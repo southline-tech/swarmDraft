@@ -16,6 +16,7 @@ import {
   type DocNode,
   type InlineNode,
   type Mark,
+  type ParagraphNode,
   type ParagraphStyle,
 } from './model';
 import { ReportBuilder, type ImportReport } from './report';
@@ -101,6 +102,7 @@ const CHAR_STYLES: Record<string, Mark['type'] | null> = {
   bookTitle: 'italic',
   commentreference: null,
   footnotereference: null,
+  imageplaceholder: null,
   endnotereference: null,
   hyperlink: null,
   defaultparagraphfont: null,
@@ -122,8 +124,37 @@ interface Pkg {
   read(path: string): XmlElement | undefined;
 }
 
+/** Zip-bomb guards: cap input size, per-part and total inflated size, and inflate only XML parts we read. */
+export const DOCX_LIMITS = {
+  maxInputBytes: 100 * 1024 * 1024,
+  maxPartBytes: 32 * 1024 * 1024,
+  maxTotalBytes: 128 * 1024 * 1024,
+};
+const NEEDED_PART =
+  /^(\[Content_Types\]\.xml|_rels\/\.rels|docProps\/core\.xml|word\/[^/]+\.xml|word\/_rels\/document\.xml\.rels)$/;
+
 function openPackage(bytes: Uint8Array): Pkg {
-  const files = unzipSync(bytes);
+  const L = DOCX_LIMITS;
+  if (bytes.length > L.maxInputBytes)
+    throw new Error(`File too large (${bytes.length} bytes; limit ${L.maxInputBytes})`);
+  let declared = 0;
+  const files = unzipSync(bytes, {
+    filter: (f) => {
+      if (!NEEDED_PART.test(f.name)) return false;
+      if (f.originalSize > L.maxPartBytes)
+        throw new Error(`Part ${f.name} too large when inflated`);
+      declared += f.originalSize;
+      if (declared > L.maxTotalBytes) throw new Error('Document too large when inflated');
+      return true;
+    },
+  });
+  let total = 0;
+  for (const [name, data] of Object.entries(files)) {
+    // Declared sizes can lie; check the real inflated size too.
+    if (data.length > L.maxPartBytes) throw new Error(`Part ${name} too large when inflated`);
+    total += data.length;
+  }
+  if (total > L.maxTotalBytes) throw new Error('Document too large when inflated');
   return {
     files,
     read(path) {
@@ -141,6 +172,12 @@ function relTargets(pkg: Pkg): Map<string, string> {
     out.set(type, `word/${target}`);
   }
   return out;
+}
+
+function relAll(pkg: Pkg, type: string): string[] {
+  return kids(pkg.read('word/_rels/document.xml.rels'), 'Relationship')
+    .filter((r) => (r.attrs.Type ?? '').split('/').pop() === type)
+    .map((r) => (r.attrs.Target ?? '').replace(/^\/?word\//, '').replace(/^\//, ''));
 }
 
 function readStyles(pkg: Pkg): Map<string, StyleInfo> {
@@ -170,23 +207,32 @@ function headingLevel(styleId: string | undefined, styles: Map<string, StyleInfo
   return 0;
 }
 
-function noteTexts(root: XmlElement | undefined, tag: string): Map<string, string> {
-  const out = new Map<string, string>();
+interface NoteDef {
+  text: string;
+  content: ParagraphNode[];
+}
+
+/** Notes keep their paragraphs and inline formatting (italic, bold, ...). */
+function readNotes(root: XmlElement | undefined, tag: string, ctx: Ctx): Map<string, NoteDef> {
+  const out = new Map<string, NoteDef>();
   for (const n of kids(root, tag)) {
     if (n.attrs['w:type'] && n.attrs['w:type'] !== 'normal') continue;
-    const paras = kids(n, 'w:p').map((p) => {
-      let t = '';
-      const walk = (el: XmlElement) => {
-        for (const c of kids(el)) {
-          if (c.name === 'w:t') t += textOf(c);
-          else if (c.name === 'w:tab') t += '\t';
-          else if (c.name !== 'w:footnoteRef' && c.name !== 'w:endnoteRef') walk(c);
-        }
-      };
-      walk(p);
-      return t;
-    });
-    out.set(n.attrs['w:id'] ?? '', paras.join('\n').trim());
+    const content: ParagraphNode[] = [];
+    for (const p of kids(n, 'w:p')) {
+      const inline = normalizeInline(extractParagraph(p, ctx).inline);
+      const first = inline[0];
+      if (first && first.type === 'text') {
+        first.text = first.text.replace(/^\s+/, '');
+        if (!first.text) inline.shift();
+      }
+      if (inline.length)
+        content.push({ type: 'paragraph', attrs: { style: 'body' }, content: inline });
+    }
+    const text = content
+      .map((p) => plainText(p.content))
+      .join('\n')
+      .trim();
+    out.set(n.attrs['w:id'] ?? '', { text, content });
   }
   return out;
 }
@@ -214,8 +260,8 @@ interface Para {
 
 interface Ctx {
   styles: Map<string, StyleInfo>;
-  footnotes: Map<string, string>;
-  endnotes: Map<string, string>;
+  footnotes: Map<string, NoteDef>;
+  endnotes: Map<string, NoteDef>;
   report: ReportBuilder;
   openComments: Set<string>;
   usedComments: Set<string>;
@@ -249,11 +295,10 @@ function runMarks(
       'All-caps formatting not kept (text kept as typed)',
       sample(),
     );
-  const u = val(rPr, 'w:u');
-  if (u !== undefined && u !== 'none')
-    ctx.report.add('warning', 'underline', 'Underline is not supported and was dropped', sample());
-  if (onOff(rPr, 'w:strike') || onOff(rPr, 'w:dstrike'))
-    ctx.report.add('warning', 'strike', 'Strikethrough is not supported and was dropped', sample());
+  const uEl = child(rPr, 'w:u');
+  const u = uEl ? (uEl.attrs['w:val'] ?? 'single') : undefined;
+  if (u !== undefined && u !== 'none') marks.push({ type: 'underline' });
+  if (onOff(rPr, 'w:strike') || onOff(rPr, 'w:dstrike')) marks.push({ type: 'strike' });
   const va = val(rPr, 'w:vertAlign');
   if (va && va !== 'baseline' && !isNoteRun)
     ctx.report.add('warning', 'vert_align', `Unsupported ${va} text kept as normal text`, sample());
@@ -261,7 +306,7 @@ function runMarks(
     ctx.report.add(
       'info',
       'direct_font',
-      'Direct font, size or color formatting dropped (theme controls typography)',
+      'Direct font, size and color settings ignored on purpose (theme controls typography; italic, bold, small caps, underline and strike kept)',
     );
   if (child(rPr, 'w:highlight'))
     ctx.report.add('info', 'highlight', 'Highlighting dropped', sample());
@@ -299,7 +344,22 @@ function extractParagraph(p: XmlElement, ctx: Ctx): Para {
 
   const walkRun = (r: XmlElement, extra: Mark[], deleted: boolean) => {
     const rPr = child(r, 'w:rPr');
-    const isNoteRun = !!(child(r, 'w:footnoteReference') || child(r, 'w:endnoteReference'));
+    if (val(rPr, 'w:rStyle') === 'ImagePlaceholder') {
+      const alt = kids(r, 'w:t')
+        .map(textOf)
+        .join('')
+        .replace(/^\[image: ?/, '')
+        .replace(/\]$/, '');
+      para.inline.push({ type: 'image', attrs: { alt } });
+      sawText = true;
+      return;
+    }
+    const isNoteRun = [
+      'w:footnoteReference',
+      'w:endnoteReference',
+      'w:footnoteRef',
+      'w:endnoteRef',
+    ].some((n) => !!child(r, n));
     const marks = [...runMarks(rPr, ctx, sample, isNoteRun), ...extra];
     for (const id of ctx.openComments) marks.push({ type: 'comment_anchor', attrs: { id } });
     const types = new Set(marks.map((m) => m.type));
@@ -343,19 +403,33 @@ function extractParagraph(p: XmlElement, ctx: Ctx): Para {
         case 'w:endnoteReference': {
           const id = c.attrs['w:id'] ?? '';
           const notes = c.name === 'w:footnoteReference' ? ctx.footnotes : ctx.endnotes;
-          const text = notes.get(id);
-          if (text === undefined)
+          const def = notes.get(id);
+          if (def === undefined)
             ctx.report.add('warning', 'missing_note', `Note ${id} referenced but not found`);
-          para.inline.push({ type: 'footnote', attrs: { id, text: text ?? '' } });
+          const kind = c.name === 'w:footnoteReference' ? 'footnote' : 'endnote';
+          para.inline.push({
+            type: 'footnote',
+            attrs: { id, kind, text: def?.text ?? '', content: def?.content ?? [] },
+          });
           para.hasNote = true;
-          if (c.name === 'w:endnoteReference')
-            ctx.report.add('info', 'endnote', 'Endnotes imported as footnotes');
           break;
         }
         case 'w:drawing':
         case 'w:pict':
         case 'w:object':
-          ctx.report.add('warning', 'image', 'Images/objects are not imported yet', sample());
+          {
+            const docPr = findDesc(c, 'wp:docPr');
+            const alt =
+              docPr?.attrs['descr'] || docPr?.attrs['title'] || docPr?.attrs['name'] || '';
+            para.inline.push({ type: 'image', attrs: { alt } });
+            sawText = true;
+            ctx.report.add(
+              'warning',
+              'image',
+              'Image/object replaced with a placeholder (re-insert it after import)',
+              alt || sample(),
+            );
+          }
           break;
         default:
           break;
@@ -439,7 +513,11 @@ function collectParagraphs(body: XmlElement, ctx: Ctx): Para[] {
     for (const c of kids(el)) {
       if (c.name === 'w:p') out.push(extractParagraph(c, ctx));
       else if (c.name === 'w:tbl') {
-        ctx.report.add('warning', 'table', 'Table flattened to paragraphs');
+        ctx.report.add(
+          'warning',
+          'table',
+          'Table flattened to paragraphs (one paragraph per cell paragraph)',
+        );
         for (const row of kids(c, 'w:tr')) for (const cell of kids(row, 'w:tc')) walk(cell);
       } else if (c.name === 'w:sdt' || c.name === 'w:sdtContent' || c.name === 'w:customXml')
         walk(c);
@@ -461,7 +539,7 @@ type Role =
   | { kind: 'text' };
 
 function isEmpty(p: Para): boolean {
-  return p.text.trim() === '' && !p.hasNote;
+  return p.text.trim() === '' && !p.hasNote && !p.inline.some((n) => n.type === 'image');
 }
 
 function classify(p: Para, report: ReportBuilder): Role {
@@ -544,13 +622,15 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
     pkg.read(rels.get(type) ?? fallback) ?? pkg.read(fallback);
   const ctx: Ctx = {
     styles: readStyles(pkg),
-    footnotes: noteTexts(read('footnotes', 'word/footnotes.xml'), 'w:footnote'),
-    endnotes: noteTexts(read('endnotes', 'word/endnotes.xml'), 'w:endnote'),
+    footnotes: new Map(),
+    endnotes: new Map(),
     report,
     openComments: new Set(),
     usedComments: new Set(),
     suggestions: new Set(),
   };
+  ctx.footnotes = readNotes(read('footnotes', 'word/footnotes.xml'), 'w:footnote', ctx);
+  ctx.endnotes = readNotes(read('endnotes', 'word/endnotes.xml'), 'w:endnote', ctx);
   const commentDefs = new Map<string, { author: string; date: string; body: string }>();
   for (const c of kids(read('comments', 'word/comments.xml'), 'w:comment')) {
     commentDefs.set(c.attrs['w:id'] ?? '', {
@@ -562,8 +642,14 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
         .trim(),
     });
   }
-  if (rels.has('header') || rels.has('footer'))
-    report.add('info', 'header_footer', 'Headers/footers not imported (theme generates them)');
+  for (const kind of ['header', 'footer'])
+    for (const target of relAll(pkg, kind))
+      report.add(
+        'warning',
+        'header_footer',
+        `${kind === 'header' ? 'Header' : 'Footer'} dropped on purpose (book design generates running heads and page numbers)`,
+        target,
+      );
 
   const paras = collectParagraphs(body, ctx);
   const roles = paras.map((p) => classify(p, report));
@@ -718,6 +804,13 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
       case 'heading':
       case 'text': {
         if (blanks >= 2 && sceneHasText && chapter && !back) startScene('');
+        else if (blanks === 1 && sceneHasText && chapter && !back)
+          report.add(
+            'warning',
+            'single_blank_line',
+            'Single blank line inside a chapter kept as spacing, not a scene break (check if a break was intended)',
+            title.slice(0, 40),
+          );
         else if (blanks > 0) report.add('info', 'spacing', 'Empty spacing paragraphs removed');
         blanks = 0;
         const t = target();
@@ -803,4 +896,13 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
   const author = tp.find((t, i) => i > 0 && t && !/^a novel$/i.test(t));
   if (author) result.author = author.replace(/^by\s+/i, '');
   return result;
+}
+
+function findDesc(el: XmlElement, name: string): XmlElement | undefined {
+  for (const c of kids(el)) {
+    if (c.name === name) return c;
+    const hit = findDesc(c, name);
+    if (hit) return hit;
+  }
+  return undefined;
 }

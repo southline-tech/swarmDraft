@@ -1,69 +1,15 @@
-/**
- * ProseMirror JSON shapes for the shared document schema (docs/mvp-spec.md §7).
- * Additions needed for faithful import: `hard_break` and inline `footnote`.
- */
-export type ParagraphStyle = 'body' | 'first' | 'block_quote' | 'epigraph' | 'verse' | 'centered';
+/** Helpers over the shared content model in @coauthor/schema. */
+import type { DocNode, NoteKind, InlineNode, Mark, TextNode } from '@coauthor/schema';
+import { MARK_TYPES } from '@coauthor/schema';
 
-export type Mark =
-  | { type: 'italic' }
-  | { type: 'bold' }
-  | { type: 'smallcaps' }
-  | { type: 'link'; attrs: { href: string } }
-  | { type: 'comment_anchor'; attrs: { id: string } }
-  | { type: 'suggestion_insert'; attrs: { id: string; author: string; ts: string } }
-  | { type: 'suggestion_delete'; attrs: { id: string; author: string; ts: string } };
-
-export interface TextNode {
-  type: 'text';
-  text: string;
-  marks?: Mark[];
-}
-export interface HardBreakNode {
-  type: 'hard_break';
-}
-export interface FootnoteNode {
-  type: 'footnote';
-  attrs: { id: string; text: string };
-}
-export type InlineNode = TextNode | HardBreakNode | FootnoteNode;
-
-export interface ParagraphNode {
-  type: 'paragraph';
-  attrs: { style: ParagraphStyle };
-  content?: InlineNode[];
-}
-export interface HeadingNode {
-  type: 'heading';
-  attrs: { level: number };
-  content?: InlineNode[];
-}
-export interface SceneBreakNode {
-  type: 'scene_break';
-  /** Original marker text ('***', '#', '❦', ...) or '' for a blank-line break. */
-  attrs: { marker: string };
-}
-export interface PageBreakNode {
-  type: 'page_break';
-}
-export type BlockNode = ParagraphNode | HeadingNode | SceneBreakNode | PageBreakNode;
-
-export interface DocNode {
-  type: 'doc';
-  content: BlockNode[];
-}
-
-const MARK_ORDER = [
-  'bold',
-  'italic',
-  'smallcaps',
-  'link',
-  'comment_anchor',
-  'suggestion_insert',
-  'suggestion_delete',
-];
+export type * from '@coauthor/schema';
 
 export function sortMarks(marks: Mark[]): Mark[] {
-  return [...marks].sort((a, b) => MARK_ORDER.indexOf(a.type) - MARK_ORDER.indexOf(b.type));
+  const rank = (m: Mark) => (MARK_TYPES as readonly string[]).indexOf(m.type);
+  const key = (m: Mark) => ('attrs' in m ? JSON.stringify(m.attrs) : '');
+  return [...marks].sort(
+    (a, b) => rank(a) - rank(b) || (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0),
+  );
 }
 
 function sameMarks(a: Mark[] = [], b: Mark[] = []): boolean {
@@ -93,4 +39,36 @@ export function plainText(nodes: InlineNode[] | undefined): string {
   return (nodes ?? [])
     .map((n) => (n.type === 'text' ? n.text : n.type === 'hard_break' ? '\n' : ''))
     .join('');
+}
+
+export interface ReadView {
+  /** Section text, one block per line; footnotes appear as `[^id]`, endnotes as `[^eid]`, images as `[image: alt]`. */
+  text: string;
+  footnotes: { id: string; kind: NoteKind; text: string }[];
+}
+
+/**
+ * Read-side representation of a section for agents (MCP `read_section`, RAD-209 consumes this).
+ * Footnotes are exposed inline as `[^id]` markers plus a `footnotes` list.
+ */
+export function readView(doc: DocNode): ReadView {
+  const footnotes: ReadView['footnotes'] = [];
+  const line = (nodes: InlineNode[] | undefined) =>
+    (nodes ?? [])
+      .map((n) => {
+        if (n.type === 'text') return n.text;
+        if (n.type === 'hard_break') return '\n';
+        if (n.type === 'image') return `[image: ${n.attrs.alt}]`;
+        footnotes.push({ id: n.attrs.id, kind: n.attrs.kind, text: n.attrs.text });
+        return n.attrs.kind === 'endnote' ? `[^e${n.attrs.id}]` : `[^${n.attrs.id}]`;
+      })
+      .join('');
+  const lines = doc.content.map((b) =>
+    b.type === 'scene_break'
+      ? b.attrs.marker || '* * *'
+      : b.type === 'page_break'
+        ? ''
+        : line(b.content),
+  );
+  return { text: lines.join('\n'), footnotes };
 }

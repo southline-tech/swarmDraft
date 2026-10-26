@@ -1,13 +1,34 @@
 /**
  * ProseMirror JSON <-> Yjs, using the same encoding as y-prosemirror
  * (Y.XmlFragment named "prosemirror"; nodes are Y.XmlElement, marks are
- * Y.XmlText format attributes keyed by mark type).
+ * Y.XmlText format attributes keyed by mark type, or `type--hash` for marks
+ * that may overlap with another of the same type, as y-prosemirror does).
  */
 import * as Y from 'yjs';
+import { NON_EXCLUSIVE_MARKS } from '@coauthor/schema';
 import { sortMarks, type DocNode, type InlineNode, type Mark } from './model';
 import type { ImportedManuscript } from './import';
 
 export const FRAGMENT_NAME = 'prosemirror';
+
+/** Short stable hash of a mark's attrs (FNV-1a, base36). */
+function hashAttrs(attrs: unknown): string {
+  const s = JSON.stringify(attrs);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
+  return h.toString(36);
+}
+
+export function markKey(m: Mark): string {
+  return NON_EXCLUSIVE_MARKS.includes(m.type) && 'attrs' in m
+    ? `${m.type}--${hashAttrs(m.attrs)}`
+    : m.type;
+}
+
+export function markTypeFromKey(key: string): string {
+  const i = key.indexOf('--');
+  return i < 0 ? key : key.slice(0, i);
+}
 
 interface PMNode {
   type: string;
@@ -26,7 +47,7 @@ function fill(parent: Y.XmlFragment | Y.XmlElement, nodes: PMNode[]): void {
     let offset = 0;
     for (const n of pendingText) {
       const attrs: Record<string, unknown> = {};
-      for (const m of n.marks ?? []) attrs[m.type] = 'attrs' in m ? m.attrs : {};
+      for (const m of n.marks ?? []) attrs[markKey(m)] = 'attrs' in m ? m.attrs : {};
       t.insert(offset, n.text ?? '', attrs);
       offset += (n.text ?? '').length;
     }
@@ -62,11 +83,12 @@ function read(el: Y.XmlFragment | Y.XmlElement): PMNode[] {
   for (const c of el.toArray()) {
     if (c instanceof Y.XmlText) {
       for (const d of c.toDelta() as { insert: string; attributes?: Record<string, unknown> }[]) {
-        const marks = Object.entries(d.attributes ?? {}).map(([type, attrs]) =>
-          attrs && typeof attrs === 'object' && Object.keys(attrs).length
+        const marks = Object.entries(d.attributes ?? {}).map(([key, attrs]) => {
+          const type = markTypeFromKey(key);
+          return attrs && typeof attrs === 'object' && Object.keys(attrs).length
             ? ({ type, attrs } as Mark)
-            : ({ type } as Mark),
-        );
+            : ({ type } as Mark);
+        });
         out.push(
           marks.length
             ? { type: 'text', text: d.insert, marks: sortMarks(marks) }

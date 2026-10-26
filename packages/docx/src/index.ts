@@ -4,10 +4,17 @@
  * ProseMirror-compatible JSON content, one Yjs doc per section), and the
  * reverse for export.
  */
-export { importDocx } from './import';
+export { importDocx, DOCX_LIMITS } from './import';
 export type { ImportedComment, ImportedManuscript, ImportedSection, ImportOptions } from './import';
 export { exportDocx } from './export';
 export { formatReport } from './report';
 export type { ImportReport, ImportSummary, ReportItem } from './report';
-export { docToYDoc, yDocToDoc, manuscriptToYDocs, FRAGMENT_NAME } from './ydoc';
+export {
+  docToYDoc,
+  yDocToDoc,
+  manuscriptToYDocs,
+  markKey,
+  markTypeFromKey,
+  FRAGMENT_NAME,
+} from './ydoc';
 export * from './model';

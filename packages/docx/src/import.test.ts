@@ -139,7 +139,10 @@ describe('mock-manuscript.docx vs EXPECTED.md', () => {
     const codes = m.report.items.map((i) => i.code);
     expect(codes).toContain('direct_font');
     expect(codes).toContain('header_footer');
-    expect(m.report.items.filter((i) => i.level === 'warning')).toEqual([]);
+    // Headers/footers are dropped on purpose and listed; nothing else is lost.
+    const warnings = m.report.items.filter((i) => i.level === 'warning');
+    expect(warnings.map((w) => w.code)).toEqual(['header_footer', 'header_footer']);
+    expect(warnings.flatMap((w) => w.samples)).toEqual(['header1.xml', 'footer1.xml']);
     expect(formatReport(m.report)).toContain('- Chapters: 12');
   });
 
@@ -199,10 +202,11 @@ describe('edge cases', () => {
       expect.arrayContaining([
         'Unmapped paragraph style "Fancy Body" imported as body text',
         'Unmapped character style "Glow"',
-        'Underline is not supported and was dropped',
       ]),
     );
     expect(text(blocks(m, 'scene')[0]!)).toBe('Hello & welcome');
+    const p = blocks(m, 'scene')[0]!.content.content[0] as { content: InlineNode[] };
+    expect(p.content[0]).toMatchObject({ marks: [{ type: 'underline' }] });
   });
 });
 

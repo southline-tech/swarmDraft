@@ -28,10 +28,13 @@ export function escapeXml(s: string): string {
 }
 
 export function parseXml(src: string): XmlElement {
+  // DTDs enable entity-expansion attacks and never appear in valid OOXML parts.
+  if (/<!DOCTYPE|<!ENTITY/i.test(src))
+    throw new Error('XML with a DOCTYPE/ENTITY declaration is not allowed');
   const root: XmlElement = { name: '#root', attrs: {}, children: [] };
   const stack: XmlElement[] = [root];
   const re =
-    /<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[([\s\S]*?)\]\]>|<!DOCTYPE[^>]*>|<(\/?)([^\s/>]+)([^>]*?)(\/?)>|([^<]+)/g;
+    /<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[([\s\S]*?)\]\]>|<(\/?)([^\s/>]+)([^>]*?)(\/?)>|([^<]+)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(src))) {
     const top = stack[stack.length - 1]!;
