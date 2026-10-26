@@ -10,7 +10,7 @@
 import { onBeforeUnmount, shallowRef, toRaw, watch } from 'vue';
 import { EditorContent, useEditor } from '@tiptap/vue-3';
 import type { Editor, EditorOptions, JSONContent } from '@tiptap/core';
-import { TextSelection } from '@tiptap/pm/state';
+import { Selection } from '@tiptap/pm/state';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import type * as Y from 'yjs';
 import EditorToolbar from './toolbar/EditorToolbar.vue';
@@ -134,33 +134,30 @@ function placeCursorInBody(e: Editor, force = false): boolean {
   if (!force && (!selection.empty || selection.from > 1)) return false;
   const target = firstBodyPos(doc);
   if (target < 0 || (selection.empty && target === selection.from)) return false;
-  e.view.dispatch(e.state.tr.setSelection(TextSelection.create(doc, target)));
+  e.view.dispatch(e.state.tr.setSelection(Selection.near(doc.resolve(target))));
   return true;
 }
 
 /**
  * Outline click (#36): focus the editor with the cursor at the start of the first body
- * paragraph. A section with no body yet (only its heading) gets one empty body paragraph right
- * after the heading; nothing already there is changed. Read-only editors only take focus.
+ * paragraph. A section with no body (only its heading) gets the cursor at the end of the
+ * heading. Only the selection moves: the doc and the undo history are never changed.
  */
 function landInBody(e: Editor) {
   if (e.isDestroyed) return;
-  if (firstBodyPos(e.state.doc) < 0 && e.isEditable) {
-    const { doc } = e.state;
-    let at = doc.content.size;
-    let offset = 0;
-    for (let i = 0; i < doc.childCount; i++) {
-      const child = doc.child(i);
-      offset += child.nodeSize;
-      if (isHeading(child)) {
-        at = offset;
-        break;
-      }
-    }
-    const paragraph = e.schema.nodes.paragraph!.create({ style: 'body' });
-    const tr = e.state.tr.insert(at, paragraph);
-    e.view.dispatch(tr.setSelection(TextSelection.create(tr.doc, at + 1)));
-  } else placeCursorInBody(e, true);
+  const { doc } = e.state;
+  let pos = firstBodyPos(doc);
+  if (pos < 0) {
+    doc.descendants((node, p) => {
+      if (pos >= 0) return false;
+      if (!node.isTextblock) return true;
+      if (isHeading(node)) pos = p + 1 + node.content.size;
+      return false;
+    });
+  }
+  const sel = pos >= 0 ? Selection.near(doc.resolve(pos)) : Selection.atStart(doc);
+  if (!sel.eq(e.state.selection))
+    e.view.dispatch(e.state.tr.setSelection(sel).setMeta('addToHistory', false));
   e.view.focus();
 }
 

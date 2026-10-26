@@ -243,20 +243,63 @@ describe('App', () => {
     const editorOf = () =>
       (w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }).editor;
     const chapters = readStructure(session.manuscript).filter((s) => s.kind === 'chapter');
+    const warn = vi.spyOn(console, 'warn');
+    const stateBefore = new Map(
+      chapters.map((c) => [c.id, Y.encodeStateVector(session.sections.get(c.docId)!)]),
+    );
     for (const ch of chapters.slice(0, 2)) {
-      await w.find(`[data-test="section-${ch.id}"]`).trigger('click');
+      const row = w.find(`[data-test="section-${ch.id}"]`);
+      (row.element as HTMLElement).focus();
+      await row.trigger('click');
       await settle();
       await new Promise((r) => setTimeout(r, 0));
       const editor = editorOf();
       expect(editor.isFocused).toBe(true);
+      // Focus really left the outline row for the editor.
+      expect(editor.view.dom.contains(document.activeElement)).toBe(true);
+      expect(row.element.contains(document.activeElement)).toBe(false);
       const { $from } = editor.state.selection;
-      expect($from.parent.type.name).toBe('paragraph');
-      expect($from.parent.attrs.style).not.toBe('heading');
-      expect($from.parentOffset).toBe(0);
-      // It sits after the heading: no heading comes later than the cursor's block.
-      const headingBefore = editor.state.doc.child(0).type.name === 'heading';
-      if (headingBefore) expect($from.index(0)).toBeGreaterThan(0);
+      const doc = session.sections.get(ch.docId)!;
+      const hasBody = JSON.stringify(yDocToDoc(doc)).includes('"style":"body"');
+      if (hasBody) {
+        expect($from.parent.attrs.style).not.toBe('heading');
+        expect($from.parentOffset).toBe(0);
+      } else {
+        // Heading-only chapter: cursor at the end of the heading, nothing added.
+        expect($from.parentOffset).toBe($from.parent.content.size);
+      }
+      // Navigating changes neither the stored doc nor the undo history.
+      expect(Y.encodeStateVector(doc)).toEqual(stateBefore.get(ch.id));
+      const undoPlugin = editor.state.plugins.find((p) =>
+        (p as unknown as { key: string }).key.startsWith('y-undo'),
+      );
+      const undo = undoPlugin?.getState(editor.state) as
+        { undoManager: { undoStack: unknown[] } } | undefined;
+      expect(undo).toBeDefined();
+      expect(undo?.undoManager.undoStack.length ?? 0).toBe(0);
     }
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+    w.unmount();
+  });
+
+  it('clicking any outline row logs no console warning (#36)', async () => {
+    const { w, session } = await withManuscript();
+    const warn = vi.spyOn(console, 'warn');
+    const rows = readStructure(session.manuscript);
+    // The sample has scenes whose doc starts with a scene break.
+    expect(
+      rows.some(
+        (r) => yDocToDoc(session.sections.get(r.docId)!).content?.[0]?.type === 'scene_break',
+      ),
+    ).toBe(true);
+    for (const r of rows) {
+      await w.find(`[data-test="section-${r.id}"]`).trigger('click');
+      await settle();
+      await new Promise((res) => setTimeout(res, 0));
+    }
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
     w.unmount();
   });
 

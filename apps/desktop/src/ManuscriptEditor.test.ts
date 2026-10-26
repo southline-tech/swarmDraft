@@ -1,3 +1,4 @@
+import { undoDepth as pmUndoDepth } from '@tiptap/pm/history';
 import { describe, expect, it } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import ManuscriptEditor from './ManuscriptEditor.vue';
@@ -124,26 +125,25 @@ describe('ManuscriptEditor', () => {
     w.unmount();
   });
 
-  it('focusBody adds one empty body paragraph after a lone heading, keeping the heading', async () => {
+  it('focusBody on a heading-only section moves only the cursor, to the end of the heading', async () => {
     const { w, editor } = await mounted({
       type: 'doc',
       content: [heading('Synthetic Heading'), { type: 'scene_break' }],
     });
+    const before = editor.state.doc;
+    const undoDepth = () => pmUndoDepth(editor.state);
+    const couldUndo = undoDepth();
     const focus = (w.vm as unknown as { focusBody: () => void }).focusBody;
     focus();
-    focus(); // a second click must not add another paragraph
+    focus();
     await new Promise((r) => setTimeout(r, 0));
-    const { doc } = editor.state;
-    expect(doc.childCount).toBe(3);
-    expect(doc.child(0).textContent).toBe('Synthetic Heading');
-    expect(doc.child(1).type.name).toBe('paragraph');
-    expect(doc.child(1).attrs.style).toBe('body');
-    expect(doc.child(2).type.name).toBe('scene_break');
-    expect(editor.state.selection.$from.index(0)).toBe(1);
+    expect(editor.state.doc.eq(before)).toBe(true);
+    expect(undoDepth()).toBe(couldUndo);
+    const { $from, empty } = editor.state.selection;
+    expect(empty).toBe(true);
+    expect($from.parent.textContent).toBe('Synthetic Heading');
+    expect($from.parentOffset).toBe('Synthetic Heading'.length);
     expect(editor.isFocused).toBe(true);
-    editor.view.dispatch(editor.state.tr.insertText('Typed'));
-    expect(editor.state.doc.child(0).textContent).toBe('Synthetic Heading');
-    expect(editor.state.doc.child(1).textContent).toBe('Typed');
     w.unmount();
   });
 
