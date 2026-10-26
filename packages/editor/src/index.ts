@@ -73,3 +73,5 @@ export function contentErrorOf(editor: Editor): Error | undefined {
 export function createManuscriptEditor(opts: Partial<EditorOptions> = {}): Editor {
   return new Editor(manuscriptEditorOptions(opts));
 }
+
+export * from './comments';
