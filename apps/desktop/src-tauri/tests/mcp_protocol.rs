@@ -936,14 +936,55 @@ async fn body_limit_applies_to_mcp() {
     let (sid, bid) = chapter_two(&s).await;
     let big = "y".repeat(mcp::MAX_BODY_BYTES);
     let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"add_comment","arguments":{"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "lantern", "body": big}}});
+    let before = refusal_snapshot(&s, &sid);
     assert_refused_early(post_result(&s.url, Some(&s.token), body).await, 413);
-    assert!(
-        s.store.open_comments(&sid).unwrap().is_empty(),
-        "nothing was written"
-    );
+    assert_nothing_happened(&s, &sid, &before).await;
+    assert!(s.store.open_comments(&sid).unwrap().is_empty());
     // Without a valid token the body is never read: plain 401.
     let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"pad": "y".repeat(mcp::MAX_BODY_BYTES)}});
+    let before = refusal_snapshot(&s, &sid);
     assert_refused_early(post_result(&s.url, None, body).await, 401);
+    assert_nothing_happened(&s, &sid, &before).await;
+}
+
+/// What a refused request must leave untouched: audit rows, raw doc updates, suggestions.
+#[derive(Debug, PartialEq)]
+struct RefusalSnapshot {
+    audit: Vec<(String, String, String, String)>,
+    doc_updates: i64,
+    suggestions: usize,
+}
+
+fn refusal_snapshot(s: &Server, sid: &str) -> RefusalSnapshot {
+    RefusalSnapshot {
+        audit: s.store.audit_log().unwrap(),
+        doc_updates: s
+            .store
+            .with_conn_mut(|c| c.query_row("SELECT COUNT(*) FROM doc_updates", [], |r| r.get(0)))
+            .unwrap(),
+        suggestions: s.store.open_suggestions(sid).unwrap().len(),
+    }
+}
+
+/// A dropped connection alone can't tell an early refusal from a panic or a mid-handler drop,
+/// so also check that nothing was audited or written and that the server still serves the token.
+async fn assert_nothing_happened(s: &Server, sid: &str, before: &RefusalSnapshot) {
+    let after = refusal_snapshot(s, sid);
+    assert!(
+        !after.audit[before.audit.len().min(after.audit.len())..]
+            .iter()
+            .any(|(_, action, _, _)| action == "add_comment" || action == "tools/list"),
+        "no audit row for the refused call: {:?}",
+        after.audit
+    );
+    assert_eq!(&after, before, "nothing was audited or written");
+    let r = post(
+        &s.url,
+        Some(&s.token),
+        json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}),
+    )
+    .await;
+    assert_eq!(r.status(), 200, "the server still serves the same token");
 }
 
 /// The server answers before reading an oversized body and closes the connection. Windows may

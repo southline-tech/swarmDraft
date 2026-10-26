@@ -1125,61 +1125,137 @@ mod tests {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let tok = store.create_token(&agent.id, Some(&scopes)).unwrap();
-        // Authenticated (the request passed auth), then revoked before the tool writes.
-        let principal = store.authenticate(&tok.token).unwrap().unwrap();
-        store.revoke_token(&principal.token_id).unwrap();
         let mcp = CoauthorMcp::new(store.clone());
-        let parts = || {
+        let before = counts(&store);
+        for tool in 0..3 {
+            // A fresh, valid token for each call: auth passes and the tool runs its checks.
+            let tok = store.create_token(&agent.id, Some(&scopes)).unwrap();
+            let principal = store.authenticate(&tok.token).unwrap().unwrap();
+            let parts = {
+                let (mut parts, ()) = axum::http::Request::new(()).into_parts();
+                parts.extensions.insert(principal.clone());
+                Extension(parts)
+            };
+            // Revoke in the window after the tool's checks and before the write transaction.
+            let fired = std::rc::Rc::new(std::cell::Cell::new(false));
+            {
+                let (store, id, fired) = (store.clone(), principal.token_id.clone(), fired.clone());
+                crate::manuscripts::BEFORE_AGENT_WRITE.with(|h| {
+                    *h.borrow_mut() = Some(Box::new(move || {
+                        store.revoke_token(&id).unwrap();
+                        fired.set(true);
+                    }))
+                });
+            }
+            let r = match tool {
+                0 => {
+                    mcp.add_comment(
+                        parts,
+                        Parameters(AddCommentArgs {
+                            manuscript_id: m.id.clone(),
+                            section_id: s.id.clone(),
+                            block_id: Some(b1.clone()),
+                            quote: Some("lantern".into()),
+                            body: "Synthetic note.".into(),
+                            thread_id: None,
+                        }),
+                    )
+                    .await
+                }
+                1 => {
+                    mcp.suggest_edit(
+                        parts,
+                        Parameters(SuggestEditArgs {
+                            manuscript_id: m.id.clone(),
+                            section_id: s.id.clone(),
+                            block_id: b1.clone(),
+                            quote: "lantern".into(),
+                            replacement: "lamp".into(),
+                            rationale: None,
+                        }),
+                    )
+                    .await
+                }
+                _ => {
+                    mcp.suggest_style(
+                        parts,
+                        Parameters(SuggestStyleArgs {
+                            manuscript_id: m.id.clone(),
+                            section_id: s.id.clone(),
+                            block_id: b1.clone(),
+                            style: "verse".into(),
+                            rationale: None,
+                        }),
+                    )
+                    .await
+                }
+            }
+            .unwrap();
+            assert!(
+                fired.get(),
+                "tool {tool}: the hook ran between auth and the write"
+            );
+            assert_eq!(r.is_error, Some(true), "{r:?}");
+            assert!(format!("{r:?}").contains("revoked"), "{r:?}");
+            assert_eq!(counts(&store), before, "tool {tool}: nothing was written");
+        }
+    }
+
+    #[tokio::test]
+    async fn suggest_edit_quote_spanning_a_footnote_gets_a_clear_refusal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(tmp.path()).unwrap();
+        let m = store.create_manuscript("Synthetic").unwrap();
+        let s = store
+            .import_section_json(
+                &m.id,
+                "chapter",
+                "One",
+                &json!({"type":"doc","content":[{"type":"paragraph","content":[
+                    {"type":"text","text":"The lantern"},
+                    {"type":"footnote","attrs":{"id":"1"},"content":[
+                        {"type":"paragraph","content":[{"type":"text","text":"A synthetic note."}]}
+                    ]},
+                    {"type":"text","text":" was lit."}
+                ]}]}),
+            )
+            .unwrap();
+        let b1 = crate::content::decode(&store.load_doc(&s.doc_id).unwrap())[0]
+            .id
+            .clone();
+        let agent = store.create_agent("Synthetic agent", "#123456").unwrap();
+        let scopes = vec!["read".to_string(), "suggest".to_string()];
+        let tok = store.create_token(&agent.id, Some(&scopes)).unwrap();
+        let principal = store.authenticate(&tok.token).unwrap().unwrap();
+        let mcp = CoauthorMcp::new(store.clone());
+        let edit = |quote: &str| {
             let (mut parts, ()) = axum::http::Request::new(()).into_parts();
             parts.extensions.insert(principal.clone());
-            Extension(parts)
-        };
-        let before = counts(&store);
-        let results = [
-            mcp.add_comment(
-                parts(),
-                Parameters(AddCommentArgs {
-                    manuscript_id: m.id.clone(),
-                    section_id: s.id.clone(),
-                    block_id: Some(b1.clone()),
-                    quote: Some("lantern".into()),
-                    body: "Synthetic note.".into(),
-                    thread_id: None,
-                }),
-            )
-            .await
-            .unwrap(),
             mcp.suggest_edit(
-                parts(),
+                Extension(parts),
                 Parameters(SuggestEditArgs {
                     manuscript_id: m.id.clone(),
                     section_id: s.id.clone(),
                     block_id: b1.clone(),
-                    quote: "lantern".into(),
+                    quote: quote.into(),
                     replacement: "lamp".into(),
                     rationale: None,
                 }),
             )
-            .await
-            .unwrap(),
-            mcp.suggest_style(
-                parts(),
-                Parameters(SuggestStyleArgs {
-                    manuscript_id: m.id.clone(),
-                    section_id: s.id.clone(),
-                    block_id: b1.clone(),
-                    style: "verse".into(),
-                    rationale: None,
-                }),
-            )
-            .await
-            .unwrap(),
-        ];
-        for r in results {
-            assert_eq!(r.is_error, Some(true), "{r:?}");
-            assert!(format!("{r:?}").contains("revoked"), "{r:?}");
-        }
+        };
+        let before = counts(&store);
+        let r = edit("lantern was").await.unwrap();
+        assert_eq!(r.is_error, Some(true), "{r:?}");
+        assert!(
+            format!("{r:?}").contains("spans a footnote marker"),
+            "{r:?}"
+        );
         assert_eq!(counts(&store), before, "nothing was written");
+        // A quote that isn't there at all is still reported as stale, not as a footnote.
+        let r = edit("candle").await.unwrap();
+        assert!(format!("{r:?}").contains("stale anchor"), "{r:?}");
+        // Text on one side of the footnote still works.
+        let r = edit("lantern").await.unwrap();
+        assert_ne!(r.is_error, Some(true), "{r:?}");
     }
 }

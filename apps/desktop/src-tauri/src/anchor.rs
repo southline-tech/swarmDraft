@@ -21,6 +21,7 @@ pub enum AnchorError {
     Stale(String),
     Ambiguous(String, usize),
     OverlapsSuggestion,
+    SpansFootnote(String),
 }
 
 impl std::fmt::Display for AnchorError {
@@ -31,6 +32,7 @@ impl std::fmt::Display for AnchorError {
             Self::Stale(q) => write!(f, "stale anchor: {q:?} is not in that block any more (re-read it with read_chapter)"),
             Self::Ambiguous(q, n) => write!(f, "ambiguous anchor: {q:?} occurs {n} times in that block; quote more surrounding text"),
             Self::OverlapsSuggestion => write!(f, "the quoted text overlaps a pending suggestion; wait for the author to decide it"),
+            Self::SpansFootnote(q) => write!(f, "quote {q:?} spans a footnote marker; quote text on one side of the footnote only"),
         }
     }
 }
@@ -68,6 +70,45 @@ fn collect_texts(txn: &TransactionMut, parent: &impl XmlFragment, out: &mut Vec<
             XmlOut::Fragment(f) => collect_texts(txn, &f, out),
         }
     }
+}
+
+/// Visible text of the block's runs, joined across footnote markers (and only those). True when
+/// the quote matches there but in no single run, i.e. it straddles a footnote.
+fn spans_footnote(txn: &TransactionMut, el: &impl XmlFragment, quote: &str) -> bool {
+    let mut runs = vec![String::new()];
+    let mut crossed = vec![false];
+    for c in el.children(txn) {
+        match c {
+            XmlOut::Text(t) => runs.last_mut().unwrap().push_str(&visible_text(txn, &t)),
+            XmlOut::Element(e) if e.tag().as_ref() == "footnote" => {
+                *crossed.last_mut().unwrap() = true;
+            }
+            _ => {
+                runs.push(String::new());
+                crossed.push(false);
+            }
+        }
+    }
+    runs.iter()
+        .zip(crossed)
+        .any(|(r, x)| x && r.contains(quote))
+}
+
+fn visible_text(txn: &TransactionMut, t: &XmlTextRef) -> String {
+    let mut s = String::new();
+    for d in t.diff(txn, YChange::identity) {
+        let Out::Any(Any::String(x)) = &d.insert else {
+            continue;
+        };
+        let pending = d
+            .attributes
+            .as_ref()
+            .is_some_and(|a| a.keys().any(|k| k.starts_with("suggestion_insert--")));
+        if !pending {
+            s.push_str(x);
+        }
+    }
+    s
 }
 
 fn is_suggestion_key(k: &str) -> bool {
@@ -181,6 +222,7 @@ pub fn resolve(
         }
     }
     match found.len() {
+        0 if spans_footnote(txn, &el, quote) => Err(AnchorError::SpansFootnote(quote.into())),
         0 => Err(AnchorError::Stale(quote.into())),
         1 => Ok(found.pop().unwrap()),
         n => Err(AnchorError::Ambiguous(quote.into(), n)),
