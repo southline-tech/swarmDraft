@@ -1,5 +1,7 @@
 //! MCP tools. RAD-209: read tools (`list_documents`, `list_chapters`, `read_chapter`,
-//! `search_text`). There is deliberately no tool that accepts or rejects a suggestion.
+//! `search_text`). RAD-210: `add_comment`, `suggest_edit`, `suggest_style`, all attributed to
+//! the calling agent. There is deliberately no tool that accepts or rejects a suggestion: that
+//! decision is human-only.
 
 use axum::http::request::Parts;
 use rmcp::handler::server::router::tool::ToolRouter;
@@ -81,6 +83,58 @@ pub struct SearchArgs {
     pub query: String,
     /// Maximum matches (default 20, max 100).
     pub limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AddCommentArgs {
+    pub manuscript_id: String,
+    pub section_id: String,
+    /// Block id from `read_chapter` or `search_text`. Optional for replies.
+    pub block_id: Option<String>,
+    /// Exact text inside the block to anchor to (must occur once). Optional for replies.
+    pub quote: Option<String>,
+    pub body: String,
+    /// Reply to this comment id instead of starting a new thread.
+    pub thread_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SuggestEditArgs {
+    pub manuscript_id: String,
+    pub section_id: String,
+    pub block_id: String,
+    /// Exact text inside the block to replace (must occur once).
+    pub quote: String,
+    /// Replacement text; empty suggests deleting the quote.
+    pub replacement: String,
+    pub rationale: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SuggestStyleArgs {
+    pub manuscript_id: String,
+    pub section_id: String,
+    pub block_id: String,
+    /// One of: body, first, block_quote, epigraph, verse, centered.
+    pub style: String,
+    pub rationale: Option<String>,
+}
+
+pub const PARAGRAPH_STYLES: &[&str] = &[
+    "body",
+    "first",
+    "block_quote",
+    "epigraph",
+    "verse",
+    "centered",
+];
+
+fn author(p: &AgentPrincipal) -> crate::manuscripts::Author {
+    crate::manuscripts::Author {
+        kind: "agent".into(),
+        id: p.agent_id.clone(),
+        name: p.name.clone(),
+    }
 }
 
 fn principal(parts: &Parts) -> Result<AgentPrincipal, ErrorData> {
@@ -321,6 +375,200 @@ impl CoauthorMcp {
             },
         )
     }
+
+    #[tool(
+        description = "Add a comment anchored to an exact quote inside a block (or reply to a comment with thread_id). The comment is attributed to you."
+    )]
+    async fn add_comment(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(a): Parameters<AddCommentArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let args = json!({ "sectionId": a.section_id, "blockId": a.block_id, "quote": a.quote, "threadId": a.thread_id });
+        self.run(
+            &parts,
+            "comment",
+            "add_comment",
+            Some(&a.manuscript_id),
+            args,
+            |p| {
+                if a.body.trim().is_empty() {
+                    return Err(ToolErr::invalid("body must not be empty"));
+                }
+                let s = self.store.get_section(&a.manuscript_id, &a.section_id)?;
+                let id = format!("c{}", crate::manuscripts::new_id());
+                let (block_id, quote) = match (&a.thread_id, &a.block_id, &a.quote) {
+                    (Some(t), _, _) => {
+                        let parent = self
+                            .store
+                            .get_comment(t)?
+                            .filter(|c| c.section_id == s.id)
+                            .ok_or_else(|| {
+                                ToolErr::invalid(format!("comment {t} not found in this section"))
+                            })?;
+                        (parent.block_id, parent.quote)
+                    }
+                    (None, Some(b), Some(q)) => {
+                        let doc = self.store.load_doc(&s.doc_id)?;
+                        let sv = crate::manuscripts::state_vector(&doc);
+                        {
+                            let mut txn = yrs::Transact::transact_mut(&doc);
+                            let r = crate::anchor::resolve(&doc, &txn, b, q)
+                                .map_err(|e| ToolErr::invalid(e.to_string()))?;
+                            crate::anchor::add_comment_mark(&mut txn, &r, &id);
+                        }
+                        self.store.save_doc_changes(&s.doc_id, &doc, &sv)?;
+                        (Some(b.clone()), Some(q.clone()))
+                    }
+                    _ => {
+                        return Err(ToolErr::invalid(
+                            "give block_id and quote, or thread_id for a reply",
+                        ))
+                    }
+                };
+                let c = crate::manuscripts::Comment {
+                    id,
+                    section_id: s.id.clone(),
+                    block_id,
+                    quote,
+                    body: a.body.clone(),
+                    thread_id: a.thread_id.clone(),
+                    author: author(p),
+                    created_at: self.store.now()?,
+                };
+                self.store.insert_comment(&a.manuscript_id, &c)?;
+                Ok(Output::Json(json!({ "comment": c })))
+            },
+        )
+    }
+
+    #[tool(
+        description = "Suggest replacing (or, with an empty replacement, deleting) an exact quote inside a block. Recorded as a tracked change attributed to you; the text is not changed until the author accepts it."
+    )]
+    async fn suggest_edit(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(a): Parameters<SuggestEditArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let args = json!({ "sectionId": a.section_id, "blockId": a.block_id, "quote": a.quote, "replacement": a.replacement });
+        self.run(
+            &parts,
+            "suggest",
+            "suggest_edit",
+            Some(&a.manuscript_id),
+            args,
+            |p| {
+                if a.quote == a.replacement {
+                    return Err(ToolErr::invalid("replacement is the same as the quote"));
+                }
+                let s = self.store.get_section(&a.manuscript_id, &a.section_id)?;
+                let id = format!("s{}", crate::manuscripts::new_id());
+                let ts = self.store.now()?;
+                let doc = self.store.load_doc(&s.doc_id)?;
+                let sv = crate::manuscripts::state_vector(&doc);
+                {
+                    let mut txn = yrs::Transact::transact_mut(&doc);
+                    let r = crate::anchor::resolve(&doc, &txn, &a.block_id, &a.quote)
+                        .map_err(|e| ToolErr::invalid(e.to_string()))?;
+                    if r.overlaps_suggestion {
+                        return Err(ToolErr::invalid(
+                            crate::anchor::AnchorError::OverlapsSuggestion.to_string(),
+                        ));
+                    }
+                    crate::anchor::add_suggestion_marks(
+                        &mut txn,
+                        &r,
+                        &id,
+                        &format!("agent:{}", p.agent_id),
+                        &ts,
+                        &a.replacement,
+                    );
+                }
+                self.store.save_doc_changes(&s.doc_id, &doc, &sv)?;
+                let x = crate::manuscripts::Suggestion {
+                    id,
+                    section_id: s.id.clone(),
+                    block_id: Some(a.block_id.clone()),
+                    kind: if a.replacement.is_empty() {
+                        "delete"
+                    } else {
+                        "replace"
+                    }
+                    .into(),
+                    quote: Some(a.quote.clone()),
+                    replacement: Some(a.replacement.clone()),
+                    rationale: a.rationale.clone(),
+                    author: author(p),
+                    status: "open".into(),
+                    created_at: ts,
+                };
+                self.store.insert_suggestion(&a.manuscript_id, &x)?;
+                Ok(Output::Json(json!({ "suggestion": x })))
+            },
+        )
+    }
+
+    #[tool(
+        description = "Suggest a paragraph style for a block (body, first, block_quote, epigraph, verse, centered). Recorded as a format suggestion attributed to you; nothing changes until the author accepts it."
+    )]
+    async fn suggest_style(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(a): Parameters<SuggestStyleArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let args = json!({ "sectionId": a.section_id, "blockId": a.block_id, "style": a.style });
+        self.run(
+            &parts,
+            "suggest",
+            "suggest_style",
+            Some(&a.manuscript_id),
+            args,
+            |p| {
+                if !PARAGRAPH_STYLES.contains(&a.style.as_str()) {
+                    return Err(ToolErr::invalid(format!(
+                        "unknown style {:?}; use one of {}",
+                        a.style,
+                        PARAGRAPH_STYLES.join(", ")
+                    )));
+                }
+                let s = self.store.get_section(&a.manuscript_id, &a.section_id)?;
+                let doc = self.store.load_doc(&s.doc_id)?;
+                let kind = {
+                    let txn = yrs::Transact::transact_mut(&doc);
+                    crate::anchor::block_kind(&txn, &a.block_id)
+                };
+                match kind.as_deref() {
+                    Some("paragraph") => {}
+                    Some(k) => {
+                        return Err(ToolErr::invalid(format!(
+                            "block {} is a {k}; styles apply to paragraphs",
+                            a.block_id
+                        )))
+                    }
+                    None => {
+                        return Err(ToolErr::invalid(
+                            crate::anchor::AnchorError::BlockNotFound(a.block_id.clone())
+                                .to_string(),
+                        ))
+                    }
+                }
+                let x = crate::manuscripts::Suggestion {
+                    id: format!("s{}", crate::manuscripts::new_id()),
+                    section_id: s.id.clone(),
+                    block_id: Some(a.block_id.clone()),
+                    kind: "style".into(),
+                    quote: None,
+                    replacement: Some(a.style.clone()),
+                    rationale: a.rationale.clone(),
+                    author: author(p),
+                    status: "open".into(),
+                    created_at: self.store.now()?,
+                };
+                self.store.insert_suggestion(&a.manuscript_id, &x)?;
+                Ok(Output::Json(json!({ "suggestion": x })))
+            },
+        )
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
@@ -328,7 +576,8 @@ impl ServerHandler for CoauthorMcp {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "coAuthor manuscript tools. Read with list_documents, list_chapters, read_chapter and \
-             search_text. Anchor comments and suggestions with a block id plus an exact quote. \
+             search_text; comment with add_comment and propose changes with suggest_edit and \
+             suggest_style. Anchor comments and suggestions with a block id plus an exact quote. \
              Accepting or rejecting suggestions is reserved for the human author.",
         )
     }
