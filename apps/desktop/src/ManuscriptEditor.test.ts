@@ -1,3 +1,4 @@
+import { undoDepth as pmUndoDepth } from '@tiptap/pm/history';
 import { describe, expect, it } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import ManuscriptEditor from './ManuscriptEditor.vue';
@@ -85,4 +86,117 @@ describe('ManuscriptEditor', () => {
     expect(editor.state.doc.child(1).textContent).toBe('XBody.');
     w.unmount();
   });
+
+  const heading = (text: string) => ({
+    type: 'heading',
+    attrs: { level: 1 },
+    content: [{ type: 'text', text }],
+  });
+  async function mounted(content: object) {
+    const w = mount(ManuscriptEditor, { props: { content }, attachTo: document.body });
+    await flushPromises();
+    await new Promise((r) => setTimeout(r, 0));
+    const editor = (
+      w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+    ).editor;
+    return { w, editor };
+  }
+
+  it('focusBody focuses and puts the cursor at the start of the first body paragraph', async () => {
+    const { w, editor } = await mounted({
+      type: 'doc',
+      content: [
+        heading('Synthetic Heading'),
+        {
+          type: 'paragraph',
+          attrs: { style: 'body' },
+          content: [{ type: 'text', text: 'Alpha.' }],
+        },
+        { type: 'paragraph', attrs: { style: 'body' }, content: [{ type: 'text', text: 'Beta.' }] },
+      ],
+    });
+    editor.commands.setTextSelection(editor.state.doc.content.size - 1); // author moved away
+    (w.vm as unknown as { focusBody: () => void }).focusBody();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(editor.isFocused).toBe(true);
+    expect(editor.state.selection.$from.parent.textContent).toBe('Alpha.');
+    expect(editor.state.selection.$from.parentOffset).toBe(0);
+    expect(editor.state.doc.childCount).toBe(3);
+    w.unmount();
+  });
+
+  it('focusBody on a heading-only section moves only the cursor, to the end of the heading', async () => {
+    const { w, editor } = await mounted({
+      type: 'doc',
+      content: [heading('Synthetic Heading'), { type: 'scene_break' }],
+    });
+    const before = editor.state.doc;
+    const undoDepth = () => pmUndoDepth(editor.state);
+    const couldUndo = undoDepth();
+    const focus = (w.vm as unknown as { focusBody: () => void }).focusBody;
+    focus();
+    focus();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(editor.state.doc.eq(before)).toBe(true);
+    expect(undoDepth()).toBe(couldUndo);
+    const { $from, empty } = editor.state.selection;
+    expect(empty).toBe(true);
+    expect($from.parent.textContent).toBe('Synthetic Heading');
+    expect($from.parentOffset).toBe('Synthetic Heading'.length);
+    expect(editor.isFocused).toBe(true);
+    w.unmount();
+  });
+
+  it('focusBody on a read-only editor focuses without changing the text', async () => {
+    const content = { type: 'doc', content: [heading('Synthetic Heading')] };
+    const w = mount(ManuscriptEditor, {
+      props: { content, readonly: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    const editor = (
+      w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+    ).editor;
+    (w.vm as unknown as { focusBody: () => void }).focusBody();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(editor.state.doc.childCount).toBe(1);
+    expect(editor.isEditable).toBe(false);
+    const before = editor.state.doc;
+    expect(editor.view.dom.getAttribute('contenteditable')).toBe('false');
+    await typeThroughDom(editor, 'Synthetic attempt');
+    expect(editor.state.doc.eq(before)).toBe(true);
+    expect(editor.getText()).not.toContain('Synthetic attempt');
+    w.unmount();
+  });
+
+  it('control: the same DOM typing does change an editable editor', async () => {
+    const content = { type: 'doc', content: [heading('Synthetic Heading')] };
+    const w = mount(ManuscriptEditor, { props: { content }, attachTo: document.body });
+    await flushPromises();
+    const editor = (
+      w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+    ).editor;
+    (w.vm as unknown as { focusBody: () => void }).focusBody();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(editor.isEditable).toBe(true);
+    const before = editor.state.doc;
+    await typeThroughDom(editor, 'Synthetic attempt');
+    expect(editor.state.doc.eq(before)).toBe(false);
+    expect(editor.getText()).toContain('Synthetic attempt');
+    w.unmount();
+  });
 });
+
+/**
+ * Type the way a browser does: change the text in the editor's DOM and let ProseMirror read the
+ * mutation (its DOM-change input path, which honours read-only). jsdom does not insert text for
+ * synthetic key events, and editor commands bypass read-only, so neither proves anything.
+ */
+async function typeThroughDom(editor: import('@tiptap/core').Editor, text: string) {
+  let node: Node | null = editor.view.dom;
+  while (node && node.nodeType !== Node.TEXT_NODE) node = node.firstChild;
+  if (!node) throw new Error('no text node to type into');
+  (node as Text).data += text;
+  (editor.view as unknown as { domObserver: { flush(): void } }).domObserver.flush();
+  await flushPromises();
+}

@@ -206,6 +206,189 @@ describe('App', () => {
     w.unmount();
   });
 
+  it.each(['part', 'chapter', 'scene', 'front_matter', 'back_matter'] as const)(
+    'a new %s from the navigator opens editable and takes typing (#42)',
+    async (kind) => {
+      const { w, session } = await withManuscript();
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const chapter = readStructure(session.manuscript).find((s) => s.kind === 'chapter')!;
+      await w.find(`[data-test="section-${chapter.id}"]`).trigger('click');
+      await settle();
+      const before = new Set(readStructure(session.manuscript).map((s) => s.id));
+      await w.find(`[data-test="add-${kind}"]`).trigger('click');
+      await settle();
+      await w.find('[data-test="rename-input"]').trigger('keydown', { key: 'Enter' });
+      await settle();
+      const added = readStructure(session.manuscript).find((s) => !before.has(s.id))!;
+      expect(added.kind).toBe(kind);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(w.find('[data-test="load-error"]').exists()).toBe(false);
+      const editor = (
+        w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+      ).editor;
+      expect(editor.isEditable).toBe(true);
+      editor.view.dispatch(editor.state.tr.insertText('Synthetic typing'));
+      await flushPromises();
+      expect(JSON.stringify(yDocToDoc(session.sections.get(added.docId)!))).toContain(
+        'Synthetic typing',
+      );
+      expect(errors.mock.calls.flat().join(' ')).not.toContain('Invalid content');
+      errors.mockRestore();
+      w.unmount();
+    },
+  );
+
+  it.each(['part', 'chapter', 'scene', 'front_matter', 'back_matter'] as const)(
+    'text typed in a new %s is saved, survives a restart, and switching away and back (#42)',
+    async (kind) => {
+      const backend = await import('./backend');
+      // A fake backend: the stored state, the last saved outline, and every saved update.
+      const stored = storedFixture();
+      const saved = new Map<string, Uint8Array[]>();
+      let outline: Parameters<typeof backend.saveOutline>[1] | null = null;
+      vi.mocked(backend.persistImport).mockResolvedValueOnce(stored);
+      vi.mocked(backend.saveSectionUpdate).mockImplementation(async (m, sec, u) => {
+        expect(m).toBe(stored.manuscript.id);
+        saved.set(sec, [...(saved.get(sec) ?? []), u]);
+      });
+      vi.mocked(backend.saveOutline).mockImplementation(async (m, next) => {
+        expect(m).toBe(stored.manuscript.id);
+        outline = next;
+      });
+      const editorOf = (w: ReturnType<typeof mount>) =>
+        (w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }).editor;
+      const first = mount(App, { attachTo: document.body });
+      await flushPromises();
+      await chooseFile(first);
+      const chapter = stored.sections.find((s) => s.kind === 'chapter')!;
+      await first.find(`[data-test="section-${chapter.id}"]`).trigger('click');
+      await settle();
+      const before = new Set(stored.sections.map((s) => s.id));
+      await first.find(`[data-test="add-${kind}"]`).trigger('click');
+      await settle();
+      await first.find('[data-test="rename-input"]').trigger('keydown', { key: 'Enter' });
+      await settle();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(outline).not.toBeNull();
+      const added = outline!.find((s) => !before.has(s.id))!;
+      expect(added.kind).toBe(kind);
+      const text = `Synthetic persisted ${kind} line`;
+      editorOf(first).commands.insertContent(text);
+      await settle();
+      first.unmount(); // closing flushes pending edits
+      await settle();
+      expect(saved.get(added.id)?.length ?? 0).toBeGreaterThan(0);
+
+      // Restart: the backend returns the saved outline, each section's stored state plus its
+      // saved updates (a new section starts from an empty doc).
+      const rows = new Map(stored.sections.map((s) => [s.id, s]));
+      const reopened = {
+        ...stored,
+        sections: outline!.map((o, position) => {
+          const d = new Y.Doc();
+          const row = rows.get(o.id);
+          if (row) Y.applyUpdate(d, Uint8Array.from(row.state));
+          for (const u of saved.get(o.id) ?? []) Y.applyUpdate(d, u);
+          return {
+            id: o.id,
+            manuscriptId: stored.manuscript.id,
+            kind: o.kind,
+            parentId: o.parentId ?? null,
+            position,
+            title: o.title,
+            docId: o.docId,
+            state: Array.from(Y.encodeStateAsUpdate(d)),
+          };
+        }),
+      };
+      vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(reopened);
+      const w = mount(App, { attachTo: document.body });
+      await settle();
+      await w.find(`[data-test="section-${added.id}"]`).trigger('click');
+      await settle();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(w.find('[data-test="load-error"]').exists()).toBe(false);
+      expect(w.find('.tiptap').text()).toContain(text);
+      // Switch to another section and back.
+      await w.find(`[data-test="section-${chapter.id}"]`).trigger('click');
+      await settle();
+      expect(w.find('.tiptap').text()).not.toContain(text);
+      await w.find(`[data-test="section-${added.id}"]`).trigger('click');
+      await settle();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(w.find('.tiptap').text()).toContain(text);
+      expect(editorOf(w).isEditable).toBe(true);
+      w.unmount();
+      vi.mocked(backend.saveSectionUpdate).mockReset().mockResolvedValue(undefined);
+      vi.mocked(backend.saveOutline).mockReset().mockResolvedValue(undefined);
+    },
+  );
+
+  it('clicking an outline row focuses the editor in the body, not the heading (#36)', async () => {
+    const { w, session } = await withManuscript();
+    const editorOf = () =>
+      (w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }).editor;
+    const chapters = readStructure(session.manuscript).filter((s) => s.kind === 'chapter');
+    const warn = vi.spyOn(console, 'warn');
+    const stateBefore = new Map(
+      chapters.map((c) => [c.id, Y.encodeStateVector(session.sections.get(c.docId)!)]),
+    );
+    for (const ch of chapters.slice(0, 2)) {
+      const row = w.find(`[data-test="section-${ch.id}"]`);
+      (row.element as HTMLElement).focus();
+      await row.trigger('click');
+      await settle();
+      await new Promise((r) => setTimeout(r, 0));
+      const editor = editorOf();
+      expect(editor.isFocused).toBe(true);
+      // Focus really left the outline row for the editor.
+      expect(editor.view.dom.contains(document.activeElement)).toBe(true);
+      expect(row.element.contains(document.activeElement)).toBe(false);
+      const { $from } = editor.state.selection;
+      const doc = session.sections.get(ch.docId)!;
+      const hasBody = JSON.stringify(yDocToDoc(doc)).includes('"style":"body"');
+      if (hasBody) {
+        expect($from.parent.attrs.style).not.toBe('heading');
+        expect($from.parentOffset).toBe(0);
+      } else {
+        // Heading-only chapter: cursor at the end of the heading, nothing added.
+        expect($from.parentOffset).toBe($from.parent.content.size);
+      }
+      // Navigating changes neither the stored doc nor the undo history.
+      expect(Y.encodeStateVector(doc)).toEqual(stateBefore.get(ch.id));
+      const undoPlugin = editor.state.plugins.find((p) =>
+        (p as unknown as { key: string }).key.startsWith('y-undo'),
+      );
+      const undo = undoPlugin?.getState(editor.state) as
+        { undoManager: { undoStack: unknown[] } } | undefined;
+      expect(undo).toBeDefined();
+      expect(undo?.undoManager.undoStack.length ?? 0).toBe(0);
+    }
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+    w.unmount();
+  });
+
+  it('clicking any outline row logs no console warning (#36)', async () => {
+    const { w, session } = await withManuscript();
+    const warn = vi.spyOn(console, 'warn');
+    const rows = readStructure(session.manuscript);
+    // The sample has scenes whose doc starts with a scene break.
+    expect(
+      rows.some(
+        (r) => yDocToDoc(session.sections.get(r.docId)!).content?.[0]?.type === 'scene_break',
+      ),
+    ).toBe(true);
+    for (const r of rows) {
+      await w.find(`[data-test="section-${r.id}"]`).trigger('click');
+      await settle();
+      await new Promise((res) => setTimeout(res, 0));
+    }
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+    w.unmount();
+  });
+
   it('keeps typed text and the same editor across a navigator close/open', async () => {
     const { w } = await withManuscript();
     const editorUid = w.findComponent({ name: 'ManuscriptEditor' }).vm.$.uid;
@@ -603,6 +786,7 @@ vi.mock('./backend', async (orig) => ({
   persistImport: vi.fn(async () => storedFixture()),
   openLatestManuscript: vi.fn(async () => null),
   saveSectionUpdate: vi.fn(async () => {}),
+  saveOutline: vi.fn(async () => {}),
   dismissRecoveryNotices: vi.fn(async () => {}),
   restoreBackup: vi.fn(async () => ({
     tokensRevoked: 2,
