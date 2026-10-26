@@ -32,3 +32,7 @@ Known gaps versus the mockups (limits of classic NSIS/MUI2 dialogs):
 - The progress bar is the native one; no "About 30 seconds left" estimate.
 - The finish page also shows the stock "Create desktop shortcut" checkbox.
 - Not yet verified on a real Windows build.
+
+## Uninstalling
+
+Uninstall coAuthor from Windows Settings > Apps, or from its Start menu entry. The uninstaller shows a **Delete the application data** checkbox. It is unchecked by default, so your manuscripts, settings and agent tokens stay on your computer unless you tick it. Tick it only if you want everything coAuthor stored removed.

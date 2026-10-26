@@ -28,5 +28,5 @@ ShowInstDetails hide
 ; MUI_FINISHPAGE_RUN is checked by default (no MUI_FINISHPAGE_RUN_NOTCHECKED), as in ob3.
 
 ; Footer branding: the Tauri template sets `BrandingText "${COPYRIGHT}"` after this hook is
-; included, so it can't be overridden here. It's blanked through `bundle.copyright: " "` in
-; tauri.conf.json instead (side effect: the exe's LegalCopyright version field is also blank).
+; included, so it can't be overridden here. `bundle.copyright` in tauri.conf.json sets both
+; the footer text and the exe's LegalCopyright field.
