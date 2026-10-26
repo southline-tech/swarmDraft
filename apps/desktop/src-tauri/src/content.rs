@@ -668,7 +668,11 @@ mod tests {
             &std::fs::read_to_string(fixture("synthetic-section.json")).unwrap(),
         )
         .unwrap();
-        assert_eq!(validate_doc(&fx["doc"]), Ok(()), "fixture uses only schema types");
+        assert_eq!(
+            validate_doc(&fx["doc"]),
+            Ok(()),
+            "fixture uses only schema types"
+        );
         let bad_mark = json!({"type":"doc","content":[{"type":"paragraph","content":[
             {"type":"text","text":"a","marks":[{"type":"highlight"}]}]}]});
         assert!(validate_doc(&bad_mark).unwrap_err().contains("highlight"));
