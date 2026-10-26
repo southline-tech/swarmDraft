@@ -163,15 +163,40 @@ describe('ManuscriptEditor', () => {
     expect(editor.isEditable).toBe(false);
     const before = editor.state.doc;
     expect(editor.view.dom.getAttribute('contenteditable')).toBe('false');
-    // Simulated typing through the view's input path (keypress -> text input).
-    for (const ch of 'Synthetic attempt') {
-      editor.view.dom.dispatchEvent(
-        new KeyboardEvent('keypress', { key: ch, charCode: ch.charCodeAt(0), bubbles: true }),
-      );
-    }
-    await flushPromises();
+    await typeThroughDom(editor, 'Synthetic attempt');
     expect(editor.state.doc.eq(before)).toBe(true);
     expect(editor.getText()).not.toContain('Synthetic attempt');
     w.unmount();
   });
+
+  it('control: the same DOM typing does change an editable editor', async () => {
+    const content = { type: 'doc', content: [heading('Synthetic Heading')] };
+    const w = mount(ManuscriptEditor, { props: { content }, attachTo: document.body });
+    await flushPromises();
+    const editor = (
+      w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+    ).editor;
+    (w.vm as unknown as { focusBody: () => void }).focusBody();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(editor.isEditable).toBe(true);
+    const before = editor.state.doc;
+    await typeThroughDom(editor, 'Synthetic attempt');
+    expect(editor.state.doc.eq(before)).toBe(false);
+    expect(editor.getText()).toContain('Synthetic attempt');
+    w.unmount();
+  });
 });
+
+/**
+ * Type the way a browser does: change the text in the editor's DOM and let ProseMirror read the
+ * mutation (its DOM-change input path, which honours read-only). jsdom does not insert text for
+ * synthetic key events, and editor commands bypass read-only, so neither proves anything.
+ */
+async function typeThroughDom(editor: import('@tiptap/core').Editor, text: string) {
+  let node: Node | null = editor.view.dom;
+  while (node && node.nodeType !== Node.TEXT_NODE) node = node.firstChild;
+  if (!node) throw new Error('no text node to type into');
+  (node as Text).data += text;
+  (editor.view as unknown as { domObserver: { flush(): void } }).domObserver.flush();
+  await flushPromises();
+}
