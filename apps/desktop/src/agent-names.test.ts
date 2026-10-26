@@ -353,3 +353,16 @@ describe('agent display names (RAD-263)', () => {
     expect(style(d, 0)).toBe(style(d, 1));
   });
 });
+
+describe('agent label styles (RAD-263)', () => {
+  // `@theme inline` aliases like --color-muted are not emitted as CSS variables, so the note
+  // must use the raw token.
+  it('uses the muted text token for the revoked/removed note', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const css = readFileSync(resolve(__dirname, 'styles/app.css'), 'utf8');
+    const note = /\.agent-note\s*\{([^}]*)\}/.exec(css)![1];
+    expect(note).toContain('color: var(--ct-text-muted)');
+    expect(note).not.toContain('--color-muted');
+  });
+});

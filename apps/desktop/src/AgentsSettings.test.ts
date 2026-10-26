@@ -42,11 +42,11 @@ describe('AgentsSettings', () => {
   it('shows the backend error when a name is reserved or taken (RAD-263)', async () => {
     const api = fakeApi();
     api.create = vi.fn(async () => {
-      throw '"Author" is reserved; choose another agent name';
+      throw '"You" is reserved; choose another agent name';
     });
     const w = mount(AgentsSettings, { props: { api } });
     await flushPromises();
-    await w.find('input[aria-label="Agent name"]').setValue('Author');
+    await w.find('input[aria-label="Agent name"]').setValue('You');
     await w.find('[data-test="create-agent"]').trigger('submit');
     await flushPromises();
     expect(w.find('[data-test="error"]').text()).toContain(

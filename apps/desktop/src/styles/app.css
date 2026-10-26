@@ -61,7 +61,7 @@
 
 /* RAD-263: "(revoked)" / "(removed)" after an agent name — muted, never an error colour. */
 .agent-note {
-  color: var(--color-muted);
+  color: var(--ct-text-muted);
   font-weight: normal;
 }
 
