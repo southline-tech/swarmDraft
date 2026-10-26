@@ -6,6 +6,8 @@ import AgentsSettings from './AgentsSettings.vue';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import { SAMPLE_DOC } from './sample';
 
+const editorKey = ref(0);
+
 const info = ref<AppInfo | null>(null);
 onMounted(async () => {
   info.value = await getAppInfo();
@@ -21,7 +23,7 @@ onMounted(async () => {
     </p>
     <p v-else data-test="browser-mode">Running in browser mode (no desktop backend).</p>
     <AgentsSettings v-if="info" />
-    <ManuscriptEditor :content="SAMPLE_DOC" />
+    <ManuscriptEditor :key="editorKey" :content="SAMPLE_DOC" @reload="editorKey++" />
   </main>
 </template>
 

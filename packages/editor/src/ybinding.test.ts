@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Editor } from '@tiptap/core';
 import * as Y from 'yjs';
+import { ySyncPluginKey } from '@tiptap/y-tiptap';
 import { docToYDoc, importDocx, markKey, rekeyMarks, yDocToDoc } from '@coauthor/docx';
 import {
   collectReviewItems,
@@ -186,6 +187,35 @@ describe('editor bound to a Y.Doc via y-prosemirror', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(contentErrorOf(editor)).toBeUndefined();
     expect(editor.getText()).toBe('A plain noted');
+    editor.destroy();
+  });
+
+  it('refuses a forged y-sync meta that tries to remove a comment', async () => {
+    const doc = docToYDoc(commented as never);
+    const editor = new Editor(
+      collaborativeEditorOptions(doc, { element: document.createElement('div') }),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    const { state } = editor;
+    const tr = state.tr
+      .removeMark(0, state.doc.content.size, state.schema.marks.comment_anchor!)
+      .setMeta(ySyncPluginKey, { isChangeOrigin: true });
+    editor.view.dispatch(tr);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(ids(collectReviewItems(editor.state.doc))).toEqual(['comment_anchor:c1']);
+    expect(reviewIdsInY(doc)).toEqual(['comment_anchor:c1']);
+
+    // The real binding path still applies a peer's removal (the Y.Doc is the source of truth).
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(doc));
+    const pt = (peer.getXmlFragment('prosemirror').get(0) as Y.XmlElement).get(0) as Y.XmlText;
+    const key = (pt.toDelta() as { attributes?: object }[])
+      .flatMap((d) => Object.keys(d.attributes ?? {}))
+      .find((k) => k.startsWith('comment_anchor'))!;
+    pt.format(0, pt.length, { [key]: null });
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(collectReviewItems(editor.state.doc)).toEqual([]);
     editor.destroy();
   });
 

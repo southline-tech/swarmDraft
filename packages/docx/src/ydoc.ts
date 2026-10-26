@@ -132,18 +132,24 @@ export function rekeyMarks(ydoc: Y.Doc): number {
         index += len;
         continue;
       }
-      // Keep parseable keys; give each unparseable one a fresh key not used on this run.
+      // Keep parseable keys; give each unparseable one a fresh key not used on this run. A mark
+      // without an id (bold, link, ...) can appear only once per run in the editor, so if its
+      // plain key is taken the existing mark wins and the stray copy is dropped; among several
+      // stray copies the first by key order wins. Marks with an id get a fresh hashed key.
       const used = new Set(entries.map(([k]) => k).filter(isParseableMarkKey));
       const fmt: Record<string, unknown> = {};
-      for (const [k, v] of entries) {
-        if (isParseableMarkKey(k)) continue;
+      const stray = entries
+        .filter(([k]) => !isParseableMarkKey(k))
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+      for (const [k, v] of stray) {
         const attrs = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
         const type = markTypeFromKey(k);
         const id = attrs.id === undefined ? undefined : String(attrs.id);
         const first = markKey({ type, attrs });
+        fmt[k] = null;
+        if (id === undefined && used.has(first)) continue;
         const key = id === undefined ? first : freeMarkKey(type, id, first, used);
         used.add(key);
-        fmt[k] = null;
         fmt[key] = v;
       }
       ops.push([t, index, len, fmt]);

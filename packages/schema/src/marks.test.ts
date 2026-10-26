@@ -59,7 +59,7 @@ describe('freeMarkKey', () => {
   it('returns the first key when free and retries on collision', () => {
     expect(freeMarkKey('comment_anchor', 'c1', 'k', new Set())).toBe('k');
     const next = freeMarkKey('comment_anchor', 'c1', 'k', new Set(['k']));
-    expect(next).toMatch(/^comment_anchor--[A-Za-z0-9_-]{8}$/);
+    expect(next).toMatch(/^comment_anchor--[A-Za-z0-9+/]{8}$/);
   });
   it(`throws after ${MAX_MARK_KEY_TRIES} collisions instead of looping`, () => {
     const constant = () => 'AAAAAAAA';
