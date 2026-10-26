@@ -59,6 +59,8 @@ const persistHooks = {
  * editor was read-only after a content error was ever accepted, so there is nothing else to lose.
  */
 const reloads = ref(0);
+/** The chapter navigator (SectionNav); the toolbar's Chapters button toggles it. */
+const navigatorOpen = ref(true);
 
 let stopCloseFlush = () => {};
 onMounted(async () => {
@@ -302,8 +304,15 @@ defineExpose({ open });
     <p v-if="openError" role="alert" data-test="open-error">{{ openError }}</p>
     <p v-if="saveError" role="alert" data-test="save-error">{{ saveError }}</p>
     <p v-if="!session" data-test="no-manuscript">Import a manuscript to see its outline.</p>
-    <div v-else class="workspace">
+    <div
+      v-else
+      class="workspace grid gap-4"
+      :class="navigatorOpen ? 'grid-cols-[18rem_1fr]' : 'grid-cols-1'"
+      data-test="workspace"
+    >
       <SectionNav
+        v-show="navigatorOpen"
+        id="chapter-navigator"
         :sections="session.outline.value"
         :manuscript-id="session.id"
         :selected-id="selectedId"
@@ -316,11 +325,13 @@ defineExpose({ open });
         :key="`${selected!.docId}#${reloads}`"
         :doc="selectedDoc"
         :readonly="session.closed"
+        :navigator-open="navigatorOpen"
         :chapter-title="selected!.title"
         :book-docs="session.sections"
         :chapter-docs="sectionTreeDocs(session.outline.value, selectedId, session.sections)"
         :save-state="saveError ? 'offline' : undefined"
         @reload="reloads++"
+        @toggle-navigator="navigatorOpen = !navigatorOpen"
       />
     </div>
   </main>
@@ -333,10 +344,5 @@ body {
 }
 .shell {
   padding: 2rem;
-}
-.workspace {
-  display: grid;
-  grid-template-columns: 18rem 1fr;
-  gap: 1rem;
 }
 </style>
