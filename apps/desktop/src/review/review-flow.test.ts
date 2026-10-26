@@ -86,7 +86,7 @@ describe('review panel in the editor (RAD-258)', () => {
     expect(w.find('[data-test=counter]').text()).toBe('1 of 1');
 
     await w.find('[data-test=accept-all]').trigger('click');
-    expect(w.find('[data-test=confirm]').text()).toMatch(/Accept 1 change from agent:/);
+    expect(w.find('[data-test=confirm]').text()).toMatch(/Accept 1 change from Unnamed agent\?/);
     await w.find('[data-test=confirm-yes]').trigger('click');
     await flushPromises();
     expect(page().text()).toContain('The lantern guttered twice.');

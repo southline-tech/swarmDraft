@@ -13,6 +13,7 @@ import {
   type RecoveryNotice,
 } from './backend';
 import AgentsSettings from './AgentsSettings.vue';
+import { authorName, refreshAgents, reloadOnFocus } from './agent-names';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
 import HomeScreen from './HomeScreen.vue';
@@ -110,13 +111,18 @@ let stopCloseFlush = () => {};
 function blockFileNavigation(e: DragEvent) {
   e.preventDefault();
 }
+// Agent display names (RAD-263): load once, and again when the window regains focus.
+const reloadAgents = () => void reloadOnFocus();
 onMounted(() => {
   window.addEventListener('dragover', blockFileNavigation);
   window.addEventListener('drop', blockFileNavigation);
+  window.addEventListener('focus', reloadAgents);
+  void refreshAgents();
 });
 onBeforeUnmount(() => {
   window.removeEventListener('dragover', blockFileNavigation);
   window.removeEventListener('drop', blockFileNavigation);
+  window.removeEventListener('focus', reloadAgents);
 });
 onMounted(async () => {
   info.value = await getAppInfo();
@@ -476,6 +482,7 @@ defineExpose({ open });
         :book-docs="outlineDocs(session.outline.value, session.sections)"
         :chapter-docs="sectionTreeDocs(session.outline.value, selectedId, session.sections)"
         :save-state="saveError ? 'offline' : undefined"
+        :author-labels="authorName"
         @reload="reloads++"
         @toggle-navigator="navigatorOpen = !navigatorOpen"
       />

@@ -15,6 +15,7 @@ import type * as Y from 'yjs';
 import EditorToolbar from './toolbar/EditorToolbar.vue';
 import StatusBar, { type SaveState } from './status/StatusBar.vue';
 import { countWords, watchBookWords } from './status/wordcount';
+import { agentDirectory, authorLabel, authorName, type AgentName } from './agent-names';
 import { loadZoom, saveZoom } from './desk/zoom';
 import ReviewPanel from './review/ReviewPanel.vue';
 import {
@@ -27,15 +28,15 @@ import {
   reviewActionFor,
   saveCollapsed,
   step,
-  toggleAuthor,
-  authorsOf,
   visibleItems,
   type AuthorFilter,
 } from './review/review-state';
 import {
   collaborativeEditorOptions,
+  AuthorLabels,
   collectReviewItems,
   listSuggestions,
+  refreshAuthorLabels,
   manuscriptEditorOptions,
   type Decision,
   type DecisionRecord,
@@ -64,8 +65,8 @@ const props = defineProps<{
   chapterDocs?: Y.Doc[];
   /** Save status, only when the parent actually knows it. */
   saveState?: SaveState;
-  /** Display labels per raw agent id for the review panel (ids are what decisions key on). */
-  authorLabels?: Record<string, string>;
+  /** Display name for a raw author id in the review panel (decisions still key on the id). */
+  authorLabels?: (author: string) => AgentName;
 }>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
@@ -175,8 +176,6 @@ const decideVisible = (d: Decision, keys: readonly string[]) =>
     keys.flatMap((k) => targetOf(k)),
     d,
   );
-const onToggleAuthor = (a: string) =>
-  (filter.value = toggleAuthor(authorsOf(suggestions.value), filter.value, a));
 
 function onKeydown(ev: KeyboardEvent) {
   const action = reviewActionFor(ev);
@@ -272,6 +271,7 @@ const loadError = shallowRef<string>('');
 /** Retry of the opening cursor placement; cleared when the editor closes. */
 let cursorTimer: ReturnType<typeof setTimeout> | undefined;
 const options: Partial<EditorOptions> = {
+  extensions: [AuthorLabels.configure({ label: authorLabel })],
   onContentError: ({ error }) => {
     loadError.value = String((error as Error & { cause?: unknown }).cause ?? error.message);
   },
@@ -311,6 +311,11 @@ watch(
   },
   { immediate: true },
 );
+// A renamed or removed agent relabels the marks' hover text without touching content.
+watch(agentDirectory, () => {
+  const e = editor.value;
+  if (e && !e.isDestroyed) refreshAuthorLabels(e.view);
+});
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown, true);
   clearTimeout(countTimer);
@@ -362,8 +367,8 @@ const LABELS: Record<ReviewItem['type'], string> = {
           :current-key="currentKey"
           :collapsed="collapsed"
           :busy="!editor?.isEditable"
-          :labels="props.authorLabels"
-          @toggle-author="onToggleAuthor"
+          :labels="props.authorLabels ?? authorName"
+          @show-only="(a: string) => (filter = new Set([a]))"
           @show-all="filter = null"
           @select="select"
           @prev="move(-1)"
@@ -377,7 +382,19 @@ const LABELS: Record<ReviewItem['type'], string> = {
           <ul>
             <li v-for="r in comments" :key="r.id" data-test="review-item">
               <strong>{{ LABELS[r.type] }}</strong>
-              <span v-if="r.author" class="muted"> · {{ r.author }}</span>
+              <span v-if="r.author" class="muted agent-label" data-test="review-author">
+                <template v-for="n in [authorName(r.author)]" :key="n.name"
+                  >·
+                  <bdi class="agent-name" dir="auto" data-test="agent-name" :title="n.name">{{
+                    n.name
+                  }}</bdi
+                  ><span v-if="n.agent" class="agent-tag" data-test="agent-tag">Agent</span>
+                  <template v-if="n.note"
+                    >{{ ' '
+                    }}<span class="agent-note" data-test="agent-note">{{ n.note }}</span></template
+                  ></template
+                ></span
+              >
               <q>{{ r.text }}</q>
             </li>
           </ul>

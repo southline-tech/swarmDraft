@@ -9,7 +9,8 @@ const items: SuggestionItem[] = [
   { id: 's3', kind: 'suggestion_insert', author: 'agent:a', ts: 't', text: 'fell' },
 ];
 const key = (i: SuggestionItem) => `${i.author}\u0000${i.id}`;
-const labels = { 'agent:a': 'Writing assistant', brett: 'Mara' };
+const NAMES: Record<string, string> = { 'agent:a': 'Writing assistant', brett: 'Mara' };
+const labels = (a: string) => ({ name: NAMES[a] ?? a, agent: a.startsWith('agent:') });
 
 describe('ReviewPanel (RAD-258)', () => {
   it('lists changes with the counter in the header and emits step-through actions', async () => {
@@ -49,21 +50,34 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(w.emitted('decide-one')).toEqual([[key(repl[0]!), 'accept']]);
   });
 
-  it('lists Everyone and each author with counts, filtering on the raw id', async () => {
+  it('filters from a dropdown defaulting to All, keyed on the raw id', async () => {
+    const all = mount(ReviewPanel, { props: { items, labels }, attachTo: document.body });
+    expect(all.find('[data-test=filter-current]').text()).toBe('All');
+    expect(all.find('[data-test=filter-menu]').exists()).toBe(false);
+    await all.find('[data-test=filter-toggle]').trigger('click');
+    expect(all.find('[data-test=filter-toggle]').attributes('aria-expanded')).toBe('true');
+    expect(all.find('[data-test=filter-all]').text()).toContain('All');
+    expect(all.find('[data-test=filter-all]').text()).toContain('3');
+    const opts = all.findAll('[data-test=filter-option]');
+    expect(opts.map((o) => o.find('.name').text())).toEqual(['Writing assistant', 'Mara']);
+    expect(opts.map((o) => o.find('.pill').text())).toEqual(['Bot', 'Person']);
+    expect(opts.map((o) => o.find('.cnt').text())).toEqual(['2', '1']);
+    await opts[0]!.trigger('click');
+    expect(all.emitted('show-only')).toEqual([['agent:a']]);
+    expect(all.find('[data-test=filter-menu]').exists()).toBe(false);
+    await all.find('[data-test=filter-toggle]').trigger('click');
+    await all.find('[data-test=filter-all]').trigger('click');
+    expect(all.emitted('show-all')).toHaveLength(1);
+    all.unmount();
+
     const w = mount(ReviewPanel, { props: { items, labels, filter: new Set(['brett']) } });
     expect(w.findAll('[data-test=item]').map((i) => i.text())).toEqual([
       expect.stringContaining('Mara'),
     ]);
-    expect(w.find('[data-test=filter-all]').text()).toContain('Everyone');
-    expect(w.find('[data-test=filter-all]').text()).toContain('3');
-    const opts = w.findAll('[data-test=filter-option]');
-    expect(opts.map((o) => o.find('.name').text())).toEqual(['Writing assistant', 'Mara']);
-    expect(opts.map((o) => o.find('.cnt').text())).toEqual(['2', '1']);
-    expect(opts[1]!.classes()).toContain('sel');
-    await opts[0]!.trigger('click');
-    expect(w.emitted('toggle-author')).toEqual([['agent:a']]);
-    await w.find('[data-test=filter-all]').trigger('click');
-    expect(w.emitted('show-all')).toHaveLength(1);
+    expect(w.find('[data-test=filter-current]').text()).toContain('Mara');
+    expect(w.find('[data-test=filter-current]').text()).toContain('Person');
+    await w.find('[data-test=filter-toggle]').trigger('click');
+    expect(w.findAll('[data-test=filter-option]')[1]!.classes()).toContain('sel');
   });
 
   it('confirms Accept all with the count and names of the visible changes', async () => {
