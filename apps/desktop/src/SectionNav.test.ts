@@ -172,6 +172,26 @@ describe('SectionNav', () => {
     w.unmount();
   });
 
+  it('moves the selection off a just-deleted section, to the row before it or the first row', async () => {
+    const w = setup({ selectedId: 'ch-2' });
+    await w.find('[data-test="delete"]').trigger('click');
+    await w.find('[data-test="confirm-delete-all"]').trigger('click');
+    await settle();
+    expect(titles(w)).not.toContain('Chapter 2');
+    expect(w.props('selectedId')).toBe('sc-2'); // the row just above it
+    expect(w.emitted('select')?.at(-1)).toEqual(['sc-2']);
+
+    // The first row has no row above it: fall back to the new first row.
+    await w.setProps({ selectedId: 'title' });
+    await w.find('[data-test="delete"]').trigger('click');
+    await w.find('[data-test="confirm-delete-all"]').trigger('click');
+    await settle();
+    expect(titles(w)[0]).toBe('Part One');
+    expect(w.props('selectedId')).toBe('part-1');
+    expect(w.find('[data-test="section-title"]').exists()).toBe(false);
+    w.unmount();
+  });
+
   it('keeps the outline unchanged and shows an error when saving fails', async () => {
     const w = setup({
       selectedId: 'sc-2',

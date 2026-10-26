@@ -152,6 +152,26 @@ export interface StoredSection {
 export interface StoredManuscript {
   manuscript: StoredManuscriptRow;
   sections: StoredSection[];
+  /** The last stored update included; `pollUpdates` returns the ones written after it. */
+  updatesCursor?: number;
+}
+
+/** Section updates written after a cursor (e.g. an agent's suggestions over MCP). */
+export interface UpdatesSince {
+  cursor: number;
+  updates: { docId: string; update: number[] }[];
+}
+
+/**
+ * Updates to a stored manuscript's sections written after `after`, oldest first (one page; poll
+ * again with the returned cursor). Null in a plain browser.
+ */
+export async function pollUpdates(
+  manuscriptId: string,
+  after: number,
+): Promise<UpdatesSince | null> {
+  if (!isTauri()) return null;
+  return invoke<UpdatesSince>('manuscript_updates_since', { manuscriptId, after });
 }
 
 /** The import payload the backend persists: one entry per section, in outline order. */

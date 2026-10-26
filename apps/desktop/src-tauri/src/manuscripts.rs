@@ -98,7 +98,29 @@ pub struct StoredSection {
 pub struct StoredManuscript {
     pub manuscript: Manuscript,
     pub sections: Vec<StoredSection>,
+    /// The last `doc_updates` seq included (read before the state, so nothing written while
+    /// loading is missed). Pass it to `updates_since` to follow later writes, e.g. an agent's.
+    pub updates_cursor: i64,
 }
+
+/// One stored Yjs update for a section doc.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocUpdate {
+    pub doc_id: String,
+    pub update: Vec<u8>,
+}
+
+/// The section updates of a manuscript written after a cursor, plus the new cursor.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatesSince {
+    pub cursor: i64,
+    pub updates: Vec<DocUpdate>,
+}
+
+/// At most this many updates are returned per `updates_since` call; the caller polls again.
+pub const UPDATES_PAGE: i64 = 200;
 
 /// One row of an outline save: the full outline is sent, in order (parents before children).
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -566,6 +588,9 @@ impl Store {
     /// Load a manuscript with every section's full document state.
     pub fn load_manuscript(&self, manuscript_id: &str) -> Result<StoredManuscript, StorageError> {
         let manuscript = self.get_manuscript(manuscript_id)?;
+        // Read the cursor first: anything written after it is replayed by `updates_since`
+        // (re-applying an update the state already has is a no-op), so nothing is missed.
+        let updates_cursor = self.updates_cursor()?;
         let sections = self
             .list_sections(manuscript_id)?
             .into_iter()
@@ -580,6 +605,47 @@ impl Store {
         Ok(StoredManuscript {
             manuscript,
             sections,
+            updates_cursor,
+        })
+    }
+
+    /// The newest `doc_updates` seq (0 when empty).
+    pub fn updates_cursor(&self) -> Result<i64, StorageError> {
+        self.with_sql(|c| {
+            c.query_row("SELECT COALESCE(MAX(seq), 0) FROM doc_updates", [], |r| {
+                r.get(0)
+            })
+        })
+    }
+
+    /// Updates to this manuscript's section docs with seq > `after`, oldest first (at most
+    /// `UPDATES_PAGE`). Lets an open editor pick up writes made elsewhere, such as an agent's
+    /// suggestions and comments over MCP, without reloading.
+    pub fn updates_since(
+        &self,
+        manuscript_id: &str,
+        after: i64,
+    ) -> Result<UpdatesSince, StorageError> {
+        self.with_sql(|c| {
+            let mut st = c.prepare(
+                "SELECT u.seq, u.doc_id, u.data FROM doc_updates u
+                 WHERE u.seq > ?2
+                   AND u.doc_id IN (SELECT doc_id FROM sections WHERE manuscript_id = ?1)
+                 ORDER BY u.seq LIMIT ?3",
+            )?;
+            let mut cursor = after;
+            let updates = st
+                .query_map(params![manuscript_id, after, UPDATES_PAGE], |r| {
+                    Ok((r.get::<_, i64>(0)?, r.get(1)?, r.get(2)?))
+                })?
+                .map(|row| {
+                    row.map(|(seq, doc_id, update)| {
+                        cursor = cursor.max(seq);
+                        DocUpdate { doc_id, update }
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(UpdatesSince { cursor, updates })
         })
     }
 

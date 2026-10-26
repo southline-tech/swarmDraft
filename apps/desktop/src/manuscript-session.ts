@@ -20,10 +20,12 @@ import {
 import {
   openLatestManuscript,
   persistImport,
+  pollUpdates,
   saveOutline,
   saveSectionUpdate,
   type ImportPayload,
   type StoredManuscript,
+  type UpdatesSince,
 } from './backend';
 
 export interface ManuscriptSession {
@@ -196,7 +198,14 @@ export class UnsavedEditsError extends Error {
 
 /** Origin used when loading stored state, so loading is not echoed back as an edit. */
 export const LOAD_ORIGIN = 'coauthor:load';
+/**
+ * Origin used when applying updates someone else already stored (an agent's suggestions over
+ * MCP), so they show in the editor without being saved back.
+ */
+export const REMOTE_ORIGIN = 'coauthor:remote';
 export const SAVE_DEBOUNCE_MS = 500;
+/** How often an open stored manuscript checks for writes made elsewhere (RAD-264). */
+export const LIVE_POLL_MS = 500;
 export const RETRY_MAX_MS = 30_000;
 export const SAVE_TIMEOUT_MS = 10_000;
 
@@ -286,7 +295,7 @@ function watchSections(manuscript: Y.Doc, docs: Map<string, Y.Doc>, p: SectionPe
   };
   const watch = (docId: string, doc: Y.Doc) => {
     const on = (update: Uint8Array, origin: unknown) => {
-      if (origin === LOAD_ORIGIN) return;
+      if (origin === LOAD_ORIGIN || origin === REMOTE_ORIGIN) return;
       pending.set(docId, [...(pending.get(docId) ?? []), update]);
       schedule(p.debounceMs ?? SAVE_DEBOUNCE_MS);
     };
@@ -321,6 +330,50 @@ function watchSections(manuscript: Y.Doc, docs: Map<string, Y.Doc>, p: SectionPe
   };
 }
 
+/** Fetches the updates written after a cursor; null means there is nothing to follow. */
+export type PollUpdates = (after: number) => Promise<UpdatesSince | null>;
+
+/**
+ * Follow writes made elsewhere to stored section docs (RAD-264): every `intervalMs`, apply
+ * the updates stored after `cursor` to the open docs with `REMOTE_ORIGIN`. y-prosemirror shows
+ * them in a bound editor right away, and the CRDT merge keeps whatever the author is typing.
+ * Updates already in a doc (e.g. the author's own saved edits) are no-ops. Polls never overlap;
+ * a failed poll is retried on the next tick. Returns `stop`.
+ */
+export function followUpdates(
+  docs: Map<string, Y.Doc>,
+  cursor: number,
+  poll: PollUpdates,
+  intervalMs = LIVE_POLL_MS,
+): () => void {
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const tick = async () => {
+    try {
+      // Drain: a full page means more may be waiting.
+      for (;;) {
+        const r = await poll(cursor);
+        if (stopped || !r) return;
+        for (const u of r.updates) {
+          const doc = docs.get(u.docId);
+          if (doc) Y.applyUpdate(doc, Uint8Array.from(u.update), REMOTE_ORIGIN);
+        }
+        const advanced = r.cursor > cursor;
+        cursor = Math.max(cursor, r.cursor);
+        if (!advanced || !r.updates.length) break;
+      }
+    } catch {
+      // Keep the cursor: the same updates are fetched again next time.
+    }
+    if (!stopped) timer = setTimeout(tick, intervalMs);
+  };
+  timer = setTimeout(tick, intervalMs);
+  return () => {
+    stopped = true;
+    clearTimeout(timer);
+  };
+}
+
 /**
  * Open a session over a manuscript as stored in the database: the outline uses the stored
  * section ids and docIds, and each section doc starts from its stored state, so edits are
@@ -331,6 +384,7 @@ export function sessionFromStored(
   report: ImportReport | null,
   persist?: SectionPersister,
   saveOutline?: SaveOutline,
+  live?: PollUpdates,
 ): ManuscriptSession {
   const manuscript = new Y.Doc();
   manuscript.getMap(META_FIELD).set('title', stored.manuscript.title);
@@ -350,7 +404,7 @@ export function sessionFromStored(
     Y.applyUpdate(doc, Uint8Array.from(s.state), LOAD_ORIGIN);
     sections.set(s.docId, doc);
   }
-  return openSession(
+  const session = openSession(
     stored.manuscript.id,
     stored.manuscript.title,
     manuscript,
@@ -359,6 +413,16 @@ export function sessionFromStored(
     persist,
     saveOutline,
   );
+  if (!live || stored.updatesCursor === undefined) return session;
+  // Follow writes made elsewhere until the session closes. `sections` is the session's own map,
+  // so docs added to it later are followed too.
+  const stop = followUpdates(sections, stored.updatesCursor, live);
+  const close = session.close;
+  session.close = async (opts) => {
+    await close(opts);
+    stop();
+  };
+  return session;
 }
 
 /** A session over a stored manuscript whose section edits are saved to the database. */
@@ -376,6 +440,7 @@ export function openStored(
       ...persistHooks,
     },
     (next) => saveOutline(id, next),
+    (after) => pollUpdates(id, after),
   );
 }
 

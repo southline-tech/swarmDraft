@@ -9,7 +9,8 @@
  */
 import { onBeforeUnmount, shallowRef, toRaw, watch } from 'vue';
 import { EditorContent, useEditor } from '@tiptap/vue-3';
-import type { EditorOptions, JSONContent } from '@tiptap/core';
+import type { Editor, EditorOptions, JSONContent } from '@tiptap/core';
+import { TextSelection } from '@tiptap/pm/state';
 import type * as Y from 'yjs';
 import EditorToolbar from './toolbar/EditorToolbar.vue';
 import ZoomControl from './desk/ZoomControl.vue';
@@ -46,13 +47,40 @@ const zoom = shallowRef(loadZoom());
 watch(zoom, (z) => saveZoom(z));
 
 const review = shallowRef<ReviewItem[]>([]);
+
+/**
+ * Put the cursor at the start of the first body text, not in the chapter heading, so typing
+ * right after opening goes into the prose. Only while the cursor is still at the very start
+ * (the author has not moved it); returns whether it moved.
+ */
+function placeCursorInBody(e: Editor): boolean {
+  const { doc, selection } = e.state;
+  if (!selection.empty || selection.from > 1) return false;
+  let target = -1;
+  doc.descendants((node, pos) => {
+    if (target >= 0) return false;
+    if (!node.isTextblock) return true;
+    const heading = node.type.name === 'heading' || node.attrs.style === 'heading';
+    if (!heading && node.type.name !== 'scene_break') target = pos + 1;
+    return false;
+  });
+  if (target < 0 || target === selection.from) return false;
+  e.view.dispatch(e.state.tr.setSelection(TextSelection.create(doc, target)));
+  return true;
+}
+
 /** Set when the content does not fit the schema; the editor is then read-only and never emits. */
 const loadError = shallowRef<string>('');
 const options: Partial<EditorOptions> = {
   onContentError: ({ error }) => {
     loadError.value = String((error as Error & { cause?: unknown }).cause ?? error.message);
   },
-  onCreate: ({ editor }) => (review.value = collectReviewItems(editor.state.doc)),
+  onCreate: ({ editor }) => {
+    review.value = collectReviewItems(editor.state.doc);
+    // A bound doc may render its content just after create; try again once it has.
+    if (!placeCursorInBody(editor))
+      setTimeout(() => !editor.isDestroyed && placeCursorInBody(editor));
+  },
   onUpdate: ({ editor }) => {
     review.value = collectReviewItems(editor.state.doc);
     if (loadError.value) return;

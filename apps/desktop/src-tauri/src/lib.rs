@@ -163,54 +163,82 @@ fn restore_backup(
     .map_err(|e| e.to_string())
 }
 
+/// Run a store call off the main thread. Sync commands run on the main thread, so a locked
+/// database froze the window for every retry; async commands keep the UI responsive.
+async fn blocking<T: Send + 'static>(
+    store: &storage::Store,
+    f: impl FnOnce(&storage::Store) -> Result<T, storage::StorageError> + Send + 'static,
+) -> Result<T, String> {
+    let store = store.clone();
+    tauri::async_runtime::spawn_blocking(move || f(&store))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(err)
+}
+
 /// Persist an imported manuscript (manuscript row, sections and their initial documents) in
 /// one transaction, so it is visible to the MCP server right away and survives a restart.
 #[tauri::command]
-fn manuscript_import_json(
+async fn manuscript_import_json(
     store: tauri::State<'_, storage::Store>,
     title: String,
     sections: Vec<manuscripts::ImportSection>,
 ) -> Result<manuscripts::StoredManuscript, String> {
-    let (m, _) = store.import_manuscript(&title, &sections).map_err(err)?;
-    store.load_manuscript(&m.id).map_err(err)
+    blocking(&store, move |s| {
+        let (m, _) = s.import_manuscript(&title, &sections)?;
+        s.load_manuscript(&m.id)
+    })
+    .await
 }
 
-/// The most recent manuscript with its sections' document state, to reopen at startup.
+/// The most recently created manuscript, if any.
 #[tauri::command]
-fn manuscript_open_latest(
+async fn manuscript_open_latest(
     store: tauri::State<'_, storage::Store>,
 ) -> Result<Option<manuscripts::StoredManuscript>, String> {
-    store.latest_manuscript().map_err(err)
+    blocking(&store, |s| s.latest_manuscript()).await
 }
 
 /// Save the whole outline of a stored manuscript (rename, reorder, move, add, delete).
 #[tauri::command]
-fn manuscript_save_outline(
+async fn manuscript_save_outline(
     store: tauri::State<'_, storage::Store>,
     manuscript_id: String,
     outline: Vec<manuscripts::OutlineEntry>,
 ) -> Result<Vec<manuscripts::Section>, String> {
-    store.save_outline(&manuscript_id, &outline).map_err(err)
+    blocking(&store, move |s| s.save_outline(&manuscript_id, &outline)).await
 }
 
-/// Save an editor's Yjs update to a stored section (validated before it is written).
+/// Append one editor update to a section's document.
 #[tauri::command]
-fn section_apply_update(
+async fn section_apply_update(
     store: tauri::State<'_, storage::Store>,
     manuscript_id: String,
     section_id: String,
     update: Vec<u8>,
 ) -> Result<(), String> {
-    store
-        .apply_section_update(&manuscript_id, &section_id, &update)
-        .map_err(err)
+    blocking(&store, move |s| {
+        s.apply_section_update(&manuscript_id, &section_id, &update)
+    })
+    .await
+}
+
+/// Section updates written after `after` (e.g. an agent's suggestions over MCP), so the open
+/// editor can show them live (RAD-264).
+#[tauri::command]
+async fn manuscript_updates_since(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+    after: i64,
+) -> Result<manuscripts::UpdatesSince, String> {
+    blocking(&store, move |s| s.updates_since(&manuscript_id, after)).await
 }
 
 #[tauri::command]
-fn manuscripts_list(
+async fn manuscripts_list(
     store: tauri::State<'_, storage::Store>,
 ) -> Result<Vec<manuscripts::Manuscript>, String> {
-    store.list_manuscripts().map_err(err)
+    blocking(&store, |s| s.list_manuscripts()).await
 }
 
 /// Where the MCP server is listening, or why it is not.
@@ -275,6 +303,7 @@ pub fn run() {
             manuscript_open_latest,
             section_apply_update,
             manuscript_save_outline,
+            manuscript_updates_since,
             mcp_status
         ])
         .run(tauri::generate_context!())
