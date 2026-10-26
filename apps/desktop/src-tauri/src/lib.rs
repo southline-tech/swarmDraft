@@ -7,6 +7,7 @@
 
 pub mod agents;
 pub mod content;
+pub mod docs;
 pub mod manuscripts;
 pub mod mcp;
 pub mod storage;
@@ -92,6 +93,26 @@ pub struct ImportSection {
     doc: serde_json::Value,
 }
 
+/// Yjs v1 diff of a stored section document against the caller's state vector (RAD-203).
+#[tauri::command]
+fn doc_diff(
+    store: tauri::State<'_, storage::Store>,
+    doc_id: String,
+    state_vector: Vec<u8>,
+) -> Result<Vec<u8>, String> {
+    store.doc_diff(&doc_id, &state_vector).map_err(err)
+}
+
+/// Append one batched autosave update to a section document (RAD-203).
+#[tauri::command]
+fn doc_append_update(
+    store: tauri::State<'_, storage::Store>,
+    doc_id: String,
+    update: Vec<u8>,
+) -> Result<(), String> {
+    store.doc_append(&doc_id, &update).map_err(err)
+}
+
 #[tauri::command]
 fn manuscript_import_json(
     store: tauri::State<'_, storage::Store>,
@@ -164,6 +185,8 @@ pub fn run() {
             agent_token_revoke,
             manuscript_import_json,
             manuscripts_list,
+            doc_diff,
+            doc_append_update,
             mcp_status
         ])
         .run(tauri::generate_context!())

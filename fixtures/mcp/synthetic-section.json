@@ -200,7 +200,7 @@
           "id": "c1"
         }
       },
-      "comment_anchor--c1"
+      "comment_anchor--8829dfd9"
     ],
     [
       {
@@ -211,7 +211,7 @@
           "ts": "2026-01-01T00:00:00Z"
         }
       },
-      "suggestion_insert--s1"
+      "suggestion_insert--0851b8c9"
     ],
     [
       {
@@ -222,7 +222,7 @@
           "ts": "2026-01-01T00:00:00Z"
         }
       },
-      "suggestion_delete--s2"
+      "suggestion_delete--0551b410"
     ]
   ]
 }

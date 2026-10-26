@@ -50,3 +50,13 @@ export const agentsApi = {
   revokeToken: (tokenId: string) => invoke<void>('agent_token_revoke', { tokenId }),
 };
 export type AgentsApi = typeof agentsApi;
+
+/** Section Y.Doc storage (RAD-203): Yjs v1 updates over the SQLite `doc_updates` log. */
+export const docsApi = {
+  diff: async (docId: string, stateVector: Uint8Array) =>
+    Uint8Array.from(
+      await invoke<number[]>('doc_diff', { docId, stateVector: Array.from(stateVector) }),
+    ),
+  append: (docId: string, update: Uint8Array) =>
+    invoke<void>('doc_append_update', { docId, update: Array.from(update) }),
+};

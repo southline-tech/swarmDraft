@@ -8,6 +8,7 @@ import {
   ReplaceStep,
   type Step,
 } from '@tiptap/pm/transform';
+import { ySyncPluginKey } from '@tiptap/y-tiptap';
 import { REVIEW_MARKS, SUGGESTION_MARKS, type ReviewMarkType } from './content';
 
 /**
@@ -15,6 +16,7 @@ import { REVIEW_MARKS, SUGGESTION_MARKS, type ReviewMarkType } from './content';
  * agents and are resolved elsewhere. The guard rejects any transaction that adds or removes a
  * review mark, pastes one in, or edits text inside a pending suggestion. Code that legitimately
  * changes them (loading a document, a future accept/reject flow) sets the `allowReviewEdits` meta.
+ * Updates applied from the section's Y.Doc are allowed too.
  */
 export const reviewGuardKey = new PluginKey('coauthorReviewGuard');
 export const ALLOW_REVIEW_EDITS = 'allowReviewEdits';
@@ -78,6 +80,10 @@ export const ReviewGuard = Extension.create({
         filterTransaction: (tr) =>
           !tr.docChanged ||
           tr.getMeta(ALLOW_REVIEW_EDITS) === true ||
+          // Changes arriving from the section's Y.Doc (stored state, an agent's comment or
+          // suggestion via MCP) are trusted; only local typing is guarded.
+          (tr.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | undefined)
+            ?.isChangeOrigin === true ||
           !transactionChangesReview(tr),
       }),
     ];

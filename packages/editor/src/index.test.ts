@@ -113,10 +113,12 @@ describe('manuscript schema', () => {
     expect([...REVIEW_MARKS].sort()).toEqual([...NON_EXCLUSIVE_MARKS].sort());
   });
 
-  it('keys review marks type--id like the Yjs encoding', () => {
-    expect(markKey({ type: 'comment_anchor', attrs: { id: 'c1' } })).toBe('comment_anchor--c1');
-    expect(markKey({ type: 'suggestion_insert', attrs: { id: 's1', ...by } })).toBe(
-      'suggestion_insert--s1',
+  it('keys review marks type--hash(id), parseable by y-prosemirror', () => {
+    expect(markKey({ type: 'comment_anchor', attrs: { id: 'c1' } })).toBe(
+      'comment_anchor--8829dfd9',
+    );
+    expect(markKey({ type: 'suggestion_insert', attrs: { id: 's1', ...by } })).toMatch(
+      /^suggestion_insert--[0-9a-f]{8}$/,
     );
     expect(markKey({ type: 'italic' })).toBe('italic');
     expect(markKey({ type: 'link', attrs: { href: 'x' } })).toBe('link');

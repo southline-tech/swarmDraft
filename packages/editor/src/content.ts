@@ -47,10 +47,17 @@ export interface JSONMark {
  * mark of the same type, so they are keyed `type--id` (same rule as packages/docx ydoc.ts);
  * every other mark is keyed by its type.
  */
+/** 8 hex chars of 32-bit FNV-1a over the id's UTF-8 bytes (y-prosemirror reads `--` + 8 chars as an overlap hash). */
+export function markIdHash(id: string): string {
+  let h = 0x811c9dc5;
+  for (const b of new TextEncoder().encode(id)) h = Math.imul(h ^ b, 0x01000193) >>> 0;
+  return h.toString(16).padStart(8, '0');
+}
+
 export function markKey(m: JSONMark): string {
   const id = m.attrs?.id;
   return (REVIEW_MARKS as readonly string[]).includes(m.type) && typeof id === 'string' && id
-    ? `${m.type}--${id}`
+    ? `${m.type}--${markIdHash(id)}`
     : m.type;
 }
 

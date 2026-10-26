@@ -1,6 +1,6 @@
 /**
- * Editor package: the Tiptap manuscript editor (RAD-202). The Yjs binding, local persistence
- * and the parts/chapters/scenes outline land here next (RAD-203, RAD-214).
+ * Editor package: the Tiptap manuscript editor (RAD-202), its per-section Yjs binding with
+ * local persistence and autosave (RAD-203). The parts/chapters/scenes outline comes next (RAD-214).
  */
 import { Editor, type EditorOptions, type JSONContent } from '@tiptap/core';
 import type { Section } from '@coauthor/schema';
@@ -29,3 +29,5 @@ export function manuscriptEditorOptions(opts: Partial<EditorOptions> = {}): Part
 export function createManuscriptEditor(opts: Partial<EditorOptions> = {}): Editor {
   return new Editor(manuscriptEditorOptions(opts));
 }
+export * from './persistence';
+export * from './collab';

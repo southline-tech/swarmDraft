@@ -61,15 +61,24 @@ pub struct ReadView {
 pub fn mark_key(mark: &Value) -> String {
     let ty = mark["type"].as_str().unwrap_or_default();
     match mark.get("attrs") {
-        // Comment and suggestion ids are unique, so `type--id` never collides.
+        // `type--<8 hex>`: y-prosemirror only parses an 8-char suffix as an overlap key.
         Some(a) if NON_EXCLUSIVE_MARKS.contains(&ty) && a.get("id").is_some() => {
             let id = a["id"]
                 .as_str()
                 .map_or_else(|| a["id"].to_string(), str::to_string);
-            format!("{ty}--{id}")
+            format!("{ty}--{}", mark_id_hash(&id))
         }
         _ => ty.to_string(),
     }
+}
+
+/// 32-bit FNV-1a of the id's UTF-8 bytes as 8 hex chars (`markIdHash` in ydoc.ts).
+pub fn mark_id_hash(id: &str) -> String {
+    let mut h: u32 = 0x811c_9dc5;
+    for b in id.bytes() {
+        h = (h ^ u32::from(b)).wrapping_mul(0x0100_0193);
+    }
+    format!("{h:08x}")
 }
 
 fn mark_type_from_key(key: &str) -> &str {
@@ -542,5 +551,10 @@ mod tests {
         assert!(md.starts_with("<!-- block:b1."));
         assert!(md.contains("{++"), "{md}");
         assert!(md.contains("[^"), "{md}");
+    }
+
+    #[test]
+    fn mark_id_hash_matches_ts() {
+        assert_eq!(super::mark_id_hash("c1"), "8829dfd9");
     }
 }
