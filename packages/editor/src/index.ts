@@ -5,3 +5,5 @@
 import type { Section } from '@coauthor/schema';
 
 export type OutlineNode = Section & { children: OutlineNode[] };
+
+export * from './decisions';
