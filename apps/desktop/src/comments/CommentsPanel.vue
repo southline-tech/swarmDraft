@@ -5,7 +5,18 @@
  * resolving and reopening here are human desktop actions.
  */
 import { ref } from 'vue';
-import { commentAuthorColor, type CommentThread } from '@coauthor/editor';
+import { commentAuthorColor, type CommentRow, type CommentThread } from '@coauthor/editor';
+import { agentIdOf, agentName } from '../agent-names';
+
+/** Agents show their current display name (RAD-263); people show the stored name. */
+/** Swatch colour key: agents by id (stable across renames), people by name. */
+const colorKey = (c: CommentRow) =>
+  c.authorKind === 'agent' ? `agent:${agentIdOf(c.authorId) ?? c.authorId}` : c.authorName;
+
+const nameOf = (c: CommentRow) =>
+  c.authorKind === 'agent'
+    ? agentName(agentIdOf(c.authorId) ?? c.authorId, c.authorName)
+    : { name: c.authorName, note: undefined, agent: false };
 
 const props = defineProps<{ threads: CommentThread[]; showResolved?: boolean; busy?: boolean }>();
 const emit = defineEmits<{
@@ -45,8 +56,21 @@ const visible = () => props.threads.filter((t) => props.showResolved || !t.resol
       </p>
       <ul>
         <li v-for="c in t.comments" :key="c.id" data-test="comment">
-          <strong :style="{ color: commentAuthorColor(c.authorName) }">{{ c.authorName }}</strong>
-          <span v-if="c.authorKind === 'agent'" class="badge">bot</span>
+          <strong
+            class="comment-author agent-label"
+            :style="{ borderLeftColor: commentAuthorColor(colorKey(c)) }"
+            data-test="comment-author"
+            ><template v-for="n in [nameOf(c)]" :key="n.name"
+              ><bdi class="agent-name" dir="auto" data-test="agent-name" :title="n.name">{{
+                n.name
+              }}</bdi
+              ><span v-if="n.agent" class="agent-tag" data-test="agent-tag">Agent</span>
+              <template v-if="n.note"
+                >{{ ' '
+                }}<span class="agent-note" data-test="agent-note">{{ n.note }}</span></template
+              ></template
+            ></strong
+          >
           {{ c.body }}
         </li>
       </ul>
@@ -72,18 +96,17 @@ const visible = () => props.threads.filter((t) => props.showResolved || !t.resol
 </template>
 
 <style scoped>
+.comment-author {
+  color: var(--ct-text);
+  border-left: 3px solid;
+  padding-left: 0.35rem;
+}
 .resolved {
   opacity: 0.6;
 }
 .warn {
   color: #a35200;
   font-size: 0.85em;
-}
-.badge {
-  font-size: 0.7em;
-  border: 1px solid;
-  border-radius: 3px;
-  padding: 0 3px;
 }
 blockquote {
   cursor: pointer;

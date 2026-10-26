@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /** Settings → Agents (RAD-205): create agents, mint tokens (shown once), revoke. */
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { setAgents } from './agent-names';
 import {
   AGENT_SCOPES,
   agentsApi,
@@ -72,6 +73,7 @@ async function guard(fn: () => Promise<void>) {
 
 async function refresh() {
   agents.value = await props.api.list();
+  setAgents(agents.value); // names in the editor and review UI follow this list live
   const entries = await Promise.all(
     agents.value.map(async (a) => [a.id, await props.api.tokens(a.id)] as const),
   );
