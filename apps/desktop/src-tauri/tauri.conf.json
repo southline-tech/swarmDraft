@@ -45,6 +45,7 @@
         "displayLanguageSelector": false,
         "languages": ["English"]
       }
-    }
+    },
+    "copyright": " "
   }
 }
