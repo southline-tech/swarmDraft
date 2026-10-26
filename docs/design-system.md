@@ -27,22 +27,22 @@ Tokens live as CSS custom properties in `apps/desktop/src/styles/tokens.css` and
 
 ## Collaborators
 
-Eight colors, `--ct-collab-1` (the author) to `--ct-collab-8` (bots, assigned in order). Each meets 4.5:1 against the page in its theme, so it can be used for underlines, swatches and names. Always show a name or initials next to the color.
+Eight colors, `--ct-collab-1` (the author) to `--ct-collab-8` (bots, assigned in order). Each meets at least 4.5:1 against `--ct-bg`, `--ct-paper` and `--ct-surface` in its theme, so it can be used for underlines, swatches and names. Always show a name or initials next to the color.
 
 | token                | light   | dark    |
 | -------------------- | ------- | ------- |
 | ct-collab-1 (author) | #2F5DA8 | #8DB2F2 |
 | ct-collab-2          | #A1452A | #F0A07F |
-| ct-collab-3          | #2E7D4F | #7FD1A0 |
+| ct-collab-3          | #2D794D | #7FD1A0 |
 | ct-collab-4          | #7A4BB0 | #C7A6F2 |
 | ct-collab-5          | #A8336B | #F29BC4 |
 | ct-collab-6          | #8A6200 | #E3C066 |
-| ct-collab-7          | #1F7A85 | #7FD3DC |
+| ct-collab-7          | #1E7681 | #7FD3DC |
 | ct-collab-8          | #5C6670 | #B4BDC6 |
 
 ## Suggestions
 
-Set `--ct-suggester: var(--collab-N)` on the mark element.
+The mark element sets both a `data-suggester` attribute and `--ct-suggester: var(--ct-collab-N)`, for example `<span data-suggester style="--ct-suggester: var(--ct-collab-3)">`. The derived `--ct-suggest-*` tokens are declared on `:where([data-suggester])` (dark override on `:where([data-theme='dark'] [data-suggester])`, zero specificity), so they resolve per element from that element's suggester. Without `data-suggester`, the derived tokens are not defined. `--ct-suggester` defaults to `var(--ct-collab-1)` on `:root`.
 
 - **Insert:** `background: var(--ct-suggest-insert-bg)` plus `text-decoration: underline 2px var(--ct-suggest-insert-underline)`.
 - **Delete:** `text-decoration: line-through var(--ct-suggest-delete-strike)`, `color: var(--ct-suggest-delete-text)`, `background: var(--ct-suggest-delete-bg)`.

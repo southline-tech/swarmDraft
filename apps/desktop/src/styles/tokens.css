@@ -119,20 +119,15 @@
   /* Collaborators: all >=4.5:1 on paper in their theme */
   --ct-collab-1: #2f5da8; /* author */
   --ct-collab-2: #a1452a;
-  --ct-collab-3: #2e7d4f;
+  --ct-collab-3: #2d794d;
   --ct-collab-4: #7a4bb0;
   --ct-collab-5: #a8336b;
   --ct-collab-6: #8a6200;
-  --ct-collab-7: #1f7a85;
+  --ct-collab-7: #1e7681;
   --ct-collab-8: #5c6670;
 
-  /* Suggestions. Set --ct-suggester on the mark to a --collab-* value. */
+  /* Suggestions: base suggester. Marks set data-suggester and --ct-suggester: var(--ct-collab-N). */
   --ct-suggester: var(--ct-collab-1);
-  --ct-suggest-insert-bg: color-mix(in srgb, var(--ct-suggester) 14%, transparent);
-  --ct-suggest-insert-underline: var(--ct-suggester);
-  --ct-suggest-delete-bg: color-mix(in srgb, var(--ct-text-muted) 12%, transparent);
-  --ct-suggest-delete-text: var(--ct-text-muted);
-  --ct-suggest-delete-strike: var(--ct-suggester);
 }
 
 [data-theme='dark'] {
@@ -167,6 +162,18 @@
   --ct-collab-6: #e3c066;
   --ct-collab-7: #7fd3dc;
   --ct-collab-8: #b4bdc6;
+}
+
+/* Derived suggestion tokens live on the mark element so they resolve against
+   that element's --ct-suggester (declaring them on :root would freeze collab-1). */
+:where([data-suggester]) {
+  --ct-suggest-insert-bg: color-mix(in srgb, var(--ct-suggester) 14%, transparent);
+  --ct-suggest-insert-underline: var(--ct-suggester);
+  --ct-suggest-delete-bg: color-mix(in srgb, var(--ct-text-muted) 12%, transparent);
+  --ct-suggest-delete-text: var(--ct-text-muted);
+  --ct-suggest-delete-strike: var(--ct-suggester);
+}
+:where([data-theme='dark'] [data-suggester]) {
   --ct-suggest-insert-bg: color-mix(in srgb, var(--ct-suggester) 22%, transparent);
 }
 
