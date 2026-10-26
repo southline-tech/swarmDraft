@@ -95,13 +95,26 @@ export function openSession(
     },
     save: async (next) => {
       if (closed.value) throw new Error('This manuscript is closed.');
+      const kept = new Set(next.map((x) => x.docId));
+      const removed = readStructure(manuscript)
+        .map((x) => x.docId)
+        .filter((d) => !kept.has(d));
+      // Save pending text first, while every section still exists in storage; if that fails the
+      // outline change is refused (nothing is lost, the edits keep retrying).
+      if (removed.length) await saver?.flush();
       await saveOutline?.(next);
+      // Removed sections are no longer tracked: no queued save or later keystroke can target a
+      // section that storage no longer has.
+      for (const d of removed) {
+        saver?.forget(d);
+        sections.delete(d);
+      }
       // New sections start with an empty doc (the backend stored one too) and are watched.
-      for (const s of next) {
-        if (sections.has(s.docId)) continue;
+      for (const x of next) {
+        if (sections.has(x.docId)) continue;
         const doc = markRaw(new Y.Doc());
-        sections.set(s.docId, doc);
-        saver?.watch(s.docId, doc);
+        sections.set(x.docId, doc);
+        saver?.watch(x.docId, doc);
       }
       writeStructure(manuscript, next);
     },
@@ -280,11 +293,17 @@ function watchSections(manuscript: Y.Doc, docs: Map<string, Y.Doc>, p: SectionPe
     doc.on('update', on);
     return () => doc.off('update', on);
   };
-  const offs = [...docs].map(([docId, doc]) => watch(docId, doc));
+  const offs = new Map([...docs].map(([docId, doc]) => [docId, watch(docId, doc)]));
   return {
     flush,
     watch: (docId: string, doc: Y.Doc) => {
-      if (!stopped) offs.push(watch(docId, doc));
+      if (!stopped && !offs.has(docId)) offs.set(docId, watch(docId, doc));
+    },
+    forget: (docId: string) => {
+      offs.get(docId)?.();
+      offs.delete(docId);
+      pending.delete(docId);
+      dirtyFull.delete(docId);
     },
     discard: () => {
       if (timer) clearTimeout(timer);
@@ -297,6 +316,7 @@ function watchSections(manuscript: Y.Doc, docs: Map<string, Y.Doc>, p: SectionPe
       if (timer) clearTimeout(timer);
       timer = undefined;
       offs.forEach((f) => f());
+      offs.clear();
     },
   };
 }

@@ -149,6 +149,12 @@ describe('SectionNav', () => {
     await w.find('[data-test="delete"]').trigger('click');
     const dialog = w.find('[data-test="confirm-delete"]');
     expect(dialog.text()).toContain('2 section(s) inside it');
+    expect(dialog.text()).toContain(
+      "Its text, comments and suggestions (including pending bot suggestions) can't be recovered.",
+    );
+    const del = w.find('[data-test="confirm-delete-all"]');
+    expect(del.text()).toBe('Delete');
+    expect(del.classes()).toContain('danger');
     // Scenes cannot move up into a part, so "keep what is inside" is not offered.
     expect(w.find('[data-test="confirm-delete-promote"]').attributes('disabled')).toBeDefined();
     await w.find('[data-test="confirm-delete-cancel"]').trigger('click');

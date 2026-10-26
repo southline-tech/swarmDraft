@@ -347,11 +347,10 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
       @keydown.esc.stop.prevent="confirmingDelete = undefined"
     >
       <p>
-        Delete {{ KIND_LABELS[deleteInfo.section.kind].toLowerCase() }} “{{
-          deleteInfo.section.title || 'Untitled'
-        }}”<template v-if="deleteInfo.inside">
+        Delete this section<template v-if="deleteInfo.inside">
           and the {{ deleteInfo.inside }} section(s) inside it</template
-        >? Its text is deleted too.
+        >? Its text, comments and suggestions (including pending bot suggestions) can't be
+        recovered.
       </p>
       <!-- Safest first; Cancel takes focus when the dialog opens. -->
       <button
@@ -372,14 +371,24 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
       >
         Delete only this, keep what is inside
       </button>
-      <button type="button" data-test="confirm-delete-all" @click="confirmDelete('delete')">
-        Delete{{ deleteInfo.inside ? ` all ${deleteInfo.inside + 1}` : '' }}
+      <button
+        type="button"
+        class="danger"
+        data-test="confirm-delete-all"
+        @click="confirmDelete('delete')"
+      >
+        Delete
       </button>
     </div>
   </nav>
 </template>
 
 <style scoped>
+.confirm .danger {
+  background: var(--ct-danger);
+  border-color: var(--ct-danger);
+  color: var(--ct-danger-bg);
+}
 .section-nav ul {
   list-style: none;
   margin: 0.5rem 0;

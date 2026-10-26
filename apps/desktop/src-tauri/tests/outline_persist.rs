@@ -96,6 +96,13 @@ async fn outline_edits_persist_across_restart_and_show_over_mcp() {
             out.iter().map(|s| s.title.as_str()).collect::<Vec<_>>(),
             ["Chapter Two", "Part One", "Added", "The Gull"]
         );
+        // The deleted section's text rows are kept, and the delete is audited.
+        let rows = store.load_doc(&secs[3].doc_id).unwrap();
+        assert!(!coauthor_lib::content::decode(&rows).is_empty());
+        let audit = store.audit_log().unwrap();
+        let last = audit.last().unwrap();
+        assert_eq!(last.1, "delete_sections");
+        assert!(last.3.contains(&secs[3].id), "{}", last.3);
         (token, m.id, secs[1].doc_id.clone())
     };
     let store = Store::open(tmp.path()).unwrap();
@@ -144,6 +151,29 @@ fn a_bad_outline_writes_nothing() {
     let mut swap = b.clone();
     swap.doc_id = a.doc_id.clone();
     assert!(store.save_outline(&m.id, &[a.clone(), swap]).is_err());
+    // Bad nesting: a chapter inside a chapter, a scene at the top level.
+    let mut nested = b.clone();
+    nested.parent_id = None;
+    let inner = OutlineEntry {
+        id: "y".into(),
+        parent_id: Some(b.id.clone()),
+        kind: "chapter".into(),
+        title: "Y".into(),
+        doc_id: format!("manuscript/{}/section/y", m.id),
+    };
+    assert!(store
+        .save_outline(&m.id, &[a.clone(), nested.clone(), inner])
+        .is_err());
+    let top_scene = OutlineEntry {
+        id: "z".into(),
+        parent_id: None,
+        kind: "scene".into(),
+        title: "Z".into(),
+        doc_id: format!("manuscript/{}/section/z", m.id),
+    };
+    assert!(store
+        .save_outline(&m.id, &[a.clone(), b.clone(), top_scene])
+        .is_err());
     // New section with a foreign doc id.
     let foreign = OutlineEntry {
         id: "x".into(),

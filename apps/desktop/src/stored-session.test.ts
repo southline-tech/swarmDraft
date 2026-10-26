@@ -225,3 +225,143 @@ describe('outline saves (RAD-263)', () => {
     await s.close();
   });
 });
+
+describe('outline edits and section saves together (RAD-263)', () => {
+  /** A fake backend: section rows plus accepted updates per section, like SQLite. */
+  function fakeBackend(stored: ReturnType<typeof storedFixture>) {
+    const rows = new Map(stored.sections.map((x) => [x.id, { ...x }]));
+    const updates = new Map(stored.sections.map((x) => [x.id, [Uint8Array.from(x.state)]]));
+    let order = stored.sections.map((x) => x.id);
+    return {
+      rows,
+      persist: {
+        save: async (id: string, u: Uint8Array) => {
+          if (!rows.has(id)) throw new Error(`section ${id} not found`);
+          updates.get(id)!.push(u);
+        },
+        debounceMs: 50,
+      },
+      saveOutline: async (next: import('@coauthor/schema').Section[]) => {
+        for (const x of next) {
+          if (!rows.has(x.id)) updates.set(x.id, []);
+          rows.set(x.id, {
+            id: x.id,
+            manuscriptId: 'db-m',
+            kind: x.kind,
+            parentId: x.parentId ?? null,
+            position: 0,
+            title: x.title,
+            docId: x.docId,
+            state: [],
+          });
+        }
+        const keep = new Set(next.map((x) => x.id));
+        for (const id of [...rows.keys()]) if (!keep.has(id)) rows.delete(id);
+        order = next.map((x) => x.id);
+      },
+      reload: () => ({
+        manuscript: stored.manuscript,
+        sections: order.map((id, i) => {
+          const d = new Y.Doc();
+          for (const u of updates.get(id)!) Y.applyUpdate(d, u);
+          return { ...rows.get(id)!, position: i, state: Array.from(Y.encodeStateAsUpdate(d)) };
+        }),
+      }),
+    };
+  }
+
+  it('deleting a section with unsaved edits saves them first, then close succeeds', async () => {
+    vi.useFakeTimers();
+    const stored = storedFixture();
+    const be = fakeBackend(stored);
+    const s = sessionFromStored(stored, null, be.persist, be.saveOutline);
+    const victim = stored.sections.find((x) => !s.outline.value.some((c) => c.parentId === x.id))!;
+    const other = stored.sections.find((x) => x.id !== victim.id)!;
+    const victimDoc = s.sections.get(victim.docId)!;
+    firstText(victimDoc).insert(0, 'LOST? ');
+    firstText(s.sections.get(other.docId)!).insert(0, 'KEPT ');
+    // Delete before the debounce fires.
+    await s.save(s.outline.value.filter((x) => x.id !== victim.id));
+    expect(s.sections.has(victim.docId)).toBe(false);
+    // A late keystroke into the deleted (still open) doc is ignored, not retried forever.
+    firstText(victimDoc).insert(0, 'late ');
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(s.close()).resolves.toBeUndefined();
+    const again = sessionFromStored(be.reload(), null);
+    expect(again.outline.value.some((x) => x.id === victim.id)).toBe(false);
+    expect(firstText(again.sections.get(other.docId)!).toString().startsWith('KEPT ')).toBe(true);
+    await again.close();
+  });
+
+  it('refuses the delete if pending edits cannot be saved first', async () => {
+    vi.useFakeTimers();
+    const stored = storedFixture();
+    const be = fakeBackend(stored);
+    const saveOutline = vi.fn(be.saveOutline);
+    const s = sessionFromStored(
+      stored,
+      null,
+      { ...be.persist, save: async () => Promise.reject(new Error('database is locked')) },
+      saveOutline,
+    );
+    const victim = stored.sections[1]!;
+    firstText(s.sections.get(victim.docId)!).insert(0, 'X');
+    await expect(s.save(s.outline.value.filter((x) => x.id !== victim.id))).rejects.toThrow(
+      UnsavedEditsError,
+    );
+    expect(saveOutline).not.toHaveBeenCalled();
+    expect(s.outline.value.some((x) => x.id === victim.id)).toBe(true);
+    await s.close({ discard: true });
+  });
+
+  it('add, rename, reorder, type in the new section, reopen: text is in the right section', async () => {
+    vi.useFakeTimers();
+    const stored = storedFixture();
+    const be = fakeBackend(stored);
+    const s = sessionFromStored(stored, null, be.persist, be.saveOutline);
+    const part = s.outline.value.find((x) => x.kind === 'part');
+    const added = {
+      id: 'new1',
+      kind: 'chapter' as const,
+      title: 'Added',
+      docId: 'manuscript/db-m/section/new1',
+      ...(part ? { parentId: part.id } : {}),
+    };
+    await s.save([...s.outline.value, added]);
+    const renamed = s.outline.value.map((x) => (x.id === 'new1' ? { ...x, title: 'Fresh' } : x));
+    await s.save(renamed);
+    const i = renamed.findIndex((x) => x.id === 'new1');
+    const reordered = [...renamed];
+    reordered.splice(i, 1);
+    reordered.splice(part ? renamed.findIndex((x) => x.id === part.id) + 1 : 0, 0, renamed[i]!);
+    await s.save(reordered);
+    const doc = s.sections.get(added.docId)!;
+    const p = new Y.XmlElement('paragraph');
+    p.insert(0, [new Y.XmlText('Synthetic new text.')]);
+    doc.getXmlFragment('prosemirror').insert(0, [p]);
+    await s.flush();
+    await s.close();
+    const again = sessionFromStored(be.reload(), null);
+    const row = again.outline.value.find((x) => x.id === 'new1')!;
+    expect(row.title).toBe('Fresh');
+    expect(again.outline.value.map((x) => x.id)).toEqual(reordered.map((x) => x.id));
+    expect(firstText(again.sections.get(row.docId)!).toString()).toBe('Synthetic new text.');
+    for (const x of stored.sections) {
+      expect(again.sections.get(x.docId)!.getXmlFragment('prosemirror').toString()).not.toContain(
+        'Synthetic new',
+      );
+    }
+    await again.close();
+  });
+
+  it('save() on a closed session rejects and calls nothing', async () => {
+    const stored = storedFixture();
+    const saveOutline = vi.fn(async () => {});
+    const save = vi.fn(async () => {});
+    const s = sessionFromStored(stored, null, { save }, saveOutline);
+    await s.close();
+    await expect(s.save([...s.outline.value].reverse())).rejects.toThrow('closed');
+    expect(saveOutline).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+  });
+});

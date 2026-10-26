@@ -484,48 +484,37 @@ impl Store {
 
     /// Save the whole outline (rename, reorder, move, add, delete) in one transaction. Existing
     /// sections keep their doc; new ones get an empty doc at `section_doc_id`. Removed sections
-    /// and their comment/suggestion index rows are deleted; their Yjs updates are kept, so the
-    /// text is never destroyed. Everything is validated first, so a bad outline writes nothing.
+    /// and their comment/suggestion index rows (including open agent suggestions) are deleted
+    /// and an audit event records what was removed; their Yjs updates are kept in
+    /// `doc_updates`. Validation reads the same state the write changes (one transaction), so
+    /// a bad outline writes nothing.
     pub fn save_outline(
         &self,
         manuscript_id: &str,
         outline: &[OutlineEntry],
     ) -> Result<Vec<Section>, StorageError> {
-        let existing: std::collections::HashMap<String, Section> = self
-            .list_sections(manuscript_id)?
-            .into_iter()
-            .map(|s| (s.id.clone(), s))
-            .collect();
-        let mut seen = std::collections::HashSet::new();
-        for e in outline {
-            let bad = |m: String| Err(StorageError::Invalid(m));
-            if !SECTION_KINDS.contains(&e.kind.as_str()) {
-                return bad(format!("unknown section kind: {}", e.kind));
-            }
-            if e.id.is_empty() || !seen.insert(e.id.as_str()) {
-                return bad(format!("duplicate or empty section id {:?}", e.id));
-            }
-            if let Some(p) = &e.parent_id {
-                if p == &e.id || !seen.contains(p.as_str()) {
-                    return bad(format!("section {:?} has unknown parent {p:?}", e.title));
-                }
-            }
-            match existing.get(&e.id) {
-                Some(s) if s.doc_id != e.doc_id => {
-                    return bad(format!("section {:?} changed its document", e.id));
-                }
-                None if e.doc_id != section_doc_id(manuscript_id, &e.id) => {
-                    return bad(format!("new section {:?} has a bad document id", e.id));
-                }
-                _ => {}
-            }
-        }
+        self.get_manuscript(manuscript_id)?;
         self.with_conn(|c| {
             let tx = c.unchecked_transaction()?;
-            let removed: Vec<&String> =
-                existing.keys().filter(|id| !seen.contains(id.as_str())).collect();
-            for id in &removed {
-                tx.execute("UPDATE sections SET parent_id = NULL WHERE id = ?1", [id])?;
+            let existing: std::collections::HashMap<String, Section> = {
+                let mut st = tx.prepare(&format!(
+                    "SELECT {SECTION_COLS} FROM sections WHERE manuscript_id = ?1"
+                ))?;
+                let rows = st
+                    .query_map([manuscript_id], row_section)?
+                    .collect::<Result<Vec<_>, _>>()?;
+                rows.into_iter().map(|s| (s.id.clone(), s)).collect()
+            };
+            validate_outline(manuscript_id, outline, &existing)?;
+            let keep: std::collections::HashSet<&str> =
+                outline.iter().map(|e| e.id.as_str()).collect();
+            let mut removed: Vec<&Section> = existing
+                .values()
+                .filter(|s| !keep.contains(s.id.as_str()))
+                .collect();
+            removed.sort_by_key(|s| s.position);
+            for s in &removed {
+                tx.execute("UPDATE sections SET parent_id = NULL WHERE id = ?1", [&s.id])?;
             }
             for (i, e) in outline.iter().enumerate() {
                 if existing.contains_key(&e.id) {
@@ -542,10 +531,31 @@ impl Store {
                     )?;
                 }
             }
-            for id in &removed {
-                tx.execute("DELETE FROM comments WHERE section_id = ?1", [id])?;
-                tx.execute("DELETE FROM suggestions WHERE section_id = ?1", [id])?;
-                tx.execute("DELETE FROM sections WHERE id = ?1", [id])?;
+            if !removed.is_empty() {
+                let mut gone = Vec::new();
+                for s in &removed {
+                    let comments = tx.execute("DELETE FROM comments WHERE section_id = ?1", [&s.id])?;
+                    let open: i64 = tx.query_row(
+                        "SELECT count(*) FROM suggestions WHERE section_id = ?1 AND status = 'open'",
+                        [&s.id],
+                        |r| r.get(0),
+                    )?;
+                    let suggestions =
+                        tx.execute("DELETE FROM suggestions WHERE section_id = ?1", [&s.id])?;
+                    tx.execute("DELETE FROM sections WHERE id = ?1", [&s.id])?;
+                    gone.push(serde_json::json!({
+                        "sectionId": s.id, "title": s.title, "kind": s.kind, "docId": s.doc_id,
+                        "comments": comments, "suggestions": suggestions,
+                        "openSuggestions": open,
+                    }));
+                }
+                tx.execute(
+                    &format!(
+                        "INSERT INTO audit_events (manuscript_id, principal_kind, principal_id, action, outcome, payload, ts)
+                         VALUES (?1, 'human', 'local', 'delete_sections', 'ok', ?2, {NOW})"
+                    ),
+                    params![manuscript_id, serde_json::json!({ "removed": gone }).to_string()],
+                )?;
             }
             tx.commit()?;
             Ok(())
@@ -796,6 +806,59 @@ fn insert_suggestion_on(
 }
 
 /// Current state vector of a doc (pair with `save_doc_changes`).
+/// Which kinds may contain which (mirrors the editor's outline rules): chapters go in parts,
+/// scenes in chapters; everything else is top level only, and a scene is never top level.
+fn can_nest(child: &str, parent: Option<&str>) -> bool {
+    match (child, parent) {
+        ("scene", None) => false,
+        (_, None) => true,
+        ("chapter", Some("part")) | ("scene", Some("chapter")) => true,
+        _ => false,
+    }
+}
+
+fn validate_outline(
+    manuscript_id: &str,
+    outline: &[OutlineEntry],
+    existing: &std::collections::HashMap<String, Section>,
+) -> Result<(), StorageError> {
+    let bad = |m: String| Err(StorageError::Invalid(m));
+    let mut seen: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+    for e in outline {
+        if !SECTION_KINDS.contains(&e.kind.as_str()) {
+            return bad(format!("unknown section kind: {}", e.kind));
+        }
+        if e.id.is_empty() || seen.contains_key(e.id.as_str()) {
+            return bad(format!("duplicate or empty section id {:?}", e.id));
+        }
+        let parent_kind = match &e.parent_id {
+            Some(p) => match seen.get(p.as_str()) {
+                Some(k) => Some(*k),
+                None => return bad(format!("section {:?} has unknown parent {p:?}", e.title)),
+            },
+            None => None,
+        };
+        if !can_nest(&e.kind, parent_kind) {
+            return bad(format!(
+                "a {} cannot go {}",
+                e.kind,
+                parent_kind.map_or("at the top level".into(), |k| format!("inside a {k}"))
+            ));
+        }
+        match existing.get(&e.id) {
+            Some(s) if s.doc_id != e.doc_id => {
+                return bad(format!("section {:?} changed its document", e.id));
+            }
+            None if e.doc_id != section_doc_id(manuscript_id, &e.id) => {
+                return bad(format!("new section {:?} has a bad document id", e.id));
+            }
+            _ => {}
+        }
+        seen.insert(&e.id, &e.kind);
+    }
+    Ok(())
+}
+
 pub fn state_vector(doc: &Doc) -> StateVector {
     doc.transact().state_vector()
 }
