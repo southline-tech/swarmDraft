@@ -286,6 +286,7 @@ function finishStory(ctx: Ctx): void {
       'warning',
       'unclosed_comment',
       'Comment range was never closed; limited to the paragraph where it starts',
+      ctx.commentDetail(id, id),
     );
     const from = st.starts.get(id) ?? 0;
     for (const inline of st.paras.slice(from + 1)) {
@@ -324,6 +325,12 @@ interface Ctx {
   commentIds: Map<string, string[]>;
   /** Fresh comment ids already reported while reading comments.xml. */
   commentRemapped: Set<string>;
+  /** Number of comments.xml definitions per original w:id. */
+  commentDefCount: Map<string, number>;
+  /** Last mapped id used for each original w:id (for continued ranges). */
+  lastCommentId: Map<string, string>;
+  /** "id: snippet" detail for report warnings. */
+  commentDetail: (orig: string, id?: string) => string;
   freshId: () => string;
   suggestions: Set<string>;
 }
@@ -548,19 +555,31 @@ function extractParagraph(p: XmlElement, ctx: Ctx): Para {
         case 'w:commentRangeStart': {
           const orig = c.attrs['w:id'] ?? '';
           // Duplicate ids pair up with comments.xml entries in document order.
-          const queued = ctx.commentIds.get(orig)?.shift();
-          const id = queued ?? (!orig || ctx.usedComments.has(orig) ? ctx.freshId() : orig);
-          if (id !== orig && !ctx.commentRemapped.has(id))
+          const st = ctx.story;
+          // A range continued in a later paragraph (our own export writes one
+          // start/end pair per paragraph) reuses the id once the previous
+          // range for it has closed, when there is a single definition.
+          const prev = ctx.lastCommentId.get(orig);
+          const continued =
+            !!orig &&
+            prev !== undefined &&
+            (ctx.commentDefCount.get(orig) ?? 0) <= 1 &&
+            !st.open.has(prev);
+          const queued = continued ? undefined : ctx.commentIds.get(orig)?.shift();
+          const id = continued
+            ? prev
+            : (queued ?? (!orig || ctx.usedComments.has(orig) ? ctx.freshId() : orig));
+          if (id !== orig && !continued && !ctx.commentRemapped.has(id))
             ctx.report.add(
               'warning',
               'duplicate_id',
               `Comment with ${orig ? 'duplicate' : 'missing'} id given a new id`,
-              orig,
+              ctx.commentDetail(orig, id),
             );
-          const st = ctx.story;
+          ctx.lastCommentId.set(orig, id);
           ctx.startedComments.add(orig);
           st.open.add(id);
-          st.empty.add(id);
+          if (!continued) st.empty.add(id);
           st.starts.set(id, st.paras.length);
           ctx.usedComments.add(id);
           const open = st.openMap.get(orig) ?? [];
@@ -576,7 +595,7 @@ function extractParagraph(p: XmlElement, ctx: Ctx): Para {
               'warning',
               'unmatched_comment_end',
               'Comment range end without a matching start in the same story was ignored',
-              c.attrs['w:id'] ?? '',
+              ctx.commentDetail(c.attrs['w:id'] ?? ''),
             );
             break;
           }
@@ -750,6 +769,7 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
   const report = new ReportBuilder();
   const read = (type: string, fallback: string) =>
     pkg.read(rels.get(type) ?? fallback) ?? pkg.read(fallback);
+  const commentDefs = new Map<string, { author: string; date: string; body: string }>();
   const ctx: Ctx = {
     styles: readStyles(pkg),
     footnotes: new Map(),
@@ -760,15 +780,22 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
     usedComments: new Set(),
     commentIds: new Map(),
     commentRemapped: new Set(),
+    commentDefCount: new Map(),
+    lastCommentId: new Map(),
+    commentDetail: (orig, id) => {
+      const body = (commentDefs.get(id ?? orig) ?? commentDefs.get(orig))?.body ?? '';
+      const snip = body.replace(/\s+/g, ' ').slice(0, 40);
+      return `${orig || '(no id)'}${snip ? `: ${snip}` : ''}`;
+    },
     freshId: (() => {
       let n = 1_000_000;
       return () => String(++n);
     })(),
     suggestions: new Set(),
   };
-  const commentDefs = new Map<string, { author: string; date: string; body: string }>();
   for (const c of kids(read('comments', 'word/comments.xml'), 'w:comment')) {
     const orig = c.attrs['w:id'] ?? '';
+    ctx.commentDefCount.set(orig, (ctx.commentDefCount.get(orig) ?? 0) + 1);
     let id = orig;
     if (!orig || commentDefs.has(orig)) {
       id = ctx.freshId();
@@ -777,7 +804,7 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
         'warning',
         'duplicate_id',
         `Comment with ${orig ? 'duplicate' : 'missing'} id given a new id`,
-        orig,
+        `${orig || '(no id)'}: ${kids(c, 'w:p').map(textOf).join(' ').trim().slice(0, 40)}`,
       );
     }
     const q = ctx.commentIds.get(orig) ?? [];
@@ -1032,16 +1059,16 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
       report.add(
         'warning',
         'orphan_comment',
-        'Comment could not be kept: the document has no text',
-        def.body,
+        'Comment could not be anchored: the document has no text (body shown here)',
+        `${id}: ${def.body || '(empty comment)'}`,
       );
       continue;
     }
     report.add(
       'warning',
       'orphan_comment',
-      'Comment had no anchor in the text; kept and attached to the start of the first section',
-      def.body.slice(0, 40),
+      `Comment had no anchor in the text; kept and attached to the start of section "${host.title}"`,
+      `${id}: ${def.body.slice(0, 40)}`,
     );
     comments.push({ id, sectionId: host.id, ...def });
   }

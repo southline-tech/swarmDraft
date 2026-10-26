@@ -404,4 +404,56 @@ describe('comment ranges never lose a body or leak', () => {
     expect(m.comments.map((c) => c.body)).toEqual(['in note']);
     expect(codes(m)).toContain('unclosed_comment');
   });
+  it('round-trips a comment spanning several paragraphs as one comment, same id', () => {
+    const m = build(
+      p(r('lead ') + '<w:commentRangeStart w:id="1"/>' + r('first')) +
+        p(r('second')) +
+        p(r('third') + '<w:commentRangeEnd w:id="1"/>' + r(' tail')),
+      def('1', 'spans three'),
+    );
+    expect(anchorsOf(m, 'second')).toEqual(['1']);
+    const back = importDocx(exportDocx(m));
+    expect(back.comments.map((c) => [c.id, c.body])).toEqual([['1', 'spans three']]);
+    for (const t of ['first', 'second', 'third']) expect(anchorsOf(back, t)).toEqual(['1']);
+    expect(anchorsOf(back, ' tail')).toEqual([]);
+    expect(codes(back)).not.toContain('duplicate_id');
+    expect(codes(back)).not.toContain('orphan_comment');
+    // And a second trip is stable.
+    const again = importDocx(exportDocx(back));
+    expect(again.comments.map((c) => [c.id, c.body])).toEqual([['1', 'spans three']]);
+    expect(codes(again)).not.toContain('duplicate_id');
+  });
+
+  it('round-trips a comment range crossing a flattened table', () => {
+    const m = build(
+      p('<w:commentRangeStart w:id="7"/>' + r('before')) +
+        `<w:tbl><w:tr><w:tc>${p(r('cell'))}</w:tc></w:tr></w:tbl>` +
+        p(r('after') + '<w:commentRangeEnd w:id="7"/>'),
+      def('7', 'across table'),
+    );
+    const back = importDocx(exportDocx(m));
+    expect(back.comments.map((c) => [c.id, c.body])).toEqual([['7', 'across table']]);
+    for (const t of ['before', 'cell', 'after']) expect(anchorsOf(back, t)).toEqual(['7']);
+    expect(codes(back)).not.toContain('duplicate_id');
+  });
+
+  it('puts the comment id and a snippet in warning details', () => {
+    const m = build(
+      p('<w:commentRangeEnd w:id="9"/>' + r('x')) +
+        p('<w:commentRangeStart w:id="5"/>' + r('open')),
+      def('5', 'unclosed body here') + def('9', 'end only') + def('9', 'dup def'),
+    );
+    const samples = (code: string) => m.report.items.find((i) => i.code === code)?.samples ?? [];
+    expect(samples('unclosed_comment')).toEqual(['5: unclosed body here']);
+    expect(samples('unmatched_comment_end')[0]).toMatch(/^9: /);
+    expect(samples('duplicate_id')).toEqual(['9: dup def']);
+    const orphan = m.report.items.find((i) => i.code === 'orphan_comment');
+    expect(orphan?.message).toMatch(/section "/);
+  });
+
+  it('carries the comment body in the warning when the document has no text', () => {
+    const m = build('', def('3', 'lonely note'));
+    const item = m.report.items.find((i) => i.code === 'orphan_comment');
+    expect(item?.samples).toEqual(['3: lonely note']);
+  });
 });
