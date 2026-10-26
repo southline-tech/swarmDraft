@@ -8,11 +8,13 @@
  * from other writers are content-checked before they apply. `content` opens an unbound snapshot.
  */
 import { onBeforeUnmount, shallowRef, toRaw, watch } from 'vue';
+import type { Editor } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/vue-3';
 import type { EditorOptions, JSONContent } from '@tiptap/core';
 import type * as Y from 'yjs';
 import EditorToolbar from './toolbar/EditorToolbar.vue';
-import ZoomControl from './desk/ZoomControl.vue';
+import StatusBar, { type SaveState } from './status/StatusBar.vue';
+import { countWords, watchBookWords } from './status/wordcount';
 import { loadZoom, saveZoom } from './desk/zoom';
 import {
   collaborativeEditorOptions,
@@ -28,6 +30,14 @@ const props = defineProps<{
   content?: JSONContent;
   /** No editing (e.g. the session is closed); edits would be dropped. */
   readonly?: boolean;
+  /** Status bar (RAD-256): the open chapter's title, when known. */
+  chapterTitle?: string;
+  /** Every section doc of the manuscript, for the live book word count. */
+  bookDocs?: Map<string, Y.Doc>;
+  /** The chapter's docs (its own and its scenes'); without it only this doc is counted. */
+  chapterDocs?: Y.Doc[];
+  /** Save status, only when the parent actually knows it. */
+  saveState?: SaveState;
 }>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
@@ -44,15 +54,68 @@ const zoom = shallowRef(loadZoom());
 watch(zoom, (z) => saveZoom(z));
 
 const review = shallowRef<ReviewItem[]>([]);
+
+/** Status bar counts (RAD-256), recounted off the typing path. */
+const chapterWords = shallowRef<number>();
+const selectionWords = shallowRef(0);
+let countTimer: ReturnType<typeof setTimeout> | undefined;
+const countChapter = (e: Editor) =>
+  !props.chapterDocs?.length &&
+  (chapterWords.value = countWords(e.state.doc.textBetween(0, e.state.doc.content.size, ' ', ' ')));
+function scheduleCount(e: Editor) {
+  if (props.chapterDocs?.length) return; // counted from the chapter's docs instead
+  clearTimeout(countTimer);
+  countTimer = setTimeout(() => countChapter(e), 250);
+}
+function countSelection(e: Editor) {
+  const { from, to, empty } = e.state.selection;
+  selectionWords.value = empty ? 0 : countWords(e.state.doc.textBetween(from, to, ' ', ' '));
+}
+const bookWords = shallowRef<number>();
+let stopBook = () => {};
+let stopChapter = () => {};
+watch(
+  () => props.chapterDocs,
+  (docs, prev) => {
+    // The parent may pass a fresh array each render; only resubscribe when the docs change.
+    if (prev && docs && prev.length === docs.length && prev.every((d, i) => d === docs[i])) return;
+    stopChapter();
+    stopChapter = () => {};
+    if (docs?.length)
+      stopChapter = watchBookWords(
+        docs.map((d) => toRaw(d)),
+        (n) => (chapterWords.value = n),
+      );
+  },
+  { immediate: true },
+);
+watch(
+  () => props.bookDocs,
+  (docs) => {
+    stopBook();
+    bookWords.value = undefined;
+    if (docs)
+      stopBook = watchBookWords(
+        [...docs.values()].map((d) => toRaw(d)),
+        (n) => (bookWords.value = n),
+      );
+  },
+  { immediate: true },
+);
 /** Set when the content does not fit the schema; the editor is then read-only and never emits. */
 const loadError = shallowRef<string>('');
 const options: Partial<EditorOptions> = {
   onContentError: ({ error }) => {
     loadError.value = String((error as Error & { cause?: unknown }).cause ?? error.message);
   },
-  onCreate: ({ editor }) => (review.value = collectReviewItems(editor.state.doc)),
+  onCreate: ({ editor }) => {
+    review.value = collectReviewItems(editor.state.doc);
+    countChapter(editor);
+  },
+  onSelectionUpdate: ({ editor }) => countSelection(editor),
   onUpdate: ({ editor }) => {
     review.value = collectReviewItems(editor.state.doc);
+    scheduleCount(editor);
     if (loadError.value) return;
     emit('change', editor.getJSON());
   },
@@ -66,7 +129,10 @@ const editor = useEditor(
     : manuscriptEditorOptions({ ...options, content: props.content }),
 );
 watch(editor, (e) => {
-  if (e) review.value = collectReviewItems(e.state.doc);
+  if (e) {
+    review.value = collectReviewItems(e.state.doc);
+    countChapter(e);
+  }
 });
 watch(
   [editor, () => props.readonly || !!loadError.value],
@@ -75,7 +141,12 @@ watch(
   },
   { immediate: true },
 );
-onBeforeUnmount(() => editor.value?.destroy());
+onBeforeUnmount(() => {
+  clearTimeout(countTimer);
+  stopBook();
+  stopChapter();
+  editor.value?.destroy();
+});
 
 const LABELS: Record<ReviewItem['type'], string> = {
   comment_anchor: 'Comment',
@@ -134,13 +205,14 @@ const LABELS: Record<ReviewItem['type'], string> = {
         <p class="muted">Comments and suggestions are read-only here.</p>
       </aside>
     </div>
-    <div
-      class="flex h-7 items-center gap-4.5 border-t border-border bg-surface px-3.5 font-ui text-xs text-muted"
-      data-test="status-bar"
-    >
-      <span class="flex-1" />
-      <ZoomControl v-model="zoom" />
-    </div>
+    <StatusBar
+      v-model:zoom="zoom"
+      :chapter-title="chapterTitle"
+      :chapter-words="chapterWords"
+      :selection-words="selectionWords"
+      :book-words="bookWords"
+      :save-state="saveState"
+    />
   </div>
 </template>
 
@@ -154,6 +226,8 @@ const LABELS: Record<ReviewItem['type'], string> = {
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* Room for the fixed, full-width status bar (h-7). */
+  padding-bottom: 1.75rem;
 }
 .manuscript-editor .body {
   flex: 1;

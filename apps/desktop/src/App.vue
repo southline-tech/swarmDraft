@@ -16,6 +16,7 @@ import AgentsSettings from './AgentsSettings.vue';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
 import { flushOnClose } from './close-flush';
+import { sectionTreeDocs } from './status/wordcount';
 import {
   importAndOpen,
   reopenLatest,
@@ -315,6 +316,10 @@ defineExpose({ open });
         :key="`${selected!.docId}#${reloads}`"
         :doc="selectedDoc"
         :readonly="session.closed"
+        :chapter-title="selected!.title"
+        :book-docs="session.sections"
+        :chapter-docs="sectionTreeDocs(session.outline.value, selectedId, session.sections)"
+        :save-state="saveError ? 'offline' : undefined"
         @reload="reloads++"
       />
     </div>
