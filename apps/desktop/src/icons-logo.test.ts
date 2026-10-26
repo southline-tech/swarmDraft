@@ -3,8 +3,9 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import AppLogo from './AppLogo.vue';
-import logoUrl from './assets/logo/coauthor-c-blue.svg';
-import logoSmallUrl from './assets/logo/coauthor-c-blue-small.svg';
+import logoUrl from './assets/logo/coauthor-c-caret.svg';
+import logo24Url from './assets/logo/coauthor-c-caret-24.png';
+import logo48Url from './assets/logo/coauthor-c-caret-48.png';
 import HomeScreen from './HomeScreen.vue';
 import SectionNav from './SectionNav.vue';
 import AppIcon from './icons/AppIcon.vue';
@@ -49,12 +50,14 @@ describe('design tokens only', () => {
 });
 
 describe('logo', () => {
-  it('uses the full master at 48px and up and the small master below', () => {
+  it('uses the caret SVG at 48px and up and the 24px PNG with a 48px 2x srcset below', () => {
     const big = mount(AppLogo, { props: { size: 64 } }).get('img');
     const small = mount(AppLogo, { props: { size: 24 } }).get('img');
     expect(big.attributes('src')).toBe(logoUrl);
-    expect(small.attributes('src')).toBe(logoSmallUrl);
-    expect(logoUrl).not.toBe(logoSmallUrl);
+    expect(big.attributes('srcset')).toBeUndefined();
+    expect(small.attributes('src')).toBe(logo24Url);
+    expect(small.attributes('srcset')).toBe(`${logo24Url} 1x, ${logo48Url} 2x`);
+    expect(logo24Url).not.toBe(logo48Url);
     expect(small.attributes('width')).toBe('24');
     expect(big.attributes('alt')).toBe('');
   });
