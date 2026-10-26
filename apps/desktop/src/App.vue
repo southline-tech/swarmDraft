@@ -29,6 +29,12 @@ import {
 const info = ref<AppInfo | null>(null);
 const session = shallowRef<ManuscriptSession | null>(null);
 const selectedId = ref<string>();
+const editorPane = ref<InstanceType<typeof ManuscriptEditor> | null>(null);
+/** Outline row clicked (#36): once that section's editor is showing, put the cursor in its body. */
+async function focusEditor(id: string) {
+  await nextTick();
+  if (selectedId.value === id) editorPane.value?.focusBody();
+}
 /** Notices from startup recovery after an interrupted restore; kept until dismissed. */
 const recoveryNotices = ref<RecoveryNotice[]>([]);
 const recoveryDismissError = ref('');
@@ -471,9 +477,11 @@ defineExpose({ open });
         :selected-id="selectedId"
         :save="session.save"
         @select="selectedId = $event"
+        @activate="focusEditor"
       />
       <ManuscriptEditor
         v-if="selectedDoc"
+        ref="editorPane"
         :key="`${selected!.docId}#${reloads}`"
         :doc="selectedDoc"
         :readonly="session.closed"
