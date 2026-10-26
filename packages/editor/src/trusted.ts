@@ -4,12 +4,14 @@
  * the review decision port (RAD-211): accept/reject as one trusted ProseMirror transaction.
  */
 import type { Transaction } from '@tiptap/pm/state';
+import type { DocNode } from '@coauthor/schema';
 import { REVIEW_EDIT_TOKEN, reviewGuardKey } from './review';
 import {
   applyReviewDecision as applyWith,
   type ReviewDecisionOp as Op,
   type ReviewView as View,
 } from './reviewtx';
+import { decideSuggestions, type DecisionOp, type ReviewTransactionPort } from './decisions';
 
 /** Let this transaction add, remove or edit review marks. */
 export function allowReviewEdits(tr: Transaction): Transaction {
@@ -30,4 +32,23 @@ export {
 /** Apply an accept/reject decision on the live editor as one trusted transaction. */
 export function applyReviewDecision(view: View, op: Op): boolean {
   return applyWith(view, op, allowReviewEdits);
+}
+
+export interface LiveDocStore {
+  /** Current document at the moment of apply (not a snapshot taken earlier). */
+  read(): DocNode;
+  /** Commit in one trusted, undoable transaction. */
+  commit(next: DocNode): void;
+}
+
+// TODO(RAD-211 wiring): replace this stub with applyReviewDecision above, editing the live
+// editor state by attrs.id in one trusted transaction instead of committing a whole doc.
+export function createReviewPort(store: LiveDocStore): ReviewTransactionPort {
+  return {
+    applyReviewDecision(op: DecisionOp) {
+      const { doc, decided, superseded } = decideSuggestions(store.read(), op);
+      if (decided.length) store.commit(doc);
+      return { decided, superseded };
+    },
+  };
 }

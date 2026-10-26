@@ -24,10 +24,10 @@ export const EMPTY_DOC: JSONContent = {
   content: [{ type: 'paragraph', attrs: { style: 'body' } }],
 };
 
-/** Options for a manuscript editor; pass the result to `new Editor()` or Vue's `useEditor()`. */
 /**
- * The content check guards loading (and, via Collaboration, every remote Yjs change). Once the
- * view exists, later pastes/inserts go back to lenient parsing (unknown HTML dropped as usual).
+ * The content check guards loading. Once the view exists, later pastes/inserts go back to
+ * lenient parsing (unknown HTML dropped as usual); incoming Yjs changes are validated separately
+ * by `collaborativeEditorOptions` (see collab.ts).
  */
 const LenientAfterLoad = Extension.create({
   name: 'lenientAfterLoad',
@@ -45,6 +45,8 @@ const LenientAfterLoad = Extension.create({
 });
 
 /**
+ * Options for a manuscript editor; pass the result to `new Editor()` or Vue's `useEditor()`.
+ *
  * Content that does not fit the manuscript schema (unknown nodes or marks) is never silently
  * dropped: the content check is on, and on a content error the editor turns read-only, a bound
  * Yjs document is detached (so nothing is written back to stored content), and
@@ -73,3 +75,6 @@ export function contentErrorOf(editor: Editor): Error | undefined {
 export function createManuscriptEditor(opts: Partial<EditorOptions> = {}): Editor {
   return new Editor(manuscriptEditorOptions(opts));
 }
+
+export * from './decisions';
+export * from './comments';
