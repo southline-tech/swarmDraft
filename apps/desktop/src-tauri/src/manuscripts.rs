@@ -472,15 +472,15 @@ impl Store {
     }
 }
 
-/// What one agent write stores (see [`Store::agent_write`]).
 #[cfg(test)]
 thread_local! {
-    /// Test-only: runs once in `agent_write` after the tool's checks and before the write
-    /// transaction, so a test can revoke a token in that window. Compiled out of release.
+    // Test-only: runs once in `agent_write` after the tool's checks and before the write
+    // transaction, so a test can revoke a token in that window. Compiled out of release.
     pub(crate) static BEFORE_AGENT_WRITE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
         std::cell::RefCell::new(None);
 }
 
+/// What one agent write stores (see [`Store::agent_write`]).
 pub struct AgentWrite<'a> {
     pub manuscript_id: &'a str,
     /// (doc id, edited doc, state vector it was loaded at)
