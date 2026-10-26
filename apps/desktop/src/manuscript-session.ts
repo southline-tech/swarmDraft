@@ -20,6 +20,7 @@ import {
 import {
   openLatestManuscript,
   persistImport,
+  saveOutline,
   saveSectionUpdate,
   type ImportPayload,
   type StoredManuscript,
@@ -36,11 +37,10 @@ export interface ManuscriptSession {
   /** Problems repaired when the stored outline was opened (already saved back). */
   repairs: OutlineIssue[];
   /**
-   * Why outline edits (add, rename, reorder, move, delete) are turned off, if they are. Set for
-   * stored manuscripts until outline changes are saved to the database (RAD-263).
+   * Save an outline edit (add, rename, reorder, move, delete). For a stored manuscript it is
+   * written to the database first and rejects (changing nothing) if that fails.
    */
-  outlineLocked?: string;
-  save(next: Section[]): void;
+  save(next: Section[]): Promise<void>;
   /**
    * Write pending section edits to storage now (no-op without storage). Rejects with an
    * `UnsavedEditsError` if some edits are still not saved (they are kept and retried).
@@ -63,7 +63,7 @@ export function openSession(
   sections: Map<string, Y.Doc>,
   report: ImportReport | null,
   persist?: SectionPersister,
-  outlineLocked?: string,
+  saveOutline?: SaveOutline,
 ): ManuscriptSession {
   // Y.Docs must never be wrapped in Vue reactive proxies: Yjs observers compare types by identity,
   // so a proxied doc silently stops delivering remote changes. (ManuscriptEditor also toRaw's.)
@@ -90,11 +90,34 @@ export function openSession(
     outline,
     report,
     repairs,
-    outlineLocked,
     get closed() {
       return closed.value;
     },
-    save: (next) => writeStructure(manuscript, next),
+    save: async (next) => {
+      if (closed.value) throw new Error('This manuscript is closed.');
+      const kept = new Set(next.map((x) => x.docId));
+      const removed = readStructure(manuscript)
+        .map((x) => x.docId)
+        .filter((d) => !kept.has(d));
+      // Save pending text first, while every section still exists in storage; if that fails the
+      // outline change is refused (nothing is lost, the edits keep retrying).
+      if (removed.length) await saver?.flush();
+      await saveOutline?.(next);
+      // Removed sections are no longer tracked: no queued save or later keystroke can target a
+      // section that storage no longer has.
+      for (const d of removed) {
+        saver?.forget(d);
+        sections.delete(d);
+      }
+      // New sections start with an empty doc (the backend stored one too) and are watched.
+      for (const x of next) {
+        if (sections.has(x.docId)) continue;
+        const doc = markRaw(new Y.Doc());
+        sections.set(x.docId, doc);
+        saver?.watch(x.docId, doc);
+      }
+      writeStructure(manuscript, next);
+    },
     flush: () => saver?.flush() ?? Promise.resolve(),
     close: async (opts) => {
       if (closed.value) return;
@@ -136,6 +159,9 @@ export function importPayload(imported: ImportedManuscript): ImportPayload {
     })),
   };
 }
+
+/** Writes a whole outline to storage. */
+export type SaveOutline = (next: Section[]) => Promise<void>;
 
 /** Writes one section's Yjs update to storage. */
 export type SaveSectionUpdate = (sectionId: string, update: Uint8Array) => Promise<void>;
@@ -258,7 +284,7 @@ function watchSections(manuscript: Y.Doc, docs: Map<string, Y.Doc>, p: SectionPe
       if (dirtyFull.size) throw new UnsavedEditsError(unsaved(), lastError);
     });
   };
-  const offs = [...docs].map(([docId, doc]) => {
+  const watch = (docId: string, doc: Y.Doc) => {
     const on = (update: Uint8Array, origin: unknown) => {
       if (origin === LOAD_ORIGIN) return;
       pending.set(docId, [...(pending.get(docId) ?? []), update]);
@@ -266,9 +292,19 @@ function watchSections(manuscript: Y.Doc, docs: Map<string, Y.Doc>, p: SectionPe
     };
     doc.on('update', on);
     return () => doc.off('update', on);
-  });
+  };
+  const offs = new Map([...docs].map(([docId, doc]) => [docId, watch(docId, doc)]));
   return {
     flush,
+    watch: (docId: string, doc: Y.Doc) => {
+      if (!stopped && !offs.has(docId)) offs.set(docId, watch(docId, doc));
+    },
+    forget: (docId: string) => {
+      offs.get(docId)?.();
+      offs.delete(docId);
+      pending.delete(docId);
+      dirtyFull.delete(docId);
+    },
     discard: () => {
       if (timer) clearTimeout(timer);
       timer = undefined;
@@ -280,13 +316,10 @@ function watchSections(manuscript: Y.Doc, docs: Map<string, Y.Doc>, p: SectionPe
       if (timer) clearTimeout(timer);
       timer = undefined;
       offs.forEach((f) => f());
+      offs.clear();
     },
   };
 }
-
-/** Shown on the outline of a stored manuscript until its outline changes are saved (RAD-263). */
-export const OUTLINE_LOCKED =
-  "Adding, renaming, moving and deleting sections is turned off for now: those changes aren't saved yet (RAD-263). Your text edits are saved.";
 
 /**
  * Open a session over a manuscript as stored in the database: the outline uses the stored
@@ -297,6 +330,7 @@ export function sessionFromStored(
   stored: StoredManuscript,
   report: ImportReport | null,
   persist?: SectionPersister,
+  saveOutline?: SaveOutline,
 ): ManuscriptSession {
   const manuscript = new Y.Doc();
   manuscript.getMap(META_FIELD).set('title', stored.manuscript.title);
@@ -323,7 +357,7 @@ export function sessionFromStored(
     sections,
     report,
     persist,
-    OUTLINE_LOCKED,
+    saveOutline,
   );
 }
 
@@ -334,10 +368,15 @@ export function openStored(
   persistHooks?: Pick<SectionPersister, 'onError' | 'onSaved'>,
 ): ManuscriptSession {
   const id = stored.manuscript.id;
-  return sessionFromStored(stored, report, {
-    save: (sectionId, update) => saveSectionUpdate(id, sectionId, update),
-    ...persistHooks,
-  });
+  return sessionFromStored(
+    stored,
+    report,
+    {
+      save: (sectionId, update) => saveSectionUpdate(id, sectionId, update),
+      ...persistHooks,
+    },
+    (next) => saveOutline(id, next),
+  );
 }
 
 /**
