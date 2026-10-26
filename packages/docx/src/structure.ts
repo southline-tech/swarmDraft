@@ -69,19 +69,21 @@ function refFor(s: Section): Ref {
 }
 
 /**
- * Store `sections` as the outline, in one transaction. A rename or reparent updates the
- * section's existing Y.Map in place, so it merges with concurrent edits field by field. When the
- * order changes the array is rewritten with fresh refs; a concurrent reorder on another peer
+ * Store `sections` as the outline, in one transaction. When the rows are unchanged (same length
+ * and the same docId at each index) every field, including a repaired id, is updated on the
+ * existing Y.Map in place, so it merges with concurrent edits field by field (a rename on another
+ * peer survives a duplicate-id repair here). When the order changes the array is rewritten with
+ * fresh refs; a concurrent reorder on another peer
  * then resolves by Yjs ordering and readers repair duplicates (see the outline's normalize).
  */
 export function writeStructure(doc: Y.Doc, sections: readonly Section[]): void {
   const arr = structureOf(doc);
   doc.transact(() => {
     const current = arr.toArray();
-    const sameOrder =
+    const sameRows =
       current.length === sections.length &&
-      current.every((m, i) => m instanceof Y.Map && m.get('id') === sections[i]!.id);
-    if (sameOrder) {
+      current.every((m, i) => m instanceof Y.Map && m.get('docId') === sections[i]!.docId);
+    if (sameRows) {
       current.forEach((m, i) => setFields(m, sections[i]!));
       return;
     }

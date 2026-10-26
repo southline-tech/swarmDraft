@@ -23,7 +23,11 @@ const selectedId = ref<string>();
 /** One-time notice: startup recovery moved folders aside after an interrupted restore. */
 const recoveryNotice = ref<RecoveryNotice | null>(null);
 const openError = ref('');
-/** Bumped by the editor's Reload action to reopen the section from its Y.Doc. */
+/**
+ * Bumped by the editor's Reload action to reopen the section from its Y.Doc. The remount is a
+ * fresh editor: its undo history is lost, and so is anything not yet written to the Y.Doc
+ * (edits the binding refused while the editor was read-only). The Y.Doc itself is kept.
+ */
 const reloads = ref(0);
 
 onMounted(async () => {

@@ -41,7 +41,12 @@ export function openSession(
   const { sections: repaired, issues: repairs } = normalizeOutline(readStructure(manuscript));
   if (repairs.length) writeStructure(manuscript, repaired);
   const outline = shallowRef(repairs.length ? readStructure(manuscript) : repaired);
-  const off = observeStructure(manuscript, (next) => (outline.value = next));
+  // Normalize on every change too: two peers repairing the same duplicate at once can merge
+  // into repeated rows (c, c~2, c, c~2); the sidebar shows each section once.
+  const off = observeStructure(
+    manuscript,
+    (next) => (outline.value = normalizeOutline(next).sections),
+  );
   return {
     id,
     title,

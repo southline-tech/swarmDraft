@@ -182,6 +182,30 @@ describe('App keyboard and placement on an imported manuscript', () => {
   });
 });
 
+describe('App open-file input', () => {
+  const pick = async (w: ReturnType<typeof mount>, name: string, data: Uint8Array) => {
+    const input = w.find('[data-test="open-docx"]');
+    const file = { name, arrayBuffer: async () => data.slice().buffer };
+    Object.defineProperty(input.element, 'files', { value: [file], configurable: true });
+    await input.trigger('change');
+    await settle();
+  };
+
+  it('opens a good .docx and reports a bad one without replacing the open manuscript', async () => {
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await pick(w, 'mock.docx', bytes());
+    expect(w.findAll('.row').length).toBeGreaterThan(0);
+    const rows = w.findAll('.row').length;
+    expect(w.text()).not.toContain('Could not import');
+
+    await pick(w, 'broken.docx', new TextEncoder().encode('not a zip'));
+    expect(w.text()).toContain('Could not import broken.docx');
+    expect(w.findAll('.row')).toHaveLength(rows);
+    w.unmount();
+  });
+});
+
 vi.mock('./backend', async (orig) => ({
   ...(await orig<typeof import('./backend')>()),
   agentsApi: { list: vi.fn(async () => []), tokens: vi.fn(async () => []) },
