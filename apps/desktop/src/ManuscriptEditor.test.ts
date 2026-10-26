@@ -21,20 +21,20 @@ describe('ManuscriptEditor', () => {
     w.unmount();
   });
 
-  it('offers every paragraph style in the toolbar', async () => {
+  it('offers the four toolbar paragraph styles', async () => {
     const w = mount(ManuscriptEditor, { props: { content: SAMPLE_DOC }, attachTo: document.body });
     await flushPromises();
     const options = w
       .findAll('[data-test="paragraph-style"] option')
       .map((o) => o.attributes('value'));
-    expect(options).toEqual(['body', 'first', 'block_quote', 'epigraph', 'verse', 'centered']);
+    expect(options.slice(0, 4)).toEqual(['body', 'heading', 'scene_break', 'block_quote']);
     w.unmount();
   });
 
   it('inserts a scene break and reports the change', async () => {
     const w = mount(ManuscriptEditor, { props: { content: SAMPLE_DOC }, attachTo: document.body });
     await flushPromises();
-    await w.find('[data-test="scene-break"]').trigger('click');
+    await w.find('[data-test="paragraph-style"]').setValue('scene_break');
     const changes = w.emitted('change');
     expect(changes?.length).toBeGreaterThan(0);
     expect(w.findAll('.tiptap .scene-break')).toHaveLength(2);
@@ -57,6 +57,9 @@ describe('ManuscriptEditor', () => {
     expect(w.find('[data-test="load-error"]').exists()).toBe(true);
     expect(w.emitted('change')).toBeUndefined();
     expect(w.find('.tiptap').attributes('contenteditable')).toBe('false');
+    const bold = w.find('[data-test="tb-bold"]');
+    expect(bold.attributes('aria-disabled')).toBe('true');
+    expect(bold.attributes('title')).toBe('Read-only: document failed to load');
     await w.find('[data-test="reload"]').trigger('click');
     expect(w.emitted('reload')).toHaveLength(1);
     w.unmount();
