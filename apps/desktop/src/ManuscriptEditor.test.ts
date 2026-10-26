@@ -160,6 +160,18 @@ describe('ManuscriptEditor', () => {
     (w.vm as unknown as { focusBody: () => void }).focusBody();
     await new Promise((r) => setTimeout(r, 0));
     expect(editor.state.doc.childCount).toBe(1);
+    expect(editor.isEditable).toBe(false);
+    const before = editor.state.doc;
+    expect(editor.view.dom.getAttribute('contenteditable')).toBe('false');
+    // Simulated typing through the view's input path (keypress -> text input).
+    for (const ch of 'Synthetic attempt') {
+      editor.view.dom.dispatchEvent(
+        new KeyboardEvent('keypress', { key: ch, charCode: ch.charCodeAt(0), bubbles: true }),
+      );
+    }
+    await flushPromises();
+    expect(editor.state.doc.eq(before)).toBe(true);
+    expect(editor.getText()).not.toContain('Synthetic attempt');
     w.unmount();
   });
 });

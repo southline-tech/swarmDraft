@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import ManuscriptEditor from './ManuscriptEditor.vue';
 import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
@@ -234,6 +235,44 @@ describe('App', () => {
       );
       expect(errors.mock.calls.flat().join(' ')).not.toContain('Invalid content');
       errors.mockRestore();
+      w.unmount();
+    },
+  );
+
+  it.each(['part', 'chapter', 'scene', 'front_matter', 'back_matter'] as const)(
+    'text typed in a new %s survives Reload and switching away and back (#42)',
+    async (kind) => {
+      const { w, session } = await withManuscript();
+      const editorOf = () =>
+        (w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }).editor;
+      const chapter = readStructure(session.manuscript).find((s) => s.kind === 'chapter')!;
+      await w.find(`[data-test="section-${chapter.id}"]`).trigger('click');
+      await settle();
+      const before = new Set(readStructure(session.manuscript).map((s) => s.id));
+      await w.find(`[data-test="add-${kind}"]`).trigger('click');
+      await settle();
+      await w.find('[data-test="rename-input"]').trigger('keydown', { key: 'Enter' });
+      await settle();
+      const added = readStructure(session.manuscript).find((s) => !before.has(s.id))!;
+      await new Promise((r) => setTimeout(r, 0));
+      const text = `Synthetic persisted ${kind} line`;
+      editorOf().commands.insertContent(text);
+      await flushPromises();
+      // Reload: re-mounts the editor from the saved section state.
+      w.findComponent(ManuscriptEditor).vm.$emit('reload');
+      await settle();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(w.find('[data-test="load-error"]').exists()).toBe(false);
+      expect(w.find('.tiptap').text()).toContain(text);
+      // Switch to another section and back.
+      await w.find(`[data-test="section-${chapter.id}"]`).trigger('click');
+      await settle();
+      expect(w.find('.tiptap').text()).not.toContain(text);
+      await w.find(`[data-test="section-${added.id}"]`).trigger('click');
+      await settle();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(w.find('.tiptap').text()).toContain(text);
+      expect(editorOf().isEditable).toBe(true);
       w.unmount();
     },
   );
