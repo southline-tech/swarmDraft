@@ -98,6 +98,12 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri
       - run: pnpm install --frozen-lockfile
+      - name: Placeholder frontend dist (generate_context! needs it; tauri build rebuilds it)
+        shell: bash
+        run: mkdir -p apps/desktop/dist && echo '<!doctype html>' > apps/desktop/dist/index.html
+      - name: cargo test (runs the Windows-only retry and locked-file paths)
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --locked
       - name: Build unsigned installers (.msi + NSIS)
         run: pnpm tauri build --bundles msi,nsis
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

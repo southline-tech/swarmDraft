@@ -5,6 +5,9 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 
+/// `app_meta` key holding the id of the restore that produced the live db.
+pub(crate) const RESTORE_ID_KEY: &str = "last_restore_id";
+
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
     #[error("io: {0}")]
@@ -69,6 +72,75 @@ impl Store {
     ) -> Result<T, StorageError> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         f(&conn)
+    }
+
+    /// Like `with_conn`, for closures returning plain rusqlite results.
+    pub(crate) fn with_sql<T>(
+        &self,
+        f: impl FnOnce(&Connection) -> rusqlite::Result<T>,
+    ) -> Result<T, StorageError> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(f(&conn)?)
+    }
+
+    /// Run `f` with mutable access to the shared connection.
+    pub fn with_conn_mut<T>(
+        &self,
+        f: impl FnOnce(&mut Connection) -> rusqlite::Result<T>,
+    ) -> Result<T, StorageError> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(f(&mut conn)?)
+    }
+
+    /// Prepare a staged database file for restore: migrate it, stamp `restore_id` into
+    /// `app_meta`, and, when `revoke_tokens`,
+    /// revoke every agent token *in the staged file*, before it is swapped in. The revoke is
+    /// thus durable before the live db changes, so a crash mid-restore cannot revive the
+    /// backup's tokens. Returns the number of tokens revoked.
+    pub(crate) fn prepare_restore_db(
+        src: &Path,
+        revoke_tokens: bool,
+        restore_id: &str,
+    ) -> Result<u64, StorageError> {
+        let mut conn = Connection::open(src)?;
+        migrate(&mut conn)?;
+        let tx = conn.transaction()?;
+        let n = if revoke_tokens {
+            tx.execute(
+                "UPDATE agent_tokens SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
+                 WHERE revoked_at IS NULL",
+                [],
+            )?
+        } else {
+            0
+        };
+        // Lets startup recovery tell whether the live db is this restore's db (see backup.rs).
+        tx.execute(
+            "INSERT OR REPLACE INTO app_meta (key, value) VALUES (?1, ?2)",
+            [RESTORE_ID_KEY, restore_id],
+        )?;
+        tx.commit()?;
+        conn.close().map_err(|(_, e)| e)?;
+        Ok(n as u64)
+    }
+
+    /// Replace the live database with `src` (SQLite backup API) and migrate it, under one
+    /// lock so no request sees a half-restored state. `src` should already be prepared with
+    /// [`Store::prepare_restore_db`].
+    pub(crate) fn restore_db_from(&self, src: &Path) -> Result<(), StorageError> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        conn.restore(
+            rusqlite::DatabaseName::Main,
+            src,
+            None::<fn(rusqlite::backup::Progress)>,
+        )?;
+        migrate(&mut conn)
+    }
+
+    /// Apply any pending migrations (e.g. after restoring an older backup).
+    pub fn migrate_now(&self) -> Result<(), StorageError> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        migrate(&mut conn)
     }
 
     pub fn schema_version(&self) -> Result<i64, StorageError> {

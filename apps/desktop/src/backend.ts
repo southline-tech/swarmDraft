@@ -50,3 +50,63 @@ export const agentsApi = {
   revokeToken: (tokenId: string) => invoke<void>('agent_token_revoke', { tokenId }),
 };
 export type AgentsApi = typeof agentsApi;
+
+export interface BackupManifest {
+  format: string;
+  formatVersion: number;
+  appVersion: string;
+  schemaVersion: number;
+  createdAtUnix: number;
+  files: string[];
+}
+
+export interface RestoreReport {
+  /** All agent tokens are revoked on restore; agents are kept and need new tokens. */
+  tokensRevoked: number;
+  manifest: BackupManifest;
+  preRestoreSnapshot: string;
+}
+
+/**
+ * Write a full-project backup .zip to `dest` or, if omitted, into the data dir's backups
+ * folder; returns its path. An existing `dest` is refused unless `replace` is true (the user
+ * confirmed Replace in the save dialog), in which case it is atomically replaced: written to
+ * a temp file beside it, then renamed over it.
+ */
+export async function createBackup(dest?: string, replace = false): Promise<string> {
+  return invoke<string>('create_backup', { dest: dest ?? null, replace });
+}
+
+const ZIP_FILTER = [{ name: 'coAuthor backup', extensions: ['zip'] }];
+
+/** Native open dialog for a backup .zip; null if cancelled. */
+export async function pickBackupToRestore(): Promise<string | null> {
+  const { open } = await import('@tauri-apps/plugin-dialog');
+  const p = await open({ multiple: false, directory: false, filters: ZIP_FILTER });
+  return typeof p === 'string' ? p : null;
+}
+
+/** Native save-as dialog for a new backup; null if cancelled. */
+export async function pickBackupDestination(): Promise<string | null> {
+  const { save } = await import('@tauri-apps/plugin-dialog');
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  return save({ defaultPath: `coauthor-backup-${stamp}.zip`, filters: ZIP_FILTER });
+}
+
+/** Validate and restore a backup .zip. The replaced state is saved as a pre-restore snapshot. */
+export async function restoreBackup(path: string): Promise<RestoreReport> {
+  return invoke<RestoreReport>('restore_backup', { path });
+}
+
+/** Left by startup recovery when an interrupted restore's state could not be proven. */
+export interface RecoveryNotice {
+  folder: string;
+  snapshot: string | null;
+  reason: string;
+}
+
+/** Return and clear the one-time recovery notice (null if none, or in a plain browser). */
+export async function takeRecoveryNotice(): Promise<RecoveryNotice | null> {
+  if (!isTauri()) return null;
+  return invoke<RecoveryNotice | null>('take_recovery_notice');
+}
