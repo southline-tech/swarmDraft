@@ -18,6 +18,8 @@ import SectionNav from './SectionNav.vue';
 import { SAMPLE_MANUSCRIPT_ID, sampleOutline } from './outline-sample';
 import type { Section } from '@coauthor/schema';
 
+const editorKey = ref(0);
+
 const info = ref<AppInfo | null>(null);
 const sections = ref<Section[]>(sampleOutline());
 const selectedId = ref<string>();
@@ -148,7 +150,7 @@ async function onRestore(): Promise<void> {
       :selected-id="selectedId"
       @select="selectedId = $event"
     />
-    <ManuscriptEditor :content="SAMPLE_DOC" />
+    <ManuscriptEditor :key="editorKey" :content="SAMPLE_DOC" @reload="editorKey++" />
   </main>
 </template>
 

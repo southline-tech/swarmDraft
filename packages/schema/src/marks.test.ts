@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   MARK_ID_HASH_TEST_VECTOR,
+  MAX_MARK_KEY_TRIES,
+  freeMarkKey,
   isParseableMarkKey,
   markIdHash,
   markKey,
@@ -50,5 +52,29 @@ describe('mark keys', () => {
       'comment_anchor--AAAAAAAA',
       'suggestion_insert--AAAAAAAA',
     ]);
+  });
+});
+
+describe('freeMarkKey', () => {
+  it('returns the first key when free and retries on collision', () => {
+    expect(freeMarkKey('comment_anchor', 'c1', 'k', new Set())).toBe('k');
+    const next = freeMarkKey('comment_anchor', 'c1', 'k', new Set(['k']));
+    expect(next).toMatch(/^comment_anchor--[A-Za-z0-9+/]{8}$/);
+  });
+  it(`throws after ${MAX_MARK_KEY_TRIES} collisions instead of looping`, () => {
+    const constant = () => 'AAAAAAAA';
+    const used = new Set(['comment_anchor--AAAAAAAA']);
+    expect(() =>
+      freeMarkKey('comment_anchor', 'c1', 'comment_anchor--AAAAAAAA', used, constant),
+    ).toThrow(/after 1000 tries/);
+    expect(() =>
+      markKeys(
+        [
+          { type: 'comment_anchor', attrs: { id: 'a' } },
+          { type: 'comment_anchor', attrs: { id: 'b' } },
+        ],
+        constant,
+      ),
+    ).toThrow(/after 1000 tries/);
   });
 });

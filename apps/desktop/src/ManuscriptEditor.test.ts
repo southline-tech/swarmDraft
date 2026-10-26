@@ -57,6 +57,8 @@ describe('ManuscriptEditor', () => {
     expect(w.find('[data-test="load-error"]').exists()).toBe(true);
     expect(w.emitted('change')).toBeUndefined();
     expect(w.find('.tiptap').attributes('contenteditable')).toBe('false');
+    await w.find('[data-test="reload"]').trigger('click');
+    expect(w.emitted('reload')).toHaveLength(1);
     w.unmount();
   });
 });
