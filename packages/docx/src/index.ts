@@ -1,17 +1,13 @@
 /**
  * Word .docx import/export (RAD-218). Independent of the editor and MCP code:
  * input is a .docx byte array, output is a structured manuscript (sections with
- * ProseMirror-compatible JSON content), and the reverse for export.
+ * ProseMirror-compatible JSON content, one Yjs doc per section), and the
+ * reverse for export.
  */
-import type { Section } from '@coauthor/schema';
-
-export interface ImportedSection extends Section {
-  /** ProseMirror JSON for this section's content. */
-  content: unknown;
-}
-
-export interface ImportedManuscript {
-  title: string;
-  sections: ImportedSection[];
-  warnings: string[];
-}
+export { importDocx } from './import';
+export type { ImportedComment, ImportedManuscript, ImportedSection, ImportOptions } from './import';
+export { exportDocx } from './export';
+export { formatReport } from './report';
+export type { ImportReport, ImportSummary, ReportItem } from './report';
+export { docToYDoc, yDocToDoc, manuscriptToYDocs, FRAGMENT_NAME } from './ydoc';
+export * from './model';
