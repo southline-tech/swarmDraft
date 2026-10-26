@@ -279,7 +279,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
         </button>
         <button
           type="button"
-          class="sh-btn sh-icon"
+          class="sh-tbtn sh-icon"
           data-test="shortcuts-open"
           aria-label="Keyboard shortcuts"
           title="Keyboard shortcuts (Ctrl+/)"
@@ -290,7 +290,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
         </button>
         <button
           type="button"
-          class="sh-btn"
+          class="sh-tbtn"
           data-test="focus-mode"
           title="Focus mode (Ctrl+Shift+F)"
           aria-keyshortcuts="Control+Shift+F"
@@ -406,7 +406,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
         Focus mode · press <kbd class="sh-kbd">Esc</kbd> to exit
         <button
           type="button"
-          class="sh-btn sh-icon"
+          class="sh-tbtn sh-icon"
           data-test="focus-exit"
           aria-label="Exit focus mode"
           @click="focusMode = false"

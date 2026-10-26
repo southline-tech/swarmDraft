@@ -46,7 +46,7 @@
   min-width: 3.5rem;
   text-align: right;
 }
-.sh-btn {
+.sh-tbtn {
   height: 28px;
   padding: 0 10px;
   border: 1px solid var(--ct-border);
@@ -57,17 +57,17 @@
   cursor: pointer;
   white-space: nowrap;
 }
-.sh-btn[aria-disabled='true'] {
+.sh-tbtn[aria-disabled='true'] {
   color: var(--ct-text-muted);
   cursor: default;
 }
-.sh-btn.sh-icon {
+.sh-tbtn.sh-icon {
   border-color: transparent;
   background: transparent;
   min-width: 28px;
   padding: 0 6px;
 }
-.sh-btn:focus-visible,
+.sh-tbtn:focus-visible,
 .sh-chip:focus-visible,
 .sh-mi:focus-visible,
 .sh-tab:focus-visible {
@@ -348,4 +348,33 @@
   height: 8px;
   border-radius: 50%;
   background: var(--ct-danger);
+}
+
+/* Onboarding/settings shells */
+/* Shared button styles for the UI shells. Tokens only. */
+.sh-btn {
+  min-height: var(--ct-space-10);
+  padding: 0 var(--ct-space-4);
+  border: 1px solid var(--ct-border-strong);
+  border-radius: var(--ct-radius-md);
+  background: var(--ct-surface);
+  color: var(--ct-text);
+  font: inherit;
+  font-size: var(--ct-text-sm);
+  font-weight: var(--ct-weight-medium);
+  cursor: pointer;
+}
+.sh-btn--primary {
+  border-color: var(--ct-accent);
+  background: var(--ct-accent);
+  color: var(--ct-accent-contrast);
+}
+.sh-btn--link {
+  border: 0;
+  background: none;
+  text-decoration: underline;
+}
+.sh-btn:focus-visible {
+  outline: var(--ct-focus-outline);
+  outline-offset: var(--ct-focus-offset);
 }

@@ -68,15 +68,15 @@ onMounted(() => nextTick(() => input.value?.focus()));
         @keydown.enter.prevent="step($event.shiftKey ? -1 : 1)"
       />
       <span class="sh-count" role="status" data-test="find-count">{{ label }}</span>
-      <button type="button" class="sh-btn sh-icon" aria-label="Previous match" @click="step(-1)">
+      <button type="button" class="sh-tbtn sh-icon" aria-label="Previous match" @click="step(-1)">
         ‹
       </button>
-      <button type="button" class="sh-btn sh-icon" aria-label="Next match" @click="step(1)">
+      <button type="button" class="sh-tbtn sh-icon" aria-label="Next match" @click="step(1)">
         ›
       </button>
       <button
         type="button"
-        class="sh-btn sh-icon"
+        class="sh-tbtn sh-icon"
         aria-label="Close find"
         data-test="find-close"
         @click="emit('close')"
@@ -94,7 +94,7 @@ onMounted(() => nextTick(() => input.value?.focus()));
       />
       <button
         type="button"
-        class="sh-btn"
+        class="sh-tbtn"
         data-test="replace-one"
         aria-disabled="true"
         :title="NOT_YET"
@@ -103,7 +103,7 @@ onMounted(() => nextTick(() => input.value?.focus()));
       </button>
       <button
         type="button"
-        class="sh-btn"
+        class="sh-tbtn"
         data-test="replace-all"
         aria-disabled="true"
         :title="NOT_YET"

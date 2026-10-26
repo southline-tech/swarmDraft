@@ -82,7 +82,7 @@ onBeforeUnmount(() => opener?.focus?.());
         <button
           ref="closeBtn"
           type="button"
-          class="sh-btn sh-icon"
+          class="sh-tbtn sh-icon"
           style="margin-left: auto"
           aria-label="Close keyboard shortcuts"
           data-test="shortcuts-close"
