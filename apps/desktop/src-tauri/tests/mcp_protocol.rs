@@ -972,7 +972,7 @@ async fn oversized_declared_content_length_is_refused_before_reading() {
 fn raw_keys(s: &Server, sid: &str) -> Vec<String> {
     use yrs::types::text::YChange;
     use yrs::types::xml::{XmlFragment, XmlOut};
-    use yrs::{Text, Transact};
+    use yrs::{ReadTxn, Text, Transact};
     let sec = s.store.get_section(&s.manuscript_id, sid).unwrap();
     let doc = s.store.load_doc(&sec.doc_id).unwrap();
     let frag = doc.get_or_insert_xml_fragment(coauthor_lib::content::FRAGMENT);
@@ -1026,7 +1026,7 @@ async fn write_tools_key_marks_with_the_shared_hash() {
 
 #[tokio::test]
 async fn writes_that_would_leave_unknown_marks_are_refused() {
-    use yrs::{Text, Transact};
+    use yrs::{ReadTxn, Text, Transact};
     let s = start(&["read", "comment", "suggest"], 1000).await;
     let (sid, bid) = chapter_two(&s).await;
     // Plant a mark the schema doesn't know (as a foreign client might).
