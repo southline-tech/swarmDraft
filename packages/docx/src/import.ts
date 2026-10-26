@@ -1032,6 +1032,36 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
   // Drop empty scenes (e.g. a chapter with no text).
   const doc = { sections: sections.filter((s) => s.kind !== 'scene' || s.content.content.length) };
 
+  // Orphan anchors: a commentRangeStart/End id with no comments.xml entry. Drop the mark
+  // (there is no comment behind it) and say so, with the id and the text it covered.
+  const orphanText = new Map<string, string>();
+  const stripOrphans = (nodes: unknown[] | undefined): void => {
+    for (const n of nodes ?? []) {
+      const node = n as { type?: string; text?: string; marks?: Mark[]; content?: unknown[] };
+      if (node.marks?.length) {
+        node.marks = node.marks.filter((m) => {
+          if (m.type !== 'comment_anchor') return true;
+          const id = String((m.attrs as { id?: unknown } | undefined)?.id ?? '');
+          if (commentDefs.has(id)) return true;
+          const prev = orphanText.get(id) ?? '';
+          if (prev.length < 40) orphanText.set(id, prev + (node.text ?? ''));
+          return false;
+        });
+        if (!node.marks.length) delete node.marks;
+      }
+      stripOrphans(node.content);
+    }
+  };
+  for (const s of doc.sections) stripOrphans(s.content.content);
+  for (const [id, snippet] of orphanText) {
+    report.add(
+      'warning',
+      'orphan_anchor',
+      'Comment range had no matching comment; the empty anchor was removed',
+      `${id}: ${snippet.trim().slice(0, 40) || '(no text)'}`,
+    );
+  }
+
   // Comments: attach to the section whose content carries the anchor mark.
   const comments: ImportedComment[] = [];
   for (const [id, def] of commentDefs) {

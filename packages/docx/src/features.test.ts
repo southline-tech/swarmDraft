@@ -457,3 +457,44 @@ describe('comment ranges never lose a body or leak', () => {
     expect(item?.samples).toEqual(['3: lonely note']);
   });
 });
+
+describe('orphan comment anchors', () => {
+  it('drops an anchor whose id has no comments.xml entry and reports orphan_anchor', () => {
+    const body = p(
+      r('Before ') +
+        '<w:commentRangeStart w:id="7"/>' +
+        r('kept range') +
+        '<w:commentRangeEnd w:id="7"/>' +
+        '<w:commentRangeStart w:id="42"/>' +
+        r(' stray words') +
+        '<w:commentRangeEnd w:id="42"/>',
+    );
+    const zip = zipSync({
+      'word/document.xml': strToU8(`<w:document ${NS}><w:body>${body}</w:body></w:document>`),
+      'word/comments.xml': strToU8(
+        `<w:comments ${NS}><w:comment w:id="7" w:author="Ann">${p(r('real'))}</w:comment></w:comments>`,
+      ),
+    });
+    const manuscript = importDocx(zip, { manuscriptId: 'm1' });
+    const report = manuscript.report;
+    const json = JSON.stringify(manuscript.sections);
+    expect(json).toContain('"comment_anchor","attrs":{"id":"7"}');
+    expect(json).not.toContain('"id":"42"');
+    expect(manuscript.comments.map((c) => c.id)).toEqual(['7']);
+    const item = report.items.find((i) => i.code === 'orphan_anchor');
+    expect(item?.level).toBe('warning');
+    expect(item?.samples).toEqual(['42: stray words']);
+    expect(json).toContain('stray words');
+  });
+
+  it('reports a point (zero-width) orphan anchor without text', () => {
+    const body = p('<w:commentRangeStart w:id="9"/><w:commentRangeEnd w:id="9"/>' + r('after'));
+    const zip = zipSync({
+      'word/document.xml': strToU8(`<w:document ${NS}><w:body>${body}</w:body></w:document>`),
+    });
+    const manuscript = importDocx(zip, { manuscriptId: 'm1' });
+    const report = manuscript.report;
+    expect(JSON.stringify(manuscript.sections)).not.toContain('comment_anchor');
+    expect(report.items.find((i) => i.code === 'orphan_anchor')?.samples[0]).toMatch(/^9: /);
+  });
+});
