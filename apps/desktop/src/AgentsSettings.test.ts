@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import AgentsSettings from './AgentsSettings.vue';
 import type { Agent, AgentsApi, TokenInfo } from './backend';
@@ -163,5 +163,55 @@ describe('AgentsSettings', () => {
     await w.find('[data-test="create-agent"]').trigger('submit');
     await flushPromises();
     expect(w.find('[data-test="error"]').text()).toContain('1-64');
+  });
+
+  describe('default clipboard (no writeClipboard prop)', () => {
+    const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    afterEach(() => {
+      if (original) Object.defineProperty(navigator, 'clipboard', original);
+      else delete (navigator as { clipboard?: unknown }).clipboard;
+    });
+    function setClipboard(value: unknown) {
+      Object.defineProperty(navigator, 'clipboard', { value, configurable: true });
+    }
+    async function mintAndCopy() {
+      const w = mount(AgentsSettings, { props: { api: fakeApi() }, attachTo: document.body });
+      await w.find('[data-test="create-agent"]').trigger('submit');
+      await flushPromises();
+      await w.find('[data-test="mint"]').trigger('click');
+      await flushPromises();
+      await w.find('[data-test="copy-token"]').trigger('click');
+      await flushPromises();
+      return w;
+    }
+
+    it('writes the token via navigator.clipboard and confirms', async () => {
+      const writeText = vi.fn(async () => undefined);
+      setClipboard({ writeText });
+      const w = await mintAndCopy();
+      expect(writeText).toHaveBeenCalledWith('cat_abcdefSECRET');
+      expect(w.find('[data-test="copied"]').text()).toBe('Copied');
+      expect(w.find('[data-test="copy-failed"]').exists()).toBe(false);
+      w.unmount();
+    });
+
+    it.each([
+      [
+        'writeText rejects',
+        () => ({ writeText: vi.fn(async () => Promise.reject(new Error('denied'))) }),
+      ],
+      ['navigator.clipboard is undefined', () => undefined],
+    ])('falls back when %s', async (_, make) => {
+      setClipboard(make());
+      const w = await mintAndCopy();
+      expect(w.find('[data-test="copied"]').exists()).toBe(false);
+      expect(w.find('[data-test="copy-failed"]').text()).toContain('copy it manually');
+      const el = w.find('[data-test="token-value"]').element as HTMLInputElement;
+      expect(el.value).toBe('cat_abcdefSECRET');
+      expect(document.activeElement).toBe(el);
+      expect(el.selectionStart).toBe(0);
+      expect(el.selectionEnd).toBe('cat_abcdefSECRET'.length);
+      w.unmount();
+    });
   });
 });

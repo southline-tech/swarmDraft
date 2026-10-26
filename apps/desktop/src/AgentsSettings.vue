@@ -15,7 +15,7 @@ const props = withDefaults(
   {
     api: () => agentsApi,
     // The Clipboard API works in the app webview under our CSP (no network involved).
-    writeClipboard: () => (text: string) => navigator.clipboard.writeText(text),
+    writeClipboard: (text: string) => navigator.clipboard.writeText(text),
   },
 );
 
