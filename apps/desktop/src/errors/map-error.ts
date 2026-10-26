@@ -111,14 +111,21 @@ const COPY: Record<ErrorCode, Omit<MappedError, 'code'>> = {
 
 /** Best-effort raw text of any thrown value, for logs only. Never show this to the user. */
 export function rawErrorText(err: unknown): string {
-  if (err instanceof Error) return err.message;
+  const safe = (f: () => unknown): string | undefined => {
+    try {
+      const v = f();
+      return typeof v === 'string' ? v : undefined;
+    } catch {
+      return undefined;
+    }
+  };
   if (typeof err === 'string') return err;
-  if (err && typeof err === 'object' && 'message' in err) return String(err.message);
-  try {
-    return JSON.stringify(err) ?? String(err);
-  } catch {
-    return String(err);
+  if (err === null || err === undefined) return '';
+  if (typeof err === 'object' && safe(() => 'message' in err && 'x')) {
+    const m = safe(() => String((err as { message: unknown }).message));
+    if (m !== undefined) return m;
   }
+  return safe(() => JSON.stringify(err)) ?? safe(() => String(err)) ?? '';
 }
 
 // Order matters: specific causes before the generic ones.
@@ -148,8 +155,14 @@ const RULES: [ErrorCode, RegExp][] = [
 
 export function mapError(err: unknown, context: ErrorContext = 'other'): MappedError {
   const text = rawErrorText(err);
+  let isUnsaved = false;
+  try {
+    isUnsaved = err instanceof Error && err.name === 'UnsavedEditsError';
+  } catch {
+    // A hostile getter must never make mapError throw.
+  }
   // A flush that left edits unsaved is always a save problem, whatever the caller was doing.
-  if (err instanceof Error && err.name === 'UnsavedEditsError') context = 'save';
+  if (isUnsaved) context = 'save';
   let code: ErrorCode | undefined = RULES.find(([, re]) => re.test(text))?.[0];
   if (!code) {
     if (context === 'save') code = 'save-failed';

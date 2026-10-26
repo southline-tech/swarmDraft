@@ -73,6 +73,30 @@ describe('mapError', () => {
     expect(mapError('not found: manuscript abc', 'open').title).toBe("We couldn't find that file");
   });
 
+  it('never throws on hostile or empty values', () => {
+    const hostile = {
+      toJSON() {
+        throw new Error('no');
+      },
+      toString() {
+        throw new Error('no');
+      },
+    };
+    const getter = Object.defineProperty({}, 'message', {
+      get() {
+        throw new Error('no');
+      },
+    });
+    for (const v of [{ message: Object.create(null) }, hostile, getter, null, undefined]) {
+      expect(() => mapError(v)).not.toThrow();
+      expect(mapError(v).code).toBe('unknown');
+      expect(mapError(v, 'save').code).toBe('save-failed');
+    }
+    expect(rawErrorText(hostile)).toBe('');
+    expect(rawErrorText(null)).toBe('');
+    expect(rawErrorText(undefined)).toBe('');
+  });
+
   it('rawErrorText handles any thrown value', () => {
     expect(rawErrorText(new Error('a'))).toBe('a');
     expect(rawErrorText('b')).toBe('b');
