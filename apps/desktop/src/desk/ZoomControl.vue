@@ -3,13 +3,14 @@
  * Status-bar zoom (RAD-255, WP1): minus, a 50%-200% slider, plus, and the current percentage.
  * Zoom only changes the view, so it stays enabled when the editor is read-only. Ctrl+= / Ctrl+- /
  * Ctrl+0 are WebView2's own zoom accelerators, so they are not bound or advertised here (RAD-259).
+ * At the limits the step buttons use aria-disabled (still focusable) with a no-op click.
  */
 import { ZOOM_MAX, ZOOM_MIN, clampZoom, stepZoom } from './zoom';
 
 const zoom = defineModel<number>({ required: true });
 const set = (z: number) => (zoom.value = clampZoom(z));
 const btn =
-  'inline-flex size-6 items-center justify-center rounded-sm border-0 bg-transparent p-0 text-muted cursor-pointer hover:bg-selected hover:text-text disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent';
+  'inline-flex size-6 items-center justify-center rounded-sm border-0 bg-transparent p-0 text-muted cursor-pointer hover:bg-selected hover:text-text aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent';
 const icon = 'size-4 flex-none fill-none stroke-current stroke-[1.6] [stroke-linecap:round]';
 </script>
 
@@ -21,8 +22,8 @@ const icon = 'size-4 flex-none fill-none stroke-current stroke-[1.6] [stroke-lin
       :class="btn"
       aria-label="Zoom out"
       title="Zoom out"
-      :disabled="zoom <= ZOOM_MIN"
-      @click="set(stepZoom(zoom, -1))"
+      :aria-disabled="zoom <= ZOOM_MIN ? 'true' : undefined"
+      @click="zoom > ZOOM_MIN && set(stepZoom(zoom, -1))"
     >
       <svg :class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 8h8" /></svg>
     </button>
@@ -44,8 +45,8 @@ const icon = 'size-4 flex-none fill-none stroke-current stroke-[1.6] [stroke-lin
       :class="btn"
       aria-label="Zoom in"
       title="Zoom in"
-      :disabled="zoom >= ZOOM_MAX"
-      @click="set(stepZoom(zoom, 1))"
+      :aria-disabled="zoom >= ZOOM_MAX ? 'true' : undefined"
+      @click="zoom < ZOOM_MAX && set(stepZoom(zoom, 1))"
     >
       <svg :class="icon" viewBox="0 0 16 16" aria-hidden="true">
         <path d="M8 3.5v9M3.5 8h9" />

@@ -39,19 +39,29 @@ describe('zoom model', () => {
 });
 
 describe('ZoomControl', () => {
-  it('steps, resets, disables only at the ends, and binds no shortcuts', async () => {
+  it('steps, resets, aria-disables (still focusable, no-op) only at the ends, and binds no shortcuts', async () => {
     const w = mount(ZoomControl, {
       props: {
         modelValue: 50,
         'onUpdate:modelValue': (v: number) => w.setProps({ modelValue: v }),
       },
     });
-    expect(w.find('[data-test="zoom-out"]').attributes('disabled')).toBeDefined();
+    const out = w.find('[data-test="zoom-out"]');
+    expect(out.attributes('disabled')).toBeUndefined();
+    expect(out.attributes('aria-disabled')).toBe('true');
+    await out.trigger('click');
+    expect(w.props('modelValue')).toBe(50);
+    expect(w.find('[data-test="zoom-in"]').attributes('aria-disabled')).toBeUndefined();
     await w.find('[data-test="zoom-in"]').trigger('click');
     expect(w.props('modelValue')).toBe(67);
     await w.find('[data-test="zoom-slider"]').setValue('200');
     expect(w.props('modelValue')).toBe(200);
-    expect(w.find('[data-test="zoom-in"]').attributes('disabled')).toBeDefined();
+    const zin = w.find('[data-test="zoom-in"]');
+    expect(zin.attributes('disabled')).toBeUndefined();
+    expect(zin.attributes('aria-disabled')).toBe('true');
+    await zin.trigger('click');
+    expect(w.props('modelValue')).toBe(200);
+    expect(w.find('[data-test="zoom-out"]').attributes('aria-disabled')).toBeUndefined();
     expect(w.find('[data-test="zoom-reset"]').text()).toBe('200%');
     await w.find('[data-test="zoom-reset"]').trigger('click');
     expect(w.props('modelValue')).toBe(100);
