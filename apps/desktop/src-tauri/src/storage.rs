@@ -5,6 +5,9 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 
+/// `app_meta` key holding the id of the restore that produced the live db.
+pub(crate) const RESTORE_ID_KEY: &str = "last_restore_id";
+
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
     #[error("io: {0}")]
@@ -89,21 +92,34 @@ impl Store {
         Ok(f(&mut conn)?)
     }
 
-    /// Prepare a staged database file for restore: migrate it and, when `revoke_tokens`,
+    /// Prepare a staged database file for restore: migrate it, stamp `restore_id` into
+    /// `app_meta`, and, when `revoke_tokens`,
     /// revoke every agent token *in the staged file*, before it is swapped in. The revoke is
     /// thus durable before the live db changes, so a crash mid-restore cannot revive the
     /// backup's tokens. Returns the number of tokens revoked.
-    pub(crate) fn prepare_restore_db(src: &Path, revoke_tokens: bool) -> Result<u64, StorageError> {
+    pub(crate) fn prepare_restore_db(
+        src: &Path,
+        revoke_tokens: bool,
+        restore_id: &str,
+    ) -> Result<u64, StorageError> {
         let mut conn = Connection::open(src)?;
         migrate(&mut conn)?;
-        if !revoke_tokens {
-            return Ok(0);
-        }
-        let n = conn.execute(
-            "UPDATE agent_tokens SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
-             WHERE revoked_at IS NULL",
-            [],
+        let tx = conn.transaction()?;
+        let n = if revoke_tokens {
+            tx.execute(
+                "UPDATE agent_tokens SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
+                 WHERE revoked_at IS NULL",
+                [],
+            )?
+        } else {
+            0
+        };
+        // Lets startup recovery tell whether the live db is this restore's db (see backup.rs).
+        tx.execute(
+            "INSERT OR REPLACE INTO app_meta (key, value) VALUES (?1, ?2)",
+            [RESTORE_ID_KEY, restore_id],
         )?;
+        tx.commit()?;
         conn.close().map_err(|(_, e)| e)?;
         Ok(n as u64)
     }

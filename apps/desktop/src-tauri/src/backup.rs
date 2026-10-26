@@ -114,9 +114,116 @@ fn files_dir(store: &Store) -> PathBuf {
     store.data_dir().join("files")
 }
 
-/// Remove temp dirs/files left by a crash mid-backup or mid-restore. Call at startup.
-/// If a crash happened between the two renames of a files/ swap, the old dir is put back.
+/// Journal written (and fsynced) before a restore touches `files/`; removed once the db copy
+/// has committed. Holds the restore id and the name of the moved-aside old `files/` dir.
+const JOURNAL: &str = ".restore-journal";
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Journal {
+    id: String,
+    /// `.files-old-*` dir name, if there was a `files/` dir to move aside.
+    old: Option<String>,
+}
+
+fn write_journal(data_dir: &Path, j: &Journal) -> std::io::Result<()> {
+    let tmp = data_dir.join(format!(".restore-journal-tmp-{}", unique_suffix()));
+    let mut f = File::create(&tmp)?;
+    f.write_all(&serde_json::to_vec(j).expect("journal serializes"))?;
+    f.sync_all()?;
+    drop(f);
+    rename_retry(&tmp, &data_dir.join(JOURNAL))?;
+    sync_dir(data_dir);
+    Ok(())
+}
+
+fn remove_journal(data_dir: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(data_dir.join(JOURNAL)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => {
+            sync_dir(data_dir);
+            Ok(())
+        }
+    }
+}
+
+/// Best-effort directory fsync so renames are durable (no-op where unsupported).
+fn sync_dir(dir: &Path) {
+    #[cfg(unix)]
+    if let Ok(d) = File::open(dir) {
+        let _ = d.sync_all();
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
+}
+
+/// Restore id recorded in the live db, if any. Opened read-only and independent of [`Store`].
+fn live_restore_id(data_dir: &Path) -> Option<String> {
+    let db = data_dir.join("coauthor.db");
+    if !db.exists() {
+        return None;
+    }
+    let c = Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE).ok()?;
+    c.query_row(
+        "SELECT value FROM app_meta WHERE key = ?1",
+        [crate::storage::RESTORE_ID_KEY],
+        |r| r.get(0),
+    )
+    .ok()
+}
+
+/// Finish or undo a restore interrupted by a crash, using the journal. If the live db carries
+/// the journal's restore id, the db copy committed: keep the restored `files/` and drop the old
+/// one. Otherwise the db is still the pre-restore db: drop the restored `files/` and put the
+/// old one back. Returns whether a journal was found.
+fn recover_journal(data_dir: &Path) -> bool {
+    let path = data_dir.join(JOURNAL);
+    let Ok(bytes) = std::fs::read(&path) else {
+        return false;
+    };
+    let files = data_dir.join("files");
+    let j: Option<Journal> = serde_json::from_slice(&bytes).ok();
+    let committed = match &j {
+        Some(j) => live_restore_id(data_dir).as_deref() == Some(j.id.as_str()),
+        // Unreadable journal: it is fsynced before any change, so treat as not committed.
+        None => false,
+    };
+    let old = j
+        .as_ref()
+        .and_then(|j| j.old.as_ref())
+        .map(|n| data_dir.join(n));
+    if committed {
+        if let Some(old) = &old {
+            let _ = std::fs::remove_dir_all(old);
+        }
+    } else {
+        let old_exists = old.as_ref().is_some_and(|o| o.exists());
+        // Only touch files/ when it is the restored copy: either the old dir is still set
+        // aside, or there was no old dir at all (restore created files/ from nothing).
+        let had_no_old = j.as_ref().is_some_and(|j| j.old.is_none());
+        if old_exists || had_no_old {
+            if files.exists() {
+                let trash = data_dir.join(format!(".restore-trash-{}", unique_suffix()));
+                if rename_retry(&files, &trash).is_ok() {
+                    let _ = std::fs::remove_dir_all(&trash);
+                }
+            }
+            if let Some(old) = &old {
+                if old_exists {
+                    let _ = rename_retry(old, &files);
+                }
+            }
+        }
+    }
+    sync_dir(data_dir);
+    let _ = remove_journal(data_dir);
+    true
+}
+
+/// Recover from a crash mid-restore (see [`recover_journal`]) and remove temp dirs/files left
+/// by a crash mid-backup or mid-restore. Call at startup, before opening the [`Store`].
+/// Without a journal, a `.files-old-*` dir is only put back if `files/` is missing.
 pub fn cleanup_temp(data_dir: &Path) {
+    recover_journal(data_dir);
     let files = data_dir.join("files");
     let Ok(rd) = std::fs::read_dir(data_dir) else {
         return;
@@ -283,7 +390,7 @@ pub fn create_backup_to(
         }
         zw.finish()?.sync_all()?;
         if replace {
-            rename_retry(&part, dest)?;
+            rename_retry(&part, dest).map_err(|e| locked_target_error(e, dest))?;
         } else {
             publish_no_clobber(&part, dest)?;
         }
@@ -482,6 +589,21 @@ enum FailAt {
     AfterDbSwap,
     AfterFilesSwap,
     AfterPrepare,
+    /// Simulated process death right after the given step: return immediately with no
+    /// in-process undo or rollback, leaving disk exactly as a crash would.
+    Crash(Step),
+}
+
+/// Steps of [`apply`], in order, for crash injection.
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Step {
+    Journal,
+    OldMovedAside,
+    FilesSwapped,
+    Prepared,
+    DbCommitted,
+    OldRemoved,
 }
 
 /// Validate `src`, snapshot current state, then replace the database and files with the backup.
@@ -507,6 +629,7 @@ fn restore_with(
 
     let tokens_revoked = match apply(store, &staged, fail, true) {
         Ok(n) => n,
+        Err(err) if matches!(fail, FailAt::Crash(_)) => return Err(err),
         Err(err) => {
             drop(staged);
             // Rollback returns to the pre-restore state exactly, so tokens valid then stay valid.
@@ -526,6 +649,22 @@ fn restore_with(
         manifest: staged.manifest,
         pre_restore_snapshot: snapshot.display().to_string(),
     })
+}
+
+/// Friendlier error when the Save As target is open in another program on Windows
+/// (ERROR_SHARING_VIOLATION 32 / ERROR_LOCK_VIOLATION 33); other errors pass through.
+fn locked_target_error(e: std::io::Error, dest: &Path) -> std::io::Error {
+    if matches!(e.raw_os_error(), Some(32) | Some(33)) {
+        std::io::Error::new(
+            e.kind(),
+            format!(
+                "{} is open in another program. Close it (or choose a different name) and try again.",
+                dest.display()
+            ),
+        )
+    } else {
+        e
+    }
 }
 
 /// Windows ERROR_SHARING_VIOLATION (32) or ERROR_ACCESS_DENIED (5): transient locks held by
@@ -550,49 +689,81 @@ fn rename_retry(from: &Path, to: &Path) -> std::io::Result<()> {
     unreachable!()
 }
 
-/// Swap staged files + db into place. files/ goes first (two same-volume renames, old dir
-/// kept until the db swap succeeds); then the db is copied in with the SQLite backup API,
-/// migrated, and (for user restores) all agent tokens are revoked, under one lock.
-/// Returns the number of tokens revoked.
+/// Swap staged files + db into place, crash-safely:
+/// 1. write + fsync a journal (restore id, old dir name);
+/// 2. move `files/` aside to `.files-old-*` and the staged files in (same-volume renames);
+/// 3. migrate the staged db, stamp the restore id into it and (for user restores) revoke all
+///    agent tokens in it;
+/// 4. copy it into the live connection with the SQLite backup API (the commit point);
+/// 5. remove the old dir, then the journal.
+///
+/// A crash anywhere is repaired at startup by [`cleanup_temp`]: the live db carries the
+/// restore id iff step 4 committed. In-process errors are undone here. Returns the number of
+/// tokens revoked.
 fn apply(
     store: &Store,
     staged: &Staged,
     fail: FailAt,
     revoke_tokens: bool,
 ) -> Result<u64, BackupError> {
+    let crash = |s: Step| -> Result<(), BackupError> {
+        if fail == FailAt::Crash(s) {
+            return Err(BackupError::Io(std::io::Error::other("simulated crash")));
+        }
+        Ok(())
+    };
+    let dir = store.data_dir();
     let live = files_dir(store);
-    let old = store
-        .data_dir()
-        .join(format!(".files-old-{}", unique_suffix()));
+    let id = unique_suffix();
+    let old_name = format!(".files-old-{id}");
+    let old = dir.join(&old_name);
     let had_old = live.exists();
-    if had_old {
-        rename_retry(&live, &old)?;
-    }
+    write_journal(
+        dir,
+        &Journal {
+            id: id.clone(),
+            old: had_old.then(|| old_name.clone()),
+        },
+    )?;
+    crash(Step::Journal)?;
     let undo_files = || {
-        if had_old {
-            let trash = store
-                .data_dir()
-                .join(format!(".restore-trash-{}", unique_suffix()));
-            if live.exists() && rename_retry(&live, &trash).is_ok() {
-                let _ = std::fs::remove_dir_all(&trash);
-            }
+        let trash = dir.join(format!(".restore-trash-{}", unique_suffix()));
+        if live.exists()
+            && (had_old && old.exists() || !had_old)
+            && rename_retry(&live, &trash).is_ok()
+        {
+            let _ = std::fs::remove_dir_all(&trash);
+        }
+        if had_old && old.exists() {
             let _ = rename_retry(&old, &live);
         }
+        let _ = remove_journal(dir);
     };
+    if had_old {
+        if let Err(e) = rename_retry(&live, &old) {
+            let _ = remove_journal(dir);
+            return Err(e.into());
+        }
+    }
+    crash(Step::OldMovedAside)?;
     if let Err(e) = rename_retry(&staged.files, &live) {
         undo_files();
         return Err(e.into());
     }
+    sync_dir(dir);
+    crash(Step::FilesSwapped)?;
     let db_step = (|| -> Result<u64, BackupError> {
         if fail == FailAt::AfterFilesSwap {
             return Err(BackupError::Io(std::io::Error::other("forced failure")));
         }
         // Revoke in the staged file first, so the swapped-in db never holds live tokens.
-        let n = Store::prepare_restore_db(&staged.db, revoke_tokens)?;
+        let n = Store::prepare_restore_db(&staged.db, revoke_tokens, &id)?;
+        crash(Step::Prepared)?;
         if fail == FailAt::AfterPrepare {
             return Err(BackupError::Io(std::io::Error::other("forced failure")));
         }
         store.restore_db_from(&staged.db)?;
+        crash(Step::DbCommitted)?;
         if fail == FailAt::AfterDbSwap {
             return Err(BackupError::Io(std::io::Error::other("forced failure")));
         }
@@ -603,8 +774,11 @@ fn apply(
             if had_old {
                 let _ = std::fs::remove_dir_all(&old);
             }
+            crash(Step::OldRemoved)?;
+            remove_journal(dir)?;
             Ok(n)
         }
+        Err(e) if matches!(fail, FailAt::Crash(_)) => Err(e),
         Err(e) => {
             undo_files();
             Err(e)
@@ -962,7 +1136,7 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(live_before(&staged.db), 2);
-        let n = Store::prepare_restore_db(&staged.db, true).unwrap();
+        let n = Store::prepare_restore_db(&staged.db, true, "rid-1").unwrap();
         assert_eq!(n, 2);
         // The file that will be swapped in already has every token revoked (durably, on disk)...
         assert_eq!(live_before(&staged.db), 0);
@@ -997,5 +1171,156 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().ends_with(".part"))
             .collect();
         assert!(leftovers.is_empty());
+    }
+
+    // ---- Crash matrix (PM harness style: synthetic manuscript row + attachment, edit after
+    // backup, then inject a crash at each step, "restart" and check recovery). ----
+
+    fn crash_setup() -> (tempfile::TempDir, Store, PathBuf, crate::agents::NewToken) {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(tmp.path()).unwrap();
+        store
+            .with_sql(|c| {
+                c.execute_batch(
+                    "CREATE TABLE IF NOT EXISTS ms (id INTEGER PRIMARY KEY, body TEXT);
+                     INSERT INTO ms (body) VALUES ('Mock chapter: the lighthouse keeper.');",
+                )
+            })
+            .unwrap();
+        let d = tmp.path().join("files/images");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("map.png"), b"orig").unwrap();
+        let bk = tmp.path().join("b.zip");
+        create_backup(&store, "0", &bk).unwrap();
+        // Post-backup edits: these are the user's pre-restore state.
+        store
+            .with_sql(|c| c.execute_batch("UPDATE ms SET body='EDITED';"))
+            .unwrap();
+        std::fs::write(d.join("map.png"), b"edited").unwrap();
+        std::fs::write(tmp.path().join("files/added.txt"), b"new attachment").unwrap();
+        let a = store.create_agent("QA agent", "#112233").unwrap();
+        let t = store.create_token(&a.id, None).unwrap();
+        (tmp, store, bk, t)
+    }
+
+    fn ms_body(s: &Store) -> String {
+        s.with_sql(|c| c.query_row("SELECT group_concat(body,'|') FROM ms", [], |r| r.get(0)))
+            .unwrap()
+    }
+
+    #[test]
+    fn crash_matrix_recovers_at_every_step() {
+        use Step::*;
+        // (crash point, whether the restore had committed)
+        let cases = [
+            (Journal, false),
+            (OldMovedAside, false),
+            (FilesSwapped, false),
+            (Prepared, false),
+            (DbCommitted, true),
+            (OldRemoved, true),
+        ];
+        for (step, committed) in cases {
+            let (tmp, store, bk, tok) = crash_setup();
+            let d = tmp.path().to_path_buf();
+            let err = restore_with(&store, "0", &bk, FailAt::Crash(step)).unwrap_err();
+            assert!(
+                err.to_string().contains("simulated crash"),
+                "{step:?}: {err}"
+            );
+            assert!(
+                d.join(JOURNAL).exists(),
+                "{step:?}: journal must survive the crash"
+            );
+            // "Process dies": drop the store, then restart.
+            drop(store);
+            cleanup_temp(&d);
+            let store = Store::open(&d).unwrap();
+
+            let map = std::fs::read(d.join("files/images/map.png")).unwrap();
+            let added = d.join("files/added.txt");
+            if committed {
+                assert_eq!(
+                    ms_body(&store),
+                    "Mock chapter: the lighthouse keeper.",
+                    "{step:?}"
+                );
+                assert_eq!(map, b"orig", "{step:?}");
+                assert!(!added.exists(), "{step:?}");
+                assert!(
+                    store.authenticate(&tok.token).unwrap().is_none(),
+                    "{step:?}"
+                );
+            } else {
+                assert_eq!(ms_body(&store), "EDITED", "{step:?}");
+                assert_eq!(map, b"edited", "{step:?}: pre-restore attachments kept");
+                assert_eq!(
+                    std::fs::read(&added).unwrap(),
+                    b"new attachment",
+                    "{step:?}"
+                );
+                assert!(
+                    store.authenticate(&tok.token).unwrap().is_some(),
+                    "{step:?}"
+                );
+            }
+            // No journal, no temp/old dirs left; data dir is clean.
+            let dots: Vec<_> = std::fs::read_dir(&d)
+                .unwrap()
+                .flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|n| n.starts_with('.'))
+                .collect();
+            assert!(dots.is_empty(), "{step:?}: leftovers {dots:?}");
+            // A later restore still works normally.
+            restore_backup(&store, "0", &bk).unwrap();
+            assert_eq!(
+                ms_body(&store),
+                "Mock chapter: the lighthouse keeper.",
+                "{step:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn crash_matrix_without_existing_files_dir() {
+        for (step, committed) in [
+            (Step::OldMovedAside, false),
+            (Step::FilesSwapped, false),
+            (Step::DbCommitted, true),
+        ] {
+            let (tmp, store, bk, _) = crash_setup();
+            let d = tmp.path().to_path_buf();
+            std::fs::remove_dir_all(d.join("files")).unwrap();
+            let _ = restore_with(&store, "0", &bk, FailAt::Crash(step)).unwrap_err();
+            drop(store);
+            cleanup_temp(&d);
+            let _store = Store::open(&d).unwrap();
+            assert_eq!(
+                d.join("files/images/map.png").exists(),
+                committed,
+                "{step:?}"
+            );
+            assert!(!d.join(JOURNAL).exists());
+        }
+    }
+
+    #[test]
+    fn successful_restore_leaves_no_journal_and_stamps_id() {
+        let (tmp, store, bk, _) = crash_setup();
+        restore_backup(&store, "0", &bk).unwrap();
+        assert!(!tmp.path().join(JOURNAL).exists());
+        assert!(live_restore_id(tmp.path()).is_some());
+    }
+
+    #[test]
+    fn locked_save_target_gets_friendly_error() {
+        let dest = Path::new("C:\\Backups\\b.zip");
+        for code in [32, 33] {
+            let e = locked_target_error(std::io::Error::from_raw_os_error(code), dest);
+            assert!(e.to_string().contains("open in another program"), "{code}");
+        }
+        let e = locked_target_error(std::io::Error::from_raw_os_error(2), dest);
+        assert!(!e.to_string().contains("open in another program"));
     }
 }
