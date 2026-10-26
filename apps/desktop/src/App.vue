@@ -17,8 +17,11 @@ import { refreshAgents, reloadOnFocus } from './agent-names';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
 import HomeScreen from './HomeScreen.vue';
+import AppLogo from './AppLogo.vue';
+import ShellsPreview from './shells/ShellsPreview.vue';
+import { applyThemeParam, readPreview } from './shells/preview';
 import { flushOnClose } from './close-flush';
-import { outlineDocs, sectionTreeDocs } from './status/wordcount';
+import { docWordCount, outlineDocs, sectionTreeDocs } from './status/wordcount';
 import {
   importAndOpen,
   reopenLatest,
@@ -97,6 +100,13 @@ async function getStarted() {
 /** "Open another book" from inside an open manuscript shows the open screen over it. */
 const choosingBook = ref(false);
 const settingsOpen = ref(false);
+// UI-shell previews (Part of #36): `?preview=<id|all>`, or Settings → Preview new screens.
+applyThemeParam(window.location.search, document.documentElement);
+const preview = ref(readPreview(window.location.search));
+function openPreview(id: 'all' | 'tc5') {
+  settingsOpen.value = false;
+  preview.value = id;
+}
 const settingsPanel = ref<HTMLElement | null>(null);
 const settingsButton = ref<HTMLButtonElement | null>(null);
 watch(settingsOpen, async (isOpen) => {
@@ -319,32 +329,131 @@ const selectedDoc = computed(() =>
   selected.value ? session.value?.sections.get(selected.value.docId) : undefined,
 );
 
+/** Per-section word counts for the outline (#52): read-only, recounted after edits settle. */
+const wordCounts = shallowRef<Record<string, number>>({});
+let countTimer: ReturnType<typeof setTimeout> | undefined;
+let stopCounts = () => {};
+function recount() {
+  const s = session.value;
+  if (!s) return;
+  const out: Record<string, number> = {};
+  for (const sec of s.outline.value) {
+    const d = s.sections.get(sec.docId);
+    if (d) out[sec.id] = docWordCount(d);
+  }
+  wordCounts.value = out;
+}
+watch(
+  () => [session.value, session.value?.outline.value] as const,
+  () => {
+    stopCounts();
+    const s = session.value;
+    if (!s) return;
+    const docs = [...new Set(s.outline.value.map((x) => s.sections.get(x.docId)))].filter(
+      (d) => !!d,
+    );
+    const later = () => {
+      clearTimeout(countTimer);
+      countTimer = setTimeout(recount, 300);
+    };
+    docs.forEach((d) => d.on('update', later));
+    stopCounts = () => docs.forEach((d) => d.off('update', later));
+    recount();
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => {
+  stopCounts();
+  clearTimeout(countTimer);
+});
+
+/** Focus mode (#56): hides the app chrome; local UI state only. */
+const focusMode = ref(false);
+
+/** Title-bar breadcrumb (#52): "Book — Chapter N · Title". */
+const breadcrumb = computed(() => {
+  const s = session.value;
+  const sel = selected.value;
+  if (!s || !sel || choosingBook.value) return '';
+  const chapters = s.outline.value.filter((x) => x.kind === 'chapter');
+  const n = chapters.findIndex((c) => c.id === sel.id);
+  const where = n >= 0 ? `Chapter ${n + 1} · ` : '';
+  return `${where}${sel.title || 'Untitled'}`;
+});
+
+const NUMBER_WORDS = [
+  'One',
+  'Two',
+  'Three',
+  'Four',
+  'Five',
+  'Six',
+  'Seven',
+  'Eight',
+  'Nine',
+  'Ten',
+  'Eleven',
+  'Twelve',
+  'Thirteen',
+  'Fourteen',
+  'Fifteen',
+  'Sixteen',
+  'Seventeen',
+  'Eighteen',
+  'Nineteen',
+  'Twenty',
+];
+/** Display-only chapter label above the H1 ("Chapter Three"); never written into the doc. */
+const chapterLabel = computed(() => {
+  const s = session.value;
+  const sel = selected.value;
+  if (!s || !sel || sel.kind !== 'chapter') return '';
+  const n =
+    s.outline.value.filter((x) => x.kind === 'chapter').findIndex((c) => c.id === sel.id) + 1;
+  return n ? `Chapter ${NUMBER_WORDS[n - 1] ?? n}` : '';
+});
+
 defineExpose({ open });
 </script>
 
 <template>
-  <main class="shell">
-    <header class="topbar">
-      <span class="topbar__name">coAuthor</span>
-      <button
-        v-if="session && !choosingBook"
-        type="button"
-        class="topbar__button topbar__open"
-        data-test="open-another"
-        @click="choosingBook = true"
-      >
-        Open another book
-      </button>
-      <button
-        ref="settingsButton"
-        type="button"
-        class="topbar__button"
-        data-test="settings-open"
-        :aria-expanded="settingsOpen"
-        @click="settingsOpen = !settingsOpen"
-      >
-        Settings
-      </button>
+  <ShellsPreview v-if="preview" class="shell" :initial="preview" @close="preview = null" />
+  <main v-else class="shell">
+    <header v-show="!focusMode" class="topbar">
+      <span class="topbar__brand">
+        <AppLogo :size="24" />
+        <span class="topbar__name">{{
+          session && !choosingBook ? session.title : 'coAuthor'
+        }}</span>
+      </span>
+      <span v-if="breadcrumb" class="topbar__crumb" data-test="breadcrumb">— {{ breadcrumb }}</span>
+      <details class="topbar__menu" data-test="app-menu">
+        <summary class="topbar__icon" aria-label="Book menu" title="Book menu">⋯</summary>
+        <div
+          class="topbar__menu-list"
+          @click="($event.currentTarget as HTMLElement).closest('details')?.removeAttribute('open')"
+        >
+          <button
+            v-if="session && !choosingBook"
+            type="button"
+            class="topbar__button topbar__open"
+            data-test="open-another"
+            @click="choosingBook = true"
+          >
+            Open another book
+          </button>
+          <button
+            ref="settingsButton"
+            type="button"
+            class="topbar__button"
+            data-test="settings-open"
+            :aria-expanded="settingsOpen"
+            @click="settingsOpen = !settingsOpen"
+          >
+            Settings
+          </button>
+        </div>
+      </details>
     </header>
     <section
       v-if="settingsOpen"
@@ -360,6 +469,14 @@ defineExpose({ open });
       <button type="button" class="btn" data-test="settings-close" @click="settingsOpen = false">
         Close
       </button>
+      <p>
+        <button type="button" class="btn" data-test="open-name-color" @click="openPreview('tc5')">
+          Your name &amp; color…
+        </button>
+        <button type="button" class="btn" data-test="open-previews" @click="openPreview('all')">
+          Preview new screens
+        </button>
+      </p>
       <p>Default trim: {{ DEFAULT_TRIM }}</p>
       <p v-if="info" data-test="app-info">
         v{{ info.version }} · data: {{ info.dataDir }} · db schema {{ info.schemaVersion }}
@@ -465,17 +582,18 @@ defineExpose({ open });
     <div
       v-else
       class="workspace grid gap-4 p-4"
-      :class="navigatorOpen ? 'grid-cols-[18rem_1fr]' : 'grid-cols-1'"
+      :class="navigatorOpen && !focusMode ? 'grid-cols-[18rem_1fr]' : 'grid-cols-1'"
       data-test="workspace"
     >
       <SectionNav
-        v-show="navigatorOpen"
+        v-show="navigatorOpen && !focusMode"
         id="chapter-navigator"
         class="min-h-0 overflow-auto"
         :sections="session.outline.value"
         :manuscript-id="session.id"
         :selected-id="selectedId"
         :save="session.save"
+        :word-counts="wordCounts"
         @select="selectedId = $event"
         @activate="focusEditor"
       />
@@ -487,11 +605,13 @@ defineExpose({ open });
         :readonly="session.closed"
         :navigator-open="navigatorOpen"
         :chapter-title="selected!.title"
+        :chapter-label="chapterLabel"
         :book-docs="outlineDocs(session.outline.value, session.sections)"
         :chapter-docs="sectionTreeDocs(session.outline.value, selectedId, session.sections)"
         :save-state="saveError ? 'offline' : undefined"
         @reload="reloads++"
         @toggle-navigator="navigatorOpen = !navigatorOpen"
+        @focus-mode="focusMode = $event"
       />
     </div>
   </main>
@@ -518,20 +638,59 @@ body {
 .topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   padding: var(--ct-space-2) var(--ct-space-4);
   border-bottom: 1px solid var(--ct-border);
   background: var(--ct-surface);
 }
+.topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-space-2);
+}
 .topbar__name {
   font-weight: var(--ct-weight-semibold);
   font-size: var(--ct-text-sm);
+}
+.topbar__crumb {
+  margin-left: var(--ct-space-2);
+  color: var(--ct-text-muted);
+  font-size: var(--ct-text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .topbar__open {
   margin-left: auto;
   margin-right: var(--ct-space-2);
 }
 .btn,
+.topbar__menu {
+  position: relative;
+  margin-left: auto;
+}
+.topbar__icon {
+  list-style: none;
+  padding: 0 var(--ct-space-2);
+  color: var(--ct-text-muted);
+  cursor: pointer;
+}
+.topbar__icon::-webkit-details-marker {
+  display: none;
+}
+.topbar__menu-list {
+  position: absolute;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-space-1);
+  padding: var(--ct-space-2);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-md);
+  background: var(--ct-surface);
+  white-space: nowrap;
+}
 .topbar__button {
   min-height: var(--ct-space-12);
   padding: 0 var(--ct-space-4);

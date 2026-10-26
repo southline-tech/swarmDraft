@@ -88,3 +88,18 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #64 · finish page had a desktop-shortcut checkbox not in the mockup · no options beyond the mockup; do the default always, in every install mode
 - 2026-10-26 · #64 · titles were sans and the accent button wasn't attempted · try each mockup style; bundle only OFL-type fonts with the license in the repo, and list what isn't feasible as a gap
 - 2026-10-26 · #64 · copied Tauri template with a caret CLI range · pin @tauri-apps/cli exactly to the template's version
+- 2026-10-26 · #33 · agent marker missing in some places a name shows · show the agent marker everywhere a name renders
+- 2026-10-26 · #46 · persistence tested only in memory · persistence tests reopen from saved state
+- 2026-10-26 · #46 · Tiptap commands bypass read-only, so command-based tests passed falsely · test read-only via DOM input
+- 2026-10-26 · #46 · tests passed with the fix removed · prove each new test fails with its fix reverted
+- 2026-10-26 · #66 · outline showed per-row type labels and five add buttons · hide type labels (aria-label only); one "+ New chapter" row; group front matter
+- 2026-10-26 · #66 · chapter heading off-spec · H1 in manuscript font, weight 400, centered, with a display-only small-caps chapter label
+- 2026-10-26 · #66 · toolbar end overcrowded · toolbar right end keeps only Track changes + Review; the rest goes in the … menu
+- 2026-10-26 · #66 · title bar crowded with actions · title bar shows the book/chapter path; secondary actions live in a small menu
+- 2026-10-26 · #66 · hard-coded #b00020/#1a7f37 · use danger/success tokens, never hex
+- 2026-10-26 · #66 · screenshots missing for some screens · attach light + dark screenshots for every screen changed
+- 2026-10-26 · #66 · screenshots labeled with mockup ids showed the same state (wp1=wp6=tc1, ob4=ob5) · every shot named after a mockup id must reproduce that mockup's distinct state; use ?preview sample data when the app can't
+- 2026-10-26 · #66 · 'doc unchanged' test built a Y.Doc the component never received · (and the click loop never reached Save) · a no-mutation test must pass the real doc into the component and actually trigger every write path
+- 2026-10-26 · #66 · settings defaults hard-coded real-looking names · use neutral sample names in defaults and fixtures
+- 2026-10-26 · #66 · inline card marked role=dialog without modal behavior · use role=dialog only with aria-modal, focus in, Tab trap, Esc and focus return; otherwise an inline card
+- 2026-10-26 · #69 · in-app logo used the superseded plain-c masters, not the c-with-caret pack · take logo assets from the Designer's latest pack and test the exact asset per size

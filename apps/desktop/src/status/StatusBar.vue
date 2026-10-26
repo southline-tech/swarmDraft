@@ -36,6 +36,7 @@ const SAVE: Record<SaveState, { label: string; cls: string; title?: string }> = 
     aria-label="Status bar"
     data-test="status-bar"
   >
+    <slot />
     <span
       v-if="chapterTitle"
       class="max-w-64 truncate text-text"

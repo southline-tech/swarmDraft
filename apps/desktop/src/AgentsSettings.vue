@@ -196,6 +196,6 @@ onBeforeUnmount(() => {
   user-select: all;
 }
 .error {
-  color: #b00020;
+  color: var(--ct-danger);
 }
 </style>
