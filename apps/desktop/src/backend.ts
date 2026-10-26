@@ -187,3 +187,24 @@ export async function saveSectionUpdate(
 ): Promise<void> {
   await invoke('section_apply_update', { manuscriptId, sectionId, update: Array.from(update) });
 }
+
+/**
+ * Save a stored manuscript's whole outline (rename, reorder, move, add, delete) in one backend
+ * transaction. Rejects, writing nothing, if the outline is invalid. No-op in a plain browser.
+ */
+export async function saveOutline(
+  manuscriptId: string,
+  outline: { id: string; parentId?: string; kind: string; title: string; docId: string }[],
+): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('manuscript_save_outline', {
+    manuscriptId,
+    outline: outline.map((s) => ({
+      id: s.id,
+      parentId: s.parentId ?? null,
+      kind: s.kind,
+      title: s.title,
+      docId: s.docId,
+    })),
+  });
+}

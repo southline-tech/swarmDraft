@@ -181,3 +181,47 @@ describe('sessionFromStored', () => {
     await s.close();
   });
 });
+
+describe('outline saves (RAD-263)', () => {
+  it('saves the outline to storage before changing it, and refuses it if that fails', async () => {
+    const stored = storedFixture();
+    const saveOutline = vi.fn(async () => {});
+    const s = sessionFromStored(stored, null, { save: async () => {} }, saveOutline);
+    const renamed = s.outline.value.map((x, i) => (i === 1 ? { ...x, title: 'Renamed' } : x));
+    await s.save(renamed);
+    expect(saveOutline).toHaveBeenCalledWith(renamed);
+    expect(s.outline.value[1]!.title).toBe('Renamed');
+
+    saveOutline.mockRejectedValueOnce(new Error('database is locked'));
+    const reordered = [...s.outline.value].reverse();
+    await expect(s.save(reordered)).rejects.toThrow('database is locked');
+    expect(s.outline.value[1]!.title).toBe('Renamed');
+    expect(s.outline.value[0]!.id).toBe(stored.sections[0]!.id);
+    await s.close();
+  });
+
+  it('gives an added section a doc whose edits are saved', async () => {
+    vi.useFakeTimers();
+    const stored = storedFixture();
+    const saved: string[] = [];
+    const s = sessionFromStored(
+      stored,
+      null,
+      { save: async (id) => void saved.push(id), debounceMs: 50 },
+      async () => {},
+    );
+    const added = {
+      id: 'new1',
+      kind: 'chapter' as const,
+      title: 'Added',
+      docId: 'manuscript/db-m/section/new1',
+    };
+    await s.save([...s.outline.value, added]);
+    const doc = s.sections.get(added.docId)!;
+    expect(doc).toBeDefined();
+    doc.getXmlFragment('prosemirror').insert(0, [new Y.XmlElement('paragraph')]);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(saved).toEqual(['new1']);
+    await s.close();
+  });
+});

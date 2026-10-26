@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import type { Section } from '@coauthor/schema';
 import SectionNav from './SectionNav.vue';
@@ -9,7 +9,6 @@ function setup(
     selectedId?: string;
     sections?: Section[];
     save?: (s: Section[]) => unknown;
-    locked?: string;
   } = {},
 ) {
   const w = mount(SectionNav, {
@@ -18,7 +17,6 @@ function setup(
       sections: opts.sections ?? sampleOutline(),
       ...(opts.selectedId ? { selectedId: opts.selectedId } : {}),
       ...(opts.save ? { save: opts.save as never } : {}),
-      ...(opts.locked ? { locked: opts.locked } : {}),
       'onUpdate:sections': (s: Section[]) => w.setProps({ sections: s }),
       onSelect: (id: string) => w.setProps({ selectedId: id }),
     },
@@ -205,47 +203,13 @@ describe('SectionNav', () => {
   });
 });
 
-describe('SectionNav locked (RAD-263)', () => {
-  it('turns off add, rename, reorder, move and delete, and says why', async () => {
-    const outline = sampleOutline();
-    const save = vi.fn();
-    const w = setup({ selectedId: outline[1]!.id, save, locked: 'Not saved yet (RAD-263).' });
-    await flushPromises();
-    expect(w.find('[data-test="outline-locked"]').text()).toContain('RAD-263');
-    const controls = w.findAll('.actions button, .actions select');
-    expect(controls.length).toBeGreaterThan(5);
-    for (const c of controls) {
-      expect(c.attributes('disabled')).toBeDefined();
-      expect(c.attributes('title')).toContain('RAD-263');
-    }
-    expect(w.find('[data-test="add-part"]').attributes('disabled')).toBeDefined();
-    const row = w.find(`[data-test="section-${outline[1]!.id}"]`);
-    expect(row.attributes('draggable')).toBe('false');
-    await row.trigger('dblclick');
-    await row.trigger('keydown', { key: 'F2' });
-    await row.trigger('keydown', { key: 'ArrowDown', altKey: true });
-    await flushPromises();
-    expect(w.find('[data-test="rename-input"]').exists()).toBe(false);
-    expect(save).not.toHaveBeenCalled();
-    // Selecting a section still works.
-    await w.find(`[data-test="section-${outline[0]!.id}"]`).trigger('click');
-    expect(w.props('selectedId')).toBe(outline[0]!.id);
-    w.unmount();
-  });
-});
-
 describe('repair notice', () => {
-  it("doesn't promise the next change saves the repair when the outline is locked", async () => {
+  it('says the next change saves the repair', async () => {
     const outline = sampleOutline();
     // A section inside itself: needs repair on load.
     const broken = outline.map((s, i) => (i === 1 ? { ...s, parentId: s.id } : s));
     const open = setup({ sections: broken });
     expect(open.find('[data-test="outline-repaired"]').text()).toContain('Your next change saves');
     open.unmount();
-    const locked = setup({ sections: broken, locked: 'Locked (RAD-263).' });
-    const text = locked.find('[data-test="outline-repaired"]').text();
-    expect(text).not.toContain('next change');
-    expect(text).toContain('not saved yet');
-    locked.unmount();
   });
 });

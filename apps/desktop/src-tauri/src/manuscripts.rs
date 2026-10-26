@@ -100,6 +100,18 @@ pub struct StoredManuscript {
     pub sections: Vec<StoredSection>,
 }
 
+/// One row of an outline save: the full outline is sent, in order (parents before children).
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutlineEntry {
+    pub id: String,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    pub kind: String,
+    pub title: String,
+    pub doc_id: String,
+}
+
 pub fn new_id() -> String {
     let mut b = [0u8; 12];
     getrandom::fill(&mut b).expect("OS random source unavailable");
@@ -468,6 +480,77 @@ impl Store {
             tx.commit()?;
             Ok((m, out))
         })
+    }
+
+    /// Save the whole outline (rename, reorder, move, add, delete) in one transaction. Existing
+    /// sections keep their doc; new ones get an empty doc at `section_doc_id`. Removed sections
+    /// and their comment/suggestion index rows are deleted; their Yjs updates are kept, so the
+    /// text is never destroyed. Everything is validated first, so a bad outline writes nothing.
+    pub fn save_outline(
+        &self,
+        manuscript_id: &str,
+        outline: &[OutlineEntry],
+    ) -> Result<Vec<Section>, StorageError> {
+        let existing: std::collections::HashMap<String, Section> = self
+            .list_sections(manuscript_id)?
+            .into_iter()
+            .map(|s| (s.id.clone(), s))
+            .collect();
+        let mut seen = std::collections::HashSet::new();
+        for e in outline {
+            let bad = |m: String| Err(StorageError::Invalid(m));
+            if !SECTION_KINDS.contains(&e.kind.as_str()) {
+                return bad(format!("unknown section kind: {}", e.kind));
+            }
+            if e.id.is_empty() || !seen.insert(e.id.as_str()) {
+                return bad(format!("duplicate or empty section id {:?}", e.id));
+            }
+            if let Some(p) = &e.parent_id {
+                if p == &e.id || !seen.contains(p.as_str()) {
+                    return bad(format!("section {:?} has unknown parent {p:?}", e.title));
+                }
+            }
+            match existing.get(&e.id) {
+                Some(s) if s.doc_id != e.doc_id => {
+                    return bad(format!("section {:?} changed its document", e.id));
+                }
+                None if e.doc_id != section_doc_id(manuscript_id, &e.id) => {
+                    return bad(format!("new section {:?} has a bad document id", e.id));
+                }
+                _ => {}
+            }
+        }
+        self.with_conn(|c| {
+            let tx = c.unchecked_transaction()?;
+            let removed: Vec<&String> =
+                existing.keys().filter(|id| !seen.contains(id.as_str())).collect();
+            for id in &removed {
+                tx.execute("UPDATE sections SET parent_id = NULL WHERE id = ?1", [id])?;
+            }
+            for (i, e) in outline.iter().enumerate() {
+                if existing.contains_key(&e.id) {
+                    tx.execute(
+                        "UPDATE sections SET kind = ?2, parent_id = ?3, position = ?4, title = ?5
+                         WHERE id = ?1 AND manuscript_id = ?6",
+                        params![e.id, e.kind, e.parent_id, i as i64, e.title, manuscript_id],
+                    )?;
+                } else {
+                    tx.execute(
+                        "INSERT INTO sections (id, manuscript_id, kind, parent_id, position, title, doc_id)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        params![e.id, manuscript_id, e.kind, e.parent_id, i as i64, e.title, e.doc_id],
+                    )?;
+                }
+            }
+            for id in &removed {
+                tx.execute("DELETE FROM comments WHERE section_id = ?1", [id])?;
+                tx.execute("DELETE FROM suggestions WHERE section_id = ?1", [id])?;
+                tx.execute("DELETE FROM sections WHERE id = ?1", [id])?;
+            }
+            tx.commit()?;
+            Ok(())
+        })?;
+        self.list_sections(manuscript_id)
     }
 
     /// Load a manuscript with every section's full document state.

@@ -183,6 +183,16 @@ fn manuscript_open_latest(
     store.latest_manuscript().map_err(err)
 }
 
+/// Save the whole outline of a stored manuscript (rename, reorder, move, add, delete).
+#[tauri::command]
+fn manuscript_save_outline(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+    outline: Vec<manuscripts::OutlineEntry>,
+) -> Result<Vec<manuscripts::Section>, String> {
+    store.save_outline(&manuscript_id, &outline).map_err(err)
+}
+
 /// Save an editor's Yjs update to a stored section (validated before it is written).
 #[tauri::command]
 fn section_apply_update(
@@ -264,6 +274,7 @@ pub fn run() {
             manuscripts_list,
             manuscript_open_latest,
             section_apply_update,
+            manuscript_save_outline,
             mcp_status
         ])
         .run(tauri::generate_context!())
