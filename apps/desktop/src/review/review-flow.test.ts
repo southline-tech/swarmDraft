@@ -12,6 +12,7 @@ import ManuscriptEditor from '../ManuscriptEditor.vue';
 import { SAMPLE_DOC } from '../fixtures/sample';
 import { LIVE_POLL_MS, sessionFromStored } from '../manuscript-session';
 import type { StoredManuscript, UpdatesSince } from '../backend';
+import { allowReviewEdits } from '@coauthor/editor/trusted';
 import { REVIEW_COLLAPSED_KEY } from './review-state';
 
 const fixture = JSON.parse(
@@ -53,6 +54,26 @@ async function openLive() {
   await flushPromises();
   return { w, session, saved };
 }
+const by = { author: 'agent:sample', ts: '2026-10-25T00:00:00Z' };
+/** SAMPLE_DOC plus a second change: an insert in the last paragraph. */
+const TWO_CHANGES = {
+  ...SAMPLE_DOC,
+  content: [
+    ...SAMPLE_DOC.content!.slice(0, -1),
+    {
+      type: 'paragraph',
+      content: [
+        { type: 'text', text: 'Morning came ' },
+        {
+          type: 'text',
+          text: 'softly',
+          marks: [{ type: 'suggestion_insert', attrs: { id: 'two-s2', ...by } }],
+        },
+        { type: 'text', text: ' late.' },
+      ],
+    },
+  ],
+};
 const lastDecisions = (w: ReturnType<typeof mount>) =>
   (w.emitted('decisions')?.at(-1)?.[0] ?? []) as DecisionRecord[];
 
@@ -60,11 +81,12 @@ describe('review panel in the editor (RAD-258)', () => {
   it('accepts from the panel and the accepted text persists across a reload', async () => {
     const { w, session, saved } = await openLive();
     const page = () => w.find('.tiptap');
-    expect(w.findAll('[data-test=item]')).toHaveLength(2);
-    expect(w.find('[data-test=counter]').text()).toBe('1 of 2');
+    // One replacement (delete + insert sharing an id) is one change.
+    expect(w.findAll('[data-test=item]')).toHaveLength(1);
+    expect(w.find('[data-test=counter]').text()).toBe('1 of 1');
 
     await w.find('[data-test=accept-all]').trigger('click');
-    expect(w.find('[data-test=confirm]').text()).toMatch(/Accept 2 changes from agent:/);
+    expect(w.find('[data-test=confirm]').text()).toMatch(/Accept 1 change from agent:/);
     await w.find('[data-test=confirm-yes]').trigger('click');
     await flushPromises();
     expect(page().text()).toContain('The lantern guttered twice.');
@@ -99,28 +121,28 @@ describe('review panel in the editor (RAD-258)', () => {
     const { w, session } = await openLive();
     const e = editorOf(w);
     const page = () => w.find('.tiptap');
-    await w.findAll('[data-test=item]')[1]!.find('[data-test=accept]').trigger('click');
+    await w.findAll('[data-test=item]')[0]!.find('[data-test=accept]').trigger('click');
     await flushPromises();
-    expect(w.findAll('[data-test=item]')).toHaveLength(1);
-    expect(lastDecisions(w)).toHaveLength(1);
+    expect(w.findAll('[data-test=item]')).toHaveLength(0);
+    expect(lastDecisions(w)).toHaveLength(2); // both parts of the replacement
 
     e.commands.undo();
     await flushPromises();
-    expect(w.findAll('[data-test=item]')).toHaveLength(2);
+    expect(w.findAll('[data-test=item]')).toHaveLength(1);
     expect(page().find('ins.suggestion-insert').exists()).toBe(true);
     expect(lastDecisions(w)).toEqual([]);
 
     e.commands.redo();
     await flushPromises();
-    expect(w.findAll('[data-test=item]')).toHaveLength(1);
-    expect(lastDecisions(w)).toHaveLength(1);
+    expect(w.findAll('[data-test=item]')).toHaveLength(0);
+    expect(lastDecisions(w)).toHaveLength(2);
 
     await session.close({ discard: true });
     w.unmount();
   });
 
   it('steps with Previous/Next and the shortcuts, moving the caret to each change', async () => {
-    const w = mount(ManuscriptEditor, { props: { content: SAMPLE_DOC }, attachTo: document.body });
+    const w = mount(ManuscriptEditor, { props: { content: TWO_CHANGES }, attachTo: document.body });
     await flushPromises();
     const e = editorOf(w);
     const marksAtCaret = () => {
@@ -130,12 +152,13 @@ describe('review panel in the editor (RAD-258)', () => {
     await w.find('[data-test=next]').trigger('click');
     expect(w.find('[data-test=counter]').text()).toBe('2 of 2');
     expect(marksAtCaret()).toContain('suggestion_insert');
+    expect(e.state.doc.textBetween(e.state.selection.from, e.state.selection.to)).toBe('softly');
     window.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, shiftKey: true }),
     );
     await flushPromises();
     expect(w.find('[data-test=counter]').text()).toBe('1 of 2');
-    expect(marksAtCaret()).toContain('suggestion_delete');
+    expect(marksAtCaret()).toContain('suggestion_delete'); // the replacement starts with its delete
     expect(w.findAll('[data-test=item]')[0]!.classes()).toContain('current');
     w.unmount();
   });
@@ -146,7 +169,7 @@ describe('review panel in the editor (RAD-258)', () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', ctrlKey: true }));
     await flushPromises();
     expect(w.find('[data-test=review-rail]').exists()).toBe(true);
-    expect(w.find('[data-test=badge]').text()).toBe('2');
+    expect(w.find('[data-test=badge]').text()).toBe('1');
     expect(localStorage.getItem(REVIEW_COLLAPSED_KEY)).toBe('1');
     w.unmount();
     const again = mount(ManuscriptEditor, {
@@ -156,5 +179,67 @@ describe('review panel in the editor (RAD-258)', () => {
     await flushPromises();
     expect(again.find('[data-test=review-rail]').exists()).toBe(true);
     again.unmount();
+  });
+
+  it('scopes accept/reject shortcuts to the open panel and the editor', async () => {
+    const w = mount(ManuscriptEditor, { props: { content: TWO_CHANGES }, attachTo: document.body });
+    await flushPromises();
+    const accept = (target: EventTarget) =>
+      target.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          ctrlKey: true,
+          shiftKey: true,
+          bubbles: true,
+        }),
+      );
+    const count = () => w.findAll('[data-test=item]').length;
+    // Focus in some other text field outside the editor: ignored.
+    const field = document.createElement('textarea');
+    document.body.appendChild(field);
+    accept(field);
+    const editable = document.createElement('div');
+    editable.setAttribute('contenteditable', 'true');
+    document.body.appendChild(editable);
+    accept(editable);
+    await flushPromises();
+    expect(count()).toBe(2);
+    // Collapsed panel: ignored. The collapse toggle itself still works.
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', ctrlKey: true }));
+    await flushPromises();
+    accept(w.find('.tiptap').element);
+    await flushPromises();
+    expect(w.find('[data-test=badge]').text()).toBe('2');
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', ctrlKey: true }));
+    await flushPromises();
+    // Panel open, focus in the editor: acts on the current change.
+    accept(w.find('.tiptap').element);
+    await flushPromises();
+    expect(count()).toBe(1);
+    field.remove();
+    editable.remove();
+    w.unmount();
+  });
+
+  it('bulk accept only decides the changes that were listed when the confirmation opened', async () => {
+    const w = mount(ManuscriptEditor, { props: { content: SAMPLE_DOC }, attachTo: document.body });
+    await flushPromises();
+    const e = editorOf(w);
+    await w.find('[data-test=accept-all]').trigger('click');
+    // A bot change arrives while the confirmation is open.
+    const end = e.state.doc.content.size - 1;
+    const mark = e.schema.marks.suggestion_insert!.create({ id: 'late-1', ...by });
+    // Stands in for the live sync path, which may add review marks.
+    e.view.dispatch(allowReviewEdits(e.state.tr.insert(end, e.schema.text(' Late.', [mark]))));
+    await flushPromises();
+    expect(w.findAll('[data-test=item]')).toHaveLength(2);
+    expect(w.find('[data-test=confirm]').text()).toContain('Accept 1 change');
+    await w.find('[data-test=confirm-yes]').trigger('click');
+    await flushPromises();
+    const left = w.findAll('[data-test=item]');
+    expect(left).toHaveLength(1);
+    expect(left[0]!.find('[data-test=ins]').text()).toBe('Late.');
+    expect(w.find('.tiptap').text()).toContain('The lantern guttered twice');
+    w.unmount();
   });
 });

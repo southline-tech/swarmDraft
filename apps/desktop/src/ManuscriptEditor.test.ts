@@ -12,9 +12,12 @@ describe('ManuscriptEditor', () => {
     expect(page.find('del.suggestion-delete').text()).toBe('flickered');
     expect(page.find('.comment-anchor').text()).toBe('rain');
     expect(page.find('.scene-break').exists()).toBe(true);
-    const kinds = w.findAll('[data-test="item"] .kind').map((i) => i.text());
-    expect(kinds).toEqual(['Delete', 'Insert']);
-    expect(w.find('[data-test="counter"]').text()).toBe('1 of 2');
+    // The replacement is one card with an inline diff.
+    const cards = w.findAll('[data-test="item"]');
+    expect(cards).toHaveLength(1);
+    expect(cards[0]!.find('[data-test=del]').text()).toBe('flickered');
+    expect(cards[0]!.find('[data-test=ins]').text()).toBe('guttered');
+    expect(w.find('[data-test="counter"]').text()).toBe('1 of 1');
     const items = w.findAll('[data-test="review-item"]').map((i) => i.text());
     expect(items).toHaveLength(1);
     expect(items[0]).toContain('Comment');

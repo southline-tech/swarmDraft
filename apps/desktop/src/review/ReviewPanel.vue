@@ -1,17 +1,18 @@
 <script setup lang="ts">
 /**
- * Review panel (RAD-211, RAD-258, board WP 8): "Show changes from" filter, Previous/Next
- * step-through, Accept/Reject on the current change, and Accept all / Reject all for the visible
- * changes behind a confirmation. Human-only: accept/reject is a desktop command, never an agent
- * tool. Presentational: the host owns the filter and current change and applies decisions.
- * Authors are raw ids; `labels` only changes what is shown.
+ * Review panel (RAD-211, RAD-258, board WP 8): "Show changes from" author list, Previous/Next
+ * step-through, Accept/Reject per change, and Accept all / Reject all for the visible changes
+ * behind a confirmation. Human-only: accept/reject is a desktop command, never an agent tool.
+ * Presentational: the host owns the filter and current change and applies decisions.
+ * Authors are raw ids; `labels` only changes what is shown. A replacement (delete + insert with
+ * one id) is one change.
  */
 import { computed, ref } from 'vue';
 import { authorColor, type Decision, type SuggestionItem } from '@coauthor/editor';
 import {
+  authorKind,
   authorsOf,
-  filterSummary,
-  keyOf,
+  groupChanges,
   REVIEW_SHORTCUTS,
   visibleItems,
   type AuthorFilter,
@@ -35,32 +36,43 @@ const emit = defineEmits<{
   select: [key: string];
   prev: [];
   next: [];
-  'decide-current': [decision: Decision];
   'decide-one': [key: string, decision: Decision];
-  'decide-visible': [decision: Decision];
+  /** Keys are locked when the confirmation opens, so later arrivals are not included. */
+  'decide-visible': [decision: Decision, keys: string[]];
   'toggle-collapsed': [];
 }>();
 
-const authors = computed(() => authorsOf(props.items));
-const visible = computed(() => visibleItems(props.items, props.filter));
-const index = computed(() => visible.value.findIndex((v) => keyOf(v) === props.currentKey));
+const changes = computed(() => groupChanges(props.items));
+const authors = computed(() => authorsOf(changes.value));
+const visible = computed(() => visibleItems(changes.value, props.filter));
+const countOf = (a: string) => changes.value.filter((c) => c.author === a).length;
+const index = computed(() => visible.value.findIndex((v) => v.key === props.currentKey));
 const name = (a: string) => props.labels[a] ?? a;
+const initial = (a: string) => (name(a).replace(/^agent:/, '')[0] ?? '?').toUpperCase();
+const only = (a: string) => !!props.filter && props.filter.size === 1 && props.filter.has(a);
 const shown = (a: string) => !props.filter || props.filter.has(a);
-const label = (i: SuggestionItem) => (i.kind === 'suggestion_insert' ? 'Insert' : 'Delete');
-const filterOpen = ref(false);
+const hue = (a: string) => ({ '--ct-suggester': authorColor(a) });
 
-/** Pending bulk decision awaiting confirmation. */
-const confirming = ref<Decision | null>(null);
+/** Pending bulk decision awaiting confirmation, with the change keys it will act on. */
+const confirming = ref<{ decision: Decision; keys: string[]; authors: string[] } | null>(null);
+function openConfirm(decision: Decision) {
+  confirming.value = {
+    decision,
+    keys: visible.value.map((v) => v.key),
+    authors: [...new Set(visible.value.map((v) => name(v.author)))],
+  };
+}
 const confirmText = computed(() => {
-  const d = confirming.value;
-  if (!d) return '';
-  const who = [...new Set(visible.value.map((v) => name(v.author)))];
+  const c = confirming.value;
+  if (!c) return '';
+  const who = c.authors;
   const list = who.length > 1 ? `${who.slice(0, -1).join(', ')} and ${who.at(-1)}` : who[0];
-  const n = visible.value.length;
-  return `${d === 'accept' ? 'Accept' : 'Reject'} ${n} change${n === 1 ? '' : 's'} from ${list}?`;
+  const n = c.keys.length;
+  return `${c.decision === 'accept' ? 'Accept' : 'Reject'} ${n} change${n === 1 ? '' : 's'} from ${list}?`;
 });
 function confirm() {
-  if (confirming.value) emit('decide-visible', confirming.value);
+  const c = confirming.value;
+  if (c) emit('decide-visible', c.decision, c.keys);
   confirming.value = null;
 }
 const tip = (text: string, keys: string) => `${text} (${keys})`;
@@ -70,7 +82,7 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
   <aside
     v-if="collapsed"
     class="review-rail"
-    aria-label="Review (collapsed)"
+    aria-label="Review changes (collapsed)"
     data-test="review-rail"
   >
     <button
@@ -87,9 +99,34 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
       visible.length
     }}</span>
   </aside>
-  <aside v-else class="review-panel" aria-label="Review" data-test="review-panel">
+  <aside v-else class="review-panel" aria-label="Review changes" data-test="review-panel">
     <header class="head">
-      <h2>Review</h2>
+      <h2>Review changes</h2>
+      <button
+        type="button"
+        class="icon"
+        data-test="prev"
+        aria-label="Previous change"
+        :disabled="!visible.length"
+        :title="tip('Previous change', REVIEW_SHORTCUTS.prev)"
+        @click="emit('prev')"
+      >
+        ‹
+      </button>
+      <span class="counter" data-test="counter" aria-live="polite">{{
+        visible.length ? `${index >= 0 ? index + 1 : 0} of ${visible.length}` : '0 of 0'
+      }}</span>
+      <button
+        type="button"
+        class="icon"
+        data-test="next"
+        aria-label="Next change"
+        :disabled="!visible.length"
+        :title="tip('Next change', REVIEW_SHORTCUTS.next)"
+        @click="emit('next')"
+      >
+        ›
+      </button>
       <button
         type="button"
         class="icon"
@@ -98,116 +135,83 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
         aria-label="Hide review panel"
         @click="emit('toggle-collapsed')"
       >
-        ›
+        ⇥
       </button>
     </header>
 
-    <div class="filter">
-      <span id="show-from" class="muted">Show changes from</span>
+    <div class="filter" role="group" aria-labelledby="show-from">
+      <div id="show-from" class="lbl">Show changes from</div>
       <button
         type="button"
-        class="trigger"
-        data-test="filter-trigger"
-        aria-labelledby="show-from"
-        :aria-expanded="filterOpen"
-        @click="filterOpen = !filterOpen"
+        class="fo"
+        :class="{ sel: !filter }"
+        data-test="filter-all"
+        :aria-pressed="!filter"
+        @click="emit('show-all')"
       >
-        {{ filterSummary(authors, filter) }} ▾
-      </button>
-      <div v-if="filterOpen" class="menu" role="group" aria-labelledby="show-from">
-        <label class="opt">
-          <input
-            type="checkbox"
-            data-test="filter-all"
-            :checked="!filter"
-            @change="emit('show-all')"
-          />
-          All
-        </label>
-        <label v-for="a in authors" :key="a" class="opt" data-test="filter-option" :title="a">
-          <input type="checkbox" :checked="shown(a)" @change="emit('toggle-author', a)" />
-          <span class="dot" :style="{ background: authorColor(a) }" />
-          <span class="name">{{ name(a) }}</span>
-        </label>
-      </div>
-    </div>
-
-    <div class="step">
-      <button
-        type="button"
-        data-test="prev"
-        :disabled="!visible.length"
-        :title="tip('Previous change', REVIEW_SHORTCUTS.prev)"
-        @click="emit('prev')"
-      >
-        Previous
-      </button>
-      <span class="counter" data-test="counter" aria-live="polite">{{
-        visible.length ? `${index >= 0 ? index + 1 : 0} of ${visible.length}` : '0 of 0'
-      }}</span>
-      <button
-        type="button"
-        data-test="next"
-        :disabled="!visible.length"
-        :title="tip('Next change', REVIEW_SHORTCUTS.next)"
-        @click="emit('next')"
-      >
-        Next
-      </button>
-    </div>
-    <div class="step">
-      <button
-        type="button"
-        class="primary"
-        data-test="accept-current"
-        :disabled="busy || index < 0"
-        :title="tip('Accept change', REVIEW_SHORTCUTS.accept)"
-        @click="emit('decide-current', 'accept')"
-      >
-        Accept
+        <span class="check" aria-hidden="true">{{ !filter ? '✓' : '' }}</span>
+        Everyone
+        <span class="cnt">{{ changes.length }}</span>
       </button>
       <button
+        v-for="a in authors"
+        :key="a"
         type="button"
-        data-test="reject-current"
-        :disabled="busy || index < 0"
-        :title="tip('Reject change', REVIEW_SHORTCUTS.reject)"
-        @click="emit('decide-current', 'reject')"
+        class="fo"
+        :class="{ sel: only(a), off: !shown(a) }"
+        data-test="filter-option"
+        :title="a"
+        :aria-pressed="shown(a)"
+        @click="emit('toggle-author', a)"
       >
-        Reject
+        <span class="av sm" :style="hue(a)" aria-hidden="true">{{ initial(a) }}</span>
+        <span class="name">{{ name(a) }}</span>
+        <span class="pill">{{ authorKind(a) }}</span>
+        <span class="cnt">{{ countOf(a) }}</span>
       </button>
     </div>
 
     <p v-if="!visible.length" class="muted" data-test="empty">No open suggestions.</p>
     <ul v-else class="cards">
       <li
-        v-for="item in visible"
-        :key="keyOf(item)"
+        v-for="c in visible"
+        :key="c.key"
         class="card"
-        :class="{ current: keyOf(item) === currentKey }"
+        :class="{ current: c.key === currentKey }"
+        :style="hue(c.author)"
+        data-suggester
         data-test="item"
-        :aria-current="keyOf(item) === currentKey ? 'true' : undefined"
-        @click="emit('select', keyOf(item))"
+        :aria-current="c.key === currentKey ? 'true' : undefined"
+        @click="emit('select', c.key)"
       >
         <div class="who">
-          <span class="dot" :style="{ background: authorColor(item.author) }" />
-          <span class="name" :title="item.author">{{ name(item.author) }}</span>
-          <span class="kind">{{ label(item) }}</span>
+          <span class="av" aria-hidden="true">{{ initial(c.author) }}</span>
+          <span class="name" :title="c.author">{{ name(c.author) }}</span>
+          <span class="pill">{{ authorKind(c.author) }}</span>
         </div>
-        <p :class="item.kind === 'suggestion_delete' ? 'del' : 'ins'">{{ item.text }}</p>
+        <p class="q">
+          <span v-if="c.del" class="del" data-test="del">{{ c.del }}</span
+          ><template v-if="c.del && c.ins">{{ ' ' }}</template
+          ><span v-if="c.ins" class="ins" data-test="ins">{{ c.ins }}</span>
+        </p>
         <div class="actions">
           <button
             type="button"
+            class="primary"
             data-test="accept"
             :disabled="busy"
-            @click.stop="emit('decide-one', keyOf(item), 'accept')"
+            :title="tip('Accept change', REVIEW_SHORTCUTS.accept)"
+            @click.stop="emit('decide-one', c.key, 'accept')"
           >
             Accept
           </button>
           <button
             type="button"
+            class="secondary"
             data-test="reject"
             :disabled="busy"
-            @click.stop="emit('decide-one', keyOf(item), 'reject')"
+            :title="tip('Reject change', REVIEW_SHORTCUTS.reject)"
+            @click.stop="emit('decide-one', c.key, 'reject')"
           >
             Reject
           </button>
@@ -216,10 +220,10 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
     </ul>
 
     <footer v-if="visible.length" class="bulk">
-      <button type="button" data-test="accept-all" :disabled="busy" @click="confirming = 'accept'">
+      <button type="button" data-test="accept-all" :disabled="busy" @click="openConfirm('accept')">
         Accept all
       </button>
-      <button type="button" data-test="reject-all" :disabled="busy" @click="confirming = 'reject'">
+      <button type="button" data-test="reject-all" :disabled="busy" @click="openConfirm('reject')">
         Reject all
       </button>
     </footer>
@@ -232,7 +236,7 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
     >
       <p>{{ confirmText }}</p>
       <button type="button" class="primary" data-test="confirm-yes" @click="confirm">
-        {{ confirming === 'accept' ? 'Accept all' : 'Reject all' }}
+        {{ confirming.decision === 'accept' ? 'Accept all' : 'Reject all' }}
       </button>
       <button type="button" data-test="confirm-no" @click="confirming = null">Cancel</button>
     </div>
@@ -251,9 +255,9 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
   overflow: auto;
 }
 .review-panel {
-  width: 300px;
+  width: 400px;
   box-sizing: border-box;
-  padding: var(--ct-space-3);
+  padding: var(--ct-space-4);
   display: flex;
   flex-direction: column;
   gap: var(--ct-space-3);
@@ -271,12 +275,12 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
 .head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: var(--ct-space-1);
 }
 h2 {
-  font-size: var(--ct-text-md);
+  font-size: var(--ct-text-lg);
   font-weight: var(--ct-weight-semibold);
-  margin: 0;
+  margin: 0 auto 0 0;
 }
 button {
   font: inherit;
@@ -305,11 +309,19 @@ button.primary:disabled {
   color: var(--ct-text-muted);
   border-color: var(--ct-border);
 }
+button.secondary {
+  background: var(--ct-surface);
+  border-color: var(--ct-border-strong);
+}
 .icon {
   border: none;
   background: none;
   font-size: var(--ct-text-lg);
   line-height: 1;
+}
+.counter {
+  color: var(--ct-text-muted);
+  font-size: var(--ct-text-sm);
 }
 .badge {
   min-width: 1.25rem;
@@ -320,54 +332,81 @@ button.primary:disabled {
   font-size: var(--ct-text-xs);
   padding: 0 var(--ct-space-1);
 }
+.lbl {
+  font-size: var(--ct-text-xs);
+  font-weight: var(--ct-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ct-text-muted);
+  margin-bottom: var(--ct-space-1);
+}
 .filter {
-  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fo {
   display: flex;
   align-items: center;
   gap: var(--ct-space-2);
-}
-.trigger {
-  margin-left: auto;
-}
-.menu {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  z-index: 2;
-  min-width: 12rem;
-  background: var(--ct-surface-raised);
-  border: 1px solid var(--ct-border);
+  min-height: var(--ct-space-12);
+  padding: 0 var(--ct-space-2);
+  border: none;
   border-radius: var(--ct-radius-md);
-  box-shadow: var(--ct-elevation-3);
-  padding: var(--ct-space-2);
+  background: none;
+  font-size: var(--ct-text-md);
+  text-align: left;
 }
-.opt {
-  display: flex;
-  align-items: center;
-  gap: var(--ct-space-2);
-  padding: var(--ct-space-1) 0;
+.fo.sel {
+  background: var(--ct-selected-bg);
+  font-weight: var(--ct-weight-semibold);
 }
-.dot {
-  width: 0.5rem;
-  height: 0.5rem;
+.fo.off {
+  color: var(--ct-text-muted);
+}
+.check {
+  width: 24px;
+  text-align: center;
+}
+.cnt {
+  margin-left: auto;
+  font-size: var(--ct-text-sm);
+  color: var(--ct-text-muted);
+  background: var(--ct-bg);
   border-radius: var(--ct-radius-full);
+  padding: 2px var(--ct-space-2);
+}
+.av {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--ct-radius-full);
+  background: var(--ct-suggester);
+  color: var(--ct-accent-contrast);
+  font-size: var(--ct-text-sm);
+  font-weight: var(--ct-weight-semibold);
+  display: grid;
+  place-items: center;
   flex: none;
+}
+.av.sm {
+  width: 24px;
+  height: 24px;
+}
+.pill {
+  font-size: var(--ct-text-xs);
+  font-weight: var(--ct-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px var(--ct-space-2);
+  border-radius: var(--ct-radius-full);
+  border: 1px solid var(--ct-border-strong);
+  color: var(--ct-text-muted);
 }
 .name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
-}
-.step {
-  display: flex;
-  align-items: center;
-  gap: var(--ct-space-2);
-}
-.counter {
-  flex: 1;
-  text-align: center;
-  color: var(--ct-text-muted);
 }
 .cards {
   list-style: none;
@@ -379,37 +418,48 @@ button.primary:disabled {
 }
 .card {
   border: 1px solid var(--ct-border);
+  border-left: 3px solid var(--ct-suggester);
   border-radius: var(--ct-radius-md);
-  background: var(--ct-paper);
-  padding: var(--ct-space-2);
+  background: var(--ct-surface-raised);
+  padding: var(--ct-space-3) var(--ct-space-4);
   cursor: pointer;
 }
 .card.current {
   border-color: var(--ct-accent);
+  border-left-color: var(--ct-suggester);
   background: var(--ct-selected-bg);
 }
 .who {
   display: flex;
   align-items: center;
   gap: var(--ct-space-2);
+  font-weight: var(--ct-weight-semibold);
 }
-.kind {
-  margin-left: auto;
-  color: var(--ct-text-muted);
-  font-size: var(--ct-text-xs);
-}
-.card p {
-  margin: var(--ct-space-1) 0;
+.card .q {
+  margin: var(--ct-space-2) 0 var(--ct-space-3);
   font-family: var(--ct-font-manuscript);
+  font-size: var(--ct-text-md);
+  line-height: 1.5;
 }
-.ins {
+/* Card diff marks win over .card p and any global ins/del rules. */
+.card .q .ins {
+  color: var(--ct-text);
   background: var(--ct-suggest-insert-bg);
-  text-decoration: underline var(--ct-suggest-insert-underline);
+  text-decoration: underline 2px var(--ct-suggest-insert-underline) !important;
+  text-underline-offset: 3px;
 }
-.del {
+.card .q .del {
   color: var(--ct-suggest-delete-text);
   background: var(--ct-suggest-delete-bg);
-  text-decoration: line-through var(--ct-suggest-delete-strike);
+  text-decoration: line-through 2px var(--ct-suggest-delete-strike) !important;
+}
+.actions .primary,
+.actions .secondary {
+  min-height: var(--ct-space-12);
+  padding: 0 var(--ct-space-5);
+  font-size: var(--ct-text-md);
+  font-weight: var(--ct-weight-semibold);
+  border-radius: var(--ct-radius-md);
 }
 .actions,
 .bulk {

@@ -34,7 +34,7 @@ describe('review state (RAD-258)', () => {
     expect(step(3, -1, -1)).toBe(2);
     expect(step(3, 2, 1)).toBe(0);
     expect(step(0, 0, 1)).toBe(-1);
-    const rest = it3.slice(1);
+    const rest = it3.slice(1).map((i) => ({ key: `suggestion_insert\u0000${i.id}` }));
     expect(resolveCurrent(rest, 'suggestion_insert\u0000s0', 0)).toBe(0);
     expect(resolveCurrent(rest, 'suggestion_insert\u0000s2', 0)).toBe(1);
     expect(resolveCurrent([], null, 0)).toBe(-1);

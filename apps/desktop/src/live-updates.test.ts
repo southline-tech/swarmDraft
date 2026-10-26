@@ -137,7 +137,7 @@ describe('live agent updates (RAD-264)', () => {
     expect(page().find('.comment-anchor').text()).toBe('lantern');
     expect(page().text()).toContain('Late. ');
     const cards = w.findAll('[data-test="item"]').map((i) => i.text());
-    expect(cards.some((t) => t.includes('Insert') && t.includes('agent:'))).toBe(true);
+    expect(cards.some((t) => t.includes('guttered') && t.includes('agent:'))).toBe(true);
     const items = w.findAll('[data-test="review-item"]').map((i) => i.text());
     expect(items.some((t) => t.includes('Comment'))).toBe(true);
 
@@ -254,9 +254,8 @@ describe('live agent updates (RAD-264)', () => {
     await vi.advanceTimersByTimeAsync(100);
     await session.flush();
 
-    const kinds = w.findAll('[data-test="item"] .kind').map((i) => i.text());
-    expect(kinds.filter((t) => t === 'Insert')).toHaveLength(1);
-    expect(kinds.filter((t) => t === 'Delete')).toHaveLength(1);
+    expect(w.findAll('[data-test="item"] [data-test=ins]')).toHaveLength(1);
+    expect(w.findAll('[data-test="item"] [data-test=del]')).toHaveLength(1);
     const items = w.findAll('[data-test="review-item"]').map((i) => i.text());
     expect(items.filter((t) => t.startsWith('Comment'))).toHaveLength(1);
     expect(w.find('.tiptap').text()).toContain('flickeredguttered only twice.');

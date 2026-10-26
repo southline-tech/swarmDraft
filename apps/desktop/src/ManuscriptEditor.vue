@@ -20,6 +20,8 @@ import ReviewPanel from './review/ReviewPanel.vue';
 import {
   DecisionLog,
   keyOf,
+  groupChanges,
+  inForeignInput,
   loadCollapsed,
   resolveCurrent,
   reviewActionFor,
@@ -91,7 +93,8 @@ const currentKey = shallowRef<string | null>(null);
 let currentIndex = -1;
 const collapsed = shallowRef(loadCollapsed());
 watch(collapsed, (v) => saveCollapsed(v));
-const visible = computed(() => visibleItems(suggestions.value, filter.value));
+const changes = computed(() => groupChanges(suggestions.value));
+const visible = computed(() => visibleItems(changes.value, filter.value));
 const log = new DecisionLog();
 
 function refreshReview(e: Editor) {
@@ -101,7 +104,7 @@ function refreshReview(e: Editor) {
   if (log.sync(suggestions.value)) emit('decisions', log.records());
   const i = resolveCurrent(visible.value, currentKey.value, currentIndex);
   currentIndex = i;
-  currentKey.value = i >= 0 ? keyOf(visible.value[i]!) : null;
+  currentKey.value = i >= 0 ? visible.value[i]!.key : null;
 }
 watch(filter, () => editor.value && refreshReview(editor.value));
 
@@ -121,21 +124,26 @@ function rangeOf(e: Editor, t: SuggestionTarget): { from: number; to: number } |
 }
 function select(key: string) {
   const e = editor.value;
-  const item = visible.value.find((v) => keyOf(v) === key);
+  const item = visible.value.find((v) => v.key === key);
   if (!e || !item) return;
   currentKey.value = key;
   currentIndex = visible.value.indexOf(item);
-  const r = rangeOf(e, item);
-  if (r) e.chain().setTextSelection(r).scrollIntoView().run();
+  const parts = item.targets.map((t) => rangeOf(e, t)).filter((r) => !!r);
+  if (!parts.length) return;
+  const r = {
+    from: Math.min(...parts.map((p) => p.from)),
+    to: Math.max(...parts.map((p) => p.to)),
+  };
+  e.chain().setTextSelection(r).scrollIntoView().run();
 }
 function move(dir: 1 | -1) {
   const list = visible.value;
   const i = step(
     list.length,
-    list.findIndex((v) => keyOf(v) === currentKey.value),
+    list.findIndex((v) => v.key === currentKey.value),
     dir,
   );
-  if (i >= 0) select(keyOf(list[i]!));
+  if (i >= 0) select(list[i]!.key);
 }
 /** Human-only: runs through the trusted review transaction on the live editor. */
 function decide(targets: SuggestionTarget[], decision: Decision) {
@@ -154,17 +162,17 @@ function decide(targets: SuggestionTarget[], decision: Decision) {
   // Auto-advance: the change now at the old position becomes current.
   if (currentKey.value) select(currentKey.value);
 }
-const targetOf = (key: string | null) =>
-  suggestions.value.filter((s) => keyOf(s) === key).map(({ kind, id }) => ({ kind, id }));
+const targetOf = (key: string | null) => changes.value.find((c) => c.key === key)?.targets ?? [];
 const decideCurrent = (d: Decision) => decide(targetOf(currentKey.value), d);
 const decideOne = (key: string, d: Decision) => {
   currentKey.value = key;
-  currentIndex = visible.value.findIndex((v) => keyOf(v) === key);
+  currentIndex = visible.value.findIndex((v) => v.key === key);
   decide(targetOf(key), d);
 };
-const decideVisible = (d: Decision) =>
+/** Bulk decision over the change keys locked when the confirmation opened. */
+const decideVisible = (d: Decision, keys: readonly string[]) =>
   decide(
-    visible.value.map(({ kind, id }) => ({ kind, id })),
+    keys.flatMap((k) => targetOf(k)),
     d,
   );
 const onToggleAuthor = (a: string) =>
@@ -173,6 +181,11 @@ const onToggleAuthor = (a: string) =>
 function onKeydown(ev: KeyboardEvent) {
   const action = reviewActionFor(ev);
   if (!action) return;
+  if (action !== 'toggle') {
+    // Only while the panel is open and focus is not in some other text field.
+    if (!reviewOpen.value || collapsed.value) return;
+    if (inForeignInput(ev.target, editor.value?.view.dom ?? null)) return;
+  }
   ev.preventDefault();
   if (action === 'toggle') {
     if (reviewOpen.value) collapsed.value = !collapsed.value;
@@ -339,7 +352,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
           data-test="page"
           :style="{ zoom: zoom / 100 }"
         >
-          <EditorContent :editor="editor" class="page" />
+          <EditorContent :editor="editor" class="page" data-suggester />
         </div>
       </div>
       <div v-if="reviewOpen" class="review" data-test="review">
@@ -355,7 +368,6 @@ const LABELS: Record<ReviewItem['type'], string> = {
           @select="select"
           @prev="move(-1)"
           @next="move(1)"
-          @decide-current="decideCurrent"
           @decide-one="decideOne"
           @decide-visible="decideVisible"
           @toggle-collapsed="collapsed = !collapsed"
@@ -385,8 +397,9 @@ const LABELS: Record<ReviewItem['type'], string> = {
 
 <style>
 .manuscript-editor .load-error {
-  border: 1px solid #b00020;
-  color: #b00020;
+  border: 1px solid var(--ct-danger);
+  color: var(--ct-danger);
+  background: var(--ct-danger-bg);
   padding: 0.5rem 0.75rem;
 }
 .manuscript-editor {
@@ -460,14 +473,19 @@ const LABELS: Record<ReviewItem['type'], string> = {
   font-variant: small-caps;
 }
 .tiptap ins.suggestion-insert {
-  color: #1a7f37;
-  text-decoration: underline;
+  color: var(--ct-text);
+  background: var(--ct-suggest-insert-bg);
+  text-decoration: underline 2px var(--ct-suggest-insert-underline);
+  text-underline-offset: 3px;
 }
 .tiptap del.suggestion-delete {
-  color: #b00020;
+  color: var(--ct-suggest-delete-text);
+  background: var(--ct-suggest-delete-bg);
+  text-decoration: line-through 2px var(--ct-suggest-delete-strike);
 }
 .tiptap .comment-anchor {
-  background: #fff3b0;
+  background: var(--ct-comment-bg);
+  color: inherit;
 }
 .manuscript-editor .review {
   display: flex;

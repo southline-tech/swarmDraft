@@ -14,14 +14,17 @@ import {
 } from '@coauthor/editor';
 
 /** Raw author ids in first-appearance (document) order. */
-export function authorsOf(items: readonly SuggestionItem[]): string[] {
+export function authorsOf(items: readonly { author: string }[]): string[] {
   return [...new Set(items.map((i) => i.author))];
 }
 
 /** `null` selection means All (the default). */
 export type AuthorFilter = ReadonlySet<string> | null;
 
-export function visibleItems(items: readonly SuggestionItem[], filter: AuthorFilter) {
+export function visibleItems<T extends { author: string }>(
+  items: readonly T[],
+  filter: AuthorFilter,
+): T[] {
   return filter ? items.filter((i) => filter.has(i.author)) : [...items];
 }
 
@@ -47,17 +50,46 @@ export function toggleAuthor(
 export const keyOf = (t: SuggestionTarget) => targetKey(t);
 
 /**
+ * One reviewable change: an insert, a delete, or a replacement (a delete and an insert that share
+ * a suggestion id and author). Deciding it decides every part.
+ */
+export interface ReviewChange {
+  key: string;
+  id: string;
+  author: string;
+  del?: string;
+  ins?: string;
+  targets: SuggestionTarget[];
+}
+export function groupChanges(items: readonly SuggestionItem[]): ReviewChange[] {
+  const out = new Map<string, ReviewChange>();
+  for (const i of items) {
+    const key = `${i.author}\u0000${i.id}`;
+    let c = out.get(key);
+    if (!c) out.set(key, (c = { key, id: i.id, author: i.author, targets: [] }));
+    c.targets.push({ kind: i.kind, id: i.id });
+    if (i.kind === 'suggestion_delete') c.del = (c.del ?? '') + i.text;
+    else c.ins = (c.ins ?? '') + i.text;
+  }
+  return [...out.values()];
+}
+
+/** Raw ids from agents are prefixed `agent:`; everyone else is a person. */
+export const authorKind = (author: string): 'Bot' | 'Person' =>
+  author.startsWith('agent:') ? 'Bot' : 'Person';
+
+/**
  * Index of the next current change after `current` is gone or moved: the same key if still
  * visible, otherwise the change now at the old position (auto-advance), clamped.
  */
 export function resolveCurrent(
-  visible: readonly SuggestionItem[],
+  visible: readonly { key: string }[],
   currentKey: string | null,
   fallbackIndex: number,
 ): number {
   if (!visible.length) return -1;
   if (currentKey) {
-    const i = visible.findIndex((v) => keyOf(v) === currentKey);
+    const i = visible.findIndex((v) => v.key === currentKey);
     if (i >= 0) return i;
   }
   return Math.min(Math.max(fallbackIndex, 0), visible.length - 1);
@@ -137,6 +169,18 @@ export const REVIEW_SHORTCUTS: Record<ReviewAction, string> = {
   reject: 'Ctrl+Shift+Backspace',
   toggle: 'Ctrl+\\',
 };
+/**
+ * True when focus is in a text field or editable region other than the manuscript editor, where
+ * review shortcuts must not fire.
+ */
+export function inForeignInput(target: EventTarget | null, editorRoot: Element | null): boolean {
+  if (!(target instanceof Element)) return false;
+  if (editorRoot && editorRoot.contains(target)) return false;
+  if (target.closest('input, textarea, select')) return true;
+  const editable = target.closest('[contenteditable]');
+  return !!editable && editable.getAttribute('contenteditable') !== 'false';
+}
+
 export function reviewActionFor(e: KeyboardEvent): ReviewAction | null {
   const ctrl = e.ctrlKey || e.metaKey;
   if (e.altKey && e.shiftKey && !ctrl) {
