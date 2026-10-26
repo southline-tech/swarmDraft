@@ -495,7 +495,21 @@ describe('orphan comment anchors', () => {
     const manuscript = importDocx(zip, { manuscriptId: 'm1' });
     const report = manuscript.report;
     expect(JSON.stringify(manuscript.sections)).not.toContain('comment_anchor');
-    expect(report.items.find((i) => i.code === 'orphan_anchor')?.samples[0]).toMatch(/^9: /);
+    expect(report.items.find((i) => i.code === 'orphan_anchor')?.samples).toEqual(['9: (no text)']);
+    expect(JSON.stringify(manuscript.sections)).toContain('after');
+  });
+
+  it('reports a point orphan in the middle of a word without the next text', () => {
+    const body = p(
+      r('a') + '<w:commentRangeStart w:id="88"/><w:commentRangeEnd w:id="88"/>' + r('b'),
+    );
+    const zip = zipSync({
+      'word/document.xml': strToU8(`<w:document ${NS}><w:body>${body}</w:body></w:document>`),
+    });
+    const samples =
+      importDocx(zip, { manuscriptId: 'm1' }).report.items.find((i) => i.code === 'orphan_anchor')
+        ?.samples ?? [];
+    expect(samples).toEqual(['88: (no text)']);
   });
 
   it('drops orphan anchors inside footnotes and endnotes too', () => {

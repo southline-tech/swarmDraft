@@ -331,6 +331,8 @@ interface Ctx {
   lastCommentId: Map<string, string>;
   /** Original docx w:id for each anchor id we assigned (for orphan_anchor reports). */
   anchorOrig: Map<string, string>;
+  /** Anchor ids that were zero-width in the docx (anchored on the next text by us). */
+  pointAnchors: Set<string>;
   /** "id: snippet" detail for report warnings. */
   commentDetail: (orig: string, id?: string) => string;
   freshId: () => string;
@@ -482,7 +484,10 @@ function extractParagraph(p: XmlElement, ctx: Ctx): Para {
           const orig = c.attrs['w:id'] ?? '';
           if (!ctx.startedComments.has(orig)) {
             const id = ctx.commentIds.get(orig)?.shift();
-            if (id) st.pending.add(id);
+            if (id) {
+              st.pending.add(id);
+              ctx.pointAnchors.add(id);
+            }
           }
           break;
         }
@@ -604,7 +609,10 @@ function extractParagraph(p: XmlElement, ctx: Ctx): Para {
           }
           st.open.delete(id);
           // Zero-width (point) comment: anchor on the next text.
-          if (st.empty.delete(id)) st.pending.add(id);
+          if (st.empty.delete(id)) {
+            st.pending.add(id);
+            ctx.pointAnchors.add(id);
+          }
           break;
         }
         case 'w:hyperlink':
@@ -786,6 +794,7 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
     commentDefCount: new Map(),
     lastCommentId: new Map(),
     anchorOrig: new Map(),
+    pointAnchors: new Set(),
     commentDetail: (orig, id) => {
       const body = (commentDefs.get(id ?? orig) ?? commentDefs.get(orig))?.body ?? '';
       const snip = body.replace(/\s+/g, ' ').slice(0, 40);
@@ -1066,11 +1075,13 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
   };
   for (const s of doc.sections) stripOrphans(s.content.content);
   for (const [id, snippet] of orphanText) {
+    // A point anchor covers text only because we attached it to the next run; it had none.
+    const shown = ctx.pointAnchors.has(id) ? '' : snippet.trim().slice(0, 40);
     report.add(
       'warning',
       'orphan_anchor',
       'Comment range had no matching comment; the empty anchor was removed',
-      `${ctx.anchorOrig.get(id) || id}: ${snippet.trim().slice(0, 40) || '(no text)'}`,
+      `${ctx.anchorOrig.get(id) || id}: ${shown || '(no text)'}`,
     );
   }
 
