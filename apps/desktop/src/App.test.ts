@@ -118,6 +118,8 @@ describe('backup dialogs', () => {
 
 describe('recovery notice', () => {
   const notice = {
+    id: 'n1',
+    corruptFile: null,
     folder: 'C:\\data\\recovery-1',
     moved: ['files', 'files-old-7'],
     snapshot: 'C:\\data\\backups\\pre-restore-1.zip',
@@ -141,7 +143,7 @@ describe('recovery notice', () => {
     expect(backend.dismissRecoveryNotices).not.toHaveBeenCalled();
     await wrapper.find('[data-test="recovery-notice-dismiss"]').trigger('click');
     await flushPromises();
-    expect(backend.dismissRecoveryNotices).toHaveBeenCalledTimes(1);
+    expect(backend.dismissRecoveryNotices).toHaveBeenCalledWith(['n1']);
     expect(wrapper.find('[data-test="recovery-notice"]').exists()).toBe(false);
   });
 
@@ -156,6 +158,18 @@ describe('recovery notice', () => {
     expect(n.text()).not.toContain('Moved to');
     expect(n.text()).toContain('try again');
     expect(wrapper.find('[data-test="recovery-notice-save-error"]').text()).toContain('disk full');
+  });
+
+  it('shows where a corrupt notice file was kept', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.getRecoveryNotices).mockResolvedValueOnce([
+      { ...notice, id: 'c', corruptFile: 'C:\\data\\recovery-notice.corrupt-1.json' },
+    ]);
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.find('[data-test="recovery-notice-corrupt"]').text()).toContain(
+      'recovery-notice.corrupt-1.json',
+    );
   });
 
   it('keeps the notice if Dismiss fails', async () => {

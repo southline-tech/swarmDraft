@@ -100,6 +100,8 @@ export async function restoreBackup(path: string): Promise<RestoreReport> {
 
 /** Left by startup recovery when an interrupted restore's state could not be proven. */
 export interface RecoveryNotice {
+  /** Stable id; Dismiss removes only the notices with these ids. */
+  id: string;
   /** Recovery folder, only when something was actually moved there. */
   folder: string | null;
   /** Items actually moved into `folder`. */
@@ -112,6 +114,8 @@ export interface RecoveryNotice {
   retryPending: boolean;
   /** Set when the notice could not be saved to disk. */
   saveError: string | null;
+  /** An unreadable notice file was kept here (never deleted). */
+  corruptFile: string | null;
 }
 
 /** Recovery notices waiting to be dismissed (empty in a plain browser). Reading does not clear. */
@@ -120,8 +124,8 @@ export async function getRecoveryNotices(): Promise<RecoveryNotice[]> {
   return invoke<RecoveryNotice[]>('recovery_notices');
 }
 
-/** Clear the recovery notices (the user pressed Dismiss). */
-export async function dismissRecoveryNotices(): Promise<void> {
+/** Clear the shown recovery notices by id (the user pressed Dismiss); newer ones stay. */
+export async function dismissRecoveryNotices(ids: string[]): Promise<void> {
   if (!isTauri()) return;
-  await invoke('dismiss_recovery_notices');
+  await invoke('dismiss_recovery_notices', { ids });
 }

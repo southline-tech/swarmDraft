@@ -126,6 +126,10 @@ struct Journal {
     /// Pre-restore snapshot path, for the recovery notice.
     #[serde(default)]
     snapshot: Option<String>,
+    /// Set once startup recovery has quarantined against this journal. From then on the live
+    /// `files/` may hold the user's new attachments, so it is only ever moved aside.
+    #[serde(default)]
+    quarantined: bool,
 }
 
 /// Notices left by startup recovery whenever it moved folders aside (or could not finish).
@@ -139,6 +143,9 @@ const RECOVERY_BUSY_TIMEOUT: Duration = Duration::from_secs(10);
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RecoveryNotice {
+    /// Stable id, so Dismiss removes only the notices that were shown.
+    #[serde(default)]
+    pub id: String,
     /// `recovery-<unique>` folder holding what was moved, if anything was actually moved.
     #[serde(default)]
     pub folder: Option<String>,
@@ -158,62 +165,67 @@ pub struct RecoveryNotice {
     /// Set when the notice could not be saved to disk (it is then only kept in memory).
     #[serde(default)]
     pub save_error: Option<String>,
+    /// A notice file that could not be read was kept here (never deleted).
+    #[serde(default)]
+    pub corrupt_file: Option<String>,
 }
 
 fn notice_path(data_dir: &Path) -> PathBuf {
     data_dir.join(RECOVERY_NOTICE)
 }
 
-/// Recovery notices waiting to be dismissed. Reading does not clear them.
-pub fn read_recovery_notices(data_dir: &Path) -> Vec<RecoveryNotice> {
-    let Ok(bytes) = std::fs::read(notice_path(data_dir)) else {
-        return Vec::new();
-    };
-    serde_json::from_slice::<Vec<RecoveryNotice>>(&bytes)
-        .or_else(|_| serde_json::from_slice::<RecoveryNotice>(&bytes).map(|n| vec![n]))
-        .unwrap_or_else(|e| {
-            eprintln!("coAuthor: recovery notice file is unreadable: {e}");
-            vec![RecoveryNotice {
-                folder: None,
-                moved: Vec::new(),
-                snapshot: None,
-                files_dir: data_dir.join("files").display().to_string(),
-                reason: format!("the recovery notice could not be read: {e}"),
-                retry_pending: false,
-                save_error: None,
-            }]
-        })
-}
+impl RecoveryNotice {
+    fn new(data_dir: &Path, reason: String) -> Self {
+        RecoveryNotice {
+            id: String::new(),
+            folder: None,
+            moved: Vec::new(),
+            snapshot: None,
+            files_dir: data_dir.join("files").display().to_string(),
+            reason,
+            retry_pending: false,
+            save_error: None,
+            corrupt_file: None,
+        }
+    }
 
-/// Clear all recovery notices (the user pressed Dismiss).
-pub fn dismiss_recovery_notices(data_dir: &Path) -> std::io::Result<()> {
-    match std::fs::remove_file(notice_path(data_dir)) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
-        _ => Ok(()),
+    /// Content hash (ignoring `id`/`save_error`): used as the id and to skip duplicates.
+    fn content_id(&self) -> String {
+        let mut c = self.clone();
+        c.id = String::new();
+        c.save_error = None;
+        let d = Sha256::digest(serde_json::to_vec(&c).expect("notice serializes"));
+        hex(&d[..8])
     }
 }
 
-/// Append `n` to the notice file (atomically). Identical notices are not duplicated.
-fn save_notice(data_dir: &Path, n: &RecoveryNotice) -> std::io::Result<()> {
+fn parse_notices(b: &[u8]) -> serde_json::Result<Vec<RecoveryNotice>> {
+    serde_json::from_slice::<Vec<RecoveryNotice>>(b)
+        .or_else(|_| serde_json::from_slice::<RecoveryNotice>(b).map(|n| vec![n]))
+        .map(|mut v| {
+            for n in &mut v {
+                if n.id.is_empty() {
+                    n.id = n.content_id();
+                }
+            }
+            v
+        })
+}
+
+fn write_notices(data_dir: &Path, all: &[RecoveryNotice]) -> std::io::Result<()> {
     #[cfg(test)]
     if FAIL_NOTICE_WRITE.with(|f| f.get()) {
         return Err(std::io::Error::other("simulated notice write failure"));
     }
-    let mut all: Vec<RecoveryNotice> = std::fs::read(notice_path(data_dir))
-        .ok()
-        .and_then(|b| {
-            serde_json::from_slice::<Vec<RecoveryNotice>>(&b)
-                .or_else(|_| serde_json::from_slice::<RecoveryNotice>(&b).map(|n| vec![n]))
-                .ok()
-        })
-        .unwrap_or_default();
-    if all.contains(n) {
-        return Ok(());
+    if all.is_empty() {
+        return match std::fs::remove_file(notice_path(data_dir)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        };
     }
-    all.push(n.clone());
     let tmp = data_dir.join(format!(".restore-notice-tmp-{}", unique_suffix()));
     let mut f = File::create(&tmp)?;
-    f.write_all(&serde_json::to_vec_pretty(&all).expect("notice serializes"))?;
+    f.write_all(&serde_json::to_vec_pretty(all).expect("notice serializes"))?;
     f.sync_all()?;
     drop(f);
     rename_retry(&tmp, &notice_path(data_dir))?;
@@ -221,8 +233,79 @@ fn save_notice(data_dir: &Path, n: &RecoveryNotice) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Load saved notices. A file that can't be parsed is never overwritten or deleted: it is
+/// renamed to `recovery-notice.corrupt-<unique>.json` and a notice pointing at it is returned
+/// (and saved). Errors only when the corrupt file could not be set aside.
+fn load_notices(data_dir: &Path) -> std::io::Result<Vec<RecoveryNotice>> {
+    let p = notice_path(data_dir);
+    let bytes = match std::fs::read(&p) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    match parse_notices(&bytes) {
+        Ok(v) => Ok(v),
+        Err(err) => {
+            let kept = data_dir.join(format!("recovery-notice.corrupt-{}.json", unique_suffix()));
+            rename_retry(&p, &kept)?;
+            sync_dir(data_dir);
+            eprintln!(
+                "coAuthor: recovery notice file was unreadable ({err}); kept as {}",
+                kept.display()
+            );
+            let mut n = RecoveryNotice::new(
+                data_dir,
+                format!("an earlier recovery notice could not be read: {err}"),
+            );
+            n.corrupt_file = Some(kept.display().to_string());
+            n.id = n.content_id();
+            let v = vec![n];
+            if let Err(e) = write_notices(data_dir, &v) {
+                eprintln!("coAuthor: could not save the recovery notice: {e}");
+            }
+            Ok(v)
+        }
+    }
+}
+
+/// Recovery notices waiting to be dismissed. Reading does not clear them.
+pub fn read_recovery_notices(data_dir: &Path) -> Vec<RecoveryNotice> {
+    load_notices(data_dir).unwrap_or_else(|e| {
+        eprintln!("coAuthor: recovery notice file could not be read: {e}");
+        let mut n = RecoveryNotice::new(
+            data_dir,
+            format!("the recovery notice file could not be read: {e}"),
+        );
+        n.corrupt_file = Some(notice_path(data_dir).display().to_string());
+        n.id = n.content_id();
+        vec![n]
+    })
+}
+
+/// Remove the notices with these ids (the ones the user saw and dismissed); others stay.
+pub fn dismiss_recovery_notices(data_dir: &Path, ids: &[String]) -> std::io::Result<()> {
+    let mut all = load_notices(data_dir)?;
+    let before = all.len();
+    all.retain(|n| !ids.contains(&n.id));
+    if all.len() == before {
+        return Ok(());
+    }
+    write_notices(data_dir, &all)
+}
+
+/// Append `n` to the notice file (atomically). Identical notices are not duplicated.
+fn save_notice(data_dir: &Path, n: &RecoveryNotice) -> std::io::Result<()> {
+    let mut all = load_notices(data_dir)?;
+    if all.iter().any(|o| o.id == n.id) {
+        return Ok(());
+    }
+    all.push(n.clone());
+    write_notices(data_dir, &all)
+}
+
 /// Save a notice; if that fails, log it and keep it in `unsaved` so the UI still shows it.
 fn notify(data_dir: &Path, mut n: RecoveryNotice, unsaved: &mut Vec<RecoveryNotice>) {
+    n.id = n.content_id();
     if let Err(e) = save_notice(data_dir, &n) {
         eprintln!("coAuthor: could not save the recovery notice: {e}");
         n.save_error = Some(e.to_string());
@@ -278,9 +361,10 @@ fn live_restore_id(data_dir: &Path, busy: Duration) -> Result<Option<String>, ru
         return Ok(None);
     }
     let deadline = Instant::now() + busy;
+    let mut logged = false;
     loop {
         let r = (|| {
-            let c = Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+            let c = Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
             c.busy_timeout(deadline.saturating_duration_since(Instant::now()))?;
             c.query_row(
                 "SELECT value FROM app_meta WHERE key = ?1",
@@ -291,6 +375,13 @@ fn live_restore_id(data_dir: &Path, busy: Duration) -> Result<Option<String>, ru
         })();
         match r {
             Err(e) if is_busy(&e) && Instant::now() < deadline => {
+                if !logged {
+                    eprintln!(
+                        "coAuthor: database is locked; waiting up to {}s before recovery",
+                        busy.as_secs_f32()
+                    );
+                    logged = true;
+                }
                 std::thread::sleep(Duration::from_millis(50));
             }
             r => return r,
@@ -348,13 +439,7 @@ fn recover_journal(data_dir: &Path, busy: Duration, unsaved: &mut Vec<RecoveryNo
         });
     let committed = match state {
         Err(reason) => {
-            quarantine(
-                data_dir,
-                &path,
-                j.ok().and_then(|j| j.snapshot),
-                reason,
-                unsaved,
-            );
+            quarantine(data_dir, &path, j.ok(), reason, unsaved);
             return;
         }
         Ok(c) => c,
@@ -372,7 +457,14 @@ fn recover_journal(data_dir: &Path, busy: Duration, unsaved: &mut Vec<RecoveryNo
         }
     } else {
         let old_exists = old.as_ref().is_some_and(|o| o.exists());
-        if old_exists && files.exists() {
+        if j.quarantined && files.exists() {
+            // An earlier start quarantined and left an empty files/: anything in it now may be
+            // the user's new attachments. Never delete: move it aside.
+            match move_to_recovery(data_dir, &files, "files-added-after-recovery") {
+                Ok(dest) => moved = Some(dest),
+                Err(e) => failure = Some(format!("could not move the attachments aside: {e}")),
+            }
+        } else if old_exists && files.exists() {
             // Provably the restored copy from the backup: safe to delete.
             let trash = data_dir.join(format!(".restore-trash-{}", unique_suffix()));
             match rename_retry(&files, &trash) {
@@ -428,6 +520,8 @@ fn recover_journal(data_dir: &Path, busy: Duration, unsaved: &mut Vec<RecoveryNo
                 reason,
                 retry_pending: failure.is_some(),
                 save_error: None,
+                id: String::new(),
+                corrupt_file: None,
             },
             unsaved,
         );
@@ -441,16 +535,28 @@ fn recover_journal(data_dir: &Path, busy: Duration, unsaved: &mut Vec<RecoveryNo
 fn quarantine(
     data_dir: &Path,
     journal: &Path,
-    snapshot: Option<String>,
+    parsed: Option<Journal>,
     reason: String,
     unsaved: &mut Vec<RecoveryNotice>,
 ) {
     let files = data_dir.join("files");
     let files_dir = files.display().to_string();
+    let snapshot = parsed.as_ref().and_then(|j| j.snapshot.clone());
     let dir = data_dir.join(format!("recovery-{}", unique_suffix()));
     let mut moved = Vec::new();
     let mut failures = Vec::new();
-    if let Err(e) = std::fs::create_dir_all(&dir) {
+    // Mark the journal first: if it is kept after this, a later start must never treat the
+    // (new, empty) files/ as the restored copy and delete it.
+    let marked = match parsed {
+        Some(mut j) if !j.quarantined => {
+            j.quarantined = true;
+            write_journal(data_dir, &j)
+        }
+        _ => Ok(()),
+    };
+    if let Err(e) = marked {
+        failures.push(format!("could not update the restore journal: {e}"));
+    } else if let Err(e) = std::fs::create_dir_all(&dir) {
         // Can't move anything safely: leave everything (journal included) in place.
         failures.push(format!("could not create a recovery folder: {e}"));
     } else {
@@ -485,7 +591,7 @@ fn quarantine(
             let _ = std::fs::remove_dir(&dir); // nothing went in
         }
     }
-    if !files.exists() {
+    if !files.exists() && marked_ok(&failures) {
         let _ = std::fs::create_dir_all(&files);
     }
     sync_dir(data_dir);
@@ -508,9 +614,17 @@ fn quarantine(
             reason,
             retry_pending,
             save_error: None,
+            id: String::new(),
+            corrupt_file: None,
         },
         unsaved,
     );
+}
+
+fn marked_ok(failures: &[String]) -> bool {
+    !failures
+        .iter()
+        .any(|f| f.starts_with("could not update the restore journal"))
 }
 
 /// Recover from a crash mid-restore (see [`recover_journal`]) and remove temp dirs/files left
@@ -558,6 +672,8 @@ fn cleanup_temp_with(data_dir: &Path, busy: Duration) -> CleanupReport {
                                 .to_string(),
                             retry_pending: false,
                             save_error: None,
+                            id: String::new(),
+                            corrupt_file: None,
                         },
                         &mut unsaved,
                     ),
@@ -1082,6 +1198,7 @@ fn apply(
             id: id.clone(),
             old: had_old.then(|| old_name.clone()),
             snapshot: Some(snapshot.display().to_string()),
+            quarantined: false,
         },
     )?;
     crash(Step::Journal)?;
@@ -1757,7 +1874,8 @@ mod tests {
         assert!(!n.retry_pending);
         assert!(n.reason.contains(reason), "{}", n.reason);
         assert_eq!(read_recovery_notices(d), ns, "reading does not clear");
-        dismiss_recovery_notices(d).unwrap();
+        let ids: Vec<String> = read_recovery_notices(d).into_iter().map(|n| n.id).collect();
+        dismiss_recovery_notices(d, &ids).unwrap();
         assert!(read_recovery_notices(d).is_empty(), "dismiss clears");
     }
 
@@ -1790,7 +1908,11 @@ mod tests {
             notice.snapshot.as_deref(),
             Some("C:\\data\\backups\\pre-restore-1.zip")
         );
-        assert_quarantined(d, j, "database could not be read");
+        // The parsed journal is marked quarantined before anything moves.
+        let mut marked: Journal = serde_json::from_slice(j).unwrap();
+        marked.quarantined = true;
+        let marked = serde_json::to_vec(&marked).unwrap();
+        assert_quarantined(d, &marked, "database could not be read");
         assert!(
             live_restore_id(d, Duration::ZERO).is_err(),
             "read error is distinguished from a missing row"
@@ -2161,7 +2283,8 @@ mod tests {
             1,
             "notice kept until dismissed"
         );
-        dismiss_recovery_notices(d).unwrap();
+        let ids: Vec<String> = read_recovery_notices(d).into_iter().map(|n| n.id).collect();
+        dismiss_recovery_notices(d, &ids).unwrap();
         cleanup_temp(d);
         assert!(read_recovery_notices(d).is_empty());
         assert!(Store::open(d).is_ok());
@@ -2186,5 +2309,121 @@ mod tests {
             .collect();
         assert!(bad.is_empty(), "leftovers: {bad:?}");
         assert!(read_recovery_notices(&d).is_empty());
+    }
+
+    #[test]
+    fn attachments_added_after_a_kept_quarantine_journal_are_never_deleted() {
+        let (tmp, store, bk, _) = crash_setup();
+        let d = tmp.path().to_path_buf();
+        // Restore crashes before the db commit: restored files/ live, user's in .files-old-*.
+        restore_with(&store, "0", &bk, FailAt::Crash(Step::Prepared)).unwrap_err();
+        drop(store);
+        // Next start: db locked -> quarantine; moving .files-old-* fails -> journal kept.
+        let locker = lock_db(&d);
+        set_fail_rename(&[".files-old-"]);
+        cleanup_temp_with(&d, Duration::from_millis(200));
+        set_fail_rename(&[]);
+        release(locker);
+        let j: Journal = serde_json::from_slice(&std::fs::read(d.join(JOURNAL)).unwrap()).unwrap();
+        assert!(j.quarantined, "journal marked");
+        assert!(d.join("files").is_dir() && tree(&d.join("files")).is_empty());
+        // The user adds an attachment.
+        std::fs::write(d.join("files/new-chapter-art.png"), b"precious new").unwrap();
+        // Following start: db readable, not committed. Must move aside, never delete.
+        cleanup_temp(&d);
+        assert!(!d.join(JOURNAL).exists());
+        let found: Vec<_> = recovery_dirs(&d)
+            .into_iter()
+            .map(|r| r.join("files-added-after-recovery/new-chapter-art.png"))
+            .filter(|p| p.exists())
+            .collect();
+        assert_eq!(found.len(), 1, "new attachment kept in a recovery folder");
+        assert_eq!(std::fs::read(&found[0]).unwrap(), b"precious new");
+        // The user's pre-restore files are back in place.
+        assert_eq!(
+            std::fs::read(d.join("files/images/map.png")).unwrap(),
+            b"edited"
+        );
+        assert!(read_recovery_notices(&d)
+            .iter()
+            .any(|n| n.moved == vec!["files-added-after-recovery"]));
+    }
+
+    #[test]
+    fn corrupt_notice_file_is_kept_aside_and_shown() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        drop(Store::open(d).unwrap());
+        std::fs::write(d.join(RECOVERY_NOTICE), b"{ not json").unwrap();
+        uncertain_layout(d, b"{bad journal");
+        cleanup_temp(d);
+        let ns = read_recovery_notices(d);
+        assert_eq!(ns.len(), 2, "{ns:?}");
+        let kept = ns
+            .iter()
+            .find_map(|n| n.corrupt_file.clone())
+            .expect("points at it");
+        assert!(kept.contains("recovery-notice.corrupt-"));
+        assert_eq!(
+            std::fs::read(&kept).unwrap(),
+            b"{ not json",
+            "never deleted"
+        );
+        assert!(ns
+            .iter()
+            .any(|n| n.reason.contains("journal is unreadable")));
+        // Reading directly also preserves a corrupt file.
+        std::fs::write(d.join(RECOVERY_NOTICE), b"\xff\xfe").unwrap();
+        let ns = read_recovery_notices(d);
+        assert_eq!(ns.len(), 1);
+        let kept2 = ns[0].corrupt_file.clone().unwrap();
+        assert_eq!(std::fs::read(kept2).unwrap(), b"\xff\xfe");
+    }
+
+    #[test]
+    fn dismiss_removes_only_the_notices_shown() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        save_notice(d, &{
+            let mut n = RecoveryNotice::new(d, "first".into());
+            n.id = n.content_id();
+            n
+        })
+        .unwrap();
+        let shown: Vec<String> = read_recovery_notices(d).into_iter().map(|n| n.id).collect();
+        // A second notice arrives after the UI read the first.
+        let mut n2 = RecoveryNotice::new(d, "second".into());
+        n2.id = n2.content_id();
+        save_notice(d, &n2).unwrap();
+        dismiss_recovery_notices(d, &shown).unwrap();
+        let left = read_recovery_notices(d);
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].reason, "second");
+        dismiss_recovery_notices(d, &[left[0].id.clone()]).unwrap();
+        assert!(!d.join(RECOVERY_NOTICE).exists());
+    }
+
+    #[test]
+    fn default_wait_rides_out_a_multi_second_lock() {
+        assert_eq!(RECOVERY_BUSY_TIMEOUT, Duration::from_secs(10));
+        let (tmp, store, bk, _) = crash_setup();
+        let d = tmp.path().to_path_buf();
+        restore_with(&store, "0", &bk, FailAt::Crash(Step::Prepared)).unwrap_err();
+        drop(store);
+        let locker = lock_db(&d);
+        let h = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(3));
+            release(locker);
+        });
+        let start = Instant::now();
+        cleanup_temp(&d); // the real default path
+        h.join().unwrap();
+        assert!(start.elapsed() >= Duration::from_secs(3));
+        assert!(recovery_dirs(&d).is_empty(), "no quarantine");
+        assert!(read_recovery_notices(&d).is_empty());
+        assert_eq!(
+            std::fs::read(d.join("files/images/map.png")).unwrap(),
+            b"edited"
+        );
     }
 }

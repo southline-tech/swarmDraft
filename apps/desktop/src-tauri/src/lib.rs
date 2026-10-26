@@ -130,14 +130,19 @@ fn recovery_notices(
     all
 }
 
-/// The user pressed Dismiss: clear every recovery notice.
+/// The user pressed Dismiss: clear the notices that were shown (by id); newer ones stay.
 #[tauri::command]
 fn dismiss_recovery_notices(
     store: tauri::State<'_, storage::Store>,
     unsaved: tauri::State<'_, UnsavedNotices>,
+    ids: Vec<String>,
 ) -> Result<(), String> {
-    unsaved.0.lock().unwrap_or_else(|e| e.into_inner()).clear();
-    backup::dismiss_recovery_notices(store.data_dir()).map_err(|e| e.to_string())
+    unsaved
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|n| !ids.contains(&n.id));
+    backup::dismiss_recovery_notices(store.data_dir(), &ids).map_err(|e| e.to_string())
 }
 
 /// Validate and restore a backup .zip; the replaced state is kept as a pre-restore snapshot.

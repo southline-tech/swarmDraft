@@ -30,8 +30,9 @@ const recoveryDismissError = ref('');
 
 async function dismissRecovery() {
   try {
-    await dismissRecoveryNotices();
-    recoveryNotices.value = [];
+    const ids = recoveryNotices.value.map((n) => n.id);
+    await dismissRecoveryNotices(ids);
+    recoveryNotices.value = recoveryNotices.value.filter((n) => !ids.includes(n.id));
     recoveryDismissError.value = '';
   } catch (e) {
     recoveryDismissError.value = `Couldn't dismiss the notice: ${String(e)}`;
@@ -132,7 +133,7 @@ async function onRestore(): Promise<void> {
           A restore was interrupted. Some attachments may be missing. coAuthor didn't delete
           anything.
         </p>
-        <div v-for="(n, i) in recoveryNotices" :key="i" data-test="recovery-notice-item">
+        <div v-for="(n, i) in recoveryNotices" :key="n.id || i" data-test="recovery-notice-item">
           <p v-if="n.folder && n.moved.length">
             Moved to <code>{{ n.folder }}</code
             >: {{ n.moved.join(', ') }}. To get an attachment back, copy it from that folder into
@@ -147,6 +148,11 @@ async function onRestore(): Promise<void> {
             coAuthor couldn't finish and will try again the next time it starts.
           </p>
           <p>Details: {{ n.reason }}</p>
+          <p v-if="n.corruptFile" data-test="recovery-notice-corrupt">
+            An earlier notice couldn't be read. It was kept, not deleted, at
+            <code>{{ n.corruptFile }}</code
+            >.
+          </p>
           <p v-if="n.saveError" data-test="recovery-notice-save-error">
             This notice couldn't be saved and won't show again after you close coAuthor:
             {{ n.saveError }}
