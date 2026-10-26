@@ -8,8 +8,7 @@ import {
   ReplaceStep,
   type Step,
 } from '@tiptap/pm/transform';
-import { ySyncPluginKey } from '@tiptap/y-tiptap';
-import { isApplyingFromY } from './ysource';
+import { isBindingTransaction } from './ysource';
 import { REVIEW_MARKS, SUGGESTION_MARKS, type ReviewMarkType } from './content';
 
 /**
@@ -20,8 +19,8 @@ import { REVIEW_MARKS, SUGGESTION_MARKS, type ReviewMarkType } from './content';
  * from `@coauthor/editor/trusted`. The meta is an unforgeable token: a plain
  * `setMeta('allowReviewEdits', true)` from a plugin or bot is ignored. Changes the Yjs binding
  * applies from the section's Y.Doc pass, since the Y.Doc is the source of truth; the y-sync
- * meta alone is forgeable, so a pass also needs the module-private flag from ./ysource, which
- * is raised only while the binding is applying a Y.Doc change.
+ * meta alone is forgeable, so only transaction objects the binding itself dispatched pass
+ * (tracked privately in ./ysource).
  */
 export const reviewGuardKey = new PluginKey('coauthorReviewGuard');
 /** Module-private token; only `allowReviewEdits` in ./trusted can attach it. */
@@ -87,11 +86,9 @@ export const ReviewGuard = Extension.create({
           !tr.docChanged ||
           tr.getMeta(reviewGuardKey) === REVIEW_EDIT_TOKEN ||
           // Changes the Yjs binding applies from the bound Y.Doc (peers, agents; validated in
-          // collab.ts). Requires both the binding's meta and the private apply flag, so a
-          // plugin that forges the meta is still checked.
-          (isApplyingFromY() &&
-            (tr.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | undefined)
-              ?.isChangeOrigin === true) ||
+          // collab.ts): only the exact transactions the binding dispatched, never a plugin's
+          // forged y-sync meta or a transaction appended in response.
+          isBindingTransaction(tr) ||
           !transactionChangesReview(tr),
       }),
     ];

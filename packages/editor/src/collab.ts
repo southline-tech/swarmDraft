@@ -18,7 +18,7 @@ import type * as Y from 'yjs';
 import type { Editor } from '@tiptap/core';
 import { manuscriptExtensions } from './extensions';
 import { EMPTY_DOC, manuscriptEditorOptions } from './index';
-import { asYApply, trackYApply } from './ysource';
+import { trustBindingDispatches } from './ysource';
 
 export const YJS_FRAGMENT = 'prosemirror';
 
@@ -55,8 +55,6 @@ export function collaborativeEditorOptions(
     });
   }
   let stop: (() => void) | undefined;
-  // Raised from the start so the binding's first render is trusted too.
-  const untrack = trackYApply(doc, ySyncPluginKey);
   return manuscriptEditorOptions({
     ...opts,
     onCreate: (props) => {
@@ -65,7 +63,6 @@ export function collaborativeEditorOptions(
     },
     onDestroy: () => {
       stop?.();
-      untrack();
       opts.onDestroy?.();
     },
     // Start from the stored content so the binding has nothing to write back on load.
@@ -78,13 +75,10 @@ export function collaborativeEditorOptions(
   });
 }
 
-type Binding = Record<'_forceRerender' | 'handleProjectionError', (...a: unknown[]) => unknown>;
-
 /**
- * The binding also renders the whole Y.Doc outside a Y transaction: on first render (from its
- * plugin view, before onCreate) and after a mapping loss or projection error. Wrap those methods
- * so their dispatches carry the trusted flag. Runs as plugin state init, after y-sync's state
- * exists and before any view is created.
+ * Mark the exact transactions the y-sync binding dispatches (see ./ysource) so the review guard
+ * lets them through. Runs as plugin state init: after y-sync's state exists, before any view is
+ * created, so the binding's first render is covered too.
  */
 const TrustBindingRenders = Extension.create({
   name: 'trustBindingRenders',
@@ -94,14 +88,11 @@ const TrustBindingRenders = Extension.create({
       new Plugin({
         state: {
           init: (_config, state) => {
-            const binding = (ySyncPluginKey.getState(state) as { binding?: Binding } | undefined)
-              ?.binding;
-            if (binding)
-              for (const name of ['_forceRerender', 'handleProjectionError'] as const) {
-                const original = binding[name];
-                if (typeof original === 'function')
-                  binding[name] = (...a) => asYApply(() => original.apply(binding, a));
-              }
+            const binding = (
+              ySyncPluginKey.getState(state) as
+                { binding?: Parameters<typeof trustBindingDispatches>[0] } | undefined
+            )?.binding;
+            if (binding) trustBindingDispatches(binding);
             return null;
           },
           apply: (_tr, v) => v,

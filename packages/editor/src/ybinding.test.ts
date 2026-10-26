@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { Editor } from '@tiptap/core';
+import { Editor, Extension } from '@tiptap/core';
+import { Plugin, type EditorState } from '@tiptap/pm/state';
 import * as Y from 'yjs';
 import { ySyncPluginKey } from '@tiptap/y-tiptap';
 import { docToYDoc, importDocx, markKey, rekeyMarks, yDocToDoc } from '@coauthor/docx';
@@ -216,6 +217,86 @@ describe('editor bound to a Y.Doc via y-prosemirror', () => {
     Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer));
     await new Promise((r) => setTimeout(r, 0));
     expect(collectReviewItems(editor.state.doc)).toEqual([]);
+    editor.destroy();
+  });
+
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  const forgedRemoval = (state: EditorState) =>
+    state.tr
+      .removeMark(0, state.doc.content.size, state.schema.marks.comment_anchor!)
+      .setMeta(ySyncPluginKey, { isChangeOrigin: true });
+  const peerOf = (doc: Y.Doc) => {
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(doc));
+    const pt = (peer.getXmlFragment('prosemirror').get(0) as Y.XmlElement).get(0) as Y.XmlText;
+    return { peer, pt };
+  };
+
+  it('refuses a forged meta dispatched from a Y observer during a local app transaction', async () => {
+    const doc = docToYDoc(commented as never);
+    const editor = new Editor(
+      collaborativeEditorOptions(doc, { element: document.createElement('div') }),
+    );
+    await tick();
+    const meta = doc.getMap('app');
+    meta.observe(() => editor.view.dispatch(forgedRemoval(editor.state)));
+    doc.transact(() => meta.set('k', 1), 'app');
+    await tick();
+    expect(ids(collectReviewItems(editor.state.doc))).toEqual(['comment_anchor:c1']);
+    expect(reviewIdsInY(doc)).toEqual(['comment_anchor:c1']);
+    editor.destroy();
+  });
+
+  it('refuses a forged appendTransaction while a real peer update applies', async () => {
+    const doc = docToYDoc(commented as never);
+    const Forger = Extension.create({
+      name: 'forger',
+      addProseMirrorPlugins: () => [
+        new Plugin({
+          appendTransaction: (trs, _old, state) =>
+            trs.some((t) => t.getMeta(ySyncPluginKey)) ? forgedRemoval(state) : null,
+        }),
+      ],
+    });
+    const editor = new Editor(
+      collaborativeEditorOptions(doc, {
+        element: document.createElement('div'),
+        extensions: [Forger],
+      }),
+    );
+    await tick();
+    const { peer, pt } = peerOf(doc);
+    pt.insert(pt.length, ' more');
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer));
+    await tick();
+    expect(editor.state.doc.textContent).toContain(' more');
+    expect(ids(collectReviewItems(editor.state.doc))).toEqual(['comment_anchor:c1']);
+    expect(reviewIdsInY(doc)).toEqual(['comment_anchor:c1']);
+    editor.destroy();
+  });
+
+  it('keeps refusing forged metas after onContentError throws', async () => {
+    const doc = docToYDoc(commented as never);
+    const editor = new Editor(
+      collaborativeEditorOptions(doc, {
+        element: document.createElement('div'),
+        onContentError: () => {
+          throw new Error('handler failed');
+        },
+      }),
+    );
+    await tick();
+    const { peer, pt } = peerOf(doc);
+    pt.format(0, 1, { glitter: {} });
+    try {
+      Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer));
+    } catch {
+      // the handler's error may surface here; trust must not leak either way
+    }
+    await tick();
+    editor.view.dispatch(forgedRemoval(editor.state));
+    await tick();
+    expect(ids(collectReviewItems(editor.state.doc))).toEqual(['comment_anchor:c1']);
     editor.destroy();
   });
 
