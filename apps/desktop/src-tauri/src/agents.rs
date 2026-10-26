@@ -178,6 +178,8 @@ impl Store {
     /// Revoke an agent and all of its tokens.
     pub fn revoke_agent(&self, agent_id: &str) -> Result<(), StorageError> {
         self.with_conn(|c| {
+            // Both updates or neither: never an active token on a revoked agent.
+            let c = c.unchecked_transaction()?;
             let n = c.execute(
                 &format!("UPDATE agents SET revoked_at = {NOW} WHERE id = ?1 AND revoked_at IS NULL"),
                 [agent_id],
@@ -186,9 +188,10 @@ impl Store {
                 &format!("UPDATE agent_tokens SET revoked_at = {NOW} WHERE agent_id = ?1 AND revoked_at IS NULL"),
                 [agent_id],
             )?;
-            if n == 0 && !exists(c, "agents", agent_id)? {
+            if n == 0 && !exists(&c, "agents", agent_id)? {
                 return Err(StorageError::NotFound(format!("agent {agent_id}")));
             }
+            c.commit()?;
             Ok(())
         })
     }
@@ -284,10 +287,15 @@ impl Store {
                 )
                 .optional()?;
             if let Some(p) = &p {
-                c.execute(
-                    &format!("UPDATE agent_tokens SET last_used_at = {NOW} WHERE id = ?1"),
+                // Best effort and throttled: at most one write per token per minute, and a
+                // failed write (e.g. a busy database) never fails authentication.
+                let _ = c.execute(
+                    &format!(
+                        "UPDATE agent_tokens SET last_used_at = {NOW} WHERE id = ?1 AND
+                         (last_used_at IS NULL OR last_used_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-60 seconds'))"
+                    ),
                     [&p.token_id],
-                )?;
+                );
             }
             Ok(p)
         })
@@ -329,10 +337,12 @@ mod tests {
             .unwrap();
         assert_eq!(stored, hash_token(&t.token));
         assert_ne!(stored, t.token);
-        // The plaintext token appears nowhere in the database file.
-        drop(s);
+        // The plaintext token appears nowhere on disk. Read while the store is still open:
+        // closing checkpoints and removes the WAL, which would make this check vacuous.
         let bytes = std::fs::read(_t.path().join("coauthor.db")).unwrap();
-        let wal = std::fs::read(_t.path().join("coauthor.db-wal")).unwrap_or_default();
+        let wal = std::fs::read(_t.path().join("coauthor.db-wal")).unwrap();
+        assert!(!wal.is_empty(), "the token row should still be in the WAL");
+        drop(s);
         let needle = t.token.as_bytes();
         for buf in [&bytes, &wal] {
             assert!(!buf.windows(needle.len()).any(|w| w == needle));
@@ -359,6 +369,51 @@ mod tests {
             "revoked token fails immediately"
         );
         assert!(s.list_tokens(&a.id).unwrap()[0].revoked_at.is_some());
+    }
+
+    #[test]
+    fn last_used_is_written_at_most_once_a_minute() {
+        let (_t, s) = store();
+        let a = s.create_agent("Grok Bot", "#3366ff").unwrap();
+        let t = s.create_token(&a.id, None).unwrap();
+        let last = |s: &Store| s.list_tokens(&a.id).unwrap()[0].last_used_at.clone();
+        s.authenticate(&t.token).unwrap().unwrap();
+        let first = last(&s).unwrap();
+        s.authenticate(&t.token).unwrap().unwrap();
+        assert_eq!(last(&s).unwrap(), first, "fresh value is not rewritten");
+        s.with_conn(|c| {
+            c.execute(
+                "UPDATE agent_tokens SET last_used_at = '2000-01-01T00:00:00.000Z'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        s.authenticate(&t.token).unwrap().unwrap();
+        assert!(
+            last(&s).unwrap().as_str() > "2001",
+            "stale value is refreshed"
+        );
+    }
+
+    #[test]
+    fn foreign_keys_are_enforced_and_cascade() {
+        let (_t, s) = store();
+        let a = s.create_agent("Grok Bot", "#3366ff").unwrap();
+        s.create_token(&a.id, None).unwrap();
+        s.with_conn(|c| {
+            let orphan = c.execute(
+                "INSERT INTO agent_tokens (id, agent_id, token_hash, prefix, scopes, created_at)
+                 VALUES ('x', 'no-such-agent', 'h', 'p', 'read', 'now')",
+                [],
+            );
+            assert!(orphan.is_err(), "orphan token rejected");
+            c.execute("DELETE FROM agents WHERE id = ?1", [&a.id])?;
+            let n: i64 = c.query_row("SELECT COUNT(*) FROM agent_tokens", [], |r| r.get(0))?;
+            assert_eq!(n, 0, "tokens deleted with their agent");
+            Ok(())
+        })
+        .unwrap();
     }
 
     #[test]

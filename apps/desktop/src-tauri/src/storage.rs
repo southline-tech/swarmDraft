@@ -39,6 +39,22 @@ const MIGRATIONS: &[&str] = &[
         revoked_at TEXT
      );
      CREATE INDEX agent_tokens_agent ON agent_tokens(agent_id);",
+    // Tokens go with their agent (foreign keys are enforced from here on; see Store::open).
+    "CREATE TABLE agent_tokens_new (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+        token_hash TEXT NOT NULL UNIQUE,
+        prefix TEXT NOT NULL,
+        scopes TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        last_used_at TEXT,
+        revoked_at TEXT
+     );
+     INSERT INTO agent_tokens_new SELECT id, agent_id, token_hash, prefix, scopes, created_at,
+        last_used_at, revoked_at FROM agent_tokens;
+     DROP TABLE agent_tokens;
+     ALTER TABLE agent_tokens_new RENAME TO agent_tokens;
+     CREATE INDEX agent_tokens_agent ON agent_tokens(agent_id);",
 ];
 
 pub struct Store {
@@ -52,6 +68,9 @@ impl Store {
         let mut conn = Connection::open(dir.join("coauthor.db"))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         migrate(&mut conn)?;
+        // After migrating: table rebuilds above need foreign keys off, which SQLite can't
+        // toggle inside the migration transaction.
+        conn.pragma_update(None, "foreign_keys", "ON")?;
         Ok(Self {
             dir: dir.to_path_buf(),
             conn: Mutex::new(conn),
