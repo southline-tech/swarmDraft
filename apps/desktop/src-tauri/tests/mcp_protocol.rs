@@ -577,3 +577,24 @@ async fn cached_token_revoked_out_of_band_gets_401() {
     s.store.clear_token_cache();
     assert!(!s.store.is_known_token_hash(&hash));
 }
+
+#[tokio::test]
+async fn cached_token_is_rejected_after_a_restore() {
+    let s = start(&["read"], 100).await;
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}});
+    assert_eq!(
+        post(&s.url, Some(&s.token), body.clone()).await.status(),
+        200
+    );
+    let hash = coauthor_lib::agents::hash_token(&s.token);
+    assert!(s.store.is_known_token_hash(&hash), "token is cached");
+    let zip = s.store.data_dir().join("synthetic-backup.zip");
+    coauthor_lib::backup::create_backup_to(&s.store, "0.0.0", &zip, false).unwrap();
+    let report = coauthor_lib::backup::restore_backup(&s.store, "0.0.0", &zip).unwrap();
+    assert!(report.tokens_revoked >= 1);
+    assert!(
+        !s.store.is_known_token_hash(&hash),
+        "restore clears the token cache"
+    );
+    assert_eq!(post(&s.url, Some(&s.token), body).await.status(), 401);
+}
