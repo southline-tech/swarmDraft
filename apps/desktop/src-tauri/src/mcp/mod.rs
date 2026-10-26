@@ -16,7 +16,7 @@
 
 mod tools;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -30,6 +30,7 @@ use rmcp::transport::streamable_http_server::session::never::NeverSessionManager
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 
 use crate::storage::Store;
+use tokio::sync::Semaphore;
 pub use tools::CoauthorMcp;
 
 pub const DEFAULT_HOST: &str = "127.0.0.1";
@@ -46,6 +47,11 @@ pub struct McpConfig {
     pub rate_limit: u32,
     /// Wrong-token attempts per window before further wrong tokens get 429.
     pub auth_failures_global: u32,
+    /// Requests that may be past the token check at once (lookup plus handling). Requests
+    /// without a token never take a slot.
+    pub max_in_flight: usize,
+    /// Concurrent token lookups (the store has one SQLite connection).
+    pub max_lookups: usize,
     /// Every auth failure takes at least this long, whatever the reason.
     pub auth_failure_floor: Duration,
 }
@@ -56,6 +62,8 @@ impl McpConfig {
             port,
             rate_limit: RATE_LIMIT,
             auth_failures_global: 50,
+            max_in_flight: 64,
+            max_lookups: 4,
             auth_failure_floor: Duration::from_millis(250),
         }
     }
@@ -93,6 +101,12 @@ struct Gate {
     allowed_hosts: Arc<Vec<String>>,
     per_token: Arc<Mutex<HashMap<String, Window>>>,
     failures: Arc<Mutex<Option<Window>>>,
+    /// Hashes of tokens that authenticated before. Once the wrong-token budget is spent, only
+    /// these (plus one probe at a time for anything else) are looked up.
+    known_good: Arc<Mutex<HashSet<String>>>,
+    in_flight: Arc<Semaphore>,
+    lookups: Arc<Semaphore>,
+    probe: Arc<Semaphore>,
     stats: Arc<GateStats>,
 }
 
@@ -102,6 +116,12 @@ impl Gate {
         let now = Instant::now();
         let w = m.entry(token_id.to_string()).or_insert((now, 0));
         bump(w, now) <= self.cfg.rate_limit
+    }
+
+    fn budget_spent(&self) -> bool {
+        let f = self.failures.lock().expect("limiter poisoned");
+        f.as_ref()
+            .is_some_and(|w| current(w, Instant::now()) >= self.cfg.auth_failures_global)
     }
 
     /// True when this wrong-token attempt is over the global budget. Counts the attempt.
@@ -153,30 +173,62 @@ async fn host_guard(State(gate): State<Gate>, req: Request, next: Next) -> Respo
     next.run(req).await
 }
 
+/// `Authorization: Bearer <token>`, scheme matched case-insensitively.
+fn bearer(req: &Request) -> Option<String> {
+    let v = req.headers().get(header::AUTHORIZATION)?.to_str().ok()?;
+    let (scheme, token) = v.trim().split_once(' ')?;
+    let token = token.trim();
+    (scheme.eq_ignore_ascii_case("bearer") && !token.is_empty()).then(|| token.to_string())
+}
+
 async fn auth(State(gate): State<Gate>, mut req: Request, next: Next) -> Response {
     let deadline = tokio::time::Instant::now() + gate.cfg.auth_failure_floor;
-    let token = req
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .map(|t| t.trim().to_string());
     // No token: plain 401, not counted, so a web page can't use it to lock out agents.
-    let Some(token) = token else {
+    let Some(token) = bearer(&req) else {
         tokio::time::sleep_until(deadline).await;
         return unauthorized();
     };
-    // The token is checked before any throttling, so a valid token always gets through.
-    gate.stats.auth_lookups.fetch_add(1, Ordering::Relaxed);
-    let store = gate.store.clone();
-    let principal = match tokio::task::spawn_blocking(move || store.authenticate(&token)).await {
+    let hash = crate::agents::hash_token(&token);
+    let known = gate
+        .known_good
+        .lock()
+        .expect("limiter poisoned")
+        .contains(&hash);
+    // Once the wrong-token budget is spent, unknown tokens don't reach the database except one
+    // probe at a time (so a brand-new valid token still gets in). Known tokens always do.
+    let _probe = if !known && gate.budget_spent() {
+        match gate.probe.clone().try_acquire_owned() {
+            Ok(p) => Some(p),
+            Err(_) => {
+                tokio::time::sleep_until(deadline).await;
+                return too_many();
+            }
+        }
+    } else {
+        None
+    };
+    let Ok(_slot) = gate.in_flight.clone().acquire_owned().await else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    let looked_up = {
+        let Ok(_l) = gate.lookups.acquire().await else {
+            return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        };
+        gate.stats.auth_lookups.fetch_add(1, Ordering::Relaxed);
+        let store = gate.store.clone();
+        tokio::task::spawn_blocking(move || store.authenticate(&token)).await
+    };
+    drop(_probe);
+    let principal = match looked_up {
         Ok(Ok(p)) => p,
         _ => {
+            drop(_slot);
             tokio::time::sleep_until(deadline).await;
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
     let Some(principal) = principal else {
+        drop(_slot);
         let throttled = gate.wrong_token_throttled();
         tokio::time::sleep_until(deadline).await;
         return if throttled {
@@ -185,6 +237,13 @@ async fn auth(State(gate): State<Gate>, mut req: Request, next: Next) -> Respons
             unauthorized()
         };
     };
+    {
+        let mut k = gate.known_good.lock().expect("limiter poisoned");
+        if k.len() >= 1024 {
+            k.clear();
+        }
+        k.insert(hash);
+    }
     if !gate.allow_token(&principal.token_id) {
         return too_many();
     }
@@ -206,6 +265,8 @@ pub fn router_with_stats(store: Store, cfg: McpConfig) -> (axum::Router, Arc<Gat
             .enforce_origin_validation(),
     );
     let p = cfg.port;
+    let in_flight = Arc::new(Semaphore::new(cfg.max_in_flight));
+    let lookups = Arc::new(Semaphore::new(cfg.max_lookups));
     let gate = Gate {
         store,
         allowed_hosts: Arc::new(vec![
@@ -216,6 +277,10 @@ pub fn router_with_stats(store: Store, cfg: McpConfig) -> (axum::Router, Arc<Gat
         cfg,
         per_token: Arc::default(),
         failures: Arc::default(),
+        known_good: Arc::default(),
+        in_flight,
+        lookups,
+        probe: Arc::new(Semaphore::new(1)),
         stats: Arc::default(),
     };
     let stats = gate.stats.clone();
