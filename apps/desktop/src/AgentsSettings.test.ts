@@ -82,6 +82,11 @@ describe('AgentsSettings', () => {
     expect(w.find('[data-test="copied"]').text()).toBe('Copied');
     expect(w.find('[data-test="copy-failed"]').exists()).toBe(false);
     expect(w.find('[data-test="token-once"]').exists()).toBe(true);
+    const tok = w.find('[data-test="token-value"]');
+    expect(tok.attributes('autocomplete')).toBe('off');
+    expect(tok.attributes('autocapitalize')).toBe('off');
+    expect(tok.attributes('autocorrect')).toBe('off');
+    expect(tok.attributes('spellcheck')).toBe('false');
   });
 
   it.each([
@@ -112,6 +117,11 @@ describe('AgentsSettings', () => {
     expect(w.find('[data-test="token-once"]').exists()).toBe(true);
     expect(el.value).toBe('cat_abcdefSECRET');
     expect(el.readOnly).toBe(true);
+    // The failed copy itself focuses and fully selects the token.
+    expect(document.activeElement).toBe(el);
+    expect(el.selectionStart).toBe(0);
+    expect(el.selectionEnd).toBe('cat_abcdefSECRET'.length);
+    el.setSelectionRange(0, 0);
     await input.trigger('focus');
     expect(el.selectionStart).toBe(0);
     expect(el.selectionEnd).toBe('cat_abcdefSECRET'.length);

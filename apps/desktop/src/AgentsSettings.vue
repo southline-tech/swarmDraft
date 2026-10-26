@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Settings → Agents (RAD-205): create agents, mint tokens (shown once), revoke. */
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import {
   AGENT_SCOPES,
   agentsApi,
@@ -28,6 +28,7 @@ const shownToken = ref<{ agentId: string; token: string } | null>(null);
 const error = ref('');
 const copied = ref(false);
 const copyFailed = ref(false);
+const tokenInput = ref<HTMLInputElement | null>(null);
 
 /**
  * Copy the shown token. On failure (clipboard missing, permission denied, webview quirk) the
@@ -42,6 +43,10 @@ async function copyToken() {
     copied.value = true;
   } catch {
     copyFailed.value = true;
+    // Focus (and so select) the token, so the "selected above" hint is true.
+    await nextTick();
+    tokenInput.value?.focus();
+    tokenInput.value?.select();
   }
 }
 
@@ -132,7 +137,11 @@ onBeforeUnmount(() => {
         class="token-value"
         data-test="token-value"
         aria-label="New agent token"
+        ref="tokenInput"
         readonly
+        autocomplete="off"
+        autocapitalize="off"
+        autocorrect="off"
         spellcheck="false"
         :value="shownToken.token"
         @focus="selectAll"
