@@ -1,13 +1,12 @@
 /**
- * Editor package: the Tiptap manuscript editor (RAD-202) and its Yjs binding (`./collab`).
+ * Editor package: the Tiptap manuscript editor (RAD-202), its Yjs binding (`./collab`) and the
+ * parts/chapters/scenes outline (`./outline`, RAD-214). Local persistence lands next (RAD-203).
  */
 import { Editor, Extension, type EditorOptions, type JSONContent } from '@tiptap/core';
 import { Plugin } from '@tiptap/pm/state';
-import type { Section } from '@coauthor/schema';
 import { manuscriptExtensions } from './extensions';
 
-export type OutlineNode = Section & { children: OutlineNode[] };
-
+export * from './outline';
 export * from './content';
 export * from './extensions';
 export * from './collab';
