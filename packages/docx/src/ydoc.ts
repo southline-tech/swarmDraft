@@ -1,27 +1,17 @@
 /**
  * ProseMirror JSON <-> Yjs, using the same encoding as y-prosemirror
  * (Y.XmlFragment named "prosemirror"; nodes are Y.XmlElement, marks are
- * Y.XmlText format attributes keyed by mark type, or `type--id` for marks
- * that may overlap with another of the same type, as y-prosemirror does).
+ * Y.XmlText format attributes keyed by mark type, or `type--<8 hex>` (see
+ * markKeys in @coauthor/schema) for marks that may overlap another of the same type).
  */
 import * as Y from 'yjs';
-import { NON_EXCLUSIVE_MARKS } from '@coauthor/schema';
+import { markKeys, markTypeFromKey } from '@coauthor/schema';
 import { sortMarks, type DocNode, type InlineNode, type Mark } from './model';
 import type { ImportedManuscript } from './import';
 
 export const FRAGMENT_NAME = 'prosemirror';
 
-export function markKey(m: Mark): string {
-  // Comment and suggestion ids are unique, so `type--id` never collides (y-prosemirror style).
-  return NON_EXCLUSIVE_MARKS.includes(m.type) && 'attrs' in m && 'id' in m.attrs
-    ? `${m.type}--${m.attrs.id}`
-    : m.type;
-}
-
-export function markTypeFromKey(key: string): string {
-  const i = key.indexOf('--');
-  return i < 0 ? key : key.slice(0, i);
-}
+export { markKey, markTypeFromKey } from '@coauthor/schema';
 
 interface PMNode {
   type: string;
@@ -40,7 +30,11 @@ function fill(parent: Y.XmlFragment | Y.XmlElement, nodes: PMNode[]): void {
     let offset = 0;
     for (const n of pendingText) {
       const attrs: Record<string, unknown> = {};
-      for (const m of n.marks ?? []) attrs[markKey(m)] = 'attrs' in m ? m.attrs : {};
+      const marks = n.marks ?? [];
+      markKeys(marks).forEach((k, i) => {
+        const m = marks[i]!;
+        attrs[k] = 'attrs' in m ? m.attrs : {};
+      });
       t.insert(offset, n.text ?? '', attrs);
       offset += (n.text ?? '').length;
     }
@@ -102,6 +96,47 @@ function read(el: Y.XmlFragment | Y.XmlElement): PMNode[] {
 
 export function yDocToDoc(ydoc: Y.Doc): DocNode {
   return { type: 'doc', content: read(ydoc.getXmlFragment(FRAGMENT_NAME)) as DocNode['content'] };
+}
+
+function texts(el: Y.XmlFragment | Y.XmlElement, out: Y.XmlText[] = []): Y.XmlText[] {
+  for (const c of el.toArray()) {
+    if (c instanceof Y.XmlText) out.push(c);
+    else if (c instanceof Y.XmlElement) texts(c, out);
+  }
+  return out;
+}
+
+/**
+ * Re-key mark attributes written in an older form (e.g. `comment_anchor--c1` from RAD-218) to
+ * the current `type--<8 base64>` keys, keeping each mark's attrs (and so its id). Idempotent:
+ * returns the number of text runs changed, 0 when the doc is already current. Runs in one
+ * transaction with origin `REKEY_ORIGIN`.
+ */
+export const REKEY_ORIGIN = 'coauthor:rekey-marks';
+export function rekeyMarks(ydoc: Y.Doc): number {
+  const ops: [Y.XmlText, number, number, Record<string, unknown>][] = [];
+  for (const t of texts(ydoc.getXmlFragment(FRAGMENT_NAME))) {
+    let index = 0;
+    for (const d of t.toDelta() as { insert: unknown; attributes?: Record<string, unknown> }[]) {
+      const len = typeof d.insert === 'string' ? d.insert.length : 1;
+      const entries = Object.entries(d.attributes ?? {});
+      const marks = entries.map(([k, attrs]) => ({
+        type: markTypeFromKey(k),
+        attrs: (attrs && typeof attrs === 'object' ? attrs : {}) as Record<string, unknown>,
+      }));
+      const keys = markKeys(marks);
+      if (entries.some(([k], i) => k !== keys[i])) {
+        const fmt: Record<string, unknown> = {};
+        for (const [k] of entries) fmt[k] = null;
+        entries.forEach(([, v], i) => (fmt[keys[i]!] = v));
+        ops.push([t, index, len, fmt]);
+      }
+      index += len;
+    }
+  }
+  if (ops.length)
+    ydoc.transact(() => ops.forEach(([t, i, l, f]) => t.format(i, l, f)), REKEY_ORIGIN);
+  return ops.length;
 }
 
 /** One Y.Doc per section, keyed by the section's docId. */

@@ -1,13 +1,17 @@
 /**
- * Trusted review entry point (`@coauthor/editor/trusted`). Only the desktop review UI may
- * import this; agent/MCP code paths must not (enforced by trusted.test.ts).
- *
- * Until the editor (#7) is on main this is a stub port over a document store: it re-reads the
- * live document at apply time and runs the reference transform. With #7 it becomes a
- * ProseMirror transaction that finds marks by attrs.id and sets `allowReviewEdits(tr)`.
+ * Trusted-only helpers, imported from `@coauthor/editor/trusted` by app code. Not re-exported
+ * from the package root, so editor plugins and agent-facing code do not get them.
+ * Also hosts the review decision port (RAD-211).
  */
+import type { Transaction } from '@tiptap/pm/state';
+import { REVIEW_EDIT_TOKEN, reviewGuardKey } from './review';
 import type { DocNode } from '@coauthor/schema';
 import { decideSuggestions, type DecisionOp, type ReviewTransactionPort } from './decisions';
+
+/** Let this transaction add, remove or edit review marks. */
+export function allowReviewEdits(tr: Transaction): Transaction {
+  return tr.setMeta(reviewGuardKey, REVIEW_EDIT_TOKEN);
+}
 
 export interface LiveDocStore {
   /** Current document at the moment of apply (not a snapshot taken earlier). */
@@ -16,7 +20,7 @@ export interface LiveDocStore {
   commit(next: DocNode): void;
 }
 
-// TODO(RAD-211, when #7 is wired): replace this stub with a ProseMirror transaction that finds
+// TODO(RAD-211, next: #7 is now on main): replace this stub with a ProseMirror transaction that finds
 // each target mark by attrs.id on the live editor state, applies the change, and is tagged with
 // `allowReviewEdits(tr)` from the editor's trusted module so the review guard lets it through.
 export function createReviewPort(store: LiveDocStore): ReviewTransactionPort {

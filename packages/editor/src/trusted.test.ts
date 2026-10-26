@@ -4,10 +4,7 @@ import { expect, it } from 'vitest';
 
 const root = resolve(__dirname, '../../..');
 /** Only the desktop review UI may import the trusted entry point. */
-const ALLOWED = [
-  /^apps\/desktop\/src\/review\//,
-  /^packages\/editor\/src\/(trusted|decisions)\.test\.ts$/,
-];
+const ALLOWED = [/^apps\/desktop\/src\/review\//, /^packages\/editor\/src\/[\w.-]+\.test\.ts$/];
 
 function* files(dir: string): Generator<string> {
   for (const name of readdirSync(dir)) {

@@ -14,9 +14,16 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@coauthor/schema": "workspace:*"
+    "@coauthor/schema": "workspace:*",
+    "@tiptap/core": "3.32.0",
+    "@tiptap/pm": "3.32.0"
   },
   "devDependencies": {
-    "vitest": "^3.2.4"
+    "@coauthor/docx": "workspace:*",
+    "@tiptap/extension-collaboration": "3.32.0",
+    "@tiptap/y-tiptap": "^3.0.10",
+    "happy-dom": "^15.11.7",
+    "vitest": "^3.2.4",
+    "yjs": "^13.6.33"
   }
 }
