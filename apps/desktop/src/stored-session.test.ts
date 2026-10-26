@@ -80,4 +80,46 @@ describe('sessionFromStored', () => {
     expect(save.mock.calls[1]![1]).toEqual(save.mock.calls[0]![1]);
     await s.close();
   });
+
+  it('retries a failing batch on its own, then drops it after maxAttempts', async () => {
+    const stored = storedFixture();
+    const save = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('locked'))
+      .mockRejectedValueOnce(new Error('locked'))
+      .mockRejectedValueOnce(new Error('locked'))
+      .mockResolvedValue(undefined);
+    const onError = vi.fn();
+    const s = sessionFromStored(stored, null, {
+      save,
+      onError,
+      debounceMs: 60_000,
+      maxAttempts: 3,
+    });
+    const doc = s.sections.get(stored.sections[1]!.docId)!;
+    firstText(doc).insert(0, 'A');
+    await s.flush(); // attempt 1 fails
+    const bad = save.mock.calls[0]![1];
+    firstText(doc).insert(0, 'B');
+    await s.flush(); // attempt 2 of the failed batch alone; B waits, unmerged
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save.mock.calls[1]![1]).toEqual(bad);
+    await s.flush(); // attempt 3 fails: dropped; B is saved on its own
+    expect(onError.mock.calls.map((c) => c[1])).toEqual([
+      { dropped: false },
+      { dropped: false },
+      { dropped: true },
+    ]);
+    expect(save).toHaveBeenCalledTimes(4);
+    const later = save.mock.calls[3]![1] as Uint8Array;
+    expect(later).not.toEqual(bad);
+    const d = new Y.Doc();
+    Y.applyUpdate(d, Uint8Array.from(stored.sections[1]!.state));
+    Y.applyUpdate(d, bad);
+    Y.applyUpdate(d, later);
+    expect(firstText(d).toString().startsWith('BA')).toBe(true);
+    await s.flush();
+    expect(save).toHaveBeenCalledTimes(4);
+    await s.close();
+  });
 });

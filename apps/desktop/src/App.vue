@@ -15,6 +15,7 @@ import {
 import AgentsSettings from './AgentsSettings.vue';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
+import { flushOnClose } from './close-flush';
 import { importAndOpen, reopenLatest, type ManuscriptSession } from './manuscript-session';
 
 const info = ref<AppInfo | null>(null);
@@ -37,8 +38,10 @@ async function dismissRecovery() {
 const openError = ref('');
 const importing = ref(false);
 const saveError = ref('');
-const onSaveError = (err: unknown) =>
-  (saveError.value = `Could not save your latest edits: ${String(err)}`);
+const onSaveError = (err: unknown, { dropped }: { dropped: boolean }) =>
+  (saveError.value = dropped
+    ? `Some edits could not be saved and were dropped: ${String(err)}`
+    : `Could not save your latest edits (will retry): ${String(err)}`);
 /**
  * Bumped by the editor's Reload action to reopen the section from its Y.Doc. The editor is bound
  * to that doc, so everything typed is already in it and survives the remount (and switching
@@ -47,6 +50,7 @@ const onSaveError = (err: unknown) =>
  */
 const reloads = ref(0);
 
+let stopCloseFlush = () => {};
 onMounted(async () => {
   info.value = await getAppInfo();
   if (info.value) {
@@ -62,7 +66,7 @@ onMounted(async () => {
       openError.value = `Could not reopen the last manuscript: ${String(err)}`;
     }
   }
-  window.addEventListener('pagehide', () => void session.value?.flush());
+  stopCloseFlush = await flushOnClose(() => session.value?.flush() ?? Promise.resolve());
 });
 
 const backupStatus = ref('');
@@ -103,6 +107,8 @@ async function onRestore(): Promise<void> {
   confirmingRestore.value = false;
   if (!restorePath.value.trim()) return;
   try {
+    // Save pending edits first so the pre-restore snapshot includes them.
+    await session.value?.flush();
     const r = await restoreBackup(restorePath.value.trim());
     // The restore replaced storage, so the open session's in-memory docs are stale: close them
     // (stops the structure observer and unmounts the editor) so nothing can write them back.
@@ -113,7 +119,10 @@ async function onRestore(): Promise<void> {
     backupStatus.value = `Restore failed: ${String(e)}`;
   }
 }
-onBeforeUnmount(() => void session.value?.close());
+onBeforeUnmount(() => {
+  stopCloseFlush();
+  void session.value?.close();
+});
 
 /** Close the open manuscript, if any, and clear the selection. */
 function closeSession() {
@@ -254,6 +263,7 @@ defineExpose({ open });
         :manuscript-id="session.id"
         :selected-id="selectedId"
         :save="session.save"
+        :locked="session.outlineLocked"
         @select="selectedId = $event"
       />
       <ManuscriptEditor

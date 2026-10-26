@@ -35,6 +35,11 @@ export interface ManuscriptSession {
   report: ImportReport | null;
   /** Problems repaired when the stored outline was opened (already saved back). */
   repairs: OutlineIssue[];
+  /**
+   * Why outline edits (add, rename, reorder, move, delete) are turned off, if they are. Set for
+   * stored manuscripts until outline changes are saved to the database (RAD-263).
+   */
+  outlineLocked?: string;
   save(next: Section[]): void;
   /** Write pending section edits to storage now (no-op without storage). */
   flush(): Promise<void>;
@@ -52,6 +57,7 @@ export function openSession(
   sections: Map<string, Y.Doc>,
   report: ImportReport | null,
   persist?: SectionPersister,
+  outlineLocked?: string,
 ): ManuscriptSession {
   // Y.Docs must never be wrapped in Vue reactive proxies: Yjs observers compare types by identity,
   // so a proxied doc silently stops delivering remote changes. (ManuscriptEditor also toRaw's.)
@@ -78,6 +84,7 @@ export function openSession(
     outline,
     report,
     repairs,
+    outlineLocked,
     save: (next) => writeStructure(manuscript, next),
     flush: () => saver?.flush() ?? Promise.resolve(),
     close: async (opts) => {
@@ -127,8 +134,13 @@ export interface SectionPersister {
   save: SaveSectionUpdate;
   /** Quiet time before pending edits are written (ms). */
   debounceMs?: number;
-  /** Called when a write fails; the edits stay pending and are retried on the next flush. */
-  onError?: (err: unknown) => void;
+  /**
+   * A batch that fails to save is kept apart from later edits and retried on the next flush, up
+   * to `maxAttempts` (default 3) in all; then it is dropped and reported with `dropped: true`.
+   */
+  maxAttempts?: number;
+  /** Called when a write fails. */
+  onError?: (err: unknown, info: { dropped: boolean }) => void;
 }
 
 /** Origin used when loading stored state, so loading is not echoed back as an edit. */
@@ -142,6 +154,9 @@ export const SAVE_DEBOUNCE_MS = 500;
  */
 function watchSections(manuscript: Y.Doc, docs: Map<string, Y.Doc>, p: SectionPersister) {
   const pending = new Map<string, Uint8Array[]>();
+  // A batch that failed to save, kept separate so it isn't merged with every later edit.
+  const failed = new Map<string, { update: Uint8Array; attempts: number }>();
+  const maxAttempts = p.maxAttempts ?? 3;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let inflight: Promise<void> = Promise.resolve();
   const sectionIdOf = (docId: string) =>
@@ -150,18 +165,38 @@ function watchSections(manuscript: Y.Doc, docs: Map<string, Y.Doc>, p: SectionPe
     if (timer) clearTimeout(timer);
     timer = undefined;
     inflight = inflight.then(async () => {
-      const batch = [...pending];
+      const batch = new Map(pending);
       pending.clear();
-      for (const [docId, updates] of batch) {
+      for (const docId of new Set([...failed.keys(), ...batch.keys()])) {
         const sectionId = sectionIdOf(docId);
         if (!sectionId) continue;
+        // Retry an earlier failure on its own first (Yjs updates are idempotent, so it's safe).
+        const retry = failed.get(docId);
+        if (retry) {
+          try {
+            await p.save(sectionId, retry.update);
+            failed.delete(docId);
+          } catch (err) {
+            retry.attempts++;
+            const dropped = retry.attempts >= maxAttempts;
+            if (dropped) failed.delete(docId);
+            p.onError?.(err, { dropped });
+          }
+        }
+        const updates = batch.get(docId);
+        if (!updates) continue;
         const merged = Y.mergeUpdates(updates);
+        if (failed.has(docId)) {
+          // The earlier batch is still failing: keep these edits pending, unmerged with it.
+          pending.set(docId, [merged, ...(pending.get(docId) ?? [])]);
+          continue;
+        }
         try {
           await p.save(sectionId, merged);
         } catch (err) {
-          // Keep it for the next flush; Yjs updates are idempotent, so a retry is safe.
-          pending.set(docId, [merged, ...(pending.get(docId) ?? [])]);
-          p.onError?.(err);
+          const dropped = maxAttempts <= 1;
+          if (!dropped) failed.set(docId, { update: merged, attempts: 1 });
+          p.onError?.(err, { dropped });
         }
       }
     });
@@ -183,10 +218,15 @@ function watchSections(manuscript: Y.Doc, docs: Map<string, Y.Doc>, p: SectionPe
       if (timer) clearTimeout(timer);
       timer = undefined;
       pending.clear();
+      failed.clear();
     },
     stop: () => offs.forEach((f) => f()),
   };
 }
+
+/** Shown on the outline of a stored manuscript until its outline changes are saved (RAD-263). */
+export const OUTLINE_LOCKED =
+  "Adding, renaming, moving and deleting sections is turned off for now: those changes aren't saved yet (RAD-263). Your text edits are saved.";
 
 /**
  * Open a session over a manuscript as stored in the database: the outline uses the stored
@@ -223,6 +263,7 @@ export function sessionFromStored(
     sections,
     report,
     persist,
+    OUTLINE_LOCKED,
   );
 }
 
@@ -230,7 +271,7 @@ export function sessionFromStored(
 export function openStored(
   stored: StoredManuscript,
   report: ImportReport | null,
-  onError?: (err: unknown) => void,
+  onError?: (err: unknown, info: { dropped: boolean }) => void,
 ): ManuscriptSession {
   const id = stored.manuscript.id;
   return sessionFromStored(stored, report, {
@@ -246,7 +287,7 @@ export function openStored(
  */
 export async function importAndOpen(
   bytes: Uint8Array,
-  onError?: (err: unknown) => void,
+  onError?: (err: unknown, info: { dropped: boolean }) => void,
 ): Promise<ManuscriptSession> {
   const id = crypto.randomUUID();
   const imported = importDocx(bytes, { manuscriptId: id });
@@ -256,7 +297,7 @@ export async function importAndOpen(
 
 /** Reopen the most recent stored manuscript (null if none or no database). */
 export async function reopenLatest(
-  onError?: (err: unknown) => void,
+  onError?: (err: unknown, info: { dropped: boolean }) => void,
 ): Promise<ManuscriptSession | null> {
   const latest = await openLatestManuscript();
   return latest ? openStored(latest, null, onError) : null;

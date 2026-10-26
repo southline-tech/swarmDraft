@@ -1,11 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import type { Section } from '@coauthor/schema';
 import SectionNav from './SectionNav.vue';
 import { SAMPLE_MANUSCRIPT_ID, sampleOutline } from './fixtures/outline-sample';
 
 function setup(
-  opts: { selectedId?: string; sections?: Section[]; save?: (s: Section[]) => unknown } = {},
+  opts: {
+    selectedId?: string;
+    sections?: Section[];
+    save?: (s: Section[]) => unknown;
+    locked?: string;
+  } = {},
 ) {
   const w = mount(SectionNav, {
     props: {
@@ -13,6 +18,7 @@ function setup(
       sections: opts.sections ?? sampleOutline(),
       ...(opts.selectedId ? { selectedId: opts.selectedId } : {}),
       ...(opts.save ? { save: opts.save as never } : {}),
+      ...(opts.locked ? { locked: opts.locked } : {}),
       'onUpdate:sections': (s: Section[]) => w.setProps({ sections: s }),
       onSelect: (id: string) => w.setProps({ selectedId: id }),
     },
@@ -195,6 +201,35 @@ describe('SectionNav', () => {
     expect(saved.find((s) => s.id === 'c~2')!.docId).toBe('d/c2');
     expect(saved.find((s) => s.id === 'c')!.parentId).toBe('b');
     expect(w.find('[data-test="outline-repaired"]').exists()).toBe(false);
+    w.unmount();
+  });
+});
+
+describe('SectionNav locked (RAD-263)', () => {
+  it('turns off add, rename, reorder, move and delete, and says why', async () => {
+    const outline = sampleOutline();
+    const save = vi.fn();
+    const w = setup({ selectedId: outline[1]!.id, save, locked: 'Not saved yet (RAD-263).' });
+    await flushPromises();
+    expect(w.find('[data-test="outline-locked"]').text()).toContain('RAD-263');
+    const controls = w.findAll('.actions button, .actions select');
+    expect(controls.length).toBeGreaterThan(5);
+    for (const c of controls) {
+      expect(c.attributes('disabled')).toBeDefined();
+      expect(c.attributes('title')).toContain('RAD-263');
+    }
+    expect(w.find('[data-test="add-part"]').attributes('disabled')).toBeDefined();
+    const row = w.find(`[data-test="section-${outline[1]!.id}"]`);
+    expect(row.attributes('draggable')).toBe('false');
+    await row.trigger('dblclick');
+    await row.trigger('keydown', { key: 'F2' });
+    await row.trigger('keydown', { key: 'ArrowDown', altKey: true });
+    await flushPromises();
+    expect(w.find('[data-test="rename-input"]').exists()).toBe(false);
+    expect(save).not.toHaveBeenCalled();
+    // Selecting a section still works.
+    await w.find(`[data-test="section-${outline[0]!.id}"]`).trigger('click');
+    expect(w.props('selectedId')).toBe(outline[0]!.id);
     w.unmount();
   });
 });

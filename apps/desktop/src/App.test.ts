@@ -378,6 +378,38 @@ vi.mock('./backend', async (orig) => ({
 }));
 
 describe('restore confirmation', () => {
+  it('saves pending edits before the restore snapshot, then drops the stale session', async () => {
+    const backend = await import('./backend');
+    const order: string[] = [];
+    vi.mocked(backend.saveSectionUpdate).mockImplementation(async () => void order.push('save'));
+    vi.mocked(backend.restoreBackup).mockImplementationOnce(async () => {
+      order.push('restore');
+      return { tokensRevoked: 0, manifest: {} as never, preRestoreSnapshot: '/tmp/x/p.zip' };
+    });
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    const editor = await vi.waitFor(() => {
+      const e = (
+        w.find('.tiptap').element as unknown as { editor?: import('@tiptap/core').Editor } | null
+      )?.editor;
+      if (!e) throw new Error('editor not mounted yet');
+      return e;
+    });
+    editor.commands.insertContentAt(1, 'PENDING ');
+    await w.find('[data-test="restore-path"]').setValue('C:\\b.zip');
+    await w.find('[data-test="restore-button"]').trigger('click');
+    await w.find('[data-test="restore-confirm-yes"]').trigger('click');
+    await flushPromises();
+    expect(order).toEqual(['save', 'restore']);
+    expect(w.find('.tiptap').exists()).toBe(false);
+    await new Promise((r) => setTimeout(r, 700));
+    expect(order).toEqual(['save', 'restore']);
+    w.unmount();
+    vi.mocked(backend.saveSectionUpdate).mockReset();
+    vi.mocked(backend.restoreBackup).mockClear();
+  });
+
   it('does not restore until the user confirms', async () => {
     const backend = await import('./backend');
     const wrapper = mount(App);
