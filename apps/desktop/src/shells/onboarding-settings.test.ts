@@ -89,4 +89,23 @@ describe('UI shells (Part of #36)', () => {
     expect(w.find('[data-test="stub-note"]').text()).toContain('preview only');
     w.unmount();
   });
+
+  it('wp8 step-through counts only the authors that are shown (preview only)', async () => {
+    const w = mount(ShellsPreview, { props: { initial: 'wp8' } });
+    const pos = () => w.find('[data-test="step-pos"]').text();
+    expect(pos()).toBe('3 of 12');
+    await w.find('[aria-label="Next change"]').trigger('click');
+    expect(pos()).toBe('4 of 12');
+    await w.findAll('.pw__authors input').at(0)!.setValue(false);
+    expect(pos()).toBe('3 of 3');
+    w.unmount();
+  });
+
+  it('wp2 collapses both sidebars to rails (preview only)', () => {
+    const w = mount(ShellsPreview, { props: { initial: 'wp2' } });
+    expect(w.find('[aria-label="Show chapters"]').exists()).toBe(true);
+    expect(w.find('[aria-label="Show review"]').exists()).toBe(true);
+    expect(w.find('[data-test="preview-wp2"] .pw__nav').exists()).toBe(false);
+    w.unmount();
+  });
 });

@@ -1,6 +1,8 @@
 /** Preview routing for the UI shells: `?preview=<id>` (or `all`) and optional `&theme=dark`. */
 export const SCREENS = [
   { id: 'wp1', label: 'wp1/wp6 · Editor with review (sample)' },
+  { id: 'wp2', label: 'wp2 · Sidebars collapsed (sample)' },
+  { id: 'wp8', label: 'wp8 · Review step-through (sample)' },
   { id: 'tc4', label: 'tc4/tc6 · Review changes by author (sample)' },
   { id: 'tc3', label: 'tc3 · Name & color prompt' },
   { id: 'tc5', label: 'tc5 · Settings: Your name & color' },

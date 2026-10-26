@@ -1,12 +1,12 @@
 <script setup lang="ts">
 /**
- * Preview-only workspace mock for wp1/wp6 and tc4/tc6 (Part of #36). Static sample data; it never
+ * Preview-only workspace mock for wp1/wp6, wp2, wp8 and tc4/tc6 (Part of #36). Static sample data; it never
  * touches a manuscript, Yjs doc, storage or IPC. Buttons only report "preview only".
  */
 import { computed, ref } from 'vue';
 import { swatchVar } from './colors';
 
-const props = defineProps<{ mode: 'wp1' | 'tc4' }>();
+const props = defineProps<{ mode: 'wp1' | 'wp2' | 'wp8' | 'tc4' }>();
 const emit = defineEmits<{ stub: [what: string] }>();
 const filter = ref<'all' | 'person' | 'bot'>('all');
 
@@ -40,22 +40,48 @@ const changes = [
 const shown = computed(() =>
   changes.filter((c) => filter.value === 'all' || (filter.value === 'bot') === c.bot),
 );
+const step = ref(3);
+const authors = ref([
+  { who: 'Writing assistant', n: 9, on: true, color: 1 },
+  { who: 'Sample Person', n: 3, on: true, color: 2 },
+  { who: 'Sample Reader', n: 2, on: false, color: 3 },
+]);
+const visible = computed(() => authors.value.filter((a) => a.on).reduce((t, a) => t + a.n, 0));
+const onCount = computed(() => authors.value.filter((a) => a.on).length);
+const go = (d: number) => {
+  step.value = Math.min(Math.max(1, step.value + d), Math.max(1, visible.value));
+};
 const count = (bot: boolean) => changes.filter((c) => c.bot === bot).length;
 </script>
 
 <template>
-  <div class="pw" :data-test="`preview-${props.mode}`">
-    <aside class="pw__nav" aria-label="Chapters (sample)">
+  <div
+    class="pw"
+    :class="{ 'pw--rails': props.mode === 'wp2' }"
+    :data-test="`preview-${props.mode}`"
+  >
+    <aside v-if="props.mode === 'wp2'" class="pw__rail" aria-label="Chapters (collapsed, sample)">
+      <button
+        type="button"
+        class="pw__icon"
+        aria-label="Show chapters"
+        @click="emit('stub', 'Show chapters')"
+      >
+        ›
+      </button>
+      <span class="pw__icon" aria-hidden="true">☰</span>
+    </aside>
+    <aside v-else class="pw__nav" aria-label="Chapters (sample)">
       <p class="pw__cap">Chapters</p>
       <ol>
         <li
           v-for="([t, n], i) in chapters"
           :key="t"
-          :class="{ pw__sel: i === (props.mode === 'wp1' ? 2 : 0) }"
+          :class="{ pw__sel: i === (props.mode === 'tc4' ? 0 : 2) }"
         >
           <span>{{ i + 1 }}</span
           ><span class="pw__t">{{ t }}</span
-          ><span v-if="props.mode === 'wp1'" class="pw__n">{{ n }}</span>
+          ><span v-if="props.mode !== 'tc4'" class="pw__n">{{ n }}</span>
         </li>
       </ol>
       <p class="pw__new">+ New chapter</p>
@@ -63,13 +89,16 @@ const count = (bot: boolean) => changes.filter((c) => c.bot === bot).length;
 
     <main class="pw__desk">
       <article class="pw__page">
-        <template v-if="props.mode === 'wp1'">
+        <template v-if="props.mode !== 'tc4'">
           <p class="pw__label">Chapter Three</p>
           <h1 class="pw__h1">The Low Tide</h1>
           <p>
             The tide went out the way it always did, slowly and then all at once, leaving the harbor
-            floor bare and shining under a <del class="pw__del">very quiet</del>
-            <ins class="pw__ins">hushed</ins> sky. Gulls worked the mud in pairs.
+            floor bare and shining under a
+            <span :class="{ pw__cur: props.mode === 'wp8' }"
+              ><del class="pw__del">very quiet</del> <ins class="pw__ins">hushed</ins></span
+            >
+            sky. Gulls worked the mud in pairs.
           </p>
           <p>
             Up on the point, the <mark class="pw__comment">lamp</mark> in the old tower was dark, as
@@ -92,8 +121,78 @@ const count = (bot: boolean) => changes.filter((c) => c.bot === bot).length;
       </article>
     </main>
 
-    <aside class="pw__review" aria-label="Review (sample)">
-      <template v-if="props.mode === 'wp1'">
+    <div v-if="props.mode === 'wp2'" class="pw__pill" data-test="margin-pill">
+      <b>Writing assistant</b
+      ><span class="pw__muted">Suggested, not applied. Review to accept.</span>
+    </div>
+    <aside
+      v-if="props.mode === 'wp2'"
+      class="pw__rail pw__rail--r"
+      aria-label="Review (collapsed, sample)"
+    >
+      <button
+        type="button"
+        class="pw__icon"
+        aria-label="Show review"
+        @click="emit('stub', 'Show review')"
+      >
+        ‹
+      </button>
+      <span class="pw__icon" aria-hidden="true">💬</span>
+      <span class="pw__badge" aria-label="3 open">3</span>
+    </aside>
+    <aside v-else class="pw__review" aria-label="Review (sample)">
+      <template v-if="props.mode === 'wp8'">
+        <p class="pw__cap">Review</p>
+        <p class="pw__sel pw__drop">Show changes from {{ onCount }} of {{ authors.length }}</p>
+        <fieldset class="pw__authors">
+          <legend class="pw__muted">Show changes from</legend>
+          <label v-for="a in authors" :key="a.who">
+            <input v-model="a.on" type="checkbox" @change="go(0)" />
+            <span class="pw__dot" :style="{ background: swatchVar(a.color) }"></span>
+            <bdi dir="auto">{{ a.who }}</bdi
+            ><span class="pw__n">{{ a.n }}</span>
+          </label>
+        </fieldset>
+        <article class="pw__card pw__step" :style="{ borderLeftColor: swatchVar(1) }">
+          <div class="pw__nav2">
+            <button type="button" class="sh-btn" aria-label="Previous change" @click="go(-1)">
+              ‹
+            </button>
+            <span data-test="step-pos">{{ Math.min(step, visible) }} of {{ visible }}</span>
+            <button type="button" class="sh-btn" aria-label="Next change" @click="go(1)">›</button>
+          </div>
+          <b>Writing assistant</b> <span class="pw__muted">Replace</span>
+          <p>Replace “very quiet” with “hushed”</p>
+          <div class="pw__act">
+            <button type="button" class="sh-btn sh-btn--primary" @click="emit('stub', 'Accept')">
+              ✓ Accept
+            </button>
+            <button type="button" class="sh-btn" @click="emit('stub', 'Reject')">✕ Reject</button>
+          </div>
+        </article>
+        <div class="pw__act">
+          <button type="button" class="sh-btn" @click="emit('stub', 'Accept all')">
+            Accept all {{ visible }}
+          </button>
+          <button type="button" class="sh-btn" @click="emit('stub', 'Reject all')">
+            Reject all {{ visible }}
+          </button>
+        </div>
+        <dl class="pw__keys pw__muted">
+          <dt><kbd>Alt</kbd><kbd>Shift</kbd><kbd>←</kbd><kbd>→</kbd></dt>
+          <dd>previous / next</dd>
+          <dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Enter</kbd></dt>
+          <dd>accept</dd>
+          <dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>⌫</kbd></dt>
+          <dd>reject</dd>
+        </dl>
+        <p class="pw__muted">
+          Accept and Reject move to the next change. Bulk actions apply only to the {{ visible }}
+          visible changes.
+        </p>
+      </template>
+      <template v-else-if="props.mode === 'wp1'">
         <p class="pw__cap">Review · Open 3</p>
         <article class="pw__card" :style="{ borderLeftColor: swatchVar(1) }">
           <b>Writing assistant</b> <span class="pw__muted">Suggestion</span>
@@ -332,5 +431,96 @@ const count = (bot: boolean) => changes.filter((c) => c.bot === bot).length;
   border: 1px solid var(--ct-border);
   border-radius: var(--ct-radius-full);
   padding: 0 6px;
+}
+.pw--rails {
+  grid-template-columns: 40px 1fr 40px;
+  position: relative;
+}
+.pw__rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  background: var(--ct-surface);
+  border-right: 1px solid var(--ct-border);
+}
+.pw__rail--r {
+  border-right: 0;
+  border-left: 1px solid var(--ct-border);
+}
+.pw__icon {
+  border: 0;
+  background: transparent;
+  color: var(--ct-text-muted);
+  font: inherit;
+}
+.pw__badge {
+  background: var(--ct-accent);
+  color: var(--ct-accent-contrast);
+  border-radius: var(--ct-radius-full);
+  font-size: var(--ct-text-xs);
+  padding: 0 6px;
+}
+.pw__pill {
+  position: absolute;
+  right: 120px;
+  top: 170px;
+  display: grid;
+  max-width: 140px;
+  padding: 6px 10px;
+  font-size: var(--ct-text-xs);
+  background: var(--ct-surface-raised);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-md);
+}
+.pw__cur {
+  outline: 2px solid var(--ct-accent);
+  border-radius: var(--ct-radius-sm);
+}
+.pw__drop {
+  padding: 6px 8px;
+  border: 1px solid var(--ct-accent);
+  border-radius: var(--ct-radius-sm);
+}
+.pw__authors {
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-md);
+  margin: 0 0 10px;
+  padding: 6px 8px;
+}
+.pw__authors label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+.pw__authors .pw__n {
+  margin-left: auto;
+}
+.pw__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--ct-radius-full);
+}
+.pw__nav2 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.pw__keys {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 8px;
+}
+.pw__keys dd {
+  margin: 0;
+}
+.pw__keys kbd {
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-sm);
+  padding: 0 4px;
+  margin-right: 2px;
 }
 </style>

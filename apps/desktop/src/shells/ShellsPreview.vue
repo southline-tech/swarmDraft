@@ -119,6 +119,14 @@ const cards = [
       <PreviewWorkspace mode="wp1" @stub="stub" />
     </section>
 
+    <section v-if="show('wp2')" class="sp__sec" data-screen="wp2">
+      <h2 class="sp__h">wp2 · Sidebars collapsed</h2>
+      <PreviewWorkspace mode="wp2" @stub="stub" />
+    </section>
+    <section v-if="show('wp8')" class="sp__sec" data-screen="wp8">
+      <h2 class="sp__h">wp8 · Review step-through</h2>
+      <PreviewWorkspace mode="wp8" @stub="stub" />
+    </section>
     <section v-if="show('tc4')" class="sp__sec" data-screen="tc4">
       <h2 class="sp__h">tc4 · Review changes by author (tc6 = dark)</h2>
       <PreviewWorkspace mode="tc4" @stub="stub" />
