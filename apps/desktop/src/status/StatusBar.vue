@@ -5,7 +5,7 @@
  * token. Items whose data is not available are left out, never shown with placeholder values.
  */
 import ZoomControl from '../desk/ZoomControl.vue';
-import { formatCount } from './wordcount';
+import { formatWords as words } from './wordcount';
 
 export type SaveState = 'saved' | 'saving' | 'offline';
 
@@ -32,7 +32,7 @@ const SAVE: Record<SaveState, { label: string; cls: string; title?: string }> = 
 
 <template>
   <footer
-    class="fixed inset-x-0 bottom-0 z-10 box-border flex h-7 items-center gap-4.5 border-t border-border bg-surface px-3.5 font-ui text-xs text-muted"
+    class="fixed inset-x-0 bottom-0 z-10 box-border flex h-7 items-center gap-5 border-t border-border bg-surface px-4 font-ui text-xs text-muted"
     aria-label="Status bar"
     data-test="status-bar"
   >
@@ -44,13 +44,13 @@ const SAVE: Record<SaveState, { label: string; cls: string; title?: string }> = 
       >{{ chapterTitle }}</span
     >
     <span v-if="chapterWords !== undefined" class="tabular-nums" data-test="status-chapter-words">
-      {{ formatCount(chapterWords) }} words in chapter
+      {{ words(chapterWords) }} in chapter
     </span>
     <span v-if="selectionWords" class="tabular-nums text-text" data-test="status-selection-words">
-      {{ formatCount(selectionWords) }} selected
+      {{ words(selectionWords) }} selected
     </span>
     <span v-if="bookWords !== undefined" class="tabular-nums" data-test="status-book-words">
-      {{ formatCount(bookWords) }} words in book
+      {{ words(bookWords) }} in book
     </span>
     <span class="flex-1" />
     <span role="status" aria-live="polite" class="flex items-center" data-test="status-save">

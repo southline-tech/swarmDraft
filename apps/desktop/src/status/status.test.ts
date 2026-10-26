@@ -26,6 +26,18 @@ describe('countWords', () => {
     expect(countWords('Twelve iron rings — eleven ropes')).toBe(5);
     expect(countWords('café naïve 1907')).toBe(3);
   });
+
+  it('keeps combining marks inside words', () => {
+    expect(countWords('nai\u0308ve cafe\u0301')).toBe(2);
+    expect(countWords('नमस्ते दुनिया')).toBe(2);
+  });
+
+  it('counts a number with a decimal point or thousands separator as one word', () => {
+    expect(countWords('3.5')).toBe(1);
+    expect(countWords('1,000')).toBe(1);
+    expect(countWords('It cost 1,000 coins, or 3.5 each.')).toBe(7);
+    expect(countWords('one,two. three')).toBe(3);
+  });
 });
 
 describe('Y.Doc counts', () => {
@@ -53,6 +65,23 @@ describe('Y.Doc counts', () => {
     ] as never;
     expect(bookWordCount(sectionTreeDocs(outline, 'C1', docs))).toBe(6);
     expect(sectionTreeDocs(outline, undefined, docs)).toEqual([]);
+  });
+
+  it('recounts only the section that changed, keeping the cached totals of the others', () => {
+    vi.useFakeTimers();
+    const a = docToYDoc(para('One two') as never);
+    const b = docToYDoc(para('Three four five') as never);
+    const seen: number[] = [];
+    const stop = watchBookWords([a, b], (n) => seen.push(n), 100);
+    expect(seen).toEqual([5]);
+    const readB = vi.spyOn(b, 'getXmlFragment');
+    const text = (a.getXmlFragment('prosemirror').get(0) as Y.XmlElement).get(0) as Y.XmlText;
+    text.insert(7, ' more');
+    vi.advanceTimersByTime(100);
+    expect(seen).toEqual([5, 6]);
+    expect(readB).not.toHaveBeenCalled();
+    stop();
+    vi.useRealTimers();
   });
 
   it('recounts the book after edits, debounced', () => {
@@ -111,7 +140,21 @@ describe('StatusBar', () => {
 
   it('shows the selection word count', () => {
     const w = mount(StatusBar, { props: { zoom: 100, selectionWords: 3 } });
-    expect(w.find('[data-test="status-selection-words"]').text()).toBe('3 selected');
+    expect(w.find('[data-test="status-selection-words"]').text()).toBe('3 words selected');
+  });
+
+  it('uses the singular for one word', () => {
+    const w = mount(StatusBar, {
+      props: { zoom: 100, chapterWords: 1, selectionWords: 1, bookWords: 1 },
+    });
+    expect(w.find('[data-test="status-chapter-words"]').text()).toBe('1 word in chapter');
+    expect(w.find('[data-test="status-selection-words"]').text()).toBe('1 word selected');
+    expect(w.find('[data-test="status-book-words"]').text()).toBe('1 word in book');
+  });
+
+  it('keeps spacing on the --ct scale (space-5 between items, space-4 padding)', () => {
+    const bar = mount(StatusBar, { props: { zoom: 100 } }).find('[data-test="status-bar"]');
+    expect(bar.classes()).toEqual(expect.arrayContaining(['gap-5', 'px-4']));
   });
 
   it('updates zoom through the existing ZoomControl', async () => {

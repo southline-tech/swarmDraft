@@ -229,8 +229,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
   display: flex;
   flex-direction: column;
   height: 100%;
-  /* Room for the fixed, full-width status bar (h-7). */
-  padding-bottom: 1.75rem;
+  min-height: 0;
 }
 .manuscript-editor .body {
   flex: 1;

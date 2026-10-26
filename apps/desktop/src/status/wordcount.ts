@@ -6,7 +6,10 @@
 import * as Y from 'yjs';
 import type { Section } from '@coauthor/schema';
 
-const WORD = /[\p{L}\p{N}]+(?:['\u2019-][\p{L}\p{N}]+)*/gu;
+// Letters keep their combining marks (decomposed "naïve", Devanagari vowel signs); digits joined
+// by "." or "," inside a number ("3.5", "1,000") stay one word.
+const WORD =
+  /(?:\p{N}+(?:[.,]\p{N}+)*|[\p{L}\p{M}\p{N}])[\p{L}\p{M}\p{N}]*(?:['\u2019-][\p{L}\p{M}\p{N}]+)*/gu;
 
 export function countWords(text: string): number {
   return text.match(WORD)?.length ?? 0;
@@ -44,6 +47,11 @@ export function formatCount(n: number): string {
   return n.toLocaleString('en-US');
 }
 
+/** "1 word", "2,154 words". */
+export function formatWords(n: number): string {
+  return `${formatCount(n)} ${n === 1 ? 'word' : 'words'}`;
+}
+
 /**
  * Live book count: recounts (debounced, so typing is never blocked) whenever any section doc
  * changes. Returns a stop function that removes the observers.
@@ -54,17 +62,29 @@ export function watchBookWords(
   delayMs = 300,
 ): () => void {
   const list = [...docs];
+  // Per-doc counts are cached; after a pause only the docs that changed are re-read.
+  const counts = new Map(list.map((d) => [d, docWordCount(d)] as const));
+  const dirty = new Set<Y.Doc>();
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const recount = () => onCount(bookWordCount(list));
-  const schedule = () => {
-    clearTimeout(timer);
-    timer = setTimeout(recount, delayMs);
+  const total = () => [...counts.values()].reduce((a, b) => a + b, 0);
+  const recount = () => {
+    for (const d of dirty) counts.set(d, docWordCount(d));
+    dirty.clear();
+    onCount(total());
   };
-  recount();
-  for (const d of list) d.on('update', schedule);
+  const handlers = list.map((d) => {
+    const h = () => {
+      dirty.add(d);
+      clearTimeout(timer);
+      timer = setTimeout(recount, delayMs);
+    };
+    d.on('update', h);
+    return [d, h] as const;
+  });
+  onCount(total());
   return () => {
     clearTimeout(timer);
-    for (const d of list) d.off('update', schedule);
+    for (const [d, h] of handlers) d.off('update', h);
   };
 }
 

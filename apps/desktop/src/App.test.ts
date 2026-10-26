@@ -7,6 +7,7 @@ import { docToYDoc, importDocx, readStructure, writeStructure, yDocToDoc } from 
 import App from './App.vue';
 import { storedFixture } from './stored-fixture.test-helper';
 import { openSession, sessionFromDocx } from './manuscript-session';
+import { docWordCount, sectionTreeDocs } from './status/wordcount';
 
 const fixture = resolve(
   __dirname,
@@ -371,6 +372,80 @@ describe('App open-file input', () => {
     await pick(w, 'broken.docx', new TextEncoder().encode('not a zip'));
     expect(w.text()).toContain('Could not import broken.docx');
     expect(w.findAll('.row')).toHaveLength(rows);
+    w.unmount();
+  });
+});
+
+describe('App status bar on an imported manuscript', () => {
+  const editorOf = (w: ReturnType<typeof mount>) =>
+    (w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }).editor;
+  const num = (w: ReturnType<typeof mount>, t: string) =>
+    Number(w.find(`[data-test="status-${t}"]`).text().replace(/[^\d]/g, ''));
+  const words = (session: ReturnType<typeof sessionFromDocx>, ids: string[]) =>
+    ids.reduce((n, id) => n + docWordCount(session.sections.get(id)!), 0);
+
+  it('shows a chapter with scenes by title, counting the scenes too', async () => {
+    const { w, session } = await withManuscript();
+    const outline = session.outline.value;
+    const ch = outline.find(
+      (s) => s.kind === 'chapter' && outline.some((c) => c.parentId === s.id),
+    )!;
+    await w.find(`[data-test="section-${ch.id}"]`).trigger('click');
+    await settle();
+    expect(w.find('[data-test="status-chapter"]').text()).toBe(ch.title);
+    const tree = sectionTreeDocs(outline, ch.id, session.sections);
+    expect(tree.length).toBeGreaterThan(1);
+    const total = tree.reduce((n, d) => n + docWordCount(d), 0);
+    expect(total).toBeGreaterThan(docWordCount(session.sections.get(ch.docId)!));
+    expect(num(w, 'chapter-words')).toBe(total);
+    w.unmount();
+  });
+
+  it('shows a book total equal to the sum of all sections', async () => {
+    const { w, session } = await withManuscript();
+    const all = session.outline.value.map((s) => s.docId);
+    expect(num(w, 'book-words')).toBe(words(session, all));
+    w.unmount();
+  });
+
+  it('updates the counts after the pause, and the text survives switching sections', async () => {
+    const { w, session } = await withManuscript();
+    const chapters = session.outline.value.filter((s) => s.kind === 'chapter');
+    const [first, second] = chapters;
+    await w.find(`[data-test="section-${first!.id}"]`).trigger('click');
+    await settle();
+    const book = num(w, 'book-words');
+    const chapter = num(w, 'chapter-words');
+    editorOf(w).commands.insertContentAt(1, 'Countme alsome ');
+    await settle();
+    await new Promise((r) => setTimeout(r, 400));
+    await settle();
+    expect(num(w, 'book-words')).toBe(book + 2);
+    expect(num(w, 'chapter-words')).toBe(chapter + 2);
+    await w.find(`[data-test="section-${second!.id}"]`).trigger('click');
+    await settle();
+    await w.find(`[data-test="section-${first!.id}"]`).trigger('click');
+    await settle();
+    expect(w.find('.tiptap').text()).toContain('Countme alsome');
+    expect(num(w, 'book-words')).toBe(book + 2);
+    w.unmount();
+  });
+
+  it('shows "Not saved, retrying" when a save fails, alongside the existing alert', async () => {
+    // Uses the backend-saved import path (chooseFile), whose saves go through saveSectionUpdate.
+    const backend = await import('./backend');
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    vi.mocked(backend.saveSectionUpdate).mockRejectedValue('disk full');
+    await vi.waitFor(() => expect(w.find('.tiptap').exists()).toBe(true));
+    editorOf(w).commands.insertContentAt(1, 'Unsaved ');
+    await settle();
+    await vi.waitFor(() =>
+      expect(w.find('[data-test="status-save"]').text()).toBe('Not saved, retrying'),
+    );
+    expect(w.find('[data-test="save-error"]').text()).toContain('Not saved, retrying');
+    vi.mocked(backend.saveSectionUpdate).mockReset().mockResolvedValue(undefined);
     w.unmount();
   });
 });

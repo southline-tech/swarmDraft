@@ -313,6 +313,7 @@ defineExpose({ open });
       <SectionNav
         v-show="navigatorOpen"
         id="chapter-navigator"
+        class="min-h-0 overflow-auto"
         :sections="session.outline.value"
         :manuscript-id="session.id"
         :selected-id="selectedId"
@@ -343,6 +344,17 @@ body {
   font-family: system-ui, sans-serif;
 }
 .shell {
-  padding: 2rem;
+  /* One window-height column: the content ends above the fixed status bar (h-7 = 1.75rem) and
+     the chapter list and editor scroll inside it, so the bar never covers either. */
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: auto;
+  padding: 2rem 2rem calc(1.75rem + var(--ct-space-4));
+}
+.shell > .workspace {
+  flex: 1 0 20rem;
+  min-height: 0;
 }
 </style>
