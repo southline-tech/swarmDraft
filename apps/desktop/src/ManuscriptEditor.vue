@@ -7,7 +7,7 @@
  * (`collaborativeEditorOptions`): every edit is written to the doc as it is typed, and changes
  * from other writers are content-checked before they apply. `content` opens an unbound snapshot.
  */
-import { onBeforeUnmount, shallowRef, toRaw, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, shallowRef, toRaw, watch } from 'vue';
 import { EditorContent, useEditor } from '@tiptap/vue-3';
 import type { Editor, EditorOptions, JSONContent } from '@tiptap/core';
 import { TextSelection } from '@tiptap/pm/state';
@@ -16,12 +16,33 @@ import EditorToolbar from './toolbar/EditorToolbar.vue';
 import StatusBar, { type SaveState } from './status/StatusBar.vue';
 import { countWords, watchBookWords } from './status/wordcount';
 import { loadZoom, saveZoom } from './desk/zoom';
+import ReviewPanel from './review/ReviewPanel.vue';
+import {
+  DecisionLog,
+  keyOf,
+  loadCollapsed,
+  resolveCurrent,
+  reviewActionFor,
+  saveCollapsed,
+  step,
+  toggleAuthor,
+  authorsOf,
+  visibleItems,
+  type AuthorFilter,
+} from './review/review-state';
 import {
   collaborativeEditorOptions,
   collectReviewItems,
+  listSuggestions,
   manuscriptEditorOptions,
+  type Decision,
+  type DecisionRecord,
   type ReviewItem,
+  type SuggestionItem,
+  type SuggestionTarget,
 } from '@coauthor/editor';
+import { applyReviewDecision } from './review/apply';
+import type { DocNode } from '@coauthor/schema';
 
 const props = defineProps<{
   /** The section's Y.Doc to bind to. When set it wins and `content` is ignored. */
@@ -41,6 +62,8 @@ const props = defineProps<{
   chapterDocs?: Y.Doc[];
   /** Save status, only when the parent actually knows it. */
   saveState?: SaveState;
+  /** Display labels per raw agent id for the review panel (ids are what decisions key on). */
+  authorLabels?: Record<string, string>;
 }>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
@@ -48,6 +71,8 @@ const emit = defineEmits<{
   reload: [];
   /** The toolbar's chapters toggle; the parent owns the navigator. */
   'toggle-navigator': [];
+  /** Human accept/reject decisions as recorded (and withdrawn again on undo). */
+  decisions: [records: DecisionRecord[]];
 }>();
 /** Review list visibility, driven by the toolbar's review toggle. */
 const reviewOpen = shallowRef(true);
@@ -57,6 +82,105 @@ const zoom = shallowRef(loadZoom());
 watch(zoom, (z) => saveZoom(z));
 
 const review = shallowRef<ReviewItem[]>([]);
+const comments = computed(() => review.value.filter((r) => r.type === 'comment_anchor'));
+
+/** Review step-through (RAD-258). Suggestions in document order, keyed on raw author id. */
+const suggestions = shallowRef<SuggestionItem[]>([]);
+const filter = shallowRef<AuthorFilter>(null);
+const currentKey = shallowRef<string | null>(null);
+let currentIndex = -1;
+const collapsed = shallowRef(loadCollapsed());
+watch(collapsed, (v) => saveCollapsed(v));
+const visible = computed(() => visibleItems(suggestions.value, filter.value));
+const log = new DecisionLog();
+
+function refreshReview(e: Editor) {
+  review.value = collectReviewItems(e.state.doc);
+  suggestions.value = listSuggestions(e.state.doc.toJSON() as DocNode);
+  // Undo/redo of a decision brings a suggestion back or removes it again: keep the log in step.
+  if (log.sync(suggestions.value)) emit('decisions', log.records());
+  const i = resolveCurrent(visible.value, currentKey.value, currentIndex);
+  currentIndex = i;
+  currentKey.value = i >= 0 ? keyOf(visible.value[i]!) : null;
+}
+watch(filter, () => editor.value && refreshReview(editor.value));
+
+/** First text position of a suggestion, found by (mark type, attrs.id). */
+function rangeOf(e: Editor, t: SuggestionTarget): { from: number; to: number } | null {
+  let from = -1;
+  let to = -1;
+  e.state.doc.descendants((n, pos) => {
+    if (!n.isText) return true;
+    if (n.marks.some((m) => m.type.name === t.kind && String(m.attrs.id) === t.id)) {
+      if (from < 0) from = pos;
+      to = pos + n.nodeSize;
+    }
+    return true;
+  });
+  return from < 0 ? null : { from, to };
+}
+function select(key: string) {
+  const e = editor.value;
+  const item = visible.value.find((v) => keyOf(v) === key);
+  if (!e || !item) return;
+  currentKey.value = key;
+  currentIndex = visible.value.indexOf(item);
+  const r = rangeOf(e, item);
+  if (r) e.chain().setTextSelection(r).scrollIntoView().run();
+}
+function move(dir: 1 | -1) {
+  const list = visible.value;
+  const i = step(
+    list.length,
+    list.findIndex((v) => keyOf(v) === currentKey.value),
+    dir,
+  );
+  if (i >= 0) select(keyOf(list[i]!));
+}
+/** Human-only: runs through the trusted review transaction on the live editor. */
+function decide(targets: SuggestionTarget[], decision: Decision) {
+  const e = editor.value;
+  if (!e || !targets.length || !e.isEditable) return;
+  const keys = new Set(targets.map(keyOf));
+  const decided = suggestions.value.filter((s) => keys.has(keyOf(s)));
+  if (!applyReviewDecision(e.view, { targets, decision })) return;
+  const decidedAt = new Date().toISOString();
+  const status = decision === 'accept' ? 'accepted' : 'rejected';
+  log.record(
+    decided.map((s) => ({ kind: s.kind, id: s.id, status, decidedAt, decidedBy: 'author' })),
+  );
+  refreshReview(e);
+  emit('decisions', log.records());
+  // Auto-advance: the change now at the old position becomes current.
+  if (currentKey.value) select(currentKey.value);
+}
+const targetOf = (key: string | null) =>
+  suggestions.value.filter((s) => keyOf(s) === key).map(({ kind, id }) => ({ kind, id }));
+const decideCurrent = (d: Decision) => decide(targetOf(currentKey.value), d);
+const decideOne = (key: string, d: Decision) => {
+  currentKey.value = key;
+  currentIndex = visible.value.findIndex((v) => keyOf(v) === key);
+  decide(targetOf(key), d);
+};
+const decideVisible = (d: Decision) =>
+  decide(
+    visible.value.map(({ kind, id }) => ({ kind, id })),
+    d,
+  );
+const onToggleAuthor = (a: string) =>
+  (filter.value = toggleAuthor(authorsOf(suggestions.value), filter.value, a));
+
+function onKeydown(ev: KeyboardEvent) {
+  const action = reviewActionFor(ev);
+  if (!action) return;
+  ev.preventDefault();
+  if (action === 'toggle') {
+    if (reviewOpen.value) collapsed.value = !collapsed.value;
+  } else if (action === 'next') move(1);
+  else if (action === 'prev') move(-1);
+  else decideCurrent(action === 'accept' ? 'accept' : 'reject');
+}
+onMounted(() => window.addEventListener('keydown', onKeydown, true));
 
 /** Status bar counts (RAD-256), recounted off the typing path. */
 const chapterWords = shallowRef<number>();
@@ -139,7 +263,7 @@ const options: Partial<EditorOptions> = {
     loadError.value = String((error as Error & { cause?: unknown }).cause ?? error.message);
   },
   onCreate: ({ editor }) => {
-    review.value = collectReviewItems(editor.state.doc);
+    refreshReview(editor);
     countChapter(editor);
     // A bound doc may render its content just after create; try again once it has.
     if (!placeCursorInBody(editor))
@@ -147,7 +271,7 @@ const options: Partial<EditorOptions> = {
   },
   onSelectionUpdate: ({ editor }) => countSelection(editor),
   onUpdate: ({ editor }) => {
-    review.value = collectReviewItems(editor.state.doc);
+    refreshReview(editor);
     scheduleCount(editor);
     if (loadError.value) return;
     emit('change', editor.getJSON());
@@ -163,7 +287,7 @@ const editor = useEditor(
 );
 watch(editor, (e) => {
   if (e) {
-    review.value = collectReviewItems(e.state.doc);
+    refreshReview(e);
     countChapter(e);
   }
 });
@@ -175,6 +299,7 @@ watch(
   { immediate: true },
 );
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown, true);
   clearTimeout(countTimer);
   stopBook();
   stopChapter();
@@ -217,28 +342,35 @@ const LABELS: Record<ReviewItem['type'], string> = {
           <EditorContent :editor="editor" class="page" />
         </div>
       </div>
-      <aside
-        v-if="reviewOpen"
-        class="review"
-        aria-label="Comments and suggestions"
-        data-test="review"
-      >
-        <h3>Review</h3>
-        <p v-if="!review.length" class="muted">No comments or suggestions.</p>
-        <ul>
-          <li
-            v-for="r in review"
-            :key="`${r.type}--${r.id}`"
-            :class="r.type"
-            data-test="review-item"
-          >
-            <strong>{{ LABELS[r.type] }}</strong>
-            <span v-if="r.author" class="muted"> · {{ r.author }}</span>
-            <q>{{ r.text }}</q>
-          </li>
-        </ul>
-        <p class="muted">Comments and suggestions are read-only here.</p>
-      </aside>
+      <div v-if="reviewOpen" class="review" data-test="review">
+        <ReviewPanel
+          :items="suggestions"
+          :filter="filter"
+          :current-key="currentKey"
+          :collapsed="collapsed"
+          :busy="!editor?.isEditable"
+          :labels="props.authorLabels"
+          @toggle-author="onToggleAuthor"
+          @show-all="filter = null"
+          @select="select"
+          @prev="move(-1)"
+          @next="move(1)"
+          @decide-current="decideCurrent"
+          @decide-one="decideOne"
+          @decide-visible="decideVisible"
+          @toggle-collapsed="collapsed = !collapsed"
+        />
+        <section v-if="!collapsed && comments.length" class="comments" aria-label="Comments">
+          <h3>Comments</h3>
+          <ul>
+            <li v-for="r in comments" :key="r.id" data-test="review-item">
+              <strong>{{ LABELS[r.type] }}</strong>
+              <span v-if="r.author" class="muted"> · {{ r.author }}</span>
+              <q>{{ r.text }}</q>
+            </li>
+          </ul>
+        </section>
+      </div>
     </div>
     <StatusBar
       v-model:zoom="zoom"
@@ -267,8 +399,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 1fr 16rem;
-  gap: 1rem;
+  grid-template-columns: 1fr auto;
 }
 .manuscript-editor .body.no-review {
   grid-template-columns: 1fr;
@@ -338,10 +469,28 @@ const LABELS: Record<ReviewItem['type'], string> = {
 .tiptap .comment-anchor {
   background: #fff3b0;
 }
-.manuscript-editor .review ul {
-  padding-left: 1rem;
+.manuscript-editor .review {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--ct-surface);
+}
+.manuscript-editor .review > :first-child {
+  flex: 1;
+}
+.manuscript-editor .comments {
+  width: 300px;
+  box-sizing: border-box;
+  padding: var(--ct-space-3);
+  border-left: 1px solid var(--ct-border);
+  border-top: 1px solid var(--ct-border);
+  font-family: var(--ct-font-ui);
+  font-size: var(--ct-text-sm);
+}
+.manuscript-editor .comments ul {
+  padding-left: var(--ct-space-4);
 }
 .manuscript-editor .muted {
-  color: #666;
+  color: var(--ct-text-muted);
 }
 </style>

@@ -4,7 +4,7 @@ import ManuscriptEditor from './ManuscriptEditor.vue';
 import { SAMPLE_DOC } from './fixtures/sample';
 
 describe('ManuscriptEditor', () => {
-  it('renders the document with tracked changes and comments, read-only in the review list', async () => {
+  it('renders the document with tracked changes in the review panel and comments below it', async () => {
     const w = mount(ManuscriptEditor, { props: { content: SAMPLE_DOC }, attachTo: document.body });
     await flushPromises();
     const page = w.find('.tiptap');
@@ -12,12 +12,14 @@ describe('ManuscriptEditor', () => {
     expect(page.find('del.suggestion-delete').text()).toBe('flickered');
     expect(page.find('.comment-anchor').text()).toBe('rain');
     expect(page.find('.scene-break').exists()).toBe(true);
+    const kinds = w.findAll('[data-test="item"] .kind').map((i) => i.text());
+    expect(kinds).toEqual(['Delete', 'Insert']);
+    expect(w.find('[data-test="counter"]').text()).toBe('1 of 2');
     const items = w.findAll('[data-test="review-item"]').map((i) => i.text());
-    expect(items).toHaveLength(3);
-    expect(items[0]).toContain('Delete');
-    expect(items[1]).toContain('Insert');
-    expect(items[2]).toContain('Comment');
-    expect(w.find('[data-test="review"] button').exists()).toBe(false);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toContain('Comment');
+    // Comments stay read-only; only suggestions get Accept/Reject.
+    expect(w.find('.comments button').exists()).toBe(false);
     w.unmount();
   });
 

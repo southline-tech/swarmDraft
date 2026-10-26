@@ -136,8 +136,9 @@ describe('live agent updates (RAD-264)', () => {
     expect(page().find('del.suggestion-delete').text()).toBe('flickered');
     expect(page().find('.comment-anchor').text()).toBe('lantern');
     expect(page().text()).toContain('Late. ');
+    const cards = w.findAll('[data-test="item"]').map((i) => i.text());
+    expect(cards.some((t) => t.includes('Insert') && t.includes('agent:'))).toBe(true);
     const items = w.findAll('[data-test="review-item"]').map((i) => i.text());
-    expect(items.some((t) => t.includes('Insert') && t.includes('agent:'))).toBe(true);
     expect(items.some((t) => t.includes('Comment'))).toBe(true);
 
     // Only the author's own edit is saved; the agent's stored updates are not written back.
@@ -253,9 +254,10 @@ describe('live agent updates (RAD-264)', () => {
     await vi.advanceTimersByTimeAsync(100);
     await session.flush();
 
+    const kinds = w.findAll('[data-test="item"] .kind').map((i) => i.text());
+    expect(kinds.filter((t) => t === 'Insert')).toHaveLength(1);
+    expect(kinds.filter((t) => t === 'Delete')).toHaveLength(1);
     const items = w.findAll('[data-test="review-item"]').map((i) => i.text());
-    expect(items.filter((t) => t.startsWith('Insert'))).toHaveLength(1);
-    expect(items.filter((t) => t.startsWith('Delete'))).toHaveLength(1);
     expect(items.filter((t) => t.startsWith('Comment'))).toHaveLength(1);
     expect(w.find('.tiptap').text()).toContain('flickeredguttered only twice.');
     // Everything from the poll came in as remote, and nothing it carried was saved back.
