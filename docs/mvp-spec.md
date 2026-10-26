@@ -186,7 +186,7 @@ Implementation is local (no cloud agents approved). First user is on **Windows**
 - **P1 — Fri 10/30: first usable build = unsigned Windows dev build (Tauri, .msi/NSIS)** with local sidecar: editor + Yjs, parts/chapters/scenes, autosave, .docx import, comments + tracked changes, native MCP with per-agent identity, backup download. (RAD-200–205, 209–212, 214, 218, 221, 224)
 - **P2 — ~11/6:** Notes + Story Bible, human roles, images, revisions. (RAD-213, 215–217)
 - **P3 — ~11/13:** book design (themes, drop caps, ornaments, headers), KDP 6x9/5.5x8.5 PDF + EPUB + .docx export, preview. (RAD-219, 222, 226, 227)
-- **P4 — ~11/20:** KDP preflight + EPUBCheck, message bubbles, templates, self-host packaging, polish, pilot. (RAD-223, 225, 228)
+- **P4 — ~11/20:** KDP preflight + EPUBCheck, message bubbles, templates, signed desktop installer and auto-update, polish, pilot. (RAD-223, 225, 228)
 
 ## 11. Risks
 
@@ -201,11 +201,11 @@ Implementation is local (no cloud agents approved). First user is on **Windows**
 
 ## 12. Open questions for Brett
 
-1. Hosting/tenancy: single-user self-hosted pilot only, or multi-user accounts from day one?
-2. Typst over Paged.js OK, given preview is page images rather than live DOM? (React or Vue — confirm Vue.)
+1. Resolved: local-first single-user desktop app (Tauri, Windows first); optional Yjs sync later.
+2. Resolved: Typst for print; Vue 3 for the UI.
 3. Resolved: agents are strictly read/comment/suggest; accept/reject is human-only.
-4. Which agents must work at launch (Grok Bot, Claude Desktop, ChatGPT)? Bearer token OK vs OAuth?
-5. What does your wife's manuscript look like today (Word? Google Docs), and which trim/theme does she want first?
+4. Resolved: Grok Bot for P1, with a bearer token per agent; other MCP clients later.
+5. Resolved: the first author's manuscript is a .docx (or other) file; .docx import is P1-critical; default trim 6x9.
 6. Need ebook-only features (KDP Kindle via EPUB) for pilot, or print first?
 
 ## 14. Differentiators
