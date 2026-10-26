@@ -16,7 +16,8 @@ import {
 } from '@coauthor/editor';
 
 const props = defineProps<{ content: JSONContent }>();
-const emit = defineEmits<{ change: [doc: JSONContent] }>();
+/** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
+const emit = defineEmits<{ change: [doc: JSONContent]; reload: [] }>();
 
 const review = shallowRef<ReviewItem[]>([]);
 /** Set when the content does not fit the schema; the editor is then read-only and never emits. */
@@ -66,6 +67,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
     <p v-if="loadError" class="load-error" role="alert" data-test="load-error">
       This section has content the editor does not support, so it was opened read-only and nothing
       will be saved. {{ loadError }}
+      <button type="button" data-test="reload" @click="emit('reload')">Reload section</button>
     </p>
     <div v-if="editor" class="toolbar" role="toolbar" aria-label="Formatting">
       <select

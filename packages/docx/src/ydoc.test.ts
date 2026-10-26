@@ -46,3 +46,36 @@ describe('rekeyMarks', () => {
     expect(rekeyMarks(ydoc)).toBe(0);
   });
 });
+
+describe('rekeyMarks with id-less stray keys', () => {
+  const run = (attrs: Record<string, unknown>) => {
+    const ydoc = new Y.Doc();
+    ydoc.transact(() => {
+      const p = new Y.XmlElement('paragraph');
+      ydoc.getXmlFragment(FRAGMENT_NAME).insert(0, [p]);
+      const t = new Y.XmlText();
+      p.insert(0, [t]);
+      t.insert(0, 'x', attrs);
+    });
+    const delta = () =>
+      ((ydoc.getXmlFragment(FRAGMENT_NAME).get(0) as Y.XmlElement).get(0) as Y.XmlText).toDelta()[0]
+        .attributes as Record<string, unknown>;
+    return { ydoc, delta };
+  };
+
+  it('does not overwrite an existing plain mark', () => {
+    const { ydoc, delta } = run({
+      link: { href: 'https://a.example' },
+      'link--x': { href: 'https://b.example' },
+    });
+    expect(rekeyMarks(ydoc)).toBe(1);
+    expect(delta()).toEqual({ link: { href: 'https://a.example' } });
+    expect(rekeyMarks(ydoc)).toBe(0);
+  });
+
+  it('keeps one stray copy deterministically when there is no plain mark', () => {
+    const { ydoc, delta } = run({ 'bold--y': {}, 'bold--x': {} });
+    expect(rekeyMarks(ydoc)).toBe(1);
+    expect(delta()).toEqual({ bold: {} });
+  });
+});
