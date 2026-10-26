@@ -225,3 +225,235 @@ describe('hostile input', () => {
     }
   });
 });
+
+describe('id collisions and zip integrity', () => {
+  const docx = (body: string, comments: string) =>
+    zipSync({
+      'word/document.xml': strToU8(`<w:document ${NS}><w:body>${body}</w:body></w:document>`),
+      'word/comments.xml': strToU8(`<w:comments ${NS}>${comments}</w:comments>`),
+    });
+  const patchCentral = (zip: Uint8Array, fn: (dv: DataView, at: number) => void) => {
+    const dv = new DataView(zip.buffer);
+    for (let i = 0; i + 4 <= zip.length; i++) if (dv.getUint32(i, true) === 0x02014b50) fn(dv, i);
+    return zip;
+  };
+
+  it('gives duplicate/missing comment and revision ids fresh ids and keeps every comment', () => {
+    const body = p(
+      '<w:commentRangeStart w:id="5"/>' +
+        r('first') +
+        '<w:commentRangeEnd w:id="5"/>' +
+        '<w:commentRangeStart w:id="5"/>' +
+        r(' second') +
+        '<w:commentRangeEnd w:id="5"/>' +
+        '<w:commentRangeStart/>' +
+        r(' third') +
+        '<w:commentRangeEnd/>' +
+        '<w:ins w:id="9" w:author="Ann">' +
+        '<w:ins w:id="9" w:author="Bo">' +
+        r(' nested') +
+        '</w:ins></w:ins>' +
+        '<w:del w:author="Cy">' +
+        `<w:r><w:delText> gone</w:delText></w:r></w:del>`,
+    );
+    const comments =
+      `<w:comment w:id="5" w:author="Ann">${p(r('one'))}</w:comment>` +
+      `<w:comment w:id="5" w:author="Bo">${p(r('two'))}</w:comment>` +
+      `<w:comment w:author="Cy">${p(r('three'))}</w:comment>`;
+    const m = importDocx(docx(body, comments));
+    expect(m.comments.map((c) => c.body)).toEqual(['one', 'two', 'three']);
+    expect(new Set(m.comments.map((c) => c.id)).size).toBe(3);
+    const all = m.sections.flatMap((s) => s.content.content);
+    const text = all.flatMap((b) => ('content' in b ? (b.content ?? []) : [])) as InlineNode[];
+    const ids = (t: string, type: string) => {
+      const n = text.find((x) => x.type === 'text' && x.text === t)!;
+      return n.type === 'text'
+        ? (n.marks ?? [])
+            .filter((k) => k.type === type)
+            .map((k) => (k as { attrs: { id: string } }).attrs.id)
+        : [];
+    };
+    const [c1] = ids('first', 'comment_anchor');
+    const [c2] = ids(' second', 'comment_anchor');
+    const [c3] = ids(' third', 'comment_anchor');
+    expect(m.comments.map((c) => c.id)).toEqual([c1, c2, c3]);
+    const ins = ids(' nested', 'suggestion_insert');
+    expect(ins).toHaveLength(2);
+    expect(new Set(ins).size).toBe(2);
+    expect(ids(' gone', 'suggestion_delete')[0]).toMatch(/^docx-\d+$/);
+    expect(m.report.items.filter((i) => i.code === 'duplicate_id').length).toBeGreaterThanOrEqual(
+      4,
+    );
+    expect(m.report.items.map((i) => i.code)).not.toContain('orphan_comment');
+    // Fresh ids survive a round trip.
+    const b = importDocx(exportDocx(m));
+    expect(b.comments.map((c) => c.body)).toEqual(['one', 'two', 'three']);
+    expect(b.report.items.map((i) => i.code)).not.toContain('duplicate_id');
+  });
+
+  it('throws on duplicate zip entry names instead of letting the last one win', () => {
+    const zip = zipSync({
+      'word/document.xml': strToU8(
+        `<w:document ${NS}><w:body>${p(r('real'))}</w:body></w:document>`,
+      ),
+      'word/documenX.xml': strToU8(
+        `<w:document ${NS}><w:body>${p(r('shadow'))}</w:body></w:document>`,
+      ),
+    });
+    // Rename every "documenX" to "document" (local + central headers).
+    const name = strToU8('word/documenX.xml');
+    for (let i = 0; i + name.length <= zip.length; i++)
+      if (name.every((c, j) => zip[i + j] === c)) zip[i + name.length - 5] = 't'.charCodeAt(0);
+    expect(() => importDocx(zip)).toThrow(/Duplicate zip entry "word\/document.xml"/);
+  });
+
+  it('rejects encrypted entries with a clear error', () => {
+    const zip = zipSync({
+      'word/document.xml': strToU8(`<w:document ${NS}><w:body/></w:document>`),
+    });
+    patchCentral(zip, (dv, at) => dv.setUint16(at + 8, dv.getUint16(at + 8, true) | 1, true));
+    expect(() => importDocx(zip)).toThrow(/encrypted/);
+  });
+});
+
+describe('comment ranges never lose a body or leak', () => {
+  const build = (body: string, comments: string, footnotes = '') =>
+    importDocx(
+      zipSync({
+        'word/document.xml': strToU8(`<w:document ${NS}><w:body>${body}</w:body></w:document>`),
+        'word/comments.xml': strToU8(`<w:comments ${NS}>${comments}</w:comments>`),
+        ...(footnotes
+          ? { 'word/footnotes.xml': strToU8(`<w:footnotes ${NS}>${footnotes}</w:footnotes>`) }
+          : {}),
+      }),
+    );
+  const def = (id: string, body: string) =>
+    `<w:comment w:id="${id}" w:author="Ann">${p(r(body))}</w:comment>`;
+  const texts = (m: ImportedManuscript) =>
+    m.sections
+      .flatMap((s) => s.content.content)
+      .flatMap((b) => ('content' in b ? (b.content ?? []) : [])) as InlineNode[];
+  const anchorsOf = (m: ImportedManuscript, t: string) => {
+    const n = texts(m).find((x) => x.type === 'text' && x.text === t);
+    if (!n || n.type !== 'text') throw new Error(`no text ${t}`);
+    return (n.marks ?? []).flatMap((k) =>
+      k.type === 'comment_anchor' ? [(k as { attrs: { id: string } }).attrs.id] : [],
+    );
+  };
+  const codes = (m: ImportedManuscript) => m.report.items.map((i) => i.code);
+
+  it('anchors zero-width and reference-only comments and keeps extra definitions', () => {
+    const m = build(
+      p(
+        r('lead') +
+          '<w:commentRangeStart w:id="1"/><w:commentRangeEnd w:id="1"/>' +
+          r(' point') +
+          '<w:r><w:commentReference w:id="2"/></w:r>' +
+          r(' ref'),
+      ) + p(r('tail')),
+      def('1', 'zero width') + def('2', 'reference only') + def('3', 'no range at all'),
+    );
+    expect(m.comments.map((c) => c.body)).toEqual([
+      'zero width',
+      'reference only',
+      'no range at all',
+    ]);
+    expect(anchorsOf(m, ' point')).toEqual(['1']);
+    expect(anchorsOf(m, ' ref')).toEqual(['2']);
+    expect(anchorsOf(m, 'lead')).toContain('3');
+    expect(codes(m)).toContain('orphan_comment');
+    const back = importDocx(exportDocx(m));
+    expect(back.comments.map((c) => c.body)).toEqual(m.comments.map((c) => c.body));
+  });
+
+  it('cuts end-before-start and unclosed ranges back to their paragraph, with warnings', () => {
+    const m = build(
+      p('<w:commentRangeEnd w:id="4"/>' + r('x') + '<w:commentRangeStart w:id="4"/>' + r('y')) +
+        p(r('later')) +
+        p('<w:commentRangeStart w:id="5"/>' + r('open')) +
+        p(r('after open')),
+      def('4', 'reversed') + def('5', 'unclosed'),
+    );
+    expect(anchorsOf(m, 'y')).toEqual(['4']);
+    expect(anchorsOf(m, 'x')).toEqual([]);
+    expect(anchorsOf(m, 'later')).toEqual([]);
+    expect(anchorsOf(m, 'open')).toEqual(['5']);
+    expect(anchorsOf(m, 'after open')).toEqual([]);
+    expect(codes(m)).toEqual(expect.arrayContaining(['unmatched_comment_end', 'unclosed_comment']));
+    expect(m.comments.map((c) => c.body)).toEqual(['reversed', 'unclosed']);
+  });
+
+  it('keeps open-range state separate per story (no leak from footnotes into the body)', () => {
+    const m = build(
+      p(
+        r('body') +
+          `<w:r><w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr><w:footnoteReference w:id="1"/></w:r>`,
+      ) + p(r('more body')),
+      def('6', 'in note'),
+      `<w:footnote w:id="1">${p('<w:commentRangeStart w:id="6"/>' + r('note text'))}${p(r('note two'))}</w:footnote>`,
+    );
+    expect(anchorsOf(m, 'body')).toEqual([]);
+    expect(anchorsOf(m, 'more body')).toEqual([]);
+    const note = texts(m).find((n) => n.type === 'footnote') as FootnoteNode;
+    const noteMarks = (i: number) =>
+      (note.attrs.content[i]!.content ?? []).flatMap((n) =>
+        n.type === 'text' ? (n.marks ?? []).map((k) => k.type) : [],
+      );
+    expect(noteMarks(0)).toContain('comment_anchor');
+    expect(noteMarks(1)).not.toContain('comment_anchor');
+    expect(m.comments.map((c) => c.body)).toEqual(['in note']);
+    expect(codes(m)).toContain('unclosed_comment');
+  });
+  it('round-trips a comment spanning several paragraphs as one comment, same id', () => {
+    const m = build(
+      p(r('lead ') + '<w:commentRangeStart w:id="1"/>' + r('first')) +
+        p(r('second')) +
+        p(r('third') + '<w:commentRangeEnd w:id="1"/>' + r(' tail')),
+      def('1', 'spans three'),
+    );
+    expect(anchorsOf(m, 'second')).toEqual(['1']);
+    const back = importDocx(exportDocx(m));
+    expect(back.comments.map((c) => [c.id, c.body])).toEqual([['1', 'spans three']]);
+    for (const t of ['first', 'second', 'third']) expect(anchorsOf(back, t)).toEqual(['1']);
+    expect(anchorsOf(back, ' tail')).toEqual([]);
+    expect(codes(back)).not.toContain('duplicate_id');
+    expect(codes(back)).not.toContain('orphan_comment');
+    // And a second trip is stable.
+    const again = importDocx(exportDocx(back));
+    expect(again.comments.map((c) => [c.id, c.body])).toEqual([['1', 'spans three']]);
+    expect(codes(again)).not.toContain('duplicate_id');
+  });
+
+  it('round-trips a comment range crossing a flattened table', () => {
+    const m = build(
+      p('<w:commentRangeStart w:id="7"/>' + r('before')) +
+        `<w:tbl><w:tr><w:tc>${p(r('cell'))}</w:tc></w:tr></w:tbl>` +
+        p(r('after') + '<w:commentRangeEnd w:id="7"/>'),
+      def('7', 'across table'),
+    );
+    const back = importDocx(exportDocx(m));
+    expect(back.comments.map((c) => [c.id, c.body])).toEqual([['7', 'across table']]);
+    for (const t of ['before', 'cell', 'after']) expect(anchorsOf(back, t)).toEqual(['7']);
+    expect(codes(back)).not.toContain('duplicate_id');
+  });
+
+  it('puts the comment id and a snippet in warning details', () => {
+    const m = build(
+      p('<w:commentRangeEnd w:id="9"/>' + r('x')) +
+        p('<w:commentRangeStart w:id="5"/>' + r('open')),
+      def('5', 'unclosed body here') + def('9', 'end only') + def('9', 'dup def'),
+    );
+    const samples = (code: string) => m.report.items.find((i) => i.code === code)?.samples ?? [];
+    expect(samples('unclosed_comment')).toEqual(['5: unclosed body here']);
+    expect(samples('unmatched_comment_end')[0]).toMatch(/^9: /);
+    expect(samples('duplicate_id')).toEqual(['9: dup def']);
+    const orphan = m.report.items.find((i) => i.code === 'orphan_comment');
+    expect(orphan?.message).toMatch(/section "/);
+  });
+
+  it('carries the comment body in the warning when the document has no text', () => {
+    const m = build('', def('3', 'lonely note'));
+    const item = m.report.items.find((i) => i.code === 'orphan_comment');
+    expect(item?.samples).toEqual(['3: lonely note']);
+  });
+});
