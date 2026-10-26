@@ -64,6 +64,7 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
+            backup::cleanup_temp(&dir);
             let store = storage::Store::open(&dir)?;
             app.manage(store);
             Ok(())

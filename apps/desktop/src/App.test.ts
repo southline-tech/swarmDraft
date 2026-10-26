@@ -1,12 +1,39 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import App from './App.vue';
 
 describe('App', () => {
   it('renders in browser mode without the desktop backend', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.getAppInfo).mockResolvedValueOnce(null);
     const wrapper = mount(App);
     await flushPromises();
     expect(wrapper.text()).toContain('coAuthor');
     expect(wrapper.find('[data-test="browser-mode"]').exists()).toBe(true);
+  });
+});
+
+vi.mock('./backend', () => ({
+  getAppInfo: vi.fn(async () => ({ version: '0.1.0', dataDir: '/tmp/x', schemaVersion: 1 })),
+  createBackup: vi.fn(async () => '/tmp/x/backups/b.zip'),
+  restoreBackup: vi.fn(async () => ({ manifest: {}, preRestoreSnapshot: '/tmp/x/backups/p.zip' })),
+}));
+
+describe('restore confirmation', () => {
+  it('does not restore until the user confirms', async () => {
+    const backend = await import('./backend');
+    const wrapper = mount(App);
+    await flushPromises();
+    await wrapper.find('[data-test="restore-path"]').setValue('C:\\Users\\a\\b.zip');
+    await wrapper.find('[data-test="restore-button"]').trigger('click');
+    expect(backend.restoreBackup).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-test="restore-confirm"]').exists()).toBe(true);
+    await wrapper.find('[data-test="restore-confirm-no"]').trigger('click');
+    expect(wrapper.find('[data-test="restore-confirm"]').exists()).toBe(false);
+    await wrapper.find('[data-test="restore-button"]').trigger('click');
+    await wrapper.find('[data-test="restore-confirm-yes"]').trigger('click');
+    await flushPromises();
+    expect(backend.restoreBackup).toHaveBeenCalledWith('C:\\Users\\a\\b.zip');
+    expect(wrapper.find('[data-test="backup-status"]').text()).toContain('p.zip');
   });
 });

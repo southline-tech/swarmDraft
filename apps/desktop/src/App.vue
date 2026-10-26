@@ -10,6 +10,11 @@ onMounted(async () => {
 
 const backupStatus = ref('');
 const restorePath = ref('');
+const confirmingRestore = ref(false);
+
+function askRestore(): void {
+  if (restorePath.value.trim()) confirmingRestore.value = true;
+}
 
 async function onBackup(): Promise<void> {
   try {
@@ -20,6 +25,7 @@ async function onBackup(): Promise<void> {
 }
 
 async function onRestore(): Promise<void> {
+  confirmingRestore.value = false;
   if (!restorePath.value.trim()) return;
   try {
     const r = await restoreBackup(restorePath.value.trim());
@@ -40,7 +46,20 @@ async function onRestore(): Promise<void> {
     <section v-if="info" data-test="backup">
       <button type="button" data-test="backup-button" @click="onBackup">Download backup</button>
       <input v-model="restorePath" data-test="restore-path" placeholder="Path to backup .zip" />
-      <button type="button" data-test="restore-button" @click="onRestore">Restore</button>
+      <button type="button" data-test="restore-button" @click="askRestore">Restore…</button>
+      <div v-if="confirmingRestore" role="alertdialog" data-test="restore-confirm">
+        <p>
+          Restoring replaces all manuscripts, comments, suggestions, settings and attached files
+          with the contents of this backup. Your current state is saved first as a pre-restore
+          snapshot in the backups folder.
+        </p>
+        <button type="button" data-test="restore-confirm-yes" @click="onRestore">
+          Replace everything and restore
+        </button>
+        <button type="button" data-test="restore-confirm-no" @click="confirmingRestore = false">
+          Cancel
+        </button>
+      </div>
       <p v-if="backupStatus" data-test="backup-status">{{ backupStatus }}</p>
     </section>
     <p v-else data-test="browser-mode">Running in browser mode (no desktop backend).</p>
