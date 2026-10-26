@@ -15,6 +15,7 @@
 //!   and is never exposed as an MCP tool.
 
 mod tools;
+pub use tools::PARAGRAPH_STYLES;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;

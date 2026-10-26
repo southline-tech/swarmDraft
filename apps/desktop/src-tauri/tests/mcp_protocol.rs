@@ -576,6 +576,7 @@ async fn cached_token_revoked_out_of_band_gets_401() {
     s.store.remember_token_hash(hash.clone());
     s.store.clear_token_cache();
     assert!(!s.store.is_known_token_hash(&hash));
+}
 
 // ---- RAD-210 write tools ----
 
@@ -1048,4 +1049,57 @@ async fn writes_that_would_leave_unknown_marks_are_refused() {
     let r = call(&s, "suggest_edit", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "lantern", "replacement": "lamp"})).await;
     assert_eq!(r["isError"], true, "{r}");
     assert_eq!(raw_keys(&s, &sid), before, "nothing was saved");
+    assert!(
+        s.store.open_comments(&sid).unwrap().is_empty(),
+        "no comment record on a refused write"
+    );
+    assert!(
+        s.store.open_suggestions(&sid).unwrap().is_empty(),
+        "no suggestion record on a refused write"
+    );
+}
+
+#[tokio::test]
+async fn suggest_style_only_accepts_allowlisted_styles() {
+    let s = start(&["read", "suggest"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    for bad in ["huge", "", "Body", "body ", "body;drop", "heading"] {
+        let r = call(&s, "suggest_style", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "style": bad})).await;
+        assert_eq!(r["isError"], true, "{bad:?}: {r}");
+        assert!(text(&r).contains("unknown style"), "{bad:?}: {r}");
+    }
+    assert!(s.store.open_suggestions(&sid).unwrap().is_empty());
+    for ok in coauthor_lib::mcp::PARAGRAPH_STYLES {
+        let r = call(&s, "suggest_style", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "style": ok})).await;
+        assert_ne!(r["isError"], true, "{ok}: {r}");
+    }
+}
+
+#[tokio::test]
+async fn malformed_content_length_is_a_400() {
+    let s = start(&["read"], 1000).await;
+    let addr = s
+        .url
+        .trim_start_matches("http://")
+        .trim_end_matches("/mcp")
+        .to_string();
+    let token = s.token.clone();
+    let status = tokio::task::spawn_blocking(move || {
+        use std::io::{Read, Write};
+        let mut c = std::net::TcpStream::connect(&addr).unwrap();
+        c.set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let req = format!(
+            "POST /mcp HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {token}\r\n\
+             Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\n\
+             Content-Length: not-a-number\r\n\r\n{{}}"
+        );
+        c.write_all(req.as_bytes()).unwrap();
+        let mut buf = [0u8; 64];
+        let n = c.read(&mut buf).expect("server answered");
+        String::from_utf8_lossy(&buf[..n]).to_string()
+    })
+    .await
+    .unwrap();
+    assert!(status.starts_with("HTTP/1.1 400"), "{status}");
 }
