@@ -6,6 +6,7 @@
 //! - `mcp`: in-app MCP server bound to 127.0.0.1 with per-agent bearer tokens (RAD-205/209/210).
 
 pub mod agents;
+pub mod anchor;
 pub mod content;
 pub mod manuscripts;
 pub mod mcp;

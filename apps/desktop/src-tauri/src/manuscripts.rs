@@ -365,6 +365,41 @@ impl Store {
         })
     }
 
+    /// Current UTC time as stored in the database (ISO 8601 with milliseconds).
+    pub fn now(&self) -> Result<String, StorageError> {
+        self.with_conn(|c| Ok(c.query_row(&format!("SELECT {NOW}"), [], |r| r.get(0))?))
+    }
+
+    pub fn insert_comment(&self, manuscript_id: &str, c: &Comment) -> Result<(), StorageError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO comments (id, manuscript_id, section_id, block_id, quote, body, thread_id,
+                   author_kind, author_id, author_name, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![c.id, manuscript_id, c.section_id, c.block_id, c.quote, c.body, c.thread_id,
+                    c.author.kind, c.author.id, c.author.name, c.created_at],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn insert_suggestion(
+        &self,
+        manuscript_id: &str,
+        x: &Suggestion,
+    ) -> Result<(), StorageError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO suggestions (id, manuscript_id, section_id, block_id, kind, quote, replacement,
+                   rationale, author_kind, author_id, author_name, status, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                params![x.id, manuscript_id, x.section_id, x.block_id, x.kind, x.quote, x.replacement,
+                    x.rationale, x.author.kind, x.author.id, x.author.name, x.status, x.created_at],
+            )?;
+            Ok(())
+        })
+    }
+
     /// Record one agent (or human) action in the audit log.
     pub fn audit(
         &self,
