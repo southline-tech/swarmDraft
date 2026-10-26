@@ -7,7 +7,7 @@
 import * as Y from 'yjs';
 import {
   isParseableMarkKey,
-  markIdHash,
+  freeMarkKey,
   markKey,
   markKeys,
   markTypeFromKey,
@@ -140,9 +140,8 @@ export function rekeyMarks(ydoc: Y.Doc): number {
         const attrs = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
         const type = markTypeFromKey(k);
         const id = attrs.id === undefined ? undefined : String(attrs.id);
-        let key = markKey({ type, attrs });
-        for (let n = 1; id !== undefined && used.has(key); n++)
-          key = `${type}--${markIdHash(`${id}:${n}`)}`;
+        const first = markKey({ type, attrs });
+        const key = id === undefined ? first : freeMarkKey(type, id, first, used);
         used.add(key);
         fmt[k] = null;
         fmt[key] = v;

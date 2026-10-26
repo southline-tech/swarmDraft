@@ -62,12 +62,34 @@ export function markKeys(
   const keys: string[] = new Array(marks.length);
   for (const { i, id } of order) {
     const m = marks[i]!;
-    let key = markKey(m, hash);
-    for (let n = 1; id && used.has(key); n++) key = `${m.type}--${hash(`${id}:${n}`)}`;
+    const key = id ? freeMarkKey(m.type, id, markKey(m, hash), used, hash) : markKey(m, hash);
     used.add(key);
     keys[i] = key;
   }
   return keys;
+}
+
+/** Collision retries before `freeMarkKey` gives up (only reachable with a broken hash). */
+export const MAX_MARK_KEY_TRIES = 1000;
+
+/**
+ * `first` if unused, else the first unused `type--hash(id:n)` for n = 1, 2, ...; throws after
+ * MAX_MARK_KEY_TRIES so a degenerate hash cannot loop forever.
+ */
+export function freeMarkKey(
+  type: string,
+  id: string,
+  first: string,
+  used: ReadonlySet<string>,
+  hash: (s: string) => string = markIdHash,
+): string {
+  let key = first;
+  for (let n = 1; used.has(key); n++) {
+    if (n > MAX_MARK_KEY_TRIES)
+      throw new Error(`no free mark key for ${type} ${id} after ${MAX_MARK_KEY_TRIES} tries`);
+    key = `${type}--${hash(`${id}:${n}`)}`;
+  }
+  return key;
 }
 
 export function markTypeFromKey(key: string): string {
