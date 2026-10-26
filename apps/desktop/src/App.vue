@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { DEFAULT_TRIM } from '@coauthor/schema';
 import { getAppInfo, type AppInfo } from './backend';
+import AgentsSettings from './AgentsSettings.vue';
 
 const info = ref<AppInfo | null>(null);
 onMounted(async () => {
@@ -17,6 +18,7 @@ onMounted(async () => {
       v{{ info.version }} · data: {{ info.dataDir }} · db schema {{ info.schemaVersion }}
     </p>
     <p v-else data-test="browser-mode">Running in browser mode (no desktop backend).</p>
+    <AgentsSettings v-if="info" />
   </main>
 </template>
 
