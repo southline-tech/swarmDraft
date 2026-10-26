@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
 import { DEFAULT_TRIM } from '@coauthor/schema';
+import { yDocToDoc } from '@coauthor/docx';
 import {
   createBackup,
   getAppInfo,
@@ -13,18 +14,17 @@ import {
 } from './backend';
 import AgentsSettings from './AgentsSettings.vue';
 import ManuscriptEditor from './ManuscriptEditor.vue';
-import { SAMPLE_DOC } from './sample';
 import SectionNav from './SectionNav.vue';
-import { SAMPLE_MANUSCRIPT_ID, sampleOutline } from './outline-sample';
-import type { Section } from '@coauthor/schema';
-
-const editorKey = ref(0);
+import { sessionFromDocx, type ManuscriptSession } from './manuscript-session';
 
 const info = ref<AppInfo | null>(null);
-const sections = ref<Section[]>(sampleOutline());
+const session = shallowRef<ManuscriptSession | null>(null);
 const selectedId = ref<string>();
 /** One-time notice: startup recovery moved folders aside after an interrupted restore. */
 const recoveryNotice = ref<RecoveryNotice | null>(null);
+const openError = ref('');
+/** Bumped by the editor's Reload action to reopen the section from its Y.Doc. */
+const reloads = ref(0);
 
 onMounted(async () => {
   info.value = await getAppInfo();
@@ -82,6 +82,35 @@ async function onRestore(): Promise<void> {
     backupStatus.value = `Restore failed: ${String(e)}`;
   }
 }
+onBeforeUnmount(() => session.value?.close());
+
+/** Open an imported manuscript (exposed for tests and the Tauri open-file flow). */
+function open(next: ManuscriptSession) {
+  session.value?.close();
+  session.value = next;
+  selectedId.value = next.outline.value.find((s) => s.kind === 'chapter')?.id;
+}
+
+async function onFile(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  if (!file) return;
+  openError.value = '';
+  try {
+    open(sessionFromDocx(new Uint8Array(await file.arrayBuffer()), crypto.randomUUID()));
+  } catch (err) {
+    openError.value = `Could not import ${file.name}: ${(err as Error).message}`;
+  }
+}
+
+const selected = computed(() =>
+  session.value?.outline.value.find((s) => s.id === selectedId.value),
+);
+const selectedContent = computed(() => {
+  const doc = selected.value && session.value?.sections.get(selected.value.docId);
+  return doc ? yDocToDoc(doc) : undefined;
+});
+
+defineExpose({ open });
 </script>
 
 <template>
@@ -144,13 +173,27 @@ async function onRestore(): Promise<void> {
     </section>
     <p v-else data-test="browser-mode">Running in browser mode (no desktop backend).</p>
     <AgentsSettings v-if="info" />
-    <SectionNav
-      v-model:sections="sections"
-      :manuscript-id="SAMPLE_MANUSCRIPT_ID"
-      :selected-id="selectedId"
-      @select="selectedId = $event"
-    />
-    <ManuscriptEditor :key="editorKey" :content="SAMPLE_DOC" @reload="editorKey++" />
+    <label>
+      Import .docx
+      <input data-test="open-docx" type="file" accept=".docx" @change="onFile" />
+    </label>
+    <p v-if="openError" role="alert" data-test="open-error">{{ openError }}</p>
+    <p v-if="!session" data-test="no-manuscript">Import a manuscript to see its outline.</p>
+    <div v-else class="workspace">
+      <SectionNav
+        :sections="session.outline.value"
+        :manuscript-id="session.id"
+        :selected-id="selectedId"
+        :save="session.save"
+        @select="selectedId = $event"
+      />
+      <ManuscriptEditor
+        v-if="selectedContent"
+        :key="`${selected!.docId}#${reloads}`"
+        :content="selectedContent"
+        @reload="reloads++"
+      />
+    </div>
   </main>
 </template>
 
@@ -161,5 +204,10 @@ body {
 }
 .shell {
   padding: 2rem;
+}
+.workspace {
+  display: grid;
+  grid-template-columns: 18rem 1fr;
+  gap: 1rem;
 }
 </style>

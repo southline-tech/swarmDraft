@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import ManuscriptEditor from './ManuscriptEditor.vue';
-import { SAMPLE_DOC } from './sample';
+import { SAMPLE_DOC } from './fixtures/sample';
 
 describe('ManuscriptEditor', () => {
   it('renders the document with tracked changes and comments, read-only in the review list', async () => {
