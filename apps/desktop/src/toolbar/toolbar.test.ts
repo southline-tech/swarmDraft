@@ -387,27 +387,70 @@ describe('EditorToolbar', () => {
     w.unmount();
   });
 
-  it('disables every formatting control when read-only, and follows editable changes', async () => {
-    const { e, w } = mountBar();
-    caretIn(e, 'plain');
+  const FORMAT = [
+    'tb-bold',
+    'tb-italic',
+    'tb-underline',
+    'tb-align-left',
+    'tb-align-center',
+    'paragraph-style',
+  ];
+
+  it('read-only: formatting stays focusable, aria-disabled, inert, and says Read-only', async () => {
+    const { e, w } = mountBar({ readOnlyReason: 'document failed to load' });
+    select(e, 'plain');
     await flushPromises();
-    const ids = ['tb-bold', 'tb-italic', 'tb-underline', 'tb-align-left', 'tb-align-center'];
-    const dis = (id: string) => w.find(`[data-test="${id}"]`).attributes('disabled') !== undefined;
-    expect(ids.some(dis)).toBe(false);
+    expect(w.find('[data-test="tb-bold"]').attributes('title')).toBe('Bold (Ctrl+B)');
     e.setEditable(false, false); // no 'update' emitted, like the load-error path
     await flushPromises();
     await new Promise((r) => setTimeout(r, 0));
-    for (const id of [...ids, 'tb-undo', 'tb-redo', 'paragraph-style']) expect(dis(id)).toBe(true);
-    await w.find('[data-test="tb-overflow"]').trigger('click');
-    for (const i of w.findAll('[role^="menuitem"]')) expect(i.attributes('disabled')).toBeDefined();
     const before = JSON.stringify(e.getJSON());
-    select(e, 'plain');
-    await w.find('[data-test="tb-bold"]').trigger('click');
+    for (const id of FORMAT) {
+      const c = w.find(`[data-test="${id}"]`);
+      expect(c.attributes('disabled')).toBeUndefined();
+      expect(c.attributes('aria-disabled')).toBe('true');
+      expect(c.attributes('title')).toBe('Read-only: document failed to load');
+      expect(c.attributes('aria-description')).toBe('Read-only: document failed to load');
+      expect(c.attributes('aria-keyshortcuts')).toBeUndefined();
+      (c.element as HTMLElement).focus();
+      expect(document.activeElement).toBe(c.element);
+      if (id !== 'paragraph-style') {
+        await c.trigger('click');
+        await c.trigger('keydown', { key: 'Enter' });
+      }
+    }
+    const sel = w.find('[data-test="paragraph-style"]');
+    const shown = (sel.element as HTMLSelectElement).value;
+    await sel.setValue('heading');
+    expect((sel.element as HTMLSelectElement).value).toBe(shown);
+    expect(toolbarState(e).bold).toBe(false);
+    for (const id of ['tb-undo', 'tb-redo'])
+      expect(w.find(`[data-test="${id}"]`).attributes('disabled')).toBeDefined();
+    await w.find('[data-test="tb-overflow"]').trigger('click');
+    for (const i of w.findAll('[role^="menuitem"]')) {
+      expect(i.attributes('disabled')).toBeUndefined();
+      expect(i.attributes('aria-disabled')).toBe('true');
+      expect(i.attributes('title')).toBe('Read-only: document failed to load');
+    }
+    await w.find('[data-test="tb-menu-smallcaps"]').trigger('click');
     expect(JSON.stringify(e.getJSON())).toBe(before);
     e.setEditable(true);
     await flushPromises();
     await new Promise((r) => setTimeout(r, 0));
-    expect(ids.some(dis)).toBe(false);
+    for (const id of FORMAT)
+      expect(w.find(`[data-test="${id}"]`).attributes('aria-disabled')).toBeUndefined();
+    expect(w.find('[data-test="tb-bold"]').attributes('title')).toBe('Bold (Ctrl+B)');
+    w.unmount();
+  });
+
+  it('read-only without a reason says editing is turned off', async () => {
+    const { e, w } = mountBar();
+    e.setEditable(false, false);
+    await flushPromises();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(w.find('[data-test="tb-italic"]').attributes('title')).toBe(
+      'Read-only: editing is turned off',
+    );
     w.unmount();
   });
 

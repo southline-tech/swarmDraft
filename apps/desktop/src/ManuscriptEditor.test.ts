@@ -57,6 +57,9 @@ describe('ManuscriptEditor', () => {
     expect(w.find('[data-test="load-error"]').exists()).toBe(true);
     expect(w.emitted('change')).toBeUndefined();
     expect(w.find('.tiptap').attributes('contenteditable')).toBe('false');
+    const bold = w.find('[data-test="tb-bold"]');
+    expect(bold.attributes('aria-disabled')).toBe('true');
+    expect(bold.attributes('title')).toBe('Read-only: document failed to load');
     await w.find('[data-test="reload"]').trigger('click');
     expect(w.emitted('reload')).toHaveLength(1);
     w.unmount();

@@ -24,9 +24,11 @@ const props = withDefaults(
     reviewOpen?: boolean;
     /** Comments and Find land in later issues (RAD-257/259); until wired they show disabled. */
     commentEnabled?: boolean;
+    /** Why the editor is read-only (e.g. 'document failed to load', 'restore in progress'). */
+    readOnlyReason?: string;
     findEnabled?: boolean;
   }>(),
-  { reviewOpen: true, commentEnabled: false, findEnabled: false },
+  { reviewOpen: true, readOnlyReason: '', commentEnabled: false, findEnabled: false },
 );
 const emit = defineEmits<{
   /** Reserved: the Chapters toggle is a 'coming soon' no-op until App.vue wires it (after #25). */
@@ -76,12 +78,23 @@ onBeforeUnmount(() => {
   listen(ed(), false);
   observer?.disconnect();
 });
+const state = computed(() => (tick.value, toolbarState(ed())));
 /** False when the editor is read-only: every formatting control is then disabled. */
 const editable = computed(() => state.value.editable);
-const state = computed(() => (tick.value, toolbarState(ed())));
+/** Tooltip and aria-description for formatting controls while read-only. */
+const readOnlyText = computed(
+  () => `Read-only: ${props.readOnlyReason || 'editing is turned off'}`,
+);
+/** Formatting control tooltip: the read-only reason replaces the label and shortcut. */
+const ftip = (label: string, key?: string) =>
+  editable.value ? tip(label, key) : readOnlyText.value;
+/** aria-disabled/aria-description pair for a formatting control (focusable while read-only). */
+const ro = computed((): Record<string, string> =>
+  editable.value ? {} : { 'aria-disabled': 'true', 'aria-description': readOnlyText.value },
+);
 
 function run(cmd: ToolbarCommand) {
-  if (!ed().isEditable) return;
+  if (!ed().isEditable) return bump();
   runCommand(ed(), cmd);
   bump();
 }
@@ -92,6 +105,11 @@ const styleOptions = computed(() => {
   return [...TOOLBAR_STYLES, ...extra] as Exclude<CaretStyle, ''>[];
 });
 function onStyle(ev: Event) {
+  const el = ev.target as HTMLSelectElement;
+  if (!editable.value) {
+    el.value = state.value.style; // read-only: keep showing the caret style
+    return;
+  }
   run(`style:${(ev.target as HTMLSelectElement).value}` as ToolbarCommand);
 }
 
@@ -171,6 +189,7 @@ function pick(cmd: ToolbarCommand) {
 
 const tip = (label: string, key?: string) => (key ? `${label} (${key})` : label);
 const SOON = 'coming soon';
+const SOON_ATTRS: Record<string, string> = { 'aria-disabled': 'true', 'aria-description': SOON };
 const soon = (label: string, key?: string) => `${tip(label, key)} — ${SOON}`;
 const btn =
   'inline-flex h-7.5 min-w-7.5 items-center justify-center gap-1.5 rounded-sm border-0 bg-transparent px-1.75 font-ui text-[13px] font-medium text-text cursor-pointer hover:bg-selected disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent aria-pressed:bg-selected aria-pressed:text-accent';
@@ -234,10 +253,13 @@ const btn =
     <select
       data-test="paragraph-style"
       aria-label="Paragraph style"
-      title="Paragraph style"
-      class="h-7.5 w-37 cursor-pointer rounded-sm border border-border bg-surface pr-2 pl-2.5 font-ui text-[13px] font-medium text-text disabled:opacity-40"
+      class="h-7.5 w-37 cursor-pointer rounded-sm border border-border bg-surface pr-2 pl-2.5 font-ui text-[13px] font-medium text-text disabled:opacity-40 aria-disabled:cursor-default aria-disabled:opacity-40"
       :value="state.style"
-      :disabled="!state.style || !state.editable"
+      :disabled="editable && !state.style"
+      v-bind="ro"
+      :title="editable ? 'Paragraph style' : readOnlyText"
+      @mousedown="!editable && $event.preventDefault()"
+      @keydown="!editable && !['Tab', 'Escape'].includes($event.key) && $event.preventDefault()"
       @change="onStyle"
     >
       <option v-for="s in styleOptions" :key="s" :value="s">{{ STYLE_LABELS[s] }}</option>
@@ -250,9 +272,9 @@ const btn =
       :class="[btn, 'font-manuscript! font-bold']"
       :aria-pressed="state.bold"
       aria-label="Bold"
-      aria-keyshortcuts="Control+B"
-      :title="tip('Bold', SHORTCUTS.bold)"
-      :disabled="!editable"
+      :aria-keyshortcuts="editable ? 'Control+B' : undefined"
+      :title="ftip('Bold', SHORTCUTS.bold)"
+      v-bind="ro"
       @click="run('bold')"
     >
       B
@@ -263,9 +285,9 @@ const btn =
       :class="[btn, 'font-manuscript! italic']"
       :aria-pressed="state.italic"
       aria-label="Italic"
-      aria-keyshortcuts="Control+I"
-      :title="tip('Italic', SHORTCUTS.italic)"
-      :disabled="!editable"
+      :aria-keyshortcuts="editable ? 'Control+I' : undefined"
+      :title="ftip('Italic', SHORTCUTS.italic)"
+      v-bind="ro"
       @click="run('italic')"
     >
       I
@@ -276,9 +298,9 @@ const btn =
       :class="[btn, 'underline']"
       :aria-pressed="state.underline"
       aria-label="Underline"
-      aria-keyshortcuts="Control+U"
-      :title="tip('Underline', SHORTCUTS.underline)"
-      :disabled="!editable"
+      :aria-keyshortcuts="editable ? 'Control+U' : undefined"
+      :title="ftip('Underline', SHORTCUTS.underline)"
+      v-bind="ro"
       @click="run('underline')"
     >
       U
@@ -293,10 +315,8 @@ const btn =
       :class="btn"
       :aria-pressed="state.align === a.id"
       :aria-label="a.label"
-      :title="SUPPORTED_ALIGN.includes(a.id) ? a.label : soon(a.label)"
-      :aria-disabled="SUPPORTED_ALIGN.includes(a.id) ? undefined : 'true'"
-      :aria-description="SUPPORTED_ALIGN.includes(a.id) ? undefined : SOON"
-      :disabled="SUPPORTED_ALIGN.includes(a.id) && !editable"
+      :title="SUPPORTED_ALIGN.includes(a.id) ? ftip(a.label) : soon(a.label)"
+      v-bind="SUPPORTED_ALIGN.includes(a.id) ? ro : SOON_ATTRS"
       @click="SUPPORTED_ALIGN.includes(a.id) && run(`align:${a.id}`)"
     >
       <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true"><path :d="a.path" /></svg>
@@ -352,10 +372,11 @@ const btn =
           type="button"
           :role="o.active ? 'menuitemcheckbox' : 'menuitem'"
           tabindex="-1"
-          :disabled="!editable"
+          v-bind="ro"
+          :title="editable ? undefined : readOnlyText"
           :data-test="`tb-menu-${o.cmd.replace(':', '-')}`"
           :aria-checked="o.active ? state[o.active] : undefined"
-          class="flex h-7.5 w-full cursor-pointer items-center rounded-sm border-0 bg-transparent px-2.5 text-left font-ui text-[13px] text-text hover:bg-selected hover:text-accent focus:bg-selected disabled:cursor-default disabled:opacity-40"
+          class="flex h-7.5 w-full cursor-pointer items-center rounded-sm border-0 bg-transparent px-2.5 text-left font-ui text-[13px] text-text hover:bg-selected hover:text-accent focus:bg-selected aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent aria-disabled:hover:text-text"
           :class="o.active && state[o.active] ? 'bg-selected text-accent' : ''"
           @click="pick(o.cmd)"
         >

@@ -80,6 +80,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
       v-if="editor"
       :editor="editor"
       :review-open="reviewOpen"
+      :read-only-reason="loadError ? 'document failed to load' : undefined"
       @toggle-navigator="emit('toggle-navigator')"
       @toggle-review="reviewOpen = !reviewOpen"
     />
