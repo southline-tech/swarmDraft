@@ -170,10 +170,29 @@ fn manuscript_import_json(
     store: tauri::State<'_, storage::Store>,
     title: String,
     sections: Vec<manuscripts::ImportSection>,
-) -> Result<manuscripts::Manuscript, String> {
+) -> Result<manuscripts::StoredManuscript, String> {
+    let (m, _) = store.import_manuscript(&title, &sections).map_err(err)?;
+    store.load_manuscript(&m.id).map_err(err)
+}
+
+/// The most recent manuscript with its sections' document state, to reopen at startup.
+#[tauri::command]
+fn manuscript_open_latest(
+    store: tauri::State<'_, storage::Store>,
+) -> Result<Option<manuscripts::StoredManuscript>, String> {
+    store.latest_manuscript().map_err(err)
+}
+
+/// Save an editor's Yjs update to a stored section (validated before it is written).
+#[tauri::command]
+fn section_apply_update(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+    section_id: String,
+    update: Vec<u8>,
+) -> Result<(), String> {
     store
-        .import_manuscript(&title, &sections)
-        .map(|(m, _)| m)
+        .apply_section_update(&manuscript_id, &section_id, &update)
         .map_err(err)
 }
 
@@ -243,6 +262,8 @@ pub fn run() {
             restore_backup,
             manuscript_import_json,
             manuscripts_list,
+            manuscript_open_latest,
+            section_apply_update,
             mcp_status
         ])
         .run(tauri::generate_context!())

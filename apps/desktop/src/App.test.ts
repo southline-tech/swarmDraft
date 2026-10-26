@@ -5,6 +5,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
 import { docToYDoc, importDocx, readStructure, writeStructure, yDocToDoc } from '@coauthor/docx';
 import App from './App.vue';
+import { storedFixture } from './stored-fixture.test-helper';
 import { openSession, sessionFromDocx } from './manuscript-session';
 
 const fixture = resolve(
@@ -54,6 +55,85 @@ describe('App', () => {
     expect(payload.sections.every((s) => (s.doc as { type: string }).type === 'doc')).toBe(true);
     expect(w.findAll('.row').length).toBe(expected.sections.length);
     w.unmount();
+  });
+
+  it('opens the import from the stored rows (ids, parents, doc ids), editable', async () => {
+    const stored = storedFixture();
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    expect(w.findAll('.row .title').map((r) => r.text())).toEqual(
+      stored.sections.map((s) => s.title),
+    );
+    for (const s of stored.sections) {
+      expect(w.find(`[data-test="section-${s.id}"]`).exists()).toBe(true);
+    }
+    expect(w.find('.ProseMirror').attributes('contenteditable')).toBe('true');
+    w.unmount();
+  });
+
+  it('disables the file input while an import is running', async () => {
+    const backend = await import('./backend');
+    let release!: (v: ReturnType<typeof storedFixture>) => void;
+    vi.mocked(backend.persistImport).mockImplementationOnce(
+      () => new Promise((r) => (release = r)),
+    );
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    const input = w.find('[data-test="open-docx"]');
+    const file = new File([bytes()], 'synthetic.docx');
+    Object.defineProperty(file, 'arrayBuffer', { value: async () => bytes().buffer });
+    Object.defineProperty(input.element, 'files', { value: [file], configurable: true });
+    await input.trigger('change');
+    await flushPromises();
+    expect((input.element as HTMLInputElement).disabled).toBe(true);
+    release(storedFixture());
+    await settle();
+    expect((input.element as HTMLInputElement).disabled).toBe(false);
+    w.unmount();
+  });
+
+  it('type, restart, and the typed text is still there (saved through the backend)', async () => {
+    const backend = await import('./backend');
+    // A fake backend: the stored state plus every saved update, per section.
+    const stored = storedFixture();
+    const saved = new Map<string, Uint8Array[]>();
+    vi.mocked(backend.persistImport).mockResolvedValueOnce(stored);
+    vi.mocked(backend.saveSectionUpdate).mockImplementation(async (m, sec, u) => {
+      expect(m).toBe(stored.manuscript.id);
+      saved.set(sec, [...(saved.get(sec) ?? []), u]);
+    });
+    const first = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(first);
+    const chapter = first.findAll('.row').length;
+    expect(chapter).toBeGreaterThan(0);
+    const editor = (
+      first.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+    ).editor;
+    editor.commands.insertContentAt(1, 'TYPED ');
+    await settle();
+    first.unmount(); // closing flushes pending edits
+    await settle();
+    expect([...saved.keys()].length).toBe(1);
+
+    // Restart: the backend returns the stored state with the saved updates applied.
+    const reopened = {
+      ...stored,
+      sections: stored.sections.map((s) => {
+        const d = new Y.Doc();
+        Y.applyUpdate(d, Uint8Array.from(s.state));
+        for (const u of saved.get(s.id) ?? []) Y.applyUpdate(d, u);
+        return { ...s, state: Array.from(Y.encodeStateAsUpdate(d)) };
+      }),
+    };
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(reopened);
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    expect(w.findAll('.row').length).toBe(chapter);
+    expect(w.find('.ProseMirror').text()).toContain('TYPED ');
+    w.unmount();
+    vi.mocked(backend.saveSectionUpdate).mockReset();
   });
 
   it('shows an error and does not open the import when saving fails', async () => {
@@ -286,7 +366,9 @@ vi.mock('./backend', async (orig) => ({
   pickBackupToRestore: vi.fn(async () => 'D:\\Backups\\picked.zip'),
   pickBackupDestination: vi.fn(async () => 'D:\\Backups\\new.zip'),
   getRecoveryNotices: vi.fn(async () => []),
-  persistImport: vi.fn(async () => ({ id: 'db1', title: 't', createdAt: '' })),
+  persistImport: vi.fn(async () => storedFixture()),
+  openLatestManuscript: vi.fn(async () => null),
+  saveSectionUpdate: vi.fn(async () => {}),
   dismissRecoveryNotices: vi.fn(async () => {}),
   restoreBackup: vi.fn(async () => ({
     tokensRevoked: 2,

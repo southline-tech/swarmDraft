@@ -130,22 +130,40 @@ export async function dismissRecoveryNotices(ids: string[]): Promise<void> {
   await invoke('dismiss_recovery_notices', { ids });
 }
 
-export interface StoredManuscript {
+export interface StoredManuscriptRow {
   id: string;
   title: string;
   createdAt: string;
 }
 
+/** A stored section plus its full Yjs state (v1 update from an empty doc). */
+export interface StoredSection {
+  id: string;
+  manuscriptId: string;
+  kind: string;
+  parentId: string | null;
+  position: number;
+  title: string;
+  docId: string;
+  state: number[];
+}
+
+/** A manuscript as stored: its row and every section, in order, with document state. */
+export interface StoredManuscript {
+  manuscript: StoredManuscriptRow;
+  sections: StoredSection[];
+}
+
 /** The import payload the backend persists: one entry per section, in outline order. */
 export interface ImportPayload {
   title: string;
-  sections: { kind: string; title: string; doc: unknown }[];
+  sections: { id: string; parentId?: string; kind: string; title: string; doc: unknown }[];
 }
 
 /**
  * Persist an imported manuscript (manuscript row, sections and their initial documents) in one
- * backend transaction, so agents can see it over MCP and it survives a restart. Returns null
- * in a plain browser (pnpm dev:web), where there is no database.
+ * backend transaction, so agents can see it over MCP and it survives a restart. Returns the
+ * stored manuscript (DB ids and doc state) to open, or null in a plain browser (no database).
  */
 export async function persistImport(payload: ImportPayload): Promise<StoredManuscript | null> {
   if (!isTauri()) return null;
@@ -153,4 +171,19 @@ export async function persistImport(payload: ImportPayload): Promise<StoredManus
     title: payload.title,
     sections: payload.sections,
   });
+}
+
+/** The most recent manuscript, to reopen at startup; null if none or in a plain browser. */
+export async function openLatestManuscript(): Promise<StoredManuscript | null> {
+  if (!isTauri()) return null;
+  return invoke<StoredManuscript | null>('manuscript_open_latest');
+}
+
+/** Save an editor's Yjs update to a stored section (validated by the backend). */
+export async function saveSectionUpdate(
+  manuscriptId: string,
+  sectionId: string,
+  update: Uint8Array,
+): Promise<void> {
+  await invoke('section_apply_update', { manuscriptId, sectionId, update: Array.from(update) });
 }

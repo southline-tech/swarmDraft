@@ -11,13 +11,11 @@ import {
   dismissRecoveryNotices,
   type AppInfo,
   type RecoveryNotice,
-  persistImport,
 } from './backend';
 import AgentsSettings from './AgentsSettings.vue';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
-import { importDocx } from '@coauthor/docx';
-import { importPayload, sessionFromImported, type ManuscriptSession } from './manuscript-session';
+import { importAndOpen, reopenLatest, type ManuscriptSession } from './manuscript-session';
 
 const info = ref<AppInfo | null>(null);
 const session = shallowRef<ManuscriptSession | null>(null);
@@ -37,6 +35,10 @@ async function dismissRecovery() {
   }
 }
 const openError = ref('');
+const importing = ref(false);
+const saveError = ref('');
+const onSaveError = (err: unknown) =>
+  (saveError.value = `Could not save your latest edits: ${String(err)}`);
 /**
  * Bumped by the editor's Reload action to reopen the section from its Y.Doc. The editor is bound
  * to that doc, so everything typed is already in it and survives the remount (and switching
@@ -53,7 +55,14 @@ onMounted(async () => {
     } catch {
       recoveryNotices.value = [];
     }
+    try {
+      const latest = await reopenLatest(onSaveError);
+      if (latest && !session.value) open(latest);
+    } catch (err) {
+      openError.value = `Could not reopen the last manuscript: ${String(err)}`;
+    }
   }
+  window.addEventListener('pagehide', () => void session.value?.flush());
 });
 
 const backupStatus = ref('');
@@ -104,35 +113,36 @@ async function onRestore(): Promise<void> {
     backupStatus.value = `Restore failed: ${String(e)}`;
   }
 }
-onBeforeUnmount(() => session.value?.close());
+onBeforeUnmount(() => void session.value?.close());
 
 /** Close the open manuscript, if any, and clear the selection. */
 function closeSession() {
-  session.value?.close();
+  // Storage was replaced: drop pending edits rather than write them into the restored data.
+  void session.value?.close({ discard: true });
   session.value = null;
   selectedId.value = undefined;
 }
 
 /** Open an imported manuscript (exposed for tests and the Tauri open-file flow). */
 function open(next: ManuscriptSession) {
-  session.value?.close();
+  void session.value?.close();
   session.value = next;
   selectedId.value = next.outline.value.find((s) => s.kind === 'chapter')?.id;
 }
 
 async function onFile(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0];
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
   if (!file) return;
   openError.value = '';
+  importing.value = true;
   try {
-    const id = crypto.randomUUID();
-    const imported = importDocx(new Uint8Array(await file.arrayBuffer()), { manuscriptId: id });
-    // Save it before showing it: an import that only lives in memory is invisible to agents
-    // (MCP) and lost on restart.
-    const saved = await persistImport(importPayload(imported));
-    open(sessionFromImported(imported, saved?.id ?? id));
+    open(await importAndOpen(new Uint8Array(await file.arrayBuffer()), onSaveError));
   } catch (err) {
     openError.value = `Could not import ${file.name}: ${err instanceof Error ? err.message : String(err)}`;
+  } finally {
+    importing.value = false;
+    input.value = '';
   }
 }
 
@@ -227,9 +237,16 @@ defineExpose({ open });
     <AgentsSettings v-if="info" />
     <label>
       Import .docx
-      <input data-test="open-docx" type="file" accept=".docx" @change="onFile" />
+      <input
+        data-test="open-docx"
+        type="file"
+        accept=".docx"
+        :disabled="importing"
+        @change="onFile"
+      />
     </label>
     <p v-if="openError" role="alert" data-test="open-error">{{ openError }}</p>
+    <p v-if="saveError" role="alert" data-test="save-error">{{ saveError }}</p>
     <p v-if="!session" data-test="no-manuscript">Import a manuscript to see its outline.</p>
     <div v-else class="workspace">
       <SectionNav
