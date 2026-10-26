@@ -177,6 +177,21 @@ describe('App', () => {
     w.unmount();
   });
 
+  it('the toolbar Chapters button toggles the chapter navigator', async () => {
+    const { w } = await withManuscript();
+    const nav = w.find('[data-test="tb-navigator"]');
+    const sidebar = () => w.findComponent({ name: 'SectionNav' });
+    expect(nav.attributes('aria-pressed')).toBe('true');
+    expect(sidebar().isVisible()).toBe(true);
+    await nav.trigger('click');
+    expect(nav.attributes('aria-pressed')).toBe('false');
+    expect(sidebar().isVisible()).toBe(false);
+    await nav.trigger('click');
+    expect(nav.attributes('aria-pressed')).toBe('true');
+    expect(sidebar().isVisible()).toBe(true);
+    w.unmount();
+  });
+
   it('persists rename and reorder to the Yjs structure', async () => {
     const { w, session, titles } = await withManuscript();
     const first = readStructure(session.manuscript).find((s) => s.kind === 'chapter')!;

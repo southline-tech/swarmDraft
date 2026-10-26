@@ -58,6 +58,8 @@ const persistHooks = {
  * editor was read-only after a content error was ever accepted, so there is nothing else to lose.
  */
 const reloads = ref(0);
+/** The chapter navigator (SectionNav); the toolbar's Chapters button toggles it. */
+const navigatorOpen = ref(true);
 
 let stopCloseFlush = () => {};
 onMounted(async () => {
@@ -303,6 +305,7 @@ defineExpose({ open });
     <p v-if="!session" data-test="no-manuscript">Import a manuscript to see its outline.</p>
     <div v-else class="workspace">
       <SectionNav
+        v-show="navigatorOpen"
         :sections="session.outline.value"
         :manuscript-id="session.id"
         :selected-id="selectedId"
@@ -315,7 +318,9 @@ defineExpose({ open });
         :key="`${selected!.docId}#${reloads}`"
         :doc="selectedDoc"
         :readonly="session.closed"
+        :navigator-open="navigatorOpen"
         @reload="reloads++"
+        @toggle-navigator="navigatorOpen = !navigatorOpen"
       />
     </div>
   </main>
