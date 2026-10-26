@@ -1,7 +1,7 @@
+import { authorColor, commentAuthorColor } from './comments';
 import { describe, expect, it, vi } from 'vitest';
 import type { DocNode, Mark } from '@coauthor/schema';
 import {
-  authorColor,
   decideSuggestions,
   listSuggestions,
   runDecision,
@@ -236,7 +236,8 @@ describe('trusted port + runDecision', () => {
   });
 });
 
-it('authorColor is stable per author', () => {
+it('authorColor is the shared comments helper', () => {
+  expect(authorColor).toBe(commentAuthorColor);
   expect(authorColor('Bot A')).toBe(authorColor('Bot A'));
   expect(authorColor('Bot A')).not.toBe(authorColor('Bot B'));
 });

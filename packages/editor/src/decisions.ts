@@ -254,10 +254,3 @@ export async function runDecision(
     return { ...res, unrecorded: records };
   }
 }
-
-/** Stable per-author color for suggestion highlighting. */
-export function authorColor(author: string): string {
-  let h = 0;
-  for (const ch of author) h = (h * 31 + ch.codePointAt(0)!) >>> 0;
-  return `hsl(${h % 360} 70% 45%)`;
-}

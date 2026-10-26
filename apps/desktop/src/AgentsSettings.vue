@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Settings → Agents (RAD-205): create agents, mint tokens (shown once), revoke. */
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import {
   AGENT_SCOPES,
   agentsApi,
@@ -15,7 +15,7 @@ const props = withDefaults(
   {
     api: () => agentsApi,
     // The Clipboard API works in the app webview under our CSP (no network involved).
-    writeClipboard: () => (text: string) => navigator.clipboard.writeText(text),
+    writeClipboard: (text: string) => navigator.clipboard.writeText(text),
   },
 );
 
@@ -27,21 +27,38 @@ const scopes = ref<AgentScope[]>([...AGENT_SCOPES]);
 const shownToken = ref<{ agentId: string; token: string } | null>(null);
 const error = ref('');
 const copied = ref(false);
+const copyFailed = ref(false);
+const tokenInput = ref<HTMLInputElement | null>(null);
 
+/**
+ * Copy the shown token. On failure (clipboard missing, permission denied, webview quirk) the
+ * token stays on screen and selectable; it is never hidden or cleared by a failed copy.
+ */
 async function copyToken() {
   if (!shownToken.value) return;
+  copied.value = false;
+  copyFailed.value = false;
   try {
     await props.writeClipboard(shownToken.value.token);
     copied.value = true;
   } catch {
-    error.value = 'Could not copy. Select the token and copy it manually.';
+    copyFailed.value = true;
+    // Focus (and so select) the token, so the "selected above" hint is true.
+    await nextTick();
+    tokenInput.value?.focus();
+    tokenInput.value?.select();
   }
+}
+
+function selectAll(e: Event) {
+  (e.target as HTMLInputElement).select();
 }
 
 /** The plaintext token only lives in memory until the panel is dismissed or the view goes away. */
 function clearToken() {
   shownToken.value = null;
   copied.value = false;
+  copyFailed.value = false;
 }
 
 async function guard(fn: () => Promise<void>) {
@@ -70,6 +87,7 @@ const mint = (agentId: string) =>
   guard(async () => {
     const t = await props.api.createToken(agentId, scopes.value);
     copied.value = false;
+    copyFailed.value = false;
     shownToken.value = { agentId, token: t.token };
     await refresh();
   });
@@ -115,9 +133,25 @@ onBeforeUnmount(() => {
     <p v-if="error" class="error" data-test="error">{{ error }}</p>
     <div v-if="shownToken" class="token-once" data-test="token-once">
       <strong>Copy this token now. It won't be shown again.</strong>
-      <code>{{ shownToken.token }}</code>
+      <input
+        class="token-value"
+        data-test="token-value"
+        aria-label="New agent token"
+        ref="tokenInput"
+        readonly
+        autocomplete="off"
+        autocapitalize="off"
+        autocorrect="off"
+        spellcheck="false"
+        :value="shownToken.token"
+        @focus="selectAll"
+        @click="selectAll"
+      />
       <button type="button" data-test="copy-token" @click="copyToken">Copy</button>
       <span v-if="copied" role="status" data-test="copied">Copied</span>
+      <p v-if="copyFailed" class="error" role="alert" data-test="copy-failed">
+        Could not copy automatically. The token is selected above; press Ctrl+C to copy it manually.
+      </p>
       <button type="button" data-test="token-done" @click="clearToken">Done</button>
     </div>
     <ul>
@@ -153,10 +187,11 @@ onBeforeUnmount(() => {
   height: 0.8em;
   border-radius: 50%;
 }
-.token-once code {
+.token-value {
   display: block;
+  width: 100%;
+  font-family: monospace;
   user-select: all;
-  word-break: break-all;
 }
 .error {
   color: #b00020;
