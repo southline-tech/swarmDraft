@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { DEFAULT_TRIM } from '@coauthor/schema';
 import {
   createBackup,
@@ -15,6 +15,7 @@ import {
 import AgentsSettings from './AgentsSettings.vue';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
+import HomeScreen from './HomeScreen.vue';
 import { flushOnClose } from './close-flush';
 import { outlineDocs, sectionTreeDocs } from './status/wordcount';
 import {
@@ -62,7 +63,61 @@ const reloads = ref(0);
 /** The chapter navigator (SectionNav); the toolbar's Chapters button toggles it. */
 const navigatorOpen = ref(true);
 
+/** First-run welcome (ob4) shows once; the flag survives restarts and updates. */
+const WELCOMED_KEY = 'coauthor.welcomed';
+const welcomed = ref(readWelcomed());
+function readWelcomed(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(WELCOMED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+function markWelcomed() {
+  welcomed.value = true;
+  try {
+    globalThis.localStorage?.setItem(WELCOMED_KEY, '1');
+  } catch {
+    // Storage unavailable: the welcome just shows again next launch.
+  }
+}
+const home = ref<InstanceType<typeof HomeScreen> | null>(null);
+async function getStarted() {
+  markWelcomed();
+  await nextTick();
+  await home.value?.focusOpen();
+}
+/** "Open another book" from inside an open manuscript shows the open screen over it. */
+const choosingBook = ref(false);
+const settingsOpen = ref(false);
+const settingsPanel = ref<HTMLElement | null>(null);
+const settingsButton = ref<HTMLButtonElement | null>(null);
+watch(settingsOpen, async (isOpen) => {
+  await nextTick();
+  // Into the panel on open; back to the button that opened it on close.
+  if (isOpen) settingsPanel.value?.focus();
+  else settingsButton.value?.focus();
+});
+const fileInput = ref<HTMLInputElement | null>(null);
+const chooseFile = () => fileInput.value?.click();
+
 let stopCloseFlush = () => {};
+/**
+ * With Tauri's drag-drop off, the webview's default for a file dropped anywhere
+ * is to navigate to it, unloading the app. Swallow that at window level; the
+ * drop zone and Chapters list still handle their own drops (they run first).
+ */
+function blockFileNavigation(e: DragEvent) {
+  e.preventDefault();
+}
+onMounted(() => {
+  window.addEventListener('dragover', blockFileNavigation);
+  window.addEventListener('drop', blockFileNavigation);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('dragover', blockFileNavigation);
+  window.removeEventListener('drop', blockFileNavigation);
+});
 onMounted(async () => {
   info.value = await getAppInfo();
   if (info.value) {
@@ -148,6 +203,7 @@ function closeSession() {
   void session.value?.close({ discard: true });
   session.value = null;
   selectedId.value = undefined;
+  choosingBook.value = false;
 }
 
 /** Open an imported manuscript (exposed for tests and the Tauri open-file flow). */
@@ -158,6 +214,9 @@ const closeQuietly = (s?: ManuscriptSession | null) =>
 function open(next: ManuscriptSession) {
   if (session.value !== next) closeQuietly(session.value);
   saveError.value = '';
+  // Anyone with a book open is past first run: never flash the welcome at them.
+  markWelcomed();
+  choosingBook.value = false;
   session.value = next;
   selectedId.value = next.outline.value.find((s) => s.kind === 'chapter')?.id;
 }
@@ -177,6 +236,23 @@ async function onFile(e: Event) {
   const input = e.target as HTMLInputElement;
   const file = input.files?.[0];
   if (!file) return;
+  try {
+    await importFile(file);
+  } finally {
+    input.value = '';
+  }
+}
+
+/** Word manuscripts only; checked before anything (including the open book) is touched. */
+const NOT_WORD_FILE = "That file isn't a Word manuscript. Please choose a Word file.";
+const isWordFile = (f: File) => f.name.toLowerCase().endsWith('.docx');
+
+async function importFile(file: File) {
+  if (importing.value) return;
+  if (!isWordFile(file)) {
+    openError.value = NOT_WORD_FILE;
+    return;
+  }
   openError.value = '';
   importing.value = true;
   try {
@@ -197,7 +273,6 @@ async function onFile(e: Event) {
         : `Could not import ${file.name}: ${err instanceof Error ? err.message : String(err)}`;
   } finally {
     importing.value = false;
-    input.value = '';
   }
 }
 
@@ -213,100 +288,147 @@ defineExpose({ open });
 
 <template>
   <main class="shell">
-    <h1>coAuthor</h1>
-    <p>Default trim: {{ DEFAULT_TRIM }}</p>
-    <p v-if="info" data-test="app-info">
-      v{{ info.version }} · data: {{ info.dataDir }} · db schema {{ info.schemaVersion }}
-    </p>
-    <section v-if="info" data-test="backup">
-      <button type="button" data-test="backup-button" @click="onBackup">Download backup</button>
-      <button type="button" data-test="restore-pick" @click="chooseRestoreFile">
-        Restore from backup…
+    <header class="topbar">
+      <span class="topbar__name">coAuthor</span>
+      <button
+        v-if="session && !choosingBook"
+        type="button"
+        class="topbar__button topbar__open"
+        data-test="open-another"
+        @click="choosingBook = true"
+      >
+        Open another book
       </button>
-      <details data-test="restore-fallback">
-        <summary>Enter a path instead</summary>
-        <input v-model="restorePath" data-test="restore-path" placeholder="Path to backup .zip" />
-        <button type="button" data-test="restore-button" @click="askRestore">Restore…</button>
-      </details>
-      <div v-if="confirmingRestore" role="alertdialog" data-test="restore-confirm">
-        <p data-test="restore-target">{{ restorePath }}</p>
-        <p>
-          Restoring replaces all manuscripts, comments, suggestions, settings and attached files
-          with the contents of this backup, and revokes all agent tokens. Your current state is
-          saved first as a pre-restore snapshot in the backups folder.
-        </p>
-        <button type="button" data-test="restore-confirm-yes" @click="onRestore">
-          Replace everything and restore
+      <button
+        ref="settingsButton"
+        type="button"
+        class="topbar__button"
+        data-test="settings-open"
+        :aria-expanded="settingsOpen"
+        @click="settingsOpen = !settingsOpen"
+      >
+        Settings
+      </button>
+    </header>
+    <section
+      v-if="settingsOpen"
+      ref="settingsPanel"
+      class="settings"
+      role="dialog"
+      aria-label="Settings"
+      tabindex="-1"
+      data-test="settings"
+      @keydown.esc="settingsOpen = false"
+    >
+      <h2>Settings</h2>
+      <button type="button" class="btn" data-test="settings-close" @click="settingsOpen = false">
+        Close
+      </button>
+      <p>Default trim: {{ DEFAULT_TRIM }}</p>
+      <p v-if="info" data-test="app-info">
+        v{{ info.version }} · data: {{ info.dataDir }} · db schema {{ info.schemaVersion }}
+      </p>
+      <section v-if="info" data-test="backup">
+        <button type="button" data-test="backup-button" @click="onBackup">Download backup</button>
+        <button type="button" data-test="restore-pick" @click="chooseRestoreFile">
+          Restore from backup…
         </button>
-        <button type="button" data-test="restore-confirm-no" @click="confirmingRestore = false">
-          Cancel
-        </button>
-      </div>
-      <div v-if="recoveryNotices.length" role="alert" data-test="recovery-notice">
-        <p>
-          A restore was interrupted. Some attachments may be missing. coAuthor didn't delete
-          anything.
-        </p>
-        <div v-for="(n, i) in recoveryNotices" :key="n.id || i" data-test="recovery-notice-item">
-          <p v-if="n.folder && n.moved.length">
-            Moved to <code>{{ n.folder }}</code
-            >: {{ n.moved.join(', ') }}. To get an attachment back, copy it from that folder into
-            <code>{{ n.filesDir }}</code
-            >.
+        <details data-test="restore-fallback">
+          <summary>Enter a path instead</summary>
+          <input v-model="restorePath" data-test="restore-path" placeholder="Path to backup .zip" />
+          <button type="button" data-test="restore-button" @click="askRestore">Restore…</button>
+        </details>
+        <div v-if="confirmingRestore" role="alertdialog" data-test="restore-confirm">
+          <p data-test="restore-target">{{ restorePath }}</p>
+          <p>
+            Restoring replaces all manuscripts, comments, suggestions, settings and attached files
+            with the contents of this backup, and revokes all agent tokens. Your current state is
+            saved first as a pre-restore snapshot in the backups folder.
           </p>
-          <p v-if="n.snapshot">
-            Or restore the backup taken just before the restore: <code>{{ n.snapshot }}</code
-            >.
-          </p>
-          <p v-if="n.retryPending">
-            coAuthor couldn't finish and will try again the next time it starts.
-          </p>
-          <p>Details: {{ n.reason }}</p>
-          <p v-if="n.corruptFile" data-test="recovery-notice-corrupt">
-            An earlier notice couldn't be read. It was kept, not deleted, at
-            <code>{{ n.corruptFile }}</code
-            >.
-          </p>
-          <p v-if="n.saveError" data-test="recovery-notice-save-error">
-            This notice couldn't be saved and won't show again after you close coAuthor:
-            {{ n.saveError }}
-          </p>
+          <button type="button" data-test="restore-confirm-yes" @click="onRestore">
+            Replace everything and restore
+          </button>
+          <button type="button" data-test="restore-confirm-no" @click="confirmingRestore = false">
+            Cancel
+          </button>
         </div>
-        <button type="button" data-test="recovery-notice-dismiss" @click="dismissRecovery">
-          Dismiss
-        </button>
-        <p v-if="recoveryDismissError">{{ recoveryDismissError }}</p>
-      </div>
-      <p v-if="backupStatus" data-test="backup-status">{{ backupStatus }}</p>
-      <div v-if="tokensNotice !== null" role="status" data-test="tokens-revoked-notice">
-        <p>
-          For safety, restoring revoked all {{ tokensNotice }} agent token(s). Your agents are kept;
-          create new tokens in Settings → Agents to reconnect them.
-        </p>
-        <button type="button" data-test="tokens-notice-dismiss" @click="tokensNotice = null">
-          Dismiss
-        </button>
-      </div>
+        <p v-if="backupStatus" data-test="backup-status">{{ backupStatus }}</p>
+        <div v-if="tokensNotice !== null" role="status" data-test="tokens-revoked-notice">
+          <p>
+            For safety, restoring revoked all {{ tokensNotice }} agent token(s). Your agents are
+            kept; create new tokens in Settings → Agents to reconnect them.
+          </p>
+          <button type="button" data-test="tokens-notice-dismiss" @click="tokensNotice = null">
+            Dismiss
+          </button>
+        </div>
+      </section>
+      <p v-else data-test="browser-mode">Running in browser mode (no desktop backend).</p>
+      <AgentsSettings v-if="info" />
     </section>
-    <p v-else data-test="browser-mode">Running in browser mode (no desktop backend).</p>
-    <AgentsSettings v-if="info" />
-    <label>
-      Import .docx
-      <input
-        data-test="open-docx"
-        type="file"
-        accept=".docx"
-        :disabled="importing"
-        @change="onFile"
-      />
-    </label>
+    <div v-if="recoveryNotices.length" role="alert" data-test="recovery-notice">
+      <p>
+        A restore was interrupted. Some attachments may be missing. coAuthor didn't delete anything.
+      </p>
+      <div v-for="(n, i) in recoveryNotices" :key="n.id || i" data-test="recovery-notice-item">
+        <p v-if="n.folder && n.moved.length">
+          Moved to <code>{{ n.folder }}</code
+          >: {{ n.moved.join(', ') }}. To get an attachment back, copy it from that folder into
+          <code>{{ n.filesDir }}</code
+          >.
+        </p>
+        <p v-if="n.snapshot">
+          Or restore the backup taken just before the restore: <code>{{ n.snapshot }}</code
+          >.
+        </p>
+        <p v-if="n.retryPending">
+          coAuthor couldn't finish and will try again the next time it starts.
+        </p>
+        <p>Details: {{ n.reason }}</p>
+        <p v-if="n.corruptFile" data-test="recovery-notice-corrupt">
+          An earlier notice couldn't be read. It was kept, not deleted, at
+          <code>{{ n.corruptFile }}</code
+          >.
+        </p>
+        <p v-if="n.saveError" data-test="recovery-notice-save-error">
+          This notice couldn't be saved and won't show again after you close coAuthor:
+          {{ n.saveError }}
+        </p>
+      </div>
+      <button type="button" data-test="recovery-notice-dismiss" @click="dismissRecovery">
+        Dismiss
+      </button>
+      <p v-if="recoveryDismissError">{{ recoveryDismissError }}</p>
+    </div>
+    <input
+      ref="fileInput"
+      class="visually-hidden"
+      data-test="open-docx"
+      type="file"
+      accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      tabindex="-1"
+      aria-hidden="true"
+      :disabled="importing"
+      @change="onFile"
+    />
     <p v-if="fatalError" role="alert" data-test="fatal-error">{{ fatalError }}</p>
     <p v-if="openError" role="alert" data-test="open-error">{{ openError }}</p>
     <p v-if="saveError" role="alert" data-test="save-error">{{ saveError }}</p>
-    <p v-if="!session" data-test="no-manuscript">Import a manuscript to see its outline.</p>
+    <HomeScreen
+      v-if="!session || choosingBook"
+      ref="home"
+      data-test="no-manuscript"
+      :step="welcomed ? 'open' : 'welcome'"
+      :busy="importing"
+      :can-cancel="!!session"
+      @cancel="choosingBook = false"
+      @get-started="getStarted"
+      @choose="chooseFile"
+      @drop-file="importFile"
+    />
     <div
       v-else
-      class="workspace grid gap-4"
+      class="workspace grid gap-4 p-4"
       :class="navigatorOpen ? 'grid-cols-[18rem_1fr]' : 'grid-cols-1'"
       data-test="workspace"
     >
@@ -340,7 +462,6 @@ defineExpose({ open });
 <style>
 body {
   margin: 0;
-  font-family: system-ui, sans-serif;
 }
 .shell {
   /* One window-height column: the content ends above the fixed status bar (h-7 = 1.75rem) and
@@ -350,10 +471,56 @@ body {
   flex-direction: column;
   height: 100vh;
   overflow: auto;
-  padding: 2rem 2rem calc(1.75rem + var(--ct-space-4));
+  padding-bottom: 1.75rem;
 }
 .shell > .workspace {
   flex: 1 0 20rem;
   min-height: 0;
+}
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--ct-space-2) var(--ct-space-4);
+  border-bottom: 1px solid var(--ct-border);
+  background: var(--ct-surface);
+}
+.topbar__name {
+  font-weight: var(--ct-weight-semibold);
+  font-size: var(--ct-text-sm);
+}
+.topbar__open {
+  margin-left: auto;
+  margin-right: var(--ct-space-2);
+}
+.btn,
+.topbar__button {
+  min-height: var(--ct-space-12);
+  padding: 0 var(--ct-space-4);
+  border: 1px solid var(--ct-border-strong);
+  border-radius: var(--ct-radius-md);
+  background: var(--ct-surface);
+  color: var(--ct-text);
+  font: inherit;
+  cursor: pointer;
+}
+.settings {
+  margin: var(--ct-space-4);
+  padding: var(--ct-space-6);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-lg);
+  background: var(--ct-surface-raised);
+  box-shadow: var(--ct-elevation-2);
+}
+.settings h2 {
+  margin-top: 0;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 </style>
