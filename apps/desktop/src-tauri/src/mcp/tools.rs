@@ -40,6 +40,37 @@ impl From<StorageError> for ToolErr {
     }
 }
 
+/// Length caps (in characters) on agent-supplied text, so one call can't bloat the document,
+/// the database or the audit log.
+pub const MAX_COMMENT: usize = 4000;
+pub const MAX_QUOTE: usize = 2000;
+pub const MAX_REPLACEMENT: usize = 4000;
+pub const MAX_RATIONALE: usize = 2000;
+pub const MAX_QUERY: usize = 500;
+
+fn check_len(field: &str, value: &str, max: usize) -> Result<(), ToolErr> {
+    let n = value.chars().count();
+    if n > max {
+        return Err(ToolErr::invalid(format!(
+            "{field} is too long ({n} characters; the limit is {max})"
+        )));
+    }
+    Ok(())
+}
+
+/// Shortens a value for the audit log so an over-long argument isn't stored in full.
+fn clip(value: &str, max: usize) -> String {
+    if value.chars().count() <= max {
+        value.to_string()
+    } else {
+        value.chars().take(max).collect::<String>() + "…"
+    }
+}
+
+fn clip_opt(value: &Option<String>, max: usize) -> Option<String> {
+    value.as_deref().map(|v| clip(v, max))
+}
+
 pub(crate) enum Output {
     Json(Value),
     Text(String),
@@ -324,7 +355,7 @@ impl CoauthorMcp {
         Extension(parts): Extension<Parts>,
         Parameters(a): Parameters<SearchArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        let args = json!({ "manuscriptId": a.manuscript_id, "query": a.query, "limit": a.limit });
+        let args = json!({ "manuscriptId": a.manuscript_id, "query": clip(&a.query, MAX_QUERY), "limit": a.limit });
         self.run(
             &parts,
             "read",
@@ -332,6 +363,7 @@ impl CoauthorMcp {
             Some(&a.manuscript_id),
             args,
             |_| {
+                check_len("query", &a.query, MAX_QUERY)?;
                 let q: Vec<char> = a.query.to_lowercase().chars().collect();
                 if q.is_empty() {
                     return Err(ToolErr::invalid("query must not be empty"));
@@ -384,7 +416,7 @@ impl CoauthorMcp {
         Extension(parts): Extension<Parts>,
         Parameters(a): Parameters<AddCommentArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        let args = json!({ "sectionId": a.section_id, "blockId": a.block_id, "quote": a.quote, "threadId": a.thread_id });
+        let args = json!({ "sectionId": a.section_id, "blockId": a.block_id, "quote": clip_opt(&a.quote, MAX_QUOTE), "threadId": a.thread_id });
         self.run(
             &parts,
             "comment",
@@ -394,6 +426,10 @@ impl CoauthorMcp {
             |p| {
                 if a.body.trim().is_empty() {
                     return Err(ToolErr::invalid("body must not be empty"));
+                }
+                check_len("body", &a.body, MAX_COMMENT)?;
+                if let Some(q) = &a.quote {
+                    check_len("quote", q, MAX_QUOTE)?;
                 }
                 let s = self.store.get_section(&a.manuscript_id, &a.section_id)?;
                 let id = format!("c{}", crate::manuscripts::new_id());
@@ -450,7 +486,7 @@ impl CoauthorMcp {
         Extension(parts): Extension<Parts>,
         Parameters(a): Parameters<SuggestEditArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        let args = json!({ "sectionId": a.section_id, "blockId": a.block_id, "quote": a.quote, "replacement": a.replacement });
+        let args = json!({ "sectionId": a.section_id, "blockId": a.block_id, "quote": clip(&a.quote, MAX_QUOTE), "replacement": clip(&a.replacement, MAX_REPLACEMENT) });
         self.run(
             &parts,
             "suggest",
@@ -458,6 +494,11 @@ impl CoauthorMcp {
             Some(&a.manuscript_id),
             args,
             |p| {
+                check_len("quote", &a.quote, MAX_QUOTE)?;
+                check_len("replacement", &a.replacement, MAX_REPLACEMENT)?;
+                if let Some(r) = &a.rationale {
+                    check_len("rationale", r, MAX_RATIONALE)?;
+                }
                 if a.quote == a.replacement {
                     return Err(ToolErr::invalid("replacement is the same as the quote"));
                 }
@@ -524,6 +565,9 @@ impl CoauthorMcp {
             Some(&a.manuscript_id),
             args,
             |p| {
+                if let Some(r) = &a.rationale {
+                    check_len("rationale", r, MAX_RATIONALE)?;
+                }
                 if !PARAGRAPH_STYLES.contains(&a.style.as_str()) {
                     return Err(ToolErr::invalid(format!(
                         "unknown style {:?}; use one of {}",

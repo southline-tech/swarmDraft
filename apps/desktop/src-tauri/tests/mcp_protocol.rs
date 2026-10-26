@@ -813,3 +813,70 @@ async fn cached_token_is_rejected_after_a_restore() {
     );
     assert_eq!(post(&s.url, Some(&s.token), body).await.status(), 401);
 }
+
+#[tokio::test]
+async fn oversized_text_is_refused_with_a_clear_error() {
+    let s = start(&["read", "comment", "suggest"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    let m = &s.manuscript_id;
+    let long = |n: usize| "é".repeat(n); // multi-byte: limits count characters
+    let cases = [
+        (
+            "add_comment",
+            json!({"manuscript_id": m, "section_id": sid, "block_id": bid, "quote": "lantern", "body": long(4001)}),
+            "body is too long (4001 characters; the limit is 4000)",
+        ),
+        (
+            "add_comment",
+            json!({"manuscript_id": m, "section_id": sid, "block_id": bid, "quote": long(2001), "body": "Hm."}),
+            "quote is too long (2001 characters; the limit is 2000)",
+        ),
+        (
+            "suggest_edit",
+            json!({"manuscript_id": m, "section_id": sid, "block_id": bid, "quote": long(2001), "replacement": "x"}),
+            "quote is too long",
+        ),
+        (
+            "suggest_edit",
+            json!({"manuscript_id": m, "section_id": sid, "block_id": bid, "quote": "lantern", "replacement": long(4001)}),
+            "replacement is too long (4001 characters; the limit is 4000)",
+        ),
+        (
+            "suggest_edit",
+            json!({"manuscript_id": m, "section_id": sid, "block_id": bid, "quote": "lantern", "replacement": "lamp", "rationale": long(2001)}),
+            "rationale is too long",
+        ),
+        (
+            "suggest_style",
+            json!({"manuscript_id": m, "section_id": sid, "block_id": bid, "style": "verse", "rationale": long(2001)}),
+            "rationale is too long",
+        ),
+        (
+            "search_text",
+            json!({"manuscript_id": m, "query": long(501)}),
+            "query is too long (501 characters; the limit is 500)",
+        ),
+    ];
+    let before = read_md(&s, &sid).await;
+    for (tool, args, want) in cases {
+        let r = call(&s, tool, args).await;
+        assert_eq!(r["isError"], true, "{tool}: {r}");
+        assert!(text(&r).contains(want), "{tool}: {}", text(&r));
+    }
+    assert_eq!(
+        read_md(&s, &sid).await,
+        before,
+        "refused calls change nothing"
+    );
+
+    // At the limit is fine.
+    let r = call(&s, "add_comment", json!({"manuscript_id": m, "section_id": sid, "block_id": bid, "quote": "lantern", "body": long(4000)})).await;
+    assert_ne!(r["isError"], true, "{r}");
+    let r = call(
+        &s,
+        "search_text",
+        json!({"manuscript_id": m, "query": long(500)}),
+    )
+    .await;
+    assert_ne!(r["isError"], true, "{r}");
+}
