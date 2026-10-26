@@ -431,6 +431,56 @@ describe('App status bar on an imported manuscript', () => {
     w.unmount();
   });
 
+  it('updates the book total when a section that is not open is deleted, then one is added', async () => {
+    const { w, session } = await withManuscript();
+    const outline = session.outline.value;
+    const open = outline.find((s) => s.kind === 'chapter')!;
+    await w.find(`[data-test="section-${open.id}"]`).trigger('click');
+    await settle();
+    const book = num(w, 'book-words');
+    // A leaf section with text that is not the open one.
+    const gone = outline.find(
+      (s) =>
+        s.id !== open.id &&
+        !outline.some((c) => c.parentId === s.id) &&
+        docWordCount(session.sections.get(s.docId)!) > 0,
+    )!;
+    const goneWords = docWordCount(session.sections.get(gone.docId)!);
+    const goneDoc = session.sections.get(gone.docId)!;
+    await session.save(outline.filter((s) => s.id !== gone.id));
+    await settle();
+    expect(num(w, 'book-words')).toBe(book - goneWords);
+    expect(w.find('.tiptap').exists()).toBe(true);
+    // The deleted doc is no longer watched: editing it changes nothing.
+    goneDoc.getXmlFragment('prosemirror').insert(0, [new Y.XmlElement('paragraph')]);
+    await new Promise((r) => setTimeout(r, 400));
+    await settle();
+    expect(num(w, 'book-words')).toBe(book - goneWords);
+    await session.save([
+      ...session.outline.value,
+      {
+        ...gone,
+        id: 'added-1',
+        docId: 'added-doc-1',
+        title: 'Added',
+        parentId: undefined,
+        kind: 'chapter',
+      },
+    ] as never);
+    await settle();
+    const added = session.sections.get('added-doc-1');
+    expect(added).toBeDefined();
+    const text = new Y.XmlText();
+    const p = new Y.XmlElement('paragraph');
+    p.insert(0, [text]);
+    added!.getXmlFragment('prosemirror').insert(0, [p]);
+    text.insert(0, 'Brand new words');
+    await new Promise((r) => setTimeout(r, 400));
+    await settle();
+    expect(num(w, 'book-words')).toBe(book - goneWords + 3);
+    w.unmount();
+  });
+
   it('shows "Not saved, retrying" when a save fails, alongside the existing alert', async () => {
     // Uses the backend-saved import path (chooseFile), whose saves go through saveSectionUpdate.
     const backend = await import('./backend');

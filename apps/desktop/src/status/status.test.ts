@@ -190,7 +190,7 @@ describe('ManuscriptEditor status bar', () => {
       ['b', docToYDoc(para('Four five') as never)],
     ]);
     const w = mount(ManuscriptEditor, {
-      props: { doc: docs.get('a'), bookDocs: docs },
+      props: { doc: docs.get('a'), bookDocs: [...docs.values()] },
       attachTo: document.body,
     });
     await flushPromises();

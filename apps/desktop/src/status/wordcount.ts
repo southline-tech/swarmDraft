@@ -108,3 +108,11 @@ export function sectionTreeDocs(
   }
   return out;
 }
+
+/** The section docs of an outline, in order (skipping any not loaded). */
+export function outlineDocs(
+  outline: readonly Section[],
+  docs: ReadonlyMap<string, Y.Doc>,
+): Y.Doc[] {
+  return outline.map((s) => docs.get(s.docId)).filter((d): d is Y.Doc => !!d);
+}

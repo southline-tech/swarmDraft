@@ -35,7 +35,8 @@ const props = defineProps<{
   /** Status bar (RAD-256): the open chapter's title, when known. */
   chapterTitle?: string;
   /** Every section doc of the manuscript, for the live book word count. */
-  bookDocs?: Map<string, Y.Doc>;
+  /** Every section doc in outline order; re-derived from the outline so adds/deletes show. */
+  bookDocs?: readonly Y.Doc[];
   /** The chapter's docs (its own and its scenes'); without it only this doc is counted. */
   chapterDocs?: Y.Doc[];
   /** Save status, only when the parent actually knows it. */
@@ -93,12 +94,15 @@ watch(
 );
 watch(
   () => props.bookDocs,
-  (docs) => {
+  (docs, prev) => {
+    // A fresh array each render; resubscribe only when a section was added or removed, which
+    // also drops the observers (and cached counts) of deleted docs.
+    if (prev && docs && prev.length === docs.length && prev.every((d, i) => d === docs[i])) return;
     stopBook();
     bookWords.value = undefined;
     if (docs)
       stopBook = watchBookWords(
-        [...docs.values()].map((d) => toRaw(d)),
+        docs.map((d) => toRaw(d)),
         (n) => (bookWords.value = n),
       );
   },
