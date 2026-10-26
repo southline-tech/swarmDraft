@@ -101,6 +101,22 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const chooseFile = () => fileInput.value?.click();
 
 let stopCloseFlush = () => {};
+/**
+ * With Tauri's drag-drop off, the webview's default for a file dropped anywhere
+ * is to navigate to it, unloading the app. Swallow that at window level; the
+ * drop zone and Chapters list still handle their own drops (they run first).
+ */
+function blockFileNavigation(e: DragEvent) {
+  e.preventDefault();
+}
+onMounted(() => {
+  window.addEventListener('dragover', blockFileNavigation);
+  window.addEventListener('drop', blockFileNavigation);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('dragover', blockFileNavigation);
+  window.removeEventListener('drop', blockFileNavigation);
+});
 onMounted(async () => {
   info.value = await getAppInfo();
   if (info.value) {

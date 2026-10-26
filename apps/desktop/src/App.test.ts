@@ -1013,4 +1013,38 @@ describe('home screen', () => {
     expect(document.activeElement).toBe(button.element);
     w.unmount();
   });
+
+  it('swallows a file dropped outside the drop zone without importing or closing', async () => {
+    const backend = await import('./backend');
+    const persist = vi.mocked(backend.persistImport);
+    const { w, session } = await withManuscript();
+    persist.mockClear();
+    const file = new File(['x'], 'other.docx');
+    for (const target of [w.find('.tiptap').element, w.find('.topbar').element]) {
+      for (const type of ['dragover', 'drop']) {
+        const ev = new Event(type, { bubbles: true, cancelable: true });
+        Object.defineProperty(ev, 'dataTransfer', { value: { files: [file] } });
+        target.dispatchEvent(ev);
+        expect(ev.defaultPrevented).toBe(true);
+      }
+    }
+    await settle();
+    expect(persist).not.toHaveBeenCalled();
+    expect(session.closed).toBe(false);
+    expect(w.find('.tiptap').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('removes the window drop guard on unmount', async () => {
+    const add = vi.spyOn(window, 'addEventListener');
+    const remove = vi.spyOn(window, 'removeEventListener');
+    const w = mount(App);
+    await flushPromises();
+    const added = add.mock.calls.filter(([t]) => t === 'drop' || t === 'dragover');
+    expect(added).toHaveLength(2);
+    w.unmount();
+    for (const [type, fn] of added) expect(remove).toHaveBeenCalledWith(type, fn);
+    add.mockRestore();
+    remove.mockRestore();
+  });
 });
