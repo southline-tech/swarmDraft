@@ -23,7 +23,7 @@ Only edit files in your area unless the issue says otherwise. Shared files: conf
 pnpm install
 pnpm lint            # eslint
 pnpm format:check    # prettier
-pnpm typecheck       # vue-tsc in every package
+pnpm typecheck       # vue-tsc (desktop) / tsc (packages)
 pnpm test            # vitest in every package
 pnpm build
 cd apps/desktop/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test
@@ -50,5 +50,5 @@ All of these must pass before review. Report test counts per package in the PR.
 - **Bots are suggest-only.** Agent edits arrive as suggestion/comment marks; only a human accept (through `review/apply.ts` → trusted path) changes text. Nothing silently edits manuscript text.
 - **No lost text.** Every edit must survive save, section switch, reload and app restart. Remote/agent updates use `Y.applyUpdate(doc, u, REMOTE_ORIGIN)`; never replace a snapshot.
 - **Tokens are secrets.** Never log, return or render agent tokens; `agents_list` returns no token.
-- **No competitor product names, parity lists or competitive analysis** in code, docs, commits, issues or PRs.
+- **No competitor product names, parity lists or competitive analysis** in code, docs, commits, branch names, issues or PRs.
 - No personal data (real names) hard-coded.
