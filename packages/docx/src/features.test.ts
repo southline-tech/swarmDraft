@@ -315,3 +315,93 @@ describe('id collisions and zip integrity', () => {
     expect(() => importDocx(zip)).toThrow(/encrypted/);
   });
 });
+
+describe('comment ranges never lose a body or leak', () => {
+  const build = (body: string, comments: string, footnotes = '') =>
+    importDocx(
+      zipSync({
+        'word/document.xml': strToU8(`<w:document ${NS}><w:body>${body}</w:body></w:document>`),
+        'word/comments.xml': strToU8(`<w:comments ${NS}>${comments}</w:comments>`),
+        ...(footnotes
+          ? { 'word/footnotes.xml': strToU8(`<w:footnotes ${NS}>${footnotes}</w:footnotes>`) }
+          : {}),
+      }),
+    );
+  const def = (id: string, body: string) =>
+    `<w:comment w:id="${id}" w:author="Ann">${p(r(body))}</w:comment>`;
+  const texts = (m: ImportedManuscript) =>
+    m.sections
+      .flatMap((s) => s.content.content)
+      .flatMap((b) => ('content' in b ? (b.content ?? []) : [])) as InlineNode[];
+  const anchorsOf = (m: ImportedManuscript, t: string) => {
+    const n = texts(m).find((x) => x.type === 'text' && x.text === t);
+    if (!n || n.type !== 'text') throw new Error(`no text ${t}`);
+    return (n.marks ?? []).flatMap((k) =>
+      k.type === 'comment_anchor' ? [(k as { attrs: { id: string } }).attrs.id] : [],
+    );
+  };
+  const codes = (m: ImportedManuscript) => m.report.items.map((i) => i.code);
+
+  it('anchors zero-width and reference-only comments and keeps extra definitions', () => {
+    const m = build(
+      p(
+        r('lead') +
+          '<w:commentRangeStart w:id="1"/><w:commentRangeEnd w:id="1"/>' +
+          r(' point') +
+          '<w:r><w:commentReference w:id="2"/></w:r>' +
+          r(' ref'),
+      ) + p(r('tail')),
+      def('1', 'zero width') + def('2', 'reference only') + def('3', 'no range at all'),
+    );
+    expect(m.comments.map((c) => c.body)).toEqual([
+      'zero width',
+      'reference only',
+      'no range at all',
+    ]);
+    expect(anchorsOf(m, ' point')).toEqual(['1']);
+    expect(anchorsOf(m, ' ref')).toEqual(['2']);
+    expect(anchorsOf(m, 'lead')).toContain('3');
+    expect(codes(m)).toContain('orphan_comment');
+    const back = importDocx(exportDocx(m));
+    expect(back.comments.map((c) => c.body)).toEqual(m.comments.map((c) => c.body));
+  });
+
+  it('cuts end-before-start and unclosed ranges back to their paragraph, with warnings', () => {
+    const m = build(
+      p('<w:commentRangeEnd w:id="4"/>' + r('x') + '<w:commentRangeStart w:id="4"/>' + r('y')) +
+        p(r('later')) +
+        p('<w:commentRangeStart w:id="5"/>' + r('open')) +
+        p(r('after open')),
+      def('4', 'reversed') + def('5', 'unclosed'),
+    );
+    expect(anchorsOf(m, 'y')).toEqual(['4']);
+    expect(anchorsOf(m, 'x')).toEqual([]);
+    expect(anchorsOf(m, 'later')).toEqual([]);
+    expect(anchorsOf(m, 'open')).toEqual(['5']);
+    expect(anchorsOf(m, 'after open')).toEqual([]);
+    expect(codes(m)).toEqual(expect.arrayContaining(['unmatched_comment_end', 'unclosed_comment']));
+    expect(m.comments.map((c) => c.body)).toEqual(['reversed', 'unclosed']);
+  });
+
+  it('keeps open-range state separate per story (no leak from footnotes into the body)', () => {
+    const m = build(
+      p(
+        r('body') +
+          `<w:r><w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr><w:footnoteReference w:id="1"/></w:r>`,
+      ) + p(r('more body')),
+      def('6', 'in note'),
+      `<w:footnote w:id="1">${p('<w:commentRangeStart w:id="6"/>' + r('note text'))}${p(r('note two'))}</w:footnote>`,
+    );
+    expect(anchorsOf(m, 'body')).toEqual([]);
+    expect(anchorsOf(m, 'more body')).toEqual([]);
+    const note = texts(m).find((n) => n.type === 'footnote') as FootnoteNode;
+    const noteMarks = (i: number) =>
+      (note.attrs.content[i]!.content ?? []).flatMap((n) =>
+        n.type === 'text' ? (n.marks ?? []).map((k) => k.type) : [],
+      );
+    expect(noteMarks(0)).toContain('comment_anchor');
+    expect(noteMarks(1)).not.toContain('comment_anchor');
+    expect(m.comments.map((c) => c.body)).toEqual(['in note']);
+    expect(codes(m)).toContain('unclosed_comment');
+  });
+});
