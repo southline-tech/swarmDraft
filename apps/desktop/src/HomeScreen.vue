@@ -1,24 +1,49 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { nextTick, ref } from 'vue';
 
 defineProps<{
   /** 'welcome' on the very first launch (shown once), then 'open'. */
   step: 'welcome' | 'open';
   /** True while a manuscript is being opened; the button is disabled. */
   busy?: boolean;
+  /** A manuscript is open behind this screen; offer a way back to it. */
+  canCancel?: boolean;
 }>();
 const emit = defineEmits<{
   (e: 'get-started'): void;
   (e: 'choose'): void;
   (e: 'drop-file', file: File): void;
+  (e: 'cancel'): void;
 }>();
 
+/** Enter/leave counter: child elements fire their own enter/leave, which made the highlight flicker. */
+const depth = ref(0);
 const dragging = ref(false);
-function onDrop(e: DragEvent) {
+function onEnter() {
+  depth.value++;
+  dragging.value = true;
+}
+function onLeave() {
+  depth.value = Math.max(0, depth.value - 1);
+  if (depth.value === 0) dragging.value = false;
+}
+function resetDrag() {
+  depth.value = 0;
   dragging.value = false;
+}
+function onDrop(e: DragEvent) {
+  resetDrag();
   const file = e.dataTransfer?.files?.[0];
   if (file) emit('drop-file', file);
 }
+
+const openButton = ref<HTMLButtonElement | null>(null);
+/** Focus the open button (after Get started, so keyboard users land on the next step). */
+async function focusOpen() {
+  await nextTick();
+  openButton.value?.focus();
+}
+defineExpose({ focusOpen });
 </script>
 
 <template>
@@ -49,31 +74,45 @@ function onDrop(e: DragEvent) {
         file is never changed.
       </p>
       <button
+        ref="openButton"
         type="button"
         class="home__primary home__primary--wide"
         data-test="open-manuscript"
         :disabled="busy"
         @click="emit('choose')"
       >
-        <svg class="home__icon" viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M4 2.5h8v11L8 11l-4 2.5z" />
+        <svg class="home__icon home__icon--book" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z" />
+          <path d="M4 21V5" />
         </svg>
         {{ busy ? 'Opening your book…' : 'Open my Word manuscript' }}
       </button>
       <div
         class="home__drop"
         :class="{ 'home__drop--active': dragging }"
+        role="region"
+        aria-label="Drop a Word manuscript here to open it"
         data-test="drop-zone"
-        @dragenter.prevent="dragging = true"
-        @dragover.prevent="dragging = true"
-        @dragleave="dragging = false"
+        @dragenter.prevent="onEnter"
+        @dragover.prevent
+        @dragleave="onLeave"
+        @dragend="resetDrag"
         @drop.prevent="onDrop"
       >
         <svg class="home__icon" viewBox="0 0 16 16" aria-hidden="true">
           <path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M3 13.5h10" />
         </svg>
-        Or drag your manuscript here from a folder
+        <span>Or drag your manuscript here from a folder</span>
       </div>
+      <button
+        v-if="canCancel"
+        type="button"
+        class="home__secondary"
+        data-test="open-cancel"
+        @click="emit('cancel')"
+      >
+        Back to my book
+      </button>
     </div>
   </section>
 </template>
@@ -93,7 +132,7 @@ function onDrop(e: DragEvent) {
   flex-direction: column;
   align-items: center;
   text-align: center;
-  max-width: 34rem;
+  max-width: 37.5rem;
   gap: var(--ct-space-4);
 }
 .home__mark {
@@ -136,15 +175,13 @@ function onDrop(e: DragEvent) {
   min-height: var(--ct-space-16);
   padding: 0 var(--ct-space-8);
   border: 0;
-  border-radius: var(--ct-radius-md);
+  border-radius: var(--ct-radius-lg);
   background: var(--ct-accent);
   color: var(--ct-accent-contrast);
   font: inherit;
   font-size: var(--ct-text-lg);
   font-weight: var(--ct-weight-semibold);
-  box-shadow:
-    0 0 0 2px var(--ct-bg),
-    0 0 0 4px var(--ct-accent);
+  box-shadow: var(--ct-elevation-2);
   cursor: pointer;
 }
 .home__primary--wide {
@@ -156,21 +193,25 @@ function onDrop(e: DragEvent) {
   cursor: progress;
 }
 .home__primary:focus-visible {
-  outline: var(--ct-focus-outline);
-  outline-offset: 6px;
+  outline: 3px solid var(--ct-focus-ring-color);
+  outline-offset: 3px;
 }
 .home__drop {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: var(--ct-space-3);
-  align-self: stretch;
+  width: min(620px, 100%);
+  box-sizing: border-box;
   min-height: var(--ct-space-12);
   margin-top: var(--ct-space-2);
-  padding: var(--ct-space-4);
+  padding: 28px;
   border: 2px dashed var(--ct-border-strong);
   border-radius: var(--ct-radius-lg);
   color: var(--ct-text-muted);
+}
+.home__drop > * {
+  pointer-events: none;
 }
 .home__drop--active {
   border-color: var(--ct-accent);
@@ -185,5 +226,18 @@ function onDrop(e: DragEvent) {
   stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+.home__icon--book {
+  stroke-width: 1.6;
+}
+.home__secondary {
+  min-height: var(--ct-space-12);
+  padding: 0 var(--ct-space-6);
+  border: 1px solid var(--ct-border-strong);
+  border-radius: var(--ct-radius-md);
+  background: transparent;
+  color: var(--ct-text);
+  font: inherit;
+  cursor: pointer;
 }
 </style>

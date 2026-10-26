@@ -930,4 +930,70 @@ describe('home screen', () => {
     expect(w.find('[data-test="settings"]').exists()).toBe(false);
     w.unmount();
   });
+
+  it('moves focus to the open button after Get started', async () => {
+    localStorage.removeItem('coauthor.welcomed');
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await w.find('[data-test="get-started"]').trigger('click');
+    await settle();
+    expect(document.activeElement).toBe(w.find('[data-test="open-manuscript"]').element);
+    w.unmount();
+  });
+
+  it('rejects a dropped file that is not Word, keeping the open book', async () => {
+    const backend = await import('./backend');
+    const persist = vi.mocked(backend.persistImport);
+    const { w, session } = await withManuscript();
+    persist.mockClear();
+    await w.find('[data-test="open-another"]').trigger('click');
+    const bad = new File(['hello'], 'notes.txt');
+    await w.find('[data-test="drop-zone"]').trigger('drop', { dataTransfer: { files: [bad] } });
+    await settle();
+    expect(w.find('[data-test="open-error"]').text()).toBe(
+      "That file isn't a Word manuscript. Please choose a Word file.",
+    );
+    expect(persist).not.toHaveBeenCalled();
+    expect(session.closed).toBe(false);
+    await w.find('[data-test="open-cancel"]').trigger('click');
+    expect(w.find('.tiptap').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('opens a second manuscript from inside an open one', async () => {
+    const { w } = await withManuscript();
+    expect(w.find('[data-test="home"]').exists()).toBe(false);
+    await w.find('[data-test="open-another"]').trigger('click');
+    expect(w.find('[data-test="home-open"]').exists()).toBe(true);
+    await chooseFile(w);
+    expect(w.find('[data-test="home"]').exists()).toBe(false);
+    expect(w.findAll('.row').length).toBeGreaterThan(0);
+    w.unmount();
+  });
+
+  it('skips the welcome for a returning user whose book reopens', async () => {
+    localStorage.removeItem('coauthor.welcomed');
+    const { w } = await withManuscript();
+    expect(localStorage.getItem('coauthor.welcomed')).toBe('1');
+    w.unmount();
+  });
+
+  it('focuses Settings when it opens and closes it on Esc', async () => {
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await w.find('[data-test="settings-open"]').trigger('click');
+    await settle();
+    const panel = w.find('[data-test="settings"]');
+    expect(document.activeElement).toBe(panel.element);
+    await panel.trigger('keydown', { key: 'Escape' });
+    expect(w.find('[data-test="settings"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('lets OS file drops reach the page (Tauri drag-drop off)', () => {
+    const conf = JSON.parse(
+      readFileSync(resolve(__dirname, '../src-tauri/tauri.conf.json'), 'utf8'),
+    ) as { app: { windows: { dragDropEnabled?: boolean }[] } };
+    expect(conf.app.windows[0]!.dragDropEnabled).toBe(false);
+  });
 });

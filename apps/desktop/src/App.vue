@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { DEFAULT_TRIM } from '@coauthor/schema';
 import {
   createBackup,
@@ -72,7 +72,7 @@ function readWelcomed(): boolean {
     return false;
   }
 }
-function getStarted() {
+function markWelcomed() {
   welcomed.value = true;
   try {
     globalThis.localStorage?.setItem(WELCOMED_KEY, '1');
@@ -80,7 +80,21 @@ function getStarted() {
     // Storage unavailable: the welcome just shows again next launch.
   }
 }
+const home = ref<InstanceType<typeof HomeScreen> | null>(null);
+async function getStarted() {
+  markWelcomed();
+  await nextTick();
+  await home.value?.focusOpen();
+}
+/** "Open another book" from inside an open manuscript shows the open screen over it. */
+const choosingBook = ref(false);
 const settingsOpen = ref(false);
+const settingsPanel = ref<HTMLElement | null>(null);
+watch(settingsOpen, async (isOpen) => {
+  if (!isOpen) return;
+  await nextTick();
+  settingsPanel.value?.focus();
+});
 const fileInput = ref<HTMLInputElement | null>(null);
 const chooseFile = () => fileInput.value?.click();
 
@@ -170,6 +184,7 @@ function closeSession() {
   void session.value?.close({ discard: true });
   session.value = null;
   selectedId.value = undefined;
+  choosingBook.value = false;
 }
 
 /** Open an imported manuscript (exposed for tests and the Tauri open-file flow). */
@@ -180,6 +195,9 @@ const closeQuietly = (s?: ManuscriptSession | null) =>
 function open(next: ManuscriptSession) {
   if (session.value !== next) closeQuietly(session.value);
   saveError.value = '';
+  // Anyone with a book open is past first run: never flash the welcome at them.
+  markWelcomed();
+  choosingBook.value = false;
   session.value = next;
   selectedId.value = next.outline.value.find((s) => s.kind === 'chapter')?.id;
 }
@@ -206,8 +224,16 @@ async function onFile(e: Event) {
   }
 }
 
+/** Word manuscripts only; checked before anything (including the open book) is touched. */
+const NOT_WORD_FILE = "That file isn't a Word manuscript. Please choose a Word file.";
+const isWordFile = (f: File) => f.name.toLowerCase().endsWith('.docx');
+
 async function importFile(file: File) {
   if (importing.value) return;
+  if (!isWordFile(file)) {
+    openError.value = NOT_WORD_FILE;
+    return;
+  }
   openError.value = '';
   importing.value = true;
   try {
@@ -246,8 +272,17 @@ defineExpose({ open });
     <header class="topbar">
       <span class="topbar__name">coAuthor</span>
       <button
+        v-if="session && !choosingBook"
         type="button"
-        class="topbar__settings"
+        class="topbar__button topbar__open"
+        data-test="open-another"
+        @click="choosingBook = true"
+      >
+        Open another book
+      </button>
+      <button
+        type="button"
+        class="topbar__button"
         data-test="settings-open"
         :aria-expanded="settingsOpen"
         @click="settingsOpen = !settingsOpen"
@@ -257,13 +292,18 @@ defineExpose({ open });
     </header>
     <section
       v-if="settingsOpen"
+      ref="settingsPanel"
       class="settings"
       role="dialog"
       aria-label="Settings"
+      tabindex="-1"
       data-test="settings"
+      @keydown.esc="settingsOpen = false"
     >
       <h2>Settings</h2>
-      <button type="button" data-test="settings-close" @click="settingsOpen = false">Close</button>
+      <button type="button" class="btn" data-test="settings-close" @click="settingsOpen = false">
+        Close
+      </button>
       <p>Default trim: {{ DEFAULT_TRIM }}</p>
       <p v-if="info" data-test="app-info">
         v{{ info.version }} · data: {{ info.dataDir }} · db schema {{ info.schemaVersion }}
@@ -304,7 +344,6 @@ defineExpose({ open });
         </div>
       </section>
       <p v-else data-test="browser-mode">Running in browser mode (no desktop backend).</p>
-      <AgentsSettings v-if="info" />
       <AgentsSettings v-if="info" />
     </section>
     <div v-if="recoveryNotices.length" role="alert" data-test="recovery-notice">
@@ -356,10 +395,13 @@ defineExpose({ open });
     <p v-if="openError" role="alert" data-test="open-error">{{ openError }}</p>
     <p v-if="saveError" role="alert" data-test="save-error">{{ saveError }}</p>
     <HomeScreen
-      v-if="!session"
+      v-if="!session || choosingBook"
+      ref="home"
       data-test="no-manuscript"
       :step="welcomed ? 'open' : 'welcome'"
       :busy="importing"
+      :can-cancel="!!session"
+      @cancel="choosingBook = false"
       @get-started="getStarted"
       @choose="chooseFile"
       @drop-file="importFile"
@@ -413,10 +455,15 @@ body {
   font-weight: var(--ct-weight-semibold);
   font-size: var(--ct-text-sm);
 }
-.topbar__settings {
-  min-height: var(--ct-space-10);
+.topbar__open {
+  margin-left: auto;
+  margin-right: var(--ct-space-2);
+}
+.btn,
+.topbar__button {
+  min-height: var(--ct-space-12);
   padding: 0 var(--ct-space-4);
-  border: 1px solid var(--ct-border);
+  border: 1px solid var(--ct-border-strong);
   border-radius: var(--ct-radius-md);
   background: var(--ct-surface);
   color: var(--ct-text);
