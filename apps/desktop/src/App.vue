@@ -423,7 +423,10 @@ defineExpose({ open });
       <span v-if="breadcrumb" class="topbar__crumb" data-test="breadcrumb">— {{ breadcrumb }}</span>
       <details class="topbar__menu" data-test="app-menu">
         <summary class="topbar__icon" aria-label="Book menu" title="Book menu">⋯</summary>
-        <div class="topbar__menu-list">
+        <div
+          class="topbar__menu-list"
+          @click="($event.currentTarget as HTMLElement).closest('details')?.removeAttribute('open')"
+        >
           <button
             v-if="session && !choosingBook"
             type="button"
