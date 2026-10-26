@@ -79,3 +79,17 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #44 · review shortcuts fired while typing in settings · scope global shortcuts to the panel and editor focus
 - 2026-10-26 · #46 · outline click inserted a paragraph (doc edit + undo step) · navigation never changes the document
 - 2026-10-26 · #63 · checklist had wrong typecheck tool and bulk-lock timing · verify every doc claim against the code before review
+- 2026-10-26 · #33 · agent marker missing in some places a name shows · show the agent marker everywhere a name renders
+- 2026-10-26 · #46 · persistence tested only in memory · persistence tests reopen from saved state
+- 2026-10-26 · #46 · Tiptap commands bypass read-only, so command-based tests passed falsely · test read-only via DOM input
+- 2026-10-26 · #46 · tests passed with the fix removed · prove each new test fails with its fix reverted
+- 2026-10-26 · #66 · outline showed per-row type labels and five add buttons · hide type labels (aria-label only); one "+ New chapter" row; group front matter
+- 2026-10-26 · #66 · chapter heading off-spec · H1 in manuscript font, weight 400, centered, with a display-only small-caps chapter label
+- 2026-10-26 · #66 · toolbar end overcrowded · toolbar right end keeps only Track changes + Review; the rest goes in the … menu
+- 2026-10-26 · #66 · title bar crowded with actions · title bar shows the book/chapter path; secondary actions live in a small menu
+- 2026-10-26 · #66 · hard-coded #b00020/#1a7f37 · use danger/success tokens, never hex
+- 2026-10-26 · #66 · screenshots missing for some screens · attach light + dark screenshots for every screen changed
+- 2026-10-26 · #66 · screenshots labeled with mockup ids showed the same state (wp1=wp6=tc1, ob4=ob5) · every shot named after a mockup id must reproduce that mockup's distinct state; use ?preview sample data when the app can't
+- 2026-10-26 · #66 · 'doc unchanged' test built a Y.Doc the component never received · (and the click loop never reached Save) · a no-mutation test must pass the real doc into the component and actually trigger every write path
+- 2026-10-26 · #66 · settings defaults hard-coded real-looking names · use neutral sample names in defaults and fixtures
+- 2026-10-26 · #66 · inline card marked role=dialog without modal behavior · use role=dialog only with aria-modal, focus in, Tab trap, Esc and focus return; otherwise an inline card

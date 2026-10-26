@@ -10,6 +10,7 @@
  */
 import { computed, nextTick, ref, watch } from 'vue';
 import type { Section, SectionKind } from '@coauthor/schema';
+import { formatCount } from './status/wordcount';
 import {
   addSection,
   applyOutlineEdit,
@@ -32,6 +33,8 @@ const props = defineProps<{
   selectedId?: string;
   /** Persist a new outline; throw (or reject) to refuse it. */
   save?: (next: Section[]) => void | Promise<void>;
+  /** Words per section id, read-only (#52); omitted hides the count column. */
+  wordCounts?: Record<string, number>;
 }>();
 const emit = defineEmits<{
   'update:sections': [Section[]];
@@ -227,7 +230,7 @@ function focusRow(id: string) {
 }
 function onKey(e: KeyboardEvent, row: Row) {
   if (editingId.value) return;
-  const ids = rows.value.map((r) => r.section.id);
+  const ids = (isFront(row) ? rows : visibleRows).value.map((r) => r.section.id);
   const i = ids.indexOf(row.section.id);
   const go = (j: number) => {
     const id = ids[Math.max(0, Math.min(ids.length - 1, j))];
@@ -257,6 +260,17 @@ function onKey(e: KeyboardEvent, row: Row) {
     h();
   }
 }
+/** UI shell (#52): top-level front matter collapses into one group row (display state only). */
+const frontOpen = ref(false);
+const isFront = (r: Row) => r.depth === 0 && r.section.kind === 'front_matter';
+const frontCount = computed(() => rows.value.filter(isFront).length);
+const showFront = computed(
+  () => frontOpen.value || rows.value.some((r) => isFront(r) && r.section.id === props.selectedId),
+);
+const visibleRows = computed(() =>
+  showFront.value ? rows.value : rows.value.filter((r) => !isFront(r)),
+);
+
 const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
 </script>
 
@@ -267,24 +281,26 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
       itself) and is shown repaired. Your next change saves the repaired outline.
     </p>
     <p v-if="saveError" role="alert" class="warn" data-test="save-error">{{ saveError }}</p>
-    <div class="actions" role="toolbar" aria-label="Add section">
-      <button
-        v-for="kind in ADD_KINDS"
-        :key="kind"
-        type="button"
-        :data-test="`add-${kind}`"
-        :disabled="busy || !parentFor(kind)"
-        @click="add(kind)"
-      >
-        + {{ KIND_LABELS[kind] }}
-      </button>
-    </div>
     <ul role="tree" aria-label="Sections">
+      <li v-if="frontCount" role="none" class="group-row">
+        <button
+          type="button"
+          class="group"
+          data-test="front-matter-group"
+          :aria-expanded="showFront"
+          @click="frontOpen = !frontOpen"
+        >
+          <span aria-hidden="true">{{ showFront ? '▾' : '▸' }}</span> Front matter
+          <span class="count">{{ frontCount }}</span>
+        </button>
+      </li>
       <li
         v-for="row in rows"
+        v-show="showFront || !isFront(row)"
         :key="row.section.id"
         role="treeitem"
         :aria-level="row.depth + 1"
+        :aria-label="`${KIND_LABELS[row.section.kind]}: ${row.section.title || 'Untitled'}`"
         :aria-selected="row.section.id === selectedId"
         :tabindex="row.section.id === focusId ? 0 : -1"
         :class="['row', row.section.kind, { selected: row.section.id === selectedId }]"
@@ -298,7 +314,6 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
         @dblclick="startRename(row.section.id, row.section.title)"
         @keydown="onKey($event, row)"
       >
-        <span class="kind">{{ KIND_LABELS[row.section.kind] }}</span>
         <input
           v-if="editingId === row.section.id"
           v-model="draft"
@@ -310,8 +325,40 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
           @blur="commitRename"
         />
         <span v-else class="title">{{ row.section.title || 'Untitled' }}</span>
+        <span
+          v-if="wordCounts"
+          class="count"
+          data-test="word-count"
+          :aria-label="`${wordCounts[row.section.id] ?? 0} words`"
+          >{{ wordCounts[row.section.id] ? formatCount(wordCounts[row.section.id]!) : '—' }}</span
+        >
       </li>
     </ul>
+    <!-- UI shell (#52): the add flow is not wired yet, so this row only shows the target design. -->
+    <button
+      type="button"
+      class="new-chapter"
+      data-test="new-chapter"
+      aria-disabled="true"
+      title="New chapter: coming soon"
+    >
+      <span aria-hidden="true">+</span> New chapter
+    </button>
+    <details class="add-more">
+      <summary data-test="add-more">More sections…</summary>
+      <div class="actions" role="toolbar" aria-label="Add section">
+        <button
+          v-for="kind in ADD_KINDS"
+          :key="kind"
+          type="button"
+          :data-test="`add-${kind}`"
+          :disabled="busy || !parentFor(kind)"
+          @click="add(kind)"
+        >
+          + {{ KIND_LABELS[kind] }}
+        </button>
+      </div>
+    </details>
     <div v-if="selected" class="actions" role="toolbar" aria-label="Selected section">
       <button type="button" data-test="move-up" :disabled="busy" @click="move(-1)">↑</button>
       <button type="button" data-test="move-down" :disabled="busy" @click="move(1)">↓</button>
@@ -412,10 +459,57 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
   cursor: pointer;
 }
 .row.selected {
-  background: #e6eefc;
+  background: var(--ct-selected-bg);
+}
+.row .title {
+  flex: 1;
+  min-width: 0;
+}
+.count {
+  margin-left: auto;
+  font-size: var(--ct-text-xs);
+  color: var(--ct-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.new-chapter {
+  display: flex;
+  gap: var(--ct-space-2);
+  align-items: center;
+  width: 100%;
+  padding: var(--ct-space-1) var(--ct-space-2);
+  border: 0;
+  background: transparent;
+  color: var(--ct-text-muted);
+  font: inherit;
+  font-size: var(--ct-text-sm);
+  cursor: default;
 }
 .row:focus-visible {
-  outline: 2px solid #3b6fd8;
+  outline: 2px solid var(--ct-focus-ring-color);
+}
+.group-row {
+  list-style: none;
+}
+.group {
+  display: flex;
+  gap: var(--ct-space-2);
+  width: 100%;
+  padding: 0.25rem 0.5rem;
+  border: 0;
+  background: none;
+  color: var(--ct-text-muted);
+  font: inherit;
+  font-size: var(--ct-text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.group .count {
+  margin-left: auto;
+}
+.add-more summary {
+  color: var(--ct-text-muted);
+  font-size: var(--ct-text-sm);
+  cursor: pointer;
 }
 .kind {
   font-size: 0.75rem;
@@ -428,7 +522,7 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
   gap: 0.25rem;
 }
 .warn {
-  color: #8a3b00;
+  color: var(--ct-warning);
 }
 .confirm {
   border: 1px solid #c33;
