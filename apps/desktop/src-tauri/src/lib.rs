@@ -84,13 +84,17 @@ fn agent_token_revoke(
     store.revoke_token(&token_id).map_err(err)
 }
 
-/// Write a full backup to `<data dir>/backups/` and return its path.
+/// Write a full backup to `dest` (from the save dialog; must not exist) or, if omitted,
+/// to `<data dir>/backups/`, and return its path.
 #[tauri::command]
 fn create_backup(
     app: tauri::AppHandle,
     store: tauri::State<'_, storage::Store>,
+    dest: Option<String>,
 ) -> Result<String, String> {
-    let dest = backup::default_backup_path(&store);
+    let dest = dest
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| backup::default_backup_path(&store));
     backup::create_backup(&store, &app.package_info().version.to_string(), &dest)
         .map_err(|e| e.to_string())?;
     Ok(dest.display().to_string())
@@ -114,6 +118,7 @@ fn restore_backup(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             backup::cleanup_temp(&dir);

@@ -18,6 +18,8 @@ vi.mock('./backend', async (orig) => ({
   agentsApi: { list: vi.fn(async () => []), tokens: vi.fn(async () => []) },
   getAppInfo: vi.fn(async () => ({ version: '0.1.0', dataDir: '/tmp/x', schemaVersion: 1 })),
   createBackup: vi.fn(async () => '/tmp/x/backups/b.zip'),
+  pickBackupToRestore: vi.fn(async () => 'D:\\Backups\\picked.zip'),
+  pickBackupDestination: vi.fn(async () => 'D:\\Backups\\new.zip'),
   restoreBackup: vi.fn(async () => ({
     tokensRevoked: 2,
     manifest: {},
@@ -45,5 +47,30 @@ describe('restore confirmation', () => {
     expect(notice.text()).toContain('revoked all 2 agent token');
     await wrapper.find('[data-test="tokens-notice-dismiss"]').trigger('click');
     expect(wrapper.find('[data-test="tokens-revoked-notice"]').exists()).toBe(false);
+  });
+});
+
+describe('backup dialogs', () => {
+  it('picker selects a file and still requires confirmation', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.restoreBackup).mockClear();
+    const wrapper = mount(App);
+    await flushPromises();
+    await wrapper.find('[data-test="restore-pick"]').trigger('click');
+    await flushPromises();
+    expect(backend.restoreBackup).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-test="restore-target"]').text()).toBe('D:\\Backups\\picked.zip');
+    await wrapper.find('[data-test="restore-confirm-yes"]').trigger('click');
+    await flushPromises();
+    expect(backend.restoreBackup).toHaveBeenCalledWith('D:\\Backups\\picked.zip');
+  });
+
+  it('backup uses the save-as destination', async () => {
+    const backend = await import('./backend');
+    const wrapper = mount(App);
+    await flushPromises();
+    await wrapper.find('[data-test="backup-button"]').trigger('click');
+    await flushPromises();
+    expect(backend.createBackup).toHaveBeenCalledWith('D:\\Backups\\new.zip');
   });
 });

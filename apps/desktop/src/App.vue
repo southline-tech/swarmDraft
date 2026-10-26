@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { DEFAULT_TRIM } from '@coauthor/schema';
-import { createBackup, getAppInfo, restoreBackup, type AppInfo } from './backend';
+import {
+  createBackup,
+  getAppInfo,
+  pickBackupDestination,
+  pickBackupToRestore,
+  restoreBackup,
+  type AppInfo,
+} from './backend';
 import AgentsSettings from './AgentsSettings.vue';
 
 const info = ref<AppInfo | null>(null);
@@ -15,13 +22,27 @@ const confirmingRestore = ref(false);
 /** One-time notice after a restore revoked agent tokens; cleared when dismissed. */
 const tokensNotice = ref<number | null>(null);
 
+async function chooseRestoreFile(): Promise<void> {
+  try {
+    const p = await pickBackupToRestore();
+    if (p) {
+      restorePath.value = p;
+      confirmingRestore.value = true;
+    }
+  } catch (e) {
+    backupStatus.value = `Could not open file picker: ${String(e)}`;
+  }
+}
+
 function askRestore(): void {
   if (restorePath.value.trim()) confirmingRestore.value = true;
 }
 
 async function onBackup(): Promise<void> {
   try {
-    backupStatus.value = `Backup saved: ${await createBackup()}`;
+    const dest = await pickBackupDestination();
+    if (dest === null) return;
+    backupStatus.value = `Backup saved: ${await createBackup(dest)}`;
   } catch (e) {
     backupStatus.value = `Backup failed: ${String(e)}`;
   }
@@ -49,9 +70,16 @@ async function onRestore(): Promise<void> {
     </p>
     <section v-if="info" data-test="backup">
       <button type="button" data-test="backup-button" @click="onBackup">Download backup</button>
-      <input v-model="restorePath" data-test="restore-path" placeholder="Path to backup .zip" />
-      <button type="button" data-test="restore-button" @click="askRestore">Restore…</button>
+      <button type="button" data-test="restore-pick" @click="chooseRestoreFile">
+        Restore from backup…
+      </button>
+      <details data-test="restore-fallback">
+        <summary>Enter a path instead</summary>
+        <input v-model="restorePath" data-test="restore-path" placeholder="Path to backup .zip" />
+        <button type="button" data-test="restore-button" @click="askRestore">Restore…</button>
+      </details>
       <div v-if="confirmingRestore" role="alertdialog" data-test="restore-confirm">
+        <p data-test="restore-target">{{ restorePath }}</p>
         <p>
           Restoring replaces all manuscripts, comments, suggestions, settings and attached files
           with the contents of this backup, and revokes all agent tokens. Your current state is

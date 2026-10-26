@@ -67,9 +67,28 @@ export interface RestoreReport {
   preRestoreSnapshot: string;
 }
 
-/** Write a full-project backup .zip into the data dir's backups folder; returns its path. */
-export async function createBackup(): Promise<string> {
-  return invoke<string>('create_backup');
+/**
+ * Write a full-project backup .zip to `dest` (must not exist) or, if omitted, into the data
+ * dir's backups folder; returns its path.
+ */
+export async function createBackup(dest?: string): Promise<string> {
+  return invoke<string>('create_backup', { dest: dest ?? null });
+}
+
+const ZIP_FILTER = [{ name: 'coAuthor backup', extensions: ['zip'] }];
+
+/** Native open dialog for a backup .zip; null if cancelled. */
+export async function pickBackupToRestore(): Promise<string | null> {
+  const { open } = await import('@tauri-apps/plugin-dialog');
+  const p = await open({ multiple: false, directory: false, filters: ZIP_FILTER });
+  return typeof p === 'string' ? p : null;
+}
+
+/** Native save-as dialog for a new backup; null if cancelled. */
+export async function pickBackupDestination(): Promise<string | null> {
+  const { save } = await import('@tauri-apps/plugin-dialog');
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  return save({ defaultPath: `coauthor-backup-${stamp}.zip`, filters: ZIP_FILTER });
 }
 
 /** Validate and restore a backup .zip. The replaced state is saved as a pre-restore snapshot. */
