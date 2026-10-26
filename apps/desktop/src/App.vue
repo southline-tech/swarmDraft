@@ -80,6 +80,9 @@ async function onRestore(): Promise<void> {
   if (!restorePath.value.trim()) return;
   try {
     const r = await restoreBackup(restorePath.value.trim());
+    // The restore replaced storage, so the open session's in-memory docs are stale: close them
+    // (stops the structure observer and unmounts the editor) so nothing can write them back.
+    closeSession();
     backupStatus.value = `Restored. Previous state saved: ${r.preRestoreSnapshot}`;
     tokensNotice.value = r.tokensRevoked > 0 ? r.tokensRevoked : null;
   } catch (e) {
@@ -87,6 +90,13 @@ async function onRestore(): Promise<void> {
   }
 }
 onBeforeUnmount(() => session.value?.close());
+
+/** Close the open manuscript, if any, and clear the selection. */
+function closeSession() {
+  session.value?.close();
+  session.value = null;
+  selectedId.value = undefined;
+}
 
 /** Open an imported manuscript (exposed for tests and the Tauri open-file flow). */
 function open(next: ManuscriptSession) {

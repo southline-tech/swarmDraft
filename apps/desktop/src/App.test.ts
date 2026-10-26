@@ -366,3 +366,45 @@ describe('recovery notice', () => {
     expect(wrapper.find('[data-test="recovery-notice"]').exists()).toBe(false);
   });
 });
+
+describe('restore closes the open manuscript', () => {
+  async function restore(w: ReturnType<typeof mount>) {
+    await w.find('[data-test="restore-path"]').setValue('C:\\b.zip');
+    await w.find('[data-test="restore-button"]').trigger('click');
+    await w.find('[data-test="restore-confirm-yes"]').trigger('click');
+    await settle();
+  }
+
+  it('drops the pre-restore session and editor, and ignores later edits to the old docs', async () => {
+    const { w, session } = await withManuscript();
+    expect(w.find('.tiptap').exists()).toBe(true);
+    const before = session.outline.value;
+    await restore(w);
+    expect(w.find('[data-test="no-manuscript"]').exists()).toBe(true);
+    expect(w.find('.tiptap').exists()).toBe(false);
+    expect(w.findAll('.row')).toHaveLength(0);
+
+    // The old docs keep changing (e.g. a late peer update); nothing reaches the UI or the session.
+    const outline = readStructure(session.manuscript);
+    writeStructure(
+      session.manuscript,
+      outline.map((s, i) => (i === 0 ? { ...s, title: 'Stale write' } : s)),
+    );
+    await settle();
+    expect(session.outline.value).toBe(before);
+    expect(w.text()).not.toContain('Stale write');
+    expect(w.find('.tiptap').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('keeps the session when the restore fails', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.restoreBackup).mockRejectedValueOnce(new Error('bad zip'));
+    const { w } = await withManuscript();
+    await restore(w);
+    expect(w.find('[data-test="backup-status"]').text()).toContain('Restore failed');
+    expect(w.find('[data-test="no-manuscript"]').exists()).toBe(false);
+    expect(w.find('.tiptap').exists()).toBe(true);
+    w.unmount();
+  });
+});
