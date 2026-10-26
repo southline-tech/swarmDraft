@@ -50,6 +50,45 @@ describe('restore confirmation', () => {
   });
 });
 
+describe('tokens-revoked notice', () => {
+  async function restoreOnce(wrapper: ReturnType<typeof mount>): Promise<void> {
+    await wrapper.find('[data-test="restore-path"]').setValue('C:\\b.zip');
+    await wrapper.find('[data-test="restore-button"]').trigger('click');
+    await wrapper.find('[data-test="restore-confirm-yes"]').trigger('click');
+    await flushPromises();
+  }
+
+  it('shows once after a restore that revoked tokens and stays gone after dismiss', async () => {
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.find('[data-test="tokens-revoked-notice"]').exists()).toBe(false);
+    await restoreOnce(wrapper);
+    const notice = wrapper.find('[data-test="tokens-revoked-notice"]');
+    expect(notice.exists()).toBe(true);
+    expect(notice.attributes('role')).toBe('status');
+    expect(notice.text()).toContain('revoked all 2 agent token');
+    expect(notice.text()).toContain('agents are kept');
+    await wrapper.find('[data-test="tokens-notice-dismiss"]').trigger('click');
+    expect(wrapper.find('[data-test="tokens-revoked-notice"]').exists()).toBe(false);
+    await flushPromises();
+    expect(wrapper.find('[data-test="tokens-revoked-notice"]').exists()).toBe(false);
+  });
+
+  it('is not shown when no tokens were revoked', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.restoreBackup).mockResolvedValueOnce({
+      tokensRevoked: 0,
+      manifest: {} as never,
+      preRestoreSnapshot: '/tmp/x/backups/p.zip',
+    });
+    const wrapper = mount(App);
+    await flushPromises();
+    await restoreOnce(wrapper);
+    expect(wrapper.find('[data-test="backup-status"]').text()).toContain('Restored');
+    expect(wrapper.find('[data-test="tokens-revoked-notice"]').exists()).toBe(false);
+  });
+});
+
 describe('backup dialogs', () => {
   it('picker selects a file and still requires confirmation', async () => {
     const backend = await import('./backend');
@@ -71,6 +110,6 @@ describe('backup dialogs', () => {
     await flushPromises();
     await wrapper.find('[data-test="backup-button"]').trigger('click');
     await flushPromises();
-    expect(backend.createBackup).toHaveBeenCalledWith('D:\\Backups\\new.zip');
+    expect(backend.createBackup).toHaveBeenCalledWith('D:\\Backups\\new.zip', true);
   });
 });

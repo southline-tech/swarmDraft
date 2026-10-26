@@ -42,7 +42,9 @@ async function onBackup(): Promise<void> {
   try {
     const dest = await pickBackupDestination();
     if (dest === null) return;
-    backupStatus.value = `Backup saved: ${await createBackup(dest)}`;
+    // The native save dialog already asked the user to confirm Replace for an existing file,
+    // so the backend may atomically replace it.
+    backupStatus.value = `Backup saved: ${await createBackup(dest, true)}`;
   } catch (e) {
     backupStatus.value = `Backup failed: ${String(e)}`;
   }

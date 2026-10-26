@@ -89,20 +89,12 @@ impl Store {
         Ok(f(&mut conn)?)
     }
 
-    /// Replace the live database with `src` (SQLite backup API), migrate it, and optionally
-    /// revoke every agent token, all under one lock so no request sees a half-restored state.
-    /// Returns the number of tokens revoked.
-    pub(crate) fn restore_db_from(
-        &self,
-        src: &Path,
-        revoke_tokens: bool,
-    ) -> Result<u64, StorageError> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        conn.restore(
-            rusqlite::DatabaseName::Main,
-            src,
-            None::<fn(rusqlite::backup::Progress)>,
-        )?;
+    /// Prepare a staged database file for restore: migrate it and, when `revoke_tokens`,
+    /// revoke every agent token *in the staged file*, before it is swapped in. The revoke is
+    /// thus durable before the live db changes, so a crash mid-restore cannot revive the
+    /// backup's tokens. Returns the number of tokens revoked.
+    pub(crate) fn prepare_restore_db(src: &Path, revoke_tokens: bool) -> Result<u64, StorageError> {
+        let mut conn = Connection::open(src)?;
         migrate(&mut conn)?;
         if !revoke_tokens {
             return Ok(0);
@@ -112,7 +104,21 @@ impl Store {
              WHERE revoked_at IS NULL",
             [],
         )?;
+        conn.close().map_err(|(_, e)| e)?;
         Ok(n as u64)
+    }
+
+    /// Replace the live database with `src` (SQLite backup API) and migrate it, under one
+    /// lock so no request sees a half-restored state. `src` should already be prepared with
+    /// [`Store::prepare_restore_db`].
+    pub(crate) fn restore_db_from(&self, src: &Path) -> Result<(), StorageError> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        conn.restore(
+            rusqlite::DatabaseName::Main,
+            src,
+            None::<fn(rusqlite::backup::Progress)>,
+        )?;
+        migrate(&mut conn)
     }
 
     /// Apply any pending migrations (e.g. after restoring an older backup).

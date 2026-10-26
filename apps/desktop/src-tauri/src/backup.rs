@@ -217,7 +217,19 @@ pub fn create_backup(
     app_version: &str,
     dest: &Path,
 ) -> Result<Manifest, BackupError> {
-    if dest.exists() {
+    create_backup_to(store, app_version, dest, false)
+}
+
+/// Like [`create_backup`]; with `replace` (the user confirmed Replace in the save dialog) an
+/// existing `dest` is atomically replaced: the archive is fully written to a temp file next to
+/// it and renamed over it, so `dest` is always either the old file or the complete new one.
+pub fn create_backup_to(
+    store: &Store,
+    app_version: &str,
+    dest: &Path,
+    replace: bool,
+) -> Result<Manifest, BackupError> {
+    if !replace && dest.exists() {
         return Err(BackupError::Io(std::io::Error::new(
             std::io::ErrorKind::AlreadyExists,
             format!("{} already exists", dest.display()),
@@ -270,7 +282,11 @@ pub fn create_backup(
             std::io::copy(&mut File::open(path)?, &mut zw)?;
         }
         zw.finish()?.sync_all()?;
-        publish_no_clobber(&part, dest)?;
+        if replace {
+            rename_retry(&part, dest)?;
+        } else {
+            publish_no_clobber(&part, dest)?;
+        }
         Ok(())
     })();
     if res.is_err() {
@@ -465,6 +481,7 @@ enum FailAt {
     None,
     AfterDbSwap,
     AfterFilesSwap,
+    AfterPrepare,
 }
 
 /// Validate `src`, snapshot current state, then replace the database and files with the backup.
@@ -511,19 +528,19 @@ fn restore_with(
     })
 }
 
+/// Windows ERROR_SHARING_VIOLATION (32) or ERROR_ACCESS_DENIED (5): transient locks held by
+/// antivirus/indexers. Never retried on other platforms.
+fn is_sharing_violation(e: &std::io::Error) -> bool {
+    cfg!(windows) && matches!(e.raw_os_error(), Some(32) | Some(5))
+}
+
 /// Rename with short retries: on Windows, antivirus/indexers briefly lock fresh files.
 fn rename_retry(from: &Path, to: &Path) -> std::io::Result<()> {
     let mut delay = std::time::Duration::from_millis(20);
     for attempt in 0.. {
         match std::fs::rename(from, to) {
             Ok(()) => return Ok(()),
-            Err(e)
-                if attempt < 5
-                    && matches!(
-                        e.kind(),
-                        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::Other
-                    ) =>
-            {
+            Err(e) if attempt < 5 && is_sharing_violation(&e) => {
                 std::thread::sleep(delay);
                 delay *= 2;
             }
@@ -570,7 +587,12 @@ fn apply(
         if fail == FailAt::AfterFilesSwap {
             return Err(BackupError::Io(std::io::Error::other("forced failure")));
         }
-        let n = store.restore_db_from(&staged.db, revoke_tokens)?;
+        // Revoke in the staged file first, so the swapped-in db never holds live tokens.
+        let n = Store::prepare_restore_db(&staged.db, revoke_tokens)?;
+        if fail == FailAt::AfterPrepare {
+            return Err(BackupError::Io(std::io::Error::other("forced failure")));
+        }
+        store.restore_db_from(&staged.db)?;
         if fail == FailAt::AfterDbSwap {
             return Err(BackupError::Io(std::io::Error::other("forced failure")));
         }
@@ -918,5 +940,62 @@ mod tests {
         create_backup(&store, "0", &zip).unwrap();
         assert!(restore_with(&store, "0", &zip, FailAt::AfterDbSwap).is_err());
         assert!(store.authenticate(&t.token).unwrap().is_some());
+    }
+
+    #[test]
+    fn staged_db_has_all_tokens_revoked_before_swap() {
+        let (tmp, store) = seeded();
+        let a = store.create_agent("Agent", "#000000").unwrap();
+        let t1 = store.create_token(&a.id, None).unwrap();
+        let _t2 = store.create_token(&a.id, None).unwrap();
+        let zip = tmp.path().join("b.zip");
+        create_backup(&store, "0", &zip).unwrap();
+        let staged = stage(&store, &zip).unwrap();
+        let live_before = |p: &Path| -> i64 {
+            rusqlite::Connection::open(p)
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM agent_tokens WHERE revoked_at IS NULL",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(live_before(&staged.db), 2);
+        let n = Store::prepare_restore_db(&staged.db, true).unwrap();
+        assert_eq!(n, 2);
+        // The file that will be swapped in already has every token revoked (durably, on disk)...
+        assert_eq!(live_before(&staged.db), 0);
+        // ...while the live db is untouched until the swap.
+        assert!(store.authenticate(&t1.token).unwrap().is_some());
+    }
+
+    #[test]
+    fn failure_after_prepare_rolls_back_with_tokens_valid() {
+        let (tmp, store) = seeded();
+        let a = store.create_agent("Agent", "#000000").unwrap();
+        let t = store.create_token(&a.id, None).unwrap();
+        let zip = tmp.path().join("b.zip");
+        create_backup(&store, "0", &zip).unwrap();
+        assert!(restore_with(&store, "0", &zip, FailAt::AfterPrepare).is_err());
+        assert!(store.authenticate(&t.token).unwrap().is_some());
+        assert_eq!(meta(&store), "v1");
+    }
+
+    #[test]
+    fn replace_overwrites_atomically_only_when_confirmed() {
+        let (tmp, store) = seeded();
+        let dest = tmp.path().join("out.zip");
+        std::fs::write(&dest, b"old").unwrap();
+        assert!(create_backup(&store, "0", &dest).is_err());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"old");
+        create_backup_to(&store, "0", &dest, true).unwrap();
+        assert!(stage(&store, &dest).is_ok());
+        let leftovers: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".part"))
+            .collect();
+        assert!(leftovers.is_empty());
     }
 }

@@ -68,11 +68,13 @@ export interface RestoreReport {
 }
 
 /**
- * Write a full-project backup .zip to `dest` (must not exist) or, if omitted, into the data
- * dir's backups folder; returns its path.
+ * Write a full-project backup .zip to `dest` or, if omitted, into the data dir's backups
+ * folder; returns its path. An existing `dest` is refused unless `replace` is true (the user
+ * confirmed Replace in the save dialog), in which case it is atomically replaced: written to
+ * a temp file beside it, then renamed over it.
  */
-export async function createBackup(dest?: string): Promise<string> {
-  return invoke<string>('create_backup', { dest: dest ?? null });
+export async function createBackup(dest?: string, replace = false): Promise<string> {
+  return invoke<string>('create_backup', { dest: dest ?? null, replace });
 }
 
 const ZIP_FILTER = [{ name: 'coAuthor backup', extensions: ['zip'] }];

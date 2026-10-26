@@ -84,19 +84,27 @@ fn agent_token_revoke(
     store.revoke_token(&token_id).map_err(err)
 }
 
-/// Write a full backup to `dest` (from the save dialog; must not exist) or, if omitted,
+/// Write a full backup to `dest` (from the save dialog; `replace` = user confirmed Replace,
+/// which atomically replaces an existing file) or, if omitted,
 /// to `<data dir>/backups/`, and return its path.
 #[tauri::command]
 fn create_backup(
     app: tauri::AppHandle,
     store: tauri::State<'_, storage::Store>,
     dest: Option<String>,
+    replace: Option<bool>,
 ) -> Result<String, String> {
+    let replace = replace.unwrap_or(false) && dest.is_some();
     let dest = dest
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| backup::default_backup_path(&store));
-    backup::create_backup(&store, &app.package_info().version.to_string(), &dest)
-        .map_err(|e| e.to_string())?;
+    backup::create_backup_to(
+        &store,
+        &app.package_info().version.to_string(),
+        &dest,
+        replace,
+    )
+    .map_err(|e| e.to_string())?;
     Ok(dest.display().to_string())
 }
 
