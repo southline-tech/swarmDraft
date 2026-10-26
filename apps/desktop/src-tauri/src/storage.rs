@@ -42,11 +42,78 @@ const MIGRATIONS: &[&str] = &[
         revoked_at TEXT
      );
      CREATE INDEX agent_tokens_agent ON agent_tokens(agent_id);",
+    // RAD-209: manuscripts, sections (one Yjs doc each), Yjs updates, comment and suggestion
+    // indexes (CRDT marks are the source of truth), and the audit log of agent calls.
+    "CREATE TABLE manuscripts (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        created_at TEXT NOT NULL
+     );
+     CREATE TABLE sections (
+        id TEXT PRIMARY KEY,
+        manuscript_id TEXT NOT NULL REFERENCES manuscripts(id),
+        kind TEXT NOT NULL CHECK (kind IN ('front_matter','part','chapter','scene','back_matter')),
+        parent_id TEXT REFERENCES sections(id),
+        position INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        doc_id TEXT NOT NULL UNIQUE
+     );
+     CREATE INDEX sections_manuscript ON sections(manuscript_id, position);
+     CREATE TABLE doc_updates (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        doc_id TEXT NOT NULL,
+        data BLOB NOT NULL
+     );
+     CREATE INDEX doc_updates_doc ON doc_updates(doc_id, seq);
+     CREATE TABLE comments (
+        id TEXT PRIMARY KEY,
+        manuscript_id TEXT NOT NULL REFERENCES manuscripts(id),
+        section_id TEXT NOT NULL REFERENCES sections(id),
+        block_id TEXT,
+        quote TEXT,
+        body TEXT NOT NULL,
+        thread_id TEXT,
+        author_kind TEXT NOT NULL CHECK (author_kind IN ('human','agent')),
+        author_id TEXT NOT NULL,
+        author_name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        resolved_at TEXT
+     );
+     CREATE INDEX comments_section ON comments(section_id);
+     CREATE TABLE suggestions (
+        id TEXT PRIMARY KEY,
+        manuscript_id TEXT NOT NULL REFERENCES manuscripts(id),
+        section_id TEXT NOT NULL REFERENCES sections(id),
+        block_id TEXT,
+        kind TEXT NOT NULL,
+        quote TEXT,
+        replacement TEXT,
+        rationale TEXT,
+        author_kind TEXT NOT NULL CHECK (author_kind IN ('human','agent')),
+        author_id TEXT NOT NULL,
+        author_name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','accepted','rejected')),
+        created_at TEXT NOT NULL,
+        decided_at TEXT,
+        decided_by TEXT
+     );
+     CREATE INDEX suggestions_section ON suggestions(section_id, status);
+     CREATE TABLE audit_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        manuscript_id TEXT,
+        principal_kind TEXT NOT NULL,
+        principal_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        ts TEXT NOT NULL
+     );",
 ];
 
+#[derive(Clone)]
 pub struct Store {
     dir: PathBuf,
-    conn: Mutex<Connection>,
+    conn: std::sync::Arc<Mutex<Connection>>,
 }
 
 impl Store {
@@ -57,7 +124,7 @@ impl Store {
         migrate(&mut conn)?;
         Ok(Self {
             dir: dir.to_path_buf(),
-            conn: Mutex::new(conn),
+            conn: std::sync::Arc::new(Mutex::new(conn)),
         })
     }
 
