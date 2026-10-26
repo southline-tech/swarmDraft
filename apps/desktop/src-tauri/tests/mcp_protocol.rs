@@ -58,6 +58,14 @@ pub async fn start_with(scopes: &[&str], tune: impl FnOnce(&mut mcp::McpConfig))
 }
 
 pub async fn post(url: &str, token: Option<&str>, body: Value) -> reqwest::Response {
+    post_result(url, token, body).await.unwrap()
+}
+
+pub async fn post_result(
+    url: &str,
+    token: Option<&str>,
+    body: Value,
+) -> reqwest::Result<reqwest::Response> {
     let mut req = reqwest::Client::new()
         .post(url)
         .header("Content-Type", "application/json")
@@ -67,7 +75,7 @@ pub async fn post(url: &str, token: Option<&str>, body: Value) -> reqwest::Respo
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
-    req.send().await.unwrap()
+    req.send().await
 }
 
 pub async fn rpc(s: &Server, method: &str, params: Value) -> Value {
@@ -928,11 +936,44 @@ async fn body_limit_applies_to_mcp() {
     let (sid, bid) = chapter_two(&s).await;
     let big = "y".repeat(mcp::MAX_BODY_BYTES);
     let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"add_comment","arguments":{"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "lantern", "body": big}}});
-    let r = post(&s.url, Some(&s.token), body).await;
-    assert_eq!(r.status(), 413);
+    assert_refused_early(post_result(&s.url, Some(&s.token), body).await, 413);
+    assert!(
+        s.store.open_comments(&sid).unwrap().is_empty(),
+        "nothing was written"
+    );
     // Without a valid token the body is never read: plain 401.
     let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"pad": "y".repeat(mcp::MAX_BODY_BYTES)}});
-    assert_eq!(post(&s.url, None, body).await.status(), 401);
+    assert_refused_early(post_result(&s.url, None, body).await, 401);
+}
+
+/// The server answers before reading an oversized body and closes the connection. Windows may
+/// then abort the client's still-uploading request (WSAECONNABORTED/RESET) before it reads the
+/// response, so a connection abort counts as refused too.
+fn assert_refused_early(r: reqwest::Result<reqwest::Response>, status: u16) {
+    match r {
+        Ok(r) => assert_eq!(r.status(), status),
+        Err(e) => {
+            let io = std::error::Error::source(&e).and_then(|s| {
+                let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(s);
+                while let Some(c) = cur {
+                    if let Some(io) = c.downcast_ref::<std::io::Error>() {
+                        return Some(io.kind());
+                    }
+                    cur = c.source();
+                }
+                None
+            });
+            assert!(
+                matches!(
+                    io,
+                    Some(
+                        std::io::ErrorKind::ConnectionAborted | std::io::ErrorKind::ConnectionReset
+                    ) | Some(std::io::ErrorKind::BrokenPipe)
+                ),
+                "expected {status} or an aborted upload, got {e:?}"
+            );
+        }
+    }
 }
 
 #[tokio::test]
