@@ -752,7 +752,15 @@ fn restore_with(
 /// Friendlier error when the Save As target is open in another program on Windows
 /// (ERROR_SHARING_VIOLATION 32 / ERROR_LOCK_VIOLATION 33); other errors pass through.
 fn locked_target_error(e: std::io::Error, dest: &Path) -> std::io::Error {
-    if matches!(e.raw_os_error(), Some(32) | Some(33)) {
+    // On Windows, replacing a file another program holds open fails with 32/33, or with 5
+    // (access denied) when the replace is a rename. Raw 5 means EIO elsewhere, so it is only
+    // mapped on Windows.
+    let locked = match e.raw_os_error() {
+        Some(32) | Some(33) => true,
+        Some(5) => cfg!(windows) && dest.exists(),
+        _ => false,
+    };
+    if locked {
         std::io::Error::new(
             e.kind(),
             format!(
