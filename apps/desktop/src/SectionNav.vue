@@ -422,7 +422,7 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
   cursor: pointer;
 }
 .row.selected {
-  background: #e6eefc;
+  background: var(--ct-selected-bg);
 }
 .row .title {
   flex: 1;
