@@ -20,6 +20,7 @@ vi.mock('./backend', async (orig) => ({
   createBackup: vi.fn(async () => '/tmp/x/backups/b.zip'),
   pickBackupToRestore: vi.fn(async () => 'D:\\Backups\\picked.zip'),
   pickBackupDestination: vi.fn(async () => 'D:\\Backups\\new.zip'),
+  takeRecoveryNotice: vi.fn(async () => null),
   restoreBackup: vi.fn(async () => ({
     tokensRevoked: 2,
     manifest: {},
@@ -111,5 +112,31 @@ describe('backup dialogs', () => {
     await wrapper.find('[data-test="backup-button"]').trigger('click');
     await flushPromises();
     expect(backend.createBackup).toHaveBeenCalledWith('D:\\Backups\\new.zip', true);
+  });
+});
+
+describe('recovery notice', () => {
+  it('shows the recovery folder and snapshot once, then dismisses', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.takeRecoveryNotice).mockResolvedValueOnce({
+      folder: 'C:\\data\\recovery-1',
+      snapshot: 'C:\\data\\backups\\pre-restore-1.zip',
+      reason: 'restore journal is unreadable',
+    });
+    const wrapper = mount(App);
+    await flushPromises();
+    const n = wrapper.find('[data-test="recovery-notice"]');
+    expect(n.exists()).toBe(true);
+    expect(n.text()).toContain('C:\\data\\recovery-1');
+    expect(n.text()).toContain('pre-restore-1.zip');
+    expect(n.text()).toContain('Nothing was deleted');
+    await wrapper.find('[data-test="recovery-notice-dismiss"]').trigger('click');
+    expect(wrapper.find('[data-test="recovery-notice"]').exists()).toBe(false);
+  });
+
+  it('is absent when recovery left no notice', async () => {
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.find('[data-test="recovery-notice"]').exists()).toBe(false);
   });
 });

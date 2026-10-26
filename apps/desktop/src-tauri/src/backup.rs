@@ -123,6 +123,31 @@ struct Journal {
     id: String,
     /// `.files-old-*` dir name, if there was a `files/` dir to move aside.
     old: Option<String>,
+    /// Pre-restore snapshot path, for the recovery notice.
+    #[serde(default)]
+    snapshot: Option<String>,
+}
+
+/// Written when startup recovery could not prove what state an interrupted restore left and
+/// moved the uncertain folders aside instead of deciding. Shown once in the UI.
+const RECOVERY_NOTICE: &str = "recovery-notice.json";
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoveryNotice {
+    /// `recovery-<unique>` folder holding the moved files/, .files-old-* and the journal.
+    pub folder: String,
+    /// Pre-restore snapshot, if the journal could be read.
+    pub snapshot: Option<String>,
+    pub reason: String,
+}
+
+/// Return and clear the one-time recovery notice, if startup recovery left one.
+pub fn take_recovery_notice(data_dir: &Path) -> Option<RecoveryNotice> {
+    let p = data_dir.join(RECOVERY_NOTICE);
+    let n = serde_json::from_slice(&std::fs::read(&p).ok()?).ok();
+    let _ = std::fs::remove_file(&p);
+    n
 }
 
 fn write_journal(data_dir: &Path, j: &Journal) -> std::io::Result<()> {
@@ -156,59 +181,85 @@ fn sync_dir(dir: &Path) {
     let _ = dir;
 }
 
-/// Restore id recorded in the live db, if any. Opened read-only and independent of [`Store`].
-fn live_restore_id(data_dir: &Path) -> Option<String> {
+/// Restore id recorded in the live db. `Ok(None)` means the db (or the row) is definitely
+/// absent; `Err` means it could not be read, so the state is unknown.
+fn live_restore_id(data_dir: &Path) -> Result<Option<String>, rusqlite::Error> {
+    use rusqlite::OptionalExtension;
     let db = data_dir.join("coauthor.db");
     if !db.exists() {
-        return None;
+        return Ok(None);
     }
-    let c = Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE).ok()?;
+    let c = Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     c.query_row(
         "SELECT value FROM app_meta WHERE key = ?1",
         [crate::storage::RESTORE_ID_KEY],
         |r| r.get(0),
     )
-    .ok()
+    .optional()
 }
 
-/// Finish or undo a restore interrupted by a crash, using the journal. If the live db carries
-/// the journal's restore id, the db copy committed: keep the restored `files/` and drop the old
-/// one. Otherwise the db is still the pre-restore db: drop the restored `files/` and put the
-/// old one back. Returns whether a journal was found.
-fn recover_journal(data_dir: &Path) -> bool {
+/// Move `path` into `<data dir>/recovery-<unique>/<label>` instead of deleting it.
+fn move_to_recovery(data_dir: &Path, path: &Path, label: &str) -> std::io::Result<PathBuf> {
+    let dir = data_dir.join(format!("recovery-{}", unique_suffix()));
+    std::fs::create_dir_all(&dir)?;
+    let dest = dir.join(label);
+    rename_retry(path, &dest)?;
+    Ok(dest)
+}
+
+/// Finish or undo a restore interrupted by a crash, using the journal. Data is deleted only
+/// when the state is proven:
+/// - live db carries the journal's restore id (committed): keep the restored `files/`; the old
+///   dir (pre-restore files) is moved to a `recovery-*` folder.
+/// - live db readable and lacks the id (not committed): if the old dir is still set aside,
+///   the live `files/` is provably the restored copy, so it is deleted and the old dir put
+///   back; if the journal says there was no old dir, `files/` is moved to a `recovery-*`
+///   folder; otherwise `files/` is the user's own and is left alone.
+/// - journal unparseable or db unreadable (unknown): change no decision. `files/`, every
+///   `.files-old-*` and the journal are moved together into a `recovery-*` folder, the app
+///   starts with an empty `files/`, and a one-time [`RecoveryNotice`] is written.
+fn recover_journal(data_dir: &Path) {
     let path = data_dir.join(JOURNAL);
     let Ok(bytes) = std::fs::read(&path) else {
-        return false;
+        return;
     };
     let files = data_dir.join("files");
-    let j: Option<Journal> = serde_json::from_slice(&bytes).ok();
-    let committed = match &j {
-        Some(j) => live_restore_id(data_dir).as_deref() == Some(j.id.as_str()),
-        // Unreadable journal: it is fsynced before any change, so treat as not committed.
-        None => false,
-    };
-    let old = j
+    let j: Result<Journal, String> = serde_json::from_slice(&bytes).map_err(|e| e.to_string());
+    let state = j
         .as_ref()
-        .and_then(|j| j.old.as_ref())
-        .map(|n| data_dir.join(n));
-    if committed {
-        if let Some(old) = &old {
-            let _ = std::fs::remove_dir_all(old);
+        .map_err(|e| format!("restore journal is unreadable: {e}"))
+        .and_then(|j| {
+            live_restore_id(data_dir)
+                .map(|id| id.as_deref() == Some(j.id.as_str()))
+                .map_err(|e| format!("database could not be read: {e}"))
+        });
+    match state {
+        Err(reason) => {
+            quarantine(data_dir, &path, j.ok().and_then(|j| j.snapshot), reason);
+            return;
         }
-    } else {
-        let old_exists = old.as_ref().is_some_and(|o| o.exists());
-        // Only touch files/ when it is the restored copy: either the old dir is still set
-        // aside, or there was no old dir at all (restore created files/ from nothing).
-        let had_no_old = j.as_ref().is_some_and(|j| j.old.is_none());
-        if old_exists || had_no_old {
-            if files.exists() {
-                let trash = data_dir.join(format!(".restore-trash-{}", unique_suffix()));
-                if rename_retry(&files, &trash).is_ok() {
-                    let _ = std::fs::remove_dir_all(&trash);
+        Ok(committed) => {
+            let j = j.expect("state is Ok only when the journal parsed");
+            let old = j.old.as_ref().map(|n| data_dir.join(n));
+            if committed {
+                if let Some(old) = old.as_ref().filter(|o| o.exists()) {
+                    let _ = move_to_recovery(data_dir, old, "files-before-restore");
                 }
-            }
-            if let Some(old) = &old {
-                if old_exists {
+            } else {
+                let old_exists = old.as_ref().is_some_and(|o| o.exists());
+                if old_exists && files.exists() {
+                    // Provably the restored copy from the backup: safe to delete.
+                    let trash = data_dir.join(format!(".restore-trash-{}", unique_suffix()));
+                    if rename_retry(&files, &trash).is_ok() {
+                        let _ = std::fs::remove_dir_all(&trash);
+                    }
+                } else if j.old.is_none() && files.exists() {
+                    // There was no files/ before; this one came from the restore, or from the
+                    // user after it. Never delete: move it aside.
+                    let _ = move_to_recovery(data_dir, &files, "files-from-interrupted-restore");
+                }
+                // (old recorded but already gone: files/ was never swapped, or was put back.)
+                if let Some(old) = old.as_ref().filter(|o| o.exists()) {
                     let _ = rename_retry(old, &files);
                 }
             }
@@ -216,14 +267,51 @@ fn recover_journal(data_dir: &Path) -> bool {
     }
     sync_dir(data_dir);
     let _ = remove_journal(data_dir);
-    true
+}
+
+/// Unknown state: move `files/`, all `.files-old-*` and the journal into one recovery folder
+/// (deleting nothing) and leave a one-time notice. Leaves an empty `files/` so the app works.
+fn quarantine(data_dir: &Path, journal: &Path, snapshot: Option<String>, reason: String) {
+    let dir = data_dir.join(format!("recovery-{}", unique_suffix()));
+    if std::fs::create_dir_all(&dir).is_err() {
+        return; // Can't move anything safely: leave everything (journal included) in place.
+    }
+    let files = data_dir.join("files");
+    if files.exists() {
+        let _ = rename_retry(&files, &dir.join("files"));
+    }
+    if let Ok(rd) = std::fs::read_dir(data_dir) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with(".files-old-") {
+                let _ = rename_retry(&e.path(), &dir.join(name.trim_start_matches('.')));
+            }
+        }
+    }
+    if rename_retry(journal, &dir.join("restore-journal")).is_err() {
+        return; // Journal stays; cleanup_temp then keeps every .files-old-* too.
+    }
+    let _ = std::fs::create_dir_all(&files);
+    let notice = RecoveryNotice {
+        folder: dir.display().to_string(),
+        snapshot,
+        reason,
+    };
+    let _ = std::fs::write(
+        data_dir.join(RECOVERY_NOTICE),
+        serde_json::to_vec_pretty(&notice).expect("notice serializes"),
+    );
+    sync_dir(data_dir);
 }
 
 /// Recover from a crash mid-restore (see [`recover_journal`]) and remove temp dirs/files left
 /// by a crash mid-backup or mid-restore. Call at startup, before opening the [`Store`].
-/// Without a journal, a `.files-old-*` dir is only put back if `files/` is missing.
+/// Without a journal, a `.files-old-*` dir is put back if `files/` is missing, otherwise moved
+/// to a `recovery-*` folder. Only temp artifacts this module created are deleted.
 pub fn cleanup_temp(data_dir: &Path) {
     recover_journal(data_dir);
+    // A journal still present means recovery could not act; then touch nothing it refers to.
+    let journal_pending = data_dir.join(JOURNAL).exists();
     let files = data_dir.join("files");
     let Ok(rd) = std::fs::read_dir(data_dir) else {
         return;
@@ -234,9 +322,18 @@ pub fn cleanup_temp(data_dir: &Path) {
             continue;
         }
         let path = e.path();
-        if name.starts_with(".files-old-") && !files.exists() {
-            let _ = std::fs::rename(&path, &files);
+        if name.starts_with(".files-old-") || name == JOURNAL {
+            if journal_pending {
+                continue;
+            }
+            // User data moved aside by a restore: put it back, or keep it in a recovery folder.
+            if !files.exists() {
+                let _ = rename_retry(&path, &files);
+            } else {
+                let _ = move_to_recovery(data_dir, &path, "files-before-restore");
+            }
         } else if path.is_dir() {
+            // Temp artifacts we created (.backup-*, .restore-* staging/trash dirs).
             let _ = std::fs::remove_dir_all(&path);
         } else {
             let _ = std::fs::remove_file(&path);
@@ -627,13 +724,14 @@ fn restore_with(
     let snapshot = backups_dir(store).join(format!("pre-restore-{}.zip", unique_suffix()));
     create_backup(store, app_version, &snapshot)?;
 
-    let tokens_revoked = match apply(store, &staged, fail, true) {
+    let tokens_revoked = match apply(store, &staged, fail, true, &snapshot) {
         Ok(n) => n,
         Err(err) if matches!(fail, FailAt::Crash(_)) => return Err(err),
         Err(err) => {
             drop(staged);
             // Rollback returns to the pre-restore state exactly, so tokens valid then stay valid.
-            let rb = stage(store, &snapshot).and_then(|s| apply(store, &s, FailAt::None, false));
+            let rb = stage(store, &snapshot)
+                .and_then(|s| apply(store, &s, FailAt::None, false, &snapshot));
             return Err(match rb {
                 Ok(_) => BackupError::RolledBack(err.to_string()),
                 Err(e2) => BackupError::RollbackFailed(
@@ -705,6 +803,7 @@ fn apply(
     staged: &Staged,
     fail: FailAt,
     revoke_tokens: bool,
+    snapshot: &Path,
 ) -> Result<u64, BackupError> {
     let crash = |s: Step| -> Result<(), BackupError> {
         if fail == FailAt::Crash(s) {
@@ -723,6 +822,7 @@ fn apply(
         &Journal {
             id: id.clone(),
             old: had_old.then(|| old_name.clone()),
+            snapshot: Some(snapshot.display().to_string()),
         },
     )?;
     crash(Step::Journal)?;
@@ -737,7 +837,7 @@ fn apply(
         if had_old && old.exists() {
             let _ = rename_retry(&old, &live);
         }
-        let _ = remove_journal(dir);
+        // The journal stays until the caller's db rollback has finished.
     };
     if had_old {
         if let Err(e) = rename_retry(&live, &old) {
@@ -1310,7 +1410,7 @@ mod tests {
         let (tmp, store, bk, _) = crash_setup();
         restore_backup(&store, "0", &bk).unwrap();
         assert!(!tmp.path().join(JOURNAL).exists());
-        assert!(live_restore_id(tmp.path()).is_some());
+        assert!(live_restore_id(tmp.path()).unwrap().is_some());
     }
 
     #[test]
@@ -1322,5 +1422,221 @@ mod tests {
         }
         let e = locked_target_error(std::io::Error::from_raw_os_error(2), dest);
         assert!(!e.to_string().contains("open in another program"));
+    }
+
+    fn recovery_dirs(d: &Path) -> Vec<PathBuf> {
+        std::fs::read_dir(d)
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                e.file_name().to_string_lossy().starts_with("recovery-") && e.path().is_dir()
+            })
+            .map(|e| e.path())
+            .collect()
+    }
+
+    #[test]
+    fn unknown_journal_without_old_moves_files_aside_never_deletes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        drop(Store::open(d).unwrap());
+        std::fs::create_dir_all(d.join("files/images")).unwrap();
+        std::fs::write(d.join("files/images/user.png"), b"user data").unwrap();
+        std::fs::write(d.join(JOURNAL), br#"{"id":"never-committed","old":null}"#).unwrap();
+        cleanup_temp(d);
+        assert!(!d.join(JOURNAL).exists());
+        let rec = recovery_dirs(d);
+        assert_eq!(rec.len(), 1);
+        assert_eq!(
+            std::fs::read(rec[0].join("files-from-interrupted-restore/images/user.png")).unwrap(),
+            b"user data"
+        );
+    }
+
+    /// Every file under `root` with its contents, keyed by path relative to `root`.
+    fn tree(root: &Path) -> BTreeMap<String, Vec<u8>> {
+        list_files(root)
+            .unwrap()
+            .into_iter()
+            .map(|(r, p)| (r, std::fs::read(p).unwrap()))
+            .collect()
+    }
+
+    /// Uncertain-state layout: live files/, a .files-old-* dir, and a journal.
+    fn uncertain_layout(d: &Path, journal: &[u8]) {
+        std::fs::create_dir_all(d.join("files/images")).unwrap();
+        std::fs::write(d.join("files/images/live.png"), b"live").unwrap();
+        std::fs::create_dir_all(d.join(".files-old-7")).unwrap();
+        std::fs::write(d.join(".files-old-7/old.txt"), b"old").unwrap();
+        std::fs::write(d.join(JOURNAL), journal).unwrap();
+    }
+
+    fn assert_quarantined(d: &Path, journal: &[u8], reason: &str) {
+        let rec = recovery_dirs(d);
+        assert_eq!(rec.len(), 1, "one recovery folder");
+        let r = &rec[0];
+        let mut want = BTreeMap::new();
+        want.insert("files/images/live.png".to_string(), b"live".to_vec());
+        want.insert("files-old-7/old.txt".to_string(), b"old".to_vec());
+        want.insert("restore-journal".to_string(), journal.to_vec());
+        assert_eq!(tree(r), want, "all data survives in the recovery folder");
+        assert!(!d.join(JOURNAL).exists());
+        assert!(!d.join(".files-old-7").exists());
+        assert!(
+            d.join("files").is_dir() && tree(&d.join("files")).is_empty(),
+            "app usable"
+        );
+        let n = take_recovery_notice(d).expect("one-time notice");
+        assert_eq!(Path::new(&n.folder), r.as_path());
+        assert!(n.reason.contains(reason), "{}", n.reason);
+        assert!(take_recovery_notice(d).is_none(), "notice is one-time");
+    }
+
+    #[test]
+    fn corrupt_journal_quarantines_everything() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        drop(Store::open(d).unwrap());
+        uncertain_layout(d, b"{not json");
+        cleanup_temp(d);
+        assert_quarantined(d, b"{not json", "journal is unreadable");
+        assert!(Store::open(d).is_ok());
+    }
+
+    #[test]
+    fn unreadable_db_quarantines_everything_and_keeps_snapshot_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        std::fs::write(
+            d.join("coauthor.db"),
+            b"this is not a sqlite database at all....",
+        )
+        .unwrap();
+        let j = br#"{"id":"r1","old":".files-old-7","snapshot":"C:\\data\\backups\\pre-restore-1.zip"}"#;
+        uncertain_layout(d, j);
+        // Peek at the snapshot before the notice is consumed by assert_quarantined.
+        cleanup_temp(d);
+        let notice: RecoveryNotice =
+            serde_json::from_slice(&std::fs::read(d.join(RECOVERY_NOTICE)).unwrap()).unwrap();
+        assert_eq!(
+            notice.snapshot.as_deref(),
+            Some("C:\\data\\backups\\pre-restore-1.zip")
+        );
+        assert_quarantined(d, j, "database could not be read");
+        assert!(
+            live_restore_id(d).is_err(),
+            "read error is distinguished from a missing row"
+        );
+    }
+
+    #[test]
+    fn missing_row_is_ok_none_not_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        drop(Store::open(tmp.path()).unwrap());
+        assert_eq!(live_restore_id(tmp.path()).unwrap(), None);
+    }
+
+    #[test]
+    fn pending_journal_keeps_files_old_in_cleanup() {
+        // A journal that cannot even be read (here: a directory) leaves recovery unable to act;
+        // cleanup_temp must then not delete or move any .files-old-* dir.
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        std::fs::create_dir_all(d.join(JOURNAL)).unwrap();
+        std::fs::create_dir_all(d.join("files")).unwrap();
+        std::fs::create_dir_all(d.join(".files-old-3")).unwrap();
+        std::fs::write(d.join(".files-old-3/keep.txt"), b"k").unwrap();
+        cleanup_temp(d);
+        assert_eq!(
+            std::fs::read(d.join(".files-old-3/keep.txt")).unwrap(),
+            b"k"
+        );
+        assert!(d.join(JOURNAL).exists());
+        assert!(recovery_dirs(d).is_empty());
+    }
+
+    #[test]
+    fn committed_recovery_keeps_old_files_in_recovery_folder() {
+        let (tmp, store, bk, _) = crash_setup();
+        let d = tmp.path().to_path_buf();
+        let _ = restore_with(&store, "0", &bk, FailAt::Crash(Step::DbCommitted)).unwrap_err();
+        drop(store);
+        cleanup_temp(&d);
+        let rec = recovery_dirs(&d);
+        assert_eq!(rec.len(), 1);
+        assert_eq!(
+            std::fs::read(rec[0].join("files-before-restore/added.txt")).unwrap(),
+            b"new attachment"
+        );
+    }
+
+    #[test]
+    fn stray_old_dir_with_live_files_is_kept_in_recovery() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        std::fs::create_dir_all(d.join("files")).unwrap();
+        std::fs::write(d.join("files/live.txt"), b"live").unwrap();
+        std::fs::create_dir_all(d.join(".files-old-9")).unwrap();
+        std::fs::write(d.join(".files-old-9/old.txt"), b"old").unwrap();
+        cleanup_temp(d);
+        assert_eq!(std::fs::read(d.join("files/live.txt")).unwrap(), b"live");
+        let rec = recovery_dirs(d);
+        assert_eq!(
+            std::fs::read(rec[0].join("files-before-restore/old.txt")).unwrap(),
+            b"old"
+        );
+    }
+
+    #[test]
+    fn sharing_violation_detection_is_windows_only() {
+        let e32 = std::io::Error::from_raw_os_error(32);
+        let e5 = std::io::Error::from_raw_os_error(5);
+        let e2 = std::io::Error::from_raw_os_error(2);
+        assert_eq!(is_sharing_violation(&e32), cfg!(windows));
+        assert_eq!(is_sharing_violation(&e5), cfg!(windows));
+        assert!(!is_sharing_violation(&e2));
+    }
+
+    /// Open `p` with no sharing, as an indexer, antivirus or another program might.
+    #[cfg(windows)]
+    fn lock_exclusive(p: &Path) -> File {
+        use std::os::windows::fs::OpenOptionsExt;
+        OpenOptions::new().read(true).share_mode(0).open(p).unwrap()
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_rename_retries_through_transient_lock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a.bin");
+        let b = tmp.path().join("b.bin");
+        std::fs::write(&a, b"x").unwrap();
+        let lock = lock_exclusive(&a);
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            drop(lock);
+        });
+        rename_retry(&a, &b).unwrap();
+        t.join().unwrap();
+        assert!(b.exists() && !a.exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_locked_save_as_target_gets_friendly_error() {
+        let (tmp, store) = seeded();
+        let dest = tmp.path().join("locked.zip");
+        std::fs::write(&dest, b"old").unwrap();
+        let lock = lock_exclusive(&dest);
+        let err = create_backup_to(&store, "0", &dest, true).unwrap_err();
+        drop(lock);
+        assert!(err.to_string().contains("open in another program"), "{err}");
+        assert_eq!(std::fs::read(&dest).unwrap(), b"old");
+        let parts = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".part"))
+            .count();
+        assert_eq!(parts, 0);
     }
 }

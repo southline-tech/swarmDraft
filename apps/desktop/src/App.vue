@@ -7,15 +7,27 @@ import {
   pickBackupDestination,
   pickBackupToRestore,
   restoreBackup,
+  takeRecoveryNotice,
   type AppInfo,
+  type RecoveryNotice,
 } from './backend';
 import AgentsSettings from './AgentsSettings.vue';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import { SAMPLE_DOC } from './sample';
 
 const info = ref<AppInfo | null>(null);
+/** One-time notice: startup recovery moved folders aside after an interrupted restore. */
+const recoveryNotice = ref<RecoveryNotice | null>(null);
+
 onMounted(async () => {
   info.value = await getAppInfo();
+  if (info.value) {
+    try {
+      recoveryNotice.value = await takeRecoveryNotice();
+    } catch {
+      recoveryNotice.value = null;
+    }
+  }
 });
 
 const backupStatus = ref('');
@@ -94,6 +106,22 @@ async function onRestore(): Promise<void> {
         </button>
         <button type="button" data-test="restore-confirm-no" @click="confirmingRestore = false">
           Cancel
+        </button>
+      </div>
+      <div v-if="recoveryNotice" role="alert" data-test="recovery-notice">
+        <p>
+          A restore was interrupted and coAuthor couldn't tell how far it got ({{
+            recoveryNotice.reason
+          }}). Nothing was deleted: your attachment folders were moved to
+          <code>{{ recoveryNotice.folder }}</code
+          >.
+          <template v-if="recoveryNotice.snapshot">
+            Your state before the restore is saved in <code>{{ recoveryNotice.snapshot }}</code
+            >.
+          </template>
+        </p>
+        <button type="button" data-test="recovery-notice-dismiss" @click="recoveryNotice = null">
+          Dismiss
         </button>
       </div>
       <p v-if="backupStatus" data-test="backup-status">{{ backupStatus }}</p>

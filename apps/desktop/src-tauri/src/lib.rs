@@ -108,6 +108,12 @@ fn create_backup(
     Ok(dest.display().to_string())
 }
 
+/// One-time notice left by startup recovery when it moved uncertain folders aside.
+#[tauri::command]
+fn take_recovery_notice(store: tauri::State<'_, storage::Store>) -> Option<backup::RecoveryNotice> {
+    backup::take_recovery_notice(store.data_dir())
+}
+
 /// Validate and restore a backup .zip; the replaced state is kept as a pre-restore snapshot.
 #[tauri::command]
 fn restore_backup(
@@ -143,6 +149,7 @@ pub fn run() {
             agent_token_create,
             agent_token_revoke,
             create_backup,
+            take_recovery_notice,
             restore_backup
         ])
         .run(tauri::generate_context!())

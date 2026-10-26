@@ -97,3 +97,16 @@ export async function pickBackupDestination(): Promise<string | null> {
 export async function restoreBackup(path: string): Promise<RestoreReport> {
   return invoke<RestoreReport>('restore_backup', { path });
 }
+
+/** Left by startup recovery when an interrupted restore's state could not be proven. */
+export interface RecoveryNotice {
+  folder: string;
+  snapshot: string | null;
+  reason: string;
+}
+
+/** Return and clear the one-time recovery notice (null if none, or in a plain browser). */
+export async function takeRecoveryNotice(): Promise<RecoveryNotice | null> {
+  if (!isTauri()) return null;
+  return invoke<RecoveryNotice | null>('take_recovery_notice');
+}
