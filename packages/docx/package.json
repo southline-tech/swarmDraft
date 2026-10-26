@@ -13,9 +13,12 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@coauthor/schema": "workspace:*"
+    "@coauthor/schema": "workspace:*",
+    "fflate": "^0.8.2",
+    "yjs": "^13.6.20"
   },
   "devDependencies": {
+    "@types/node": "^20",
     "vitest": "^3.2.4"
   }
 }
