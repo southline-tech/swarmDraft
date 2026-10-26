@@ -110,10 +110,41 @@ fn create_backup(
     Ok(dest.display().to_string())
 }
 
-/// One-time notice left by startup recovery when it moved uncertain folders aside.
+/// Recovery notices that could not be saved to disk; shown from memory until dismissed.
+#[derive(Default)]
+struct UnsavedNotices(std::sync::Mutex<Vec<backup::RecoveryNotice>>);
+
+/// Notices left by startup recovery when it moved folders aside. Reading does not clear them.
 #[tauri::command]
-fn take_recovery_notice(store: tauri::State<'_, storage::Store>) -> Option<backup::RecoveryNotice> {
-    backup::take_recovery_notice(store.data_dir())
+fn recovery_notices(
+    store: tauri::State<'_, storage::Store>,
+    unsaved: tauri::State<'_, UnsavedNotices>,
+) -> Vec<backup::RecoveryNotice> {
+    let mut all = backup::read_recovery_notices(store.data_dir());
+    all.extend(
+        unsaved
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .cloned(),
+    );
+    all
+}
+
+/// The user pressed Dismiss: clear the notices that were shown (by id); newer ones stay.
+#[tauri::command]
+fn dismiss_recovery_notices(
+    store: tauri::State<'_, storage::Store>,
+    unsaved: tauri::State<'_, UnsavedNotices>,
+    ids: Vec<String>,
+) -> Result<(), String> {
+    unsaved
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|n| !ids.contains(&n.id));
+    backup::dismiss_recovery_notices(store.data_dir(), &ids).map_err(|e| e.to_string())
 }
 
 /// Validate and restore a backup .zip; the replaced state is kept as a pre-restore snapshot.
@@ -179,7 +210,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
-            backup::cleanup_temp(&dir);
+            let report = backup::cleanup_temp(&dir);
+            app.manage(UnsavedNotices(std::sync::Mutex::new(
+                report.unsaved_notices,
+            )));
             let store = storage::Store::open(&dir)?;
             app.manage(store.clone());
             app.manage(std::sync::Mutex::new(McpStatus {
@@ -212,7 +246,8 @@ pub fn run() {
             agent_token_create,
             agent_token_revoke,
             create_backup,
-            take_recovery_notice,
+            recovery_notices,
+            dismiss_recovery_notices,
             restore_backup,
             manuscript_import_json,
             manuscripts_list,

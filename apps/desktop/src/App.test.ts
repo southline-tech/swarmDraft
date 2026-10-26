@@ -246,7 +246,8 @@ vi.mock('./backend', async (orig) => ({
   createBackup: vi.fn(async () => '/tmp/x/backups/b.zip'),
   pickBackupToRestore: vi.fn(async () => 'D:\\Backups\\picked.zip'),
   pickBackupDestination: vi.fn(async () => 'D:\\Backups\\new.zip'),
-  takeRecoveryNotice: vi.fn(async () => null),
+  getRecoveryNotices: vi.fn(async () => []),
+  dismissRecoveryNotices: vi.fn(async () => {}),
   restoreBackup: vi.fn(async () => ({
     tokensRevoked: 2,
     manifest: {},
@@ -342,22 +343,70 @@ describe('backup dialogs', () => {
 });
 
 describe('recovery notice', () => {
-  it('shows the recovery folder and snapshot once, then dismisses', async () => {
+  const notice = {
+    id: 'n1',
+    corruptFile: null,
+    folder: 'C:\\data\\recovery-1',
+    moved: ['files', 'files-old-7'],
+    snapshot: 'C:\\data\\backups\\pre-restore-1.zip',
+    filesDir: 'C:\\data\\files',
+    reason: 'restore journal is unreadable',
+    retryPending: false,
+    saveError: null,
+  };
+
+  it('shows plain wording with the folder and snapshot, and clears only on Dismiss', async () => {
     const backend = await import('./backend');
-    vi.mocked(backend.takeRecoveryNotice).mockResolvedValueOnce({
-      folder: 'C:\\data\\recovery-1',
-      snapshot: 'C:\\data\\backups\\pre-restore-1.zip',
-      reason: 'restore journal is unreadable',
-    });
+    vi.mocked(backend.getRecoveryNotices).mockResolvedValueOnce([notice]);
     const wrapper = mount(App);
     await flushPromises();
     const n = wrapper.find('[data-test="recovery-notice"]');
     expect(n.exists()).toBe(true);
+    expect(n.text()).toContain('Some attachments may be missing');
     expect(n.text()).toContain('C:\\data\\recovery-1');
+    expect(n.text()).toContain('C:\\data\\files');
     expect(n.text()).toContain('pre-restore-1.zip');
-    expect(n.text()).toContain('Nothing was deleted');
+    expect(backend.dismissRecoveryNotices).not.toHaveBeenCalled();
     await wrapper.find('[data-test="recovery-notice-dismiss"]').trigger('click');
+    await flushPromises();
+    expect(backend.dismissRecoveryNotices).toHaveBeenCalledWith(['n1']);
     expect(wrapper.find('[data-test="recovery-notice"]').exists()).toBe(false);
+  });
+
+  it('does not say moved when nothing was moved, and shows a save error', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.getRecoveryNotices).mockResolvedValueOnce([
+      { ...notice, folder: null, moved: [], retryPending: true, saveError: 'disk full' },
+    ]);
+    const wrapper = mount(App);
+    await flushPromises();
+    const n = wrapper.find('[data-test="recovery-notice"]');
+    expect(n.text()).not.toContain('Moved to');
+    expect(n.text()).toContain('try again');
+    expect(wrapper.find('[data-test="recovery-notice-save-error"]').text()).toContain('disk full');
+  });
+
+  it('shows where a corrupt notice file was kept', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.getRecoveryNotices).mockResolvedValueOnce([
+      { ...notice, id: 'c', corruptFile: 'C:\\data\\recovery-notice.corrupt-1.json' },
+    ]);
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.find('[data-test="recovery-notice-corrupt"]').text()).toContain(
+      'recovery-notice.corrupt-1.json',
+    );
+  });
+
+  it('keeps the notice if Dismiss fails', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.getRecoveryNotices).mockResolvedValueOnce([notice]);
+    vi.mocked(backend.dismissRecoveryNotices).mockRejectedValueOnce(new Error('locked'));
+    const wrapper = mount(App);
+    await flushPromises();
+    await wrapper.find('[data-test="recovery-notice-dismiss"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-test="recovery-notice"]').text()).toContain("Couldn't dismiss");
   });
 
   it('is absent when recovery left no notice', async () => {
