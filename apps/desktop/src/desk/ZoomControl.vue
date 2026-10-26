@@ -3,6 +3,7 @@
  * Status-bar zoom (RAD-255, WP1): minus, a 50%-200% slider, plus, and the current percentage.
  * Zoom only changes the view, so it stays enabled when the editor is read-only. Ctrl+= / Ctrl+- /
  * Ctrl+0 are WebView2's own zoom accelerators, so they are not bound or advertised here (RAD-259).
+ * Note: WebView2 Ctrl+= / Ctrl+- zoom scales the whole window and stacks with this page zoom.
  * At the limits the step buttons use aria-disabled (still focusable) with a no-op click.
  */
 import { ZOOM_MAX, ZOOM_MIN, clampZoom, stepZoom } from './zoom';

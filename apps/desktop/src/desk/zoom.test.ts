@@ -27,6 +27,10 @@ describe('zoom model', () => {
     saveZoom(150);
     expect(localStorage.getItem(ZOOM_STORAGE_KEY)).toBe('150');
     expect(loadZoom()).toBe(150);
+    for (const blank of ['', '   ']) {
+      localStorage.setItem(ZOOM_STORAGE_KEY, blank);
+      expect(loadZoom()).toBe(100);
+    }
     localStorage.setItem(ZOOM_STORAGE_KEY, 'junk');
     expect(loadZoom()).toBe(100);
     const broken = {
@@ -76,9 +80,10 @@ describe('page on desk', () => {
     const w = mount(ManuscriptEditor, { props: { content: SAMPLE_DOC }, attachTo: document.body });
     await flushPromises();
     const desk = w.find('[data-test="desk"]');
-    expect(desk.classes()).toEqual(
-      expect.arrayContaining(['bg-bg', 'justify-center', 'overflow-y-auto']),
-    );
+    expect(desk.classes()).toEqual(expect.arrayContaining(['bg-bg', 'overflow-auto']));
+    // Overflow-safe centering: auto margins, never justify-center, so the left edge stays reachable.
+    expect(desk.classes()).not.toContain('justify-center');
+    expect(desk.find('[data-test="page"]').classes()).toContain('mx-auto');
     const page = desk.find('[data-test="page"]');
     expect(page.classes()).toEqual(
       expect.arrayContaining(['box-border', 'w-144', 'min-h-216', 'p-18', 'bg-paper', 'shadow-2']),

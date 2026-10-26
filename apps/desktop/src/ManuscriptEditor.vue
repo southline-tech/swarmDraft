@@ -91,9 +91,11 @@ const LABELS: Record<ReviewItem['type'], string> = {
       @toggle-review="reviewOpen = !reviewOpen"
     />
     <div class="body" :class="{ 'no-review': !reviewOpen }">
-      <div class="desk flex min-w-0 justify-center overflow-y-auto bg-bg" data-test="desk">
+      <!-- Auto margins (not justify-center) keep a zoomed page that is wider than the desk
+           reachable: it centers when it fits and scrolls from its left edge when it does not. -->
+      <div class="desk flex min-w-0 overflow-auto bg-bg" data-test="desk">
         <div
-          class="page-sheet box-border mt-8 mb-8 h-fit min-h-216 w-144 flex-none bg-paper p-18 text-text shadow-2"
+          class="page-sheet box-border mx-auto mt-8 mb-8 h-fit min-h-216 w-144 flex-none bg-paper p-18 text-text shadow-2"
           data-test="page"
           :style="{ zoom: zoom / 100 }"
         >

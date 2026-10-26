@@ -28,7 +28,7 @@ export function loadZoom(
 ): number {
   try {
     const v = storage?.getItem(ZOOM_STORAGE_KEY);
-    return v == null ? ZOOM_DEFAULT : clampZoom(Number(v));
+    return v == null || v.trim() === '' ? ZOOM_DEFAULT : clampZoom(Number(v));
   } catch {
     return ZOOM_DEFAULT;
   }
