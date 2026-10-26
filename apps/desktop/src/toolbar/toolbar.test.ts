@@ -363,6 +363,46 @@ describe('EditorToolbar', () => {
     w.unmount();
   });
 
+  it('undo/redo: read-only is aria-disabled, focusable and inert; editable with no history is natively disabled', async () => {
+    const e = new Editor(
+      collaborativeEditorOptions(docToYDoc(structuredClone(DOC) as never), {
+        element: document.createElement('div'),
+      }),
+    );
+    editors.push(e);
+    const w = mount(EditorToolbar, {
+      props: { editor: e, readOnlyReason: 'document failed to load' },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    for (const id of ['tb-undo', 'tb-redo']) {
+      const c = w.find(`[data-test="${id}"]`);
+      expect(c.attributes('disabled')).toBeDefined();
+      expect(c.attributes('aria-disabled')).toBeUndefined();
+    }
+    e.commands.insertContent('x');
+    await new Promise((r) => setTimeout(r, 0));
+    e.setEditable(false, false);
+    await flushPromises();
+    await new Promise((r) => setTimeout(r, 0));
+    const before = JSON.stringify(e.getJSON());
+    for (const id of ['tb-undo', 'tb-redo']) {
+      const c = w.find(`[data-test="${id}"]`);
+      expect(c.attributes('disabled')).toBeUndefined();
+      expect(c.attributes('aria-disabled')).toBe('true');
+      expect(c.attributes('title')).toBe('Read-only: document failed to load');
+      expect(c.attributes('aria-description')).toBe('Read-only: document failed to load');
+      expect(c.attributes('aria-keyshortcuts')).toBeUndefined();
+      (c.element as HTMLElement).focus();
+      expect(document.activeElement).toBe(c.element);
+      await c.trigger('click');
+      await c.trigger('keydown', { key: 'Enter' });
+    }
+    await new Promise((r) => setTimeout(r, 0));
+    expect(JSON.stringify(e.getJSON())).toBe(before);
+    w.unmount();
+  });
+
   it('binds the advertised B/I/U keys in the editor', () => {
     const e = make();
     select(e, 'plain');
@@ -425,7 +465,7 @@ describe('EditorToolbar', () => {
     expect((sel.element as HTMLSelectElement).value).toBe(shown);
     expect(toolbarState(e).bold).toBe(false);
     for (const id of ['tb-undo', 'tb-redo'])
-      expect(w.find(`[data-test="${id}"]`).attributes('disabled')).toBeDefined();
+      expect(w.find(`[data-test="${id}"]`).attributes('aria-disabled')).toBe('true');
     await w.find('[data-test="tb-overflow"]').trigger('click');
     for (const i of w.findAll('[role^="menuitem"]')) {
       expect(i.attributes('disabled')).toBeUndefined();

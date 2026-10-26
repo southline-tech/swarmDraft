@@ -223,9 +223,10 @@ const btn =
       data-test="tb-undo"
       :class="btn"
       aria-label="Undo"
-      :aria-keyshortcuts="state.hasHistory ? 'Control+Z' : undefined"
-      :title="tip('Undo', state.hasHistory ? SHORTCUTS.undo : undefined)"
-      :disabled="!editable || !state.canUndo"
+      :aria-keyshortcuts="editable && state.hasHistory ? 'Control+Z' : undefined"
+      :title="ftip('Undo', state.hasHistory ? SHORTCUTS.undo : undefined)"
+      :disabled="editable && !state.canUndo"
+      v-bind="ro"
       @click="run('undo')"
     >
       <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
@@ -238,9 +239,10 @@ const btn =
       data-test="tb-redo"
       :class="btn"
       aria-label="Redo"
-      :aria-keyshortcuts="state.hasHistory ? 'Control+Y' : undefined"
-      :title="tip('Redo', state.hasHistory ? SHORTCUTS.redo : undefined)"
-      :disabled="!editable || !state.canRedo"
+      :aria-keyshortcuts="editable && state.hasHistory ? 'Control+Y' : undefined"
+      :title="ftip('Redo', state.hasHistory ? SHORTCUTS.redo : undefined)"
+      :disabled="editable && !state.canRedo"
+      v-bind="ro"
       @click="run('redo')"
     >
       <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
