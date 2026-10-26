@@ -17,7 +17,7 @@ describe('ManuscriptEditor', () => {
     expect(items[0]).toContain('Delete');
     expect(items[1]).toContain('Insert');
     expect(items[2]).toContain('Comment');
-    expect(w.find('[data-test="review"] button').exists()).toBe(false);
+    expect(w.find('[data-test="review"] button:not([role="tab"])').exists()).toBe(false);
     w.unmount();
   });
 

@@ -1272,3 +1272,45 @@ describe('home screen', () => {
     remove.mockRestore();
   });
 });
+
+describe('App UI shells (Part of #36)', () => {
+  it('shows the breadcrumb, per-section word counts, and a no-op New chapter row', async () => {
+    const { w, session } = await withManuscript();
+    const outline = readStructure(session.manuscript);
+    const chapter = outline.find((s) => s.kind === 'chapter')!;
+    await w.find(`[data-test="section-${chapter.id}"]`).trigger('click');
+    await settle();
+    expect(w.find('[data-test="breadcrumb"]').text()).toContain(chapter.title);
+    expect(w.find('[data-test="breadcrumb"]').text()).toMatch(/Chapter 1 ·/);
+    const counts = w.findAll('[data-test="word-count"]');
+    expect(counts).toHaveLength(outline.length);
+    const words = docWordCount(session.sections.get(chapter.docId)!);
+    expect(
+      w
+        .find(`[data-test="section-${chapter.id}"] [data-test="word-count"]`)
+        .attributes('aria-label'),
+    ).toBe(`${words} words`);
+    const svs = [session.manuscript, ...session.sections.values()].map((d) =>
+      Y.encodeStateVector(d),
+    );
+    await w.find('[data-test="new-chapter"]').trigger('click');
+    await settle();
+    expect(readStructure(session.manuscript)).toEqual(outline);
+    expect(
+      [session.manuscript, ...session.sections.values()].map((d) => Y.encodeStateVector(d)),
+    ).toEqual(svs);
+    w.unmount();
+  });
+
+  it('focus mode from the editor hides the outline and top bar', async () => {
+    const { w } = await withManuscript();
+    await w.find('[data-test="focus-mode"]').trigger('click');
+    await settle();
+    expect(w.find('#chapter-navigator').isVisible()).toBe(false);
+    expect(w.find('.topbar').isVisible()).toBe(false);
+    await w.find('[data-test="focus-exit"]').trigger('click');
+    await settle();
+    expect(w.find('#chapter-navigator').isVisible()).toBe(true);
+    w.unmount();
+  });
+});

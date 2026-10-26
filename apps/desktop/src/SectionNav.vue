@@ -10,6 +10,7 @@
  */
 import { computed, nextTick, ref, watch } from 'vue';
 import type { Section, SectionKind } from '@coauthor/schema';
+import { formatCount } from './status/wordcount';
 import {
   addSection,
   applyOutlineEdit,
@@ -32,6 +33,8 @@ const props = defineProps<{
   selectedId?: string;
   /** Persist a new outline; throw (or reject) to refuse it. */
   save?: (next: Section[]) => void | Promise<void>;
+  /** Words per section id, read-only (#52); omitted hides the count column. */
+  wordCounts?: Record<string, number>;
 }>();
 const emit = defineEmits<{ 'update:sections': [Section[]]; select: [id: string] }>();
 
@@ -300,8 +303,25 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
           @blur="commitRename"
         />
         <span v-else class="title">{{ row.section.title || 'Untitled' }}</span>
+        <span
+          v-if="wordCounts"
+          class="count"
+          data-test="word-count"
+          :aria-label="`${wordCounts[row.section.id] ?? 0} words`"
+          >{{ wordCounts[row.section.id] ? formatCount(wordCounts[row.section.id]!) : '—' }}</span
+        >
       </li>
     </ul>
+    <!-- UI shell (#52): the add flow is not wired yet, so this row only shows the target design. -->
+    <button
+      type="button"
+      class="new-chapter"
+      data-test="new-chapter"
+      aria-disabled="true"
+      title="New chapter: coming soon"
+    >
+      <span aria-hidden="true">+</span> New chapter
+    </button>
     <div v-if="selected" class="actions" role="toolbar" aria-label="Selected section">
       <button type="button" data-test="move-up" :disabled="busy" @click="move(-1)">↑</button>
       <button type="button" data-test="move-down" :disabled="busy" @click="move(1)">↓</button>
@@ -403,6 +423,29 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
 }
 .row.selected {
   background: #e6eefc;
+}
+.row .title {
+  flex: 1;
+  min-width: 0;
+}
+.count {
+  margin-left: auto;
+  font-size: var(--ct-text-xs);
+  color: var(--ct-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.new-chapter {
+  display: flex;
+  gap: var(--ct-space-2);
+  align-items: center;
+  width: 100%;
+  padding: var(--ct-space-1) var(--ct-space-2);
+  border: 0;
+  background: transparent;
+  color: var(--ct-text-muted);
+  font: inherit;
+  font-size: var(--ct-text-sm);
+  cursor: default;
 }
 .row:focus-visible {
   outline: 2px solid #3b6fd8;

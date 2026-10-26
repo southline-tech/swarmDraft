@@ -18,7 +18,7 @@ import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
 import HomeScreen from './HomeScreen.vue';
 import { flushOnClose } from './close-flush';
-import { outlineDocs, sectionTreeDocs } from './status/wordcount';
+import { docWordCount, outlineDocs, sectionTreeDocs } from './status/wordcount';
 import {
   importAndOpen,
   reopenLatest,
@@ -313,13 +313,66 @@ const selectedDoc = computed(() =>
   selected.value ? session.value?.sections.get(selected.value.docId) : undefined,
 );
 
+/** Per-section word counts for the outline (#52): read-only, recounted after edits settle. */
+const wordCounts = shallowRef<Record<string, number>>({});
+let countTimer: ReturnType<typeof setTimeout> | undefined;
+let stopCounts = () => {};
+function recount() {
+  const s = session.value;
+  if (!s) return;
+  const out: Record<string, number> = {};
+  for (const sec of s.outline.value) {
+    const d = s.sections.get(sec.docId);
+    if (d) out[sec.id] = docWordCount(d);
+  }
+  wordCounts.value = out;
+}
+watch(
+  () => [session.value, session.value?.outline.value] as const,
+  () => {
+    stopCounts();
+    const s = session.value;
+    if (!s) return;
+    const docs = [...new Set(s.outline.value.map((x) => s.sections.get(x.docId)))].filter(
+      (d) => !!d,
+    );
+    const later = () => {
+      clearTimeout(countTimer);
+      countTimer = setTimeout(recount, 300);
+    };
+    docs.forEach((d) => d.on('update', later));
+    stopCounts = () => docs.forEach((d) => d.off('update', later));
+    recount();
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => {
+  stopCounts();
+  clearTimeout(countTimer);
+});
+
+/** Focus mode (#56): hides the app chrome; local UI state only. */
+const focusMode = ref(false);
+
+/** Title-bar breadcrumb (#52): "Book — Chapter N · Title". */
+const breadcrumb = computed(() => {
+  const s = session.value;
+  const sel = selected.value;
+  if (!s || !sel || choosingBook.value) return '';
+  const chapters = s.outline.value.filter((x) => x.kind === 'chapter');
+  const n = chapters.findIndex((c) => c.id === sel.id);
+  const where = n >= 0 ? `Chapter ${n + 1} · ` : '';
+  return `${where}${sel.title || 'Untitled'}`;
+});
+
 defineExpose({ open });
 </script>
 
 <template>
   <main class="shell">
-    <header class="topbar">
-      <span class="topbar__name">coAuthor</span>
+    <header v-show="!focusMode" class="topbar">
+      <span class="topbar__name">{{ session && !choosingBook ? session.title : 'coAuthor' }}</span>
+      <span v-if="breadcrumb" class="topbar__crumb" data-test="breadcrumb">— {{ breadcrumb }}</span>
       <button
         v-if="session && !choosingBook"
         type="button"
@@ -459,17 +512,18 @@ defineExpose({ open });
     <div
       v-else
       class="workspace grid gap-4 p-4"
-      :class="navigatorOpen ? 'grid-cols-[18rem_1fr]' : 'grid-cols-1'"
+      :class="navigatorOpen && !focusMode ? 'grid-cols-[18rem_1fr]' : 'grid-cols-1'"
       data-test="workspace"
     >
       <SectionNav
-        v-show="navigatorOpen"
+        v-show="navigatorOpen && !focusMode"
         id="chapter-navigator"
         class="min-h-0 overflow-auto"
         :sections="session.outline.value"
         :manuscript-id="session.id"
         :selected-id="selectedId"
         :save="session.save"
+        :word-counts="wordCounts"
         @select="selectedId = $event"
       />
       <ManuscriptEditor
@@ -484,6 +538,7 @@ defineExpose({ open });
         :save-state="saveError ? 'offline' : undefined"
         @reload="reloads++"
         @toggle-navigator="navigatorOpen = !navigatorOpen"
+        @focus-mode="focusMode = $event"
       />
     </div>
   </main>
@@ -510,7 +565,7 @@ body {
 .topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   padding: var(--ct-space-2) var(--ct-space-4);
   border-bottom: 1px solid var(--ct-border);
   background: var(--ct-surface);
@@ -518,6 +573,14 @@ body {
 .topbar__name {
   font-weight: var(--ct-weight-semibold);
   font-size: var(--ct-text-sm);
+}
+.topbar__crumb {
+  margin-left: var(--ct-space-2);
+  color: var(--ct-text-muted);
+  font-size: var(--ct-text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .topbar__open {
   margin-left: auto;

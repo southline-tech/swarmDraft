@@ -397,6 +397,7 @@ const btn =
     </div>
 
     <span class="flex-1" />
+    <slot name="end" />
     <button
       type="button"
       data-test="tb-find"
