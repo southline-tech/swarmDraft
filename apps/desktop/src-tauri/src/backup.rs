@@ -11,8 +11,10 @@
 //!
 //! Restore validates the archive (manifest vs entries, hashes, safe entry names, SQLite
 //! integrity, schema version not newer than this build) before touching anything, writes a
-//! uniquely named `pre-restore-*.zip` snapshot, swaps the database in with the SQLite backup
-//! API and swaps `files/` by rename. Any error after the snapshot rolls back automatically.
+//! uniquely named `pre-restore-*.zip` snapshot, swaps `files/` by rename and the database in
+//! with the SQLite backup API. Any error after the snapshot rolls back automatically.
+//! Every restore revokes all agent tokens (agents are kept) so a backup can never revive a
+//! token revoked after it was taken (RAD-234).
 //!
 //! Backup/restore are desktop (human) commands only and must never be exposed as MCP tools.
 //!
@@ -43,6 +45,7 @@ const MAX_MANIFEST_BYTES: u64 = 16 << 20;
 const MAX_TOTAL_BYTES: u64 = 2 << 30;
 /// Temp-name prefixes in the data dir; leftovers are removed by [`cleanup_temp`].
 const TMP_PREFIXES: &[&str] = &[".backup-", ".restore-", ".files-old-"];
+// (".restore-trash-*" is covered by ".restore-".)
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -188,10 +191,22 @@ fn publish_no_clobber(part: &Path, dest: &Path) -> std::io::Result<()> {
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(e),
         Err(_) => {
             // Filesystem without hard links: exclusive create + copy.
-            let mut out = OpenOptions::new().write(true).create_new(true).open(dest)?;
-            std::io::copy(&mut File::open(part)?, &mut out)?;
-            out.sync_all()?;
-            std::fs::remove_file(part)
+            // Reserve the name, then fill it; on failure remove it so no partial file remains
+            // under the real name.
+            let res = (|| {
+                let mut out = OpenOptions::new().write(true).create_new(true).open(dest)?;
+                std::io::copy(&mut File::open(part)?, &mut out)?;
+                out.sync_all()
+            })();
+            match res {
+                Ok(()) => std::fs::remove_file(part),
+                Err(e) => {
+                    if e.kind() != std::io::ErrorKind::AlreadyExists {
+                        let _ = std::fs::remove_file(dest);
+                    }
+                    Err(e)
+                }
+            }
         }
     }
 }
@@ -436,6 +451,9 @@ fn stage(store: &Store, src: &Path) -> Result<Staged, BackupError> {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RestoreReport {
+    /// Agent tokens revoked by this restore (all of them). Agents are kept; the user must mint
+    /// new tokens. The UI shows this once.
+    pub tokens_revoked: u64,
     pub manifest: Manifest,
     /// Snapshot of the state that was replaced; restore it to undo.
     pub pre_restore_snapshot: String,
@@ -470,64 +488,106 @@ fn restore_with(
     let snapshot = backups_dir(store).join(format!("pre-restore-{}.zip", unique_suffix()));
     create_backup(store, app_version, &snapshot)?;
 
-    if let Err(err) = apply(store, &staged, fail) {
-        drop(staged);
-        let rb = stage(store, &snapshot).and_then(|s| apply(store, &s, FailAt::None));
-        return Err(match rb {
-            Ok(()) => BackupError::RolledBack(err.to_string()),
-            Err(e2) => BackupError::RollbackFailed(
-                err.to_string(),
-                e2.to_string(),
-                snapshot.display().to_string(),
-            ),
-        });
-    }
+    let tokens_revoked = match apply(store, &staged, fail, true) {
+        Ok(n) => n,
+        Err(err) => {
+            drop(staged);
+            // Rollback returns to the pre-restore state exactly, so tokens valid then stay valid.
+            let rb = stage(store, &snapshot).and_then(|s| apply(store, &s, FailAt::None, false));
+            return Err(match rb {
+                Ok(_) => BackupError::RolledBack(err.to_string()),
+                Err(e2) => BackupError::RollbackFailed(
+                    err.to_string(),
+                    e2.to_string(),
+                    snapshot.display().to_string(),
+                ),
+            });
+        }
+    };
     Ok(RestoreReport {
+        tokens_revoked,
         manifest: staged.manifest,
         pre_restore_snapshot: snapshot.display().to_string(),
     })
 }
 
-/// Swap staged db + files into place. files/ is swapped by two renames inside the data dir;
-/// the old dir is kept until the swap succeeds.
-fn apply(store: &Store, staged: &Staged, fail: FailAt) -> Result<(), BackupError> {
-    store.with_conn_mut(|c| {
-        c.restore(
-            rusqlite::DatabaseName::Main,
-            &staged.db,
-            None::<fn(rusqlite::backup::Progress)>,
-        )
-    })?;
-    store.migrate_now()?;
-    if fail == FailAt::AfterDbSwap {
-        return Err(BackupError::Io(std::io::Error::other("forced failure")));
+/// Rename with short retries: on Windows, antivirus/indexers briefly lock fresh files.
+fn rename_retry(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut delay = std::time::Duration::from_millis(20);
+    for attempt in 0.. {
+        match std::fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(e)
+                if attempt < 5
+                    && matches!(
+                        e.kind(),
+                        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::Other
+                    ) =>
+            {
+                std::thread::sleep(delay);
+                delay *= 2;
+            }
+            Err(e) => return Err(e),
+        }
     }
+    unreachable!()
+}
 
+/// Swap staged files + db into place. files/ goes first (two same-volume renames, old dir
+/// kept until the db swap succeeds); then the db is copied in with the SQLite backup API,
+/// migrated, and (for user restores) all agent tokens are revoked, under one lock.
+/// Returns the number of tokens revoked.
+fn apply(
+    store: &Store,
+    staged: &Staged,
+    fail: FailAt,
+    revoke_tokens: bool,
+) -> Result<u64, BackupError> {
     let live = files_dir(store);
     let old = store
         .data_dir()
         .join(format!(".files-old-{}", unique_suffix()));
     let had_old = live.exists();
     if had_old {
-        std::fs::rename(&live, &old)?;
+        rename_retry(&live, &old)?;
     }
-    // Staged dir is a sibling inside the data dir, so this is a same-volume rename.
-    if let Err(e) = std::fs::rename(&staged.files, &live) {
+    let undo_files = || {
         if had_old {
-            let _ = std::fs::rename(&old, &live);
+            let trash = store
+                .data_dir()
+                .join(format!(".restore-trash-{}", unique_suffix()));
+            if live.exists() && rename_retry(&live, &trash).is_ok() {
+                let _ = std::fs::remove_dir_all(&trash);
+            }
+            let _ = rename_retry(&old, &live);
         }
+    };
+    if let Err(e) = rename_retry(&staged.files, &live) {
+        undo_files();
         return Err(e.into());
     }
-    if fail == FailAt::AfterFilesSwap {
-        if had_old {
-            let _ = std::fs::remove_dir_all(&old);
+    let db_step = (|| -> Result<u64, BackupError> {
+        if fail == FailAt::AfterFilesSwap {
+            return Err(BackupError::Io(std::io::Error::other("forced failure")));
         }
-        return Err(BackupError::Io(std::io::Error::other("forced failure")));
+        let n = store.restore_db_from(&staged.db, revoke_tokens)?;
+        if fail == FailAt::AfterDbSwap {
+            return Err(BackupError::Io(std::io::Error::other("forced failure")));
+        }
+        Ok(n)
+    })();
+    match db_step {
+        Ok(n) => {
+            if had_old {
+                let _ = std::fs::remove_dir_all(&old);
+            }
+            Ok(n)
+        }
+        Err(e) => {
+            undo_files();
+            Err(e)
+        }
     }
-    if had_old {
-        let _ = std::fs::remove_dir_all(&old);
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -808,5 +868,55 @@ mod tests {
         assert_eq!(std::fs::read(d.join("files/a.png")).unwrap(), b"a");
         assert!(!d.join("backups/x.zip.1.part").exists());
         assert!(d.join("backups/keep.zip").exists());
+    }
+
+    #[test]
+    fn token_revoked_after_backup_stays_dead() {
+        let (tmp, store) = seeded();
+        let a = store.create_agent("Synthetic agent", "#3366ff").unwrap();
+        let t = store.create_token(&a.id, None).unwrap();
+        let zip = tmp.path().join("b.zip");
+        create_backup(&store, "0", &zip).unwrap();
+        store.revoke_token(&t.info.id).unwrap();
+        assert!(store.authenticate(&t.token).unwrap().is_none());
+        let r = restore_backup(&store, "0", &zip).unwrap();
+        assert!(store.authenticate(&t.token).unwrap().is_none());
+        assert!(r.tokens_revoked >= 1);
+    }
+
+    #[test]
+    fn restore_revokes_all_tokens_and_keeps_agents() {
+        let (tmp, store) = seeded();
+        let a = store.create_agent("Agent A", "#112233").unwrap();
+        let b = store.create_agent("Agent B", "#445566").unwrap();
+        let ta = store.create_token(&a.id, None).unwrap();
+        let tb = store.create_token(&b.id, None).unwrap();
+        let zip = tmp.path().join("b.zip");
+        create_backup(&store, "0", &zip).unwrap();
+        let r = restore_backup(&store, "0", &zip).unwrap();
+        assert_eq!(r.tokens_revoked, 2);
+        assert!(store.authenticate(&ta.token).unwrap().is_none());
+        assert!(store.authenticate(&tb.token).unwrap().is_none());
+        let agents = store.list_agents().unwrap();
+        assert_eq!(agents.len(), 2);
+        assert!(agents.iter().all(|x| x.revoked_at.is_none()));
+        // Agents can get fresh tokens.
+        let fresh = store.create_token(&a.id, None).unwrap();
+        assert!(store.authenticate(&fresh.token).unwrap().is_some());
+        // A second restore revokes again, including tokens minted after the first.
+        let r2 = restore_backup(&store, "0", &zip).unwrap();
+        assert_eq!(r2.tokens_revoked, 2);
+        assert!(store.authenticate(&fresh.token).unwrap().is_none());
+    }
+
+    #[test]
+    fn rollback_keeps_tokens_valid() {
+        let (tmp, store) = seeded();
+        let a = store.create_agent("Agent", "#000000").unwrap();
+        let t = store.create_token(&a.id, None).unwrap();
+        let zip = tmp.path().join("b.zip");
+        create_backup(&store, "0", &zip).unwrap();
+        assert!(restore_with(&store, "0", &zip, FailAt::AfterDbSwap).is_err());
+        assert!(store.authenticate(&t.token).unwrap().is_some());
     }
 }

@@ -61,6 +61,8 @@ export interface BackupManifest {
 }
 
 export interface RestoreReport {
+  /** All agent tokens are revoked on restore; agents are kept and need new tokens. */
+  tokensRevoked: number;
   manifest: BackupManifest;
   preRestoreSnapshot: string;
 }

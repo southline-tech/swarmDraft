@@ -18,7 +18,11 @@ vi.mock('./backend', async (orig) => ({
   agentsApi: { list: vi.fn(async () => []), tokens: vi.fn(async () => []) },
   getAppInfo: vi.fn(async () => ({ version: '0.1.0', dataDir: '/tmp/x', schemaVersion: 1 })),
   createBackup: vi.fn(async () => '/tmp/x/backups/b.zip'),
-  restoreBackup: vi.fn(async () => ({ manifest: {}, preRestoreSnapshot: '/tmp/x/backups/p.zip' })),
+  restoreBackup: vi.fn(async () => ({
+    tokensRevoked: 2,
+    manifest: {},
+    preRestoreSnapshot: '/tmp/x/backups/p.zip',
+  })),
 }));
 
 describe('restore confirmation', () => {
@@ -37,5 +41,9 @@ describe('restore confirmation', () => {
     await flushPromises();
     expect(backend.restoreBackup).toHaveBeenCalledWith('C:\\Users\\a\\b.zip');
     expect(wrapper.find('[data-test="backup-status"]').text()).toContain('p.zip');
+    const notice = wrapper.find('[data-test="tokens-revoked-notice"]');
+    expect(notice.text()).toContain('revoked all 2 agent token');
+    await wrapper.find('[data-test="tokens-notice-dismiss"]').trigger('click');
+    expect(wrapper.find('[data-test="tokens-revoked-notice"]').exists()).toBe(false);
   });
 });

@@ -12,6 +12,8 @@ onMounted(async () => {
 const backupStatus = ref('');
 const restorePath = ref('');
 const confirmingRestore = ref(false);
+/** One-time notice after a restore revoked agent tokens; cleared when dismissed. */
+const tokensNotice = ref<number | null>(null);
 
 function askRestore(): void {
   if (restorePath.value.trim()) confirmingRestore.value = true;
@@ -31,6 +33,7 @@ async function onRestore(): Promise<void> {
   try {
     const r = await restoreBackup(restorePath.value.trim());
     backupStatus.value = `Restored. Previous state saved: ${r.preRestoreSnapshot}`;
+    tokensNotice.value = r.tokensRevoked > 0 ? r.tokensRevoked : null;
   } catch (e) {
     backupStatus.value = `Restore failed: ${String(e)}`;
   }
@@ -51,8 +54,8 @@ async function onRestore(): Promise<void> {
       <div v-if="confirmingRestore" role="alertdialog" data-test="restore-confirm">
         <p>
           Restoring replaces all manuscripts, comments, suggestions, settings and attached files
-          with the contents of this backup. Your current state is saved first as a pre-restore
-          snapshot in the backups folder.
+          with the contents of this backup, and revokes all agent tokens. Your current state is
+          saved first as a pre-restore snapshot in the backups folder.
         </p>
         <button type="button" data-test="restore-confirm-yes" @click="onRestore">
           Replace everything and restore
@@ -62,6 +65,15 @@ async function onRestore(): Promise<void> {
         </button>
       </div>
       <p v-if="backupStatus" data-test="backup-status">{{ backupStatus }}</p>
+      <div v-if="tokensNotice !== null" role="status" data-test="tokens-revoked-notice">
+        <p>
+          For safety, restoring revoked all {{ tokensNotice }} agent token(s). Your agents are kept;
+          create new tokens in Settings → Agents to reconnect them.
+        </p>
+        <button type="button" data-test="tokens-notice-dismiss" @click="tokensNotice = null">
+          Dismiss
+        </button>
+      </div>
     </section>
     <p v-else data-test="browser-mode">Running in browser mode (no desktop backend).</p>
     <AgentsSettings v-if="info" />

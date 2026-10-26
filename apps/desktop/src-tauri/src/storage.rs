@@ -89,6 +89,32 @@ impl Store {
         Ok(f(&mut conn)?)
     }
 
+    /// Replace the live database with `src` (SQLite backup API), migrate it, and optionally
+    /// revoke every agent token, all under one lock so no request sees a half-restored state.
+    /// Returns the number of tokens revoked.
+    pub(crate) fn restore_db_from(
+        &self,
+        src: &Path,
+        revoke_tokens: bool,
+    ) -> Result<u64, StorageError> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        conn.restore(
+            rusqlite::DatabaseName::Main,
+            src,
+            None::<fn(rusqlite::backup::Progress)>,
+        )?;
+        migrate(&mut conn)?;
+        if !revoke_tokens {
+            return Ok(0);
+        }
+        let n = conn.execute(
+            "UPDATE agent_tokens SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
+             WHERE revoked_at IS NULL",
+            [],
+        )?;
+        Ok(n as u64)
+    }
+
     /// Apply any pending migrations (e.g. after restoring an older backup).
     pub fn migrate_now(&self) -> Result<(), StorageError> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
