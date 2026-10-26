@@ -224,5 +224,21 @@
       },
       "suggestion_delete--/Ae1eMww"
     ]
-  ]
+  ],
+  "schema": {
+    "blockNodes": ["paragraph", "heading", "scene_break", "page_break"],
+    "inlineNodes": ["text", "hard_break", "footnote", "image"],
+    "marks": [
+      "bold",
+      "italic",
+      "smallcaps",
+      "underline",
+      "strike",
+      "link",
+      "comment_anchor",
+      "suggestion_insert",
+      "suggestion_delete"
+    ],
+    "nonExclusiveMarks": ["comment_anchor", "suggestion_insert", "suggestion_delete"]
+  }
 }

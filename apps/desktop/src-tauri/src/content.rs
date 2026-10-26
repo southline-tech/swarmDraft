@@ -298,6 +298,16 @@ pub fn decode(doc: &Doc) -> Vec<Block> {
         .collect()
 }
 
+/// [`decode`], erroring if the section holds a node or mark type the schema doesn't know
+/// (reads report it rather than silently dropping content).
+pub fn decode_checked(doc: &Doc) -> Result<Vec<Block>, String> {
+    let blocks = decode(doc);
+    let nodes: Vec<Value> = blocks.iter().map(|b| b.node.clone()).collect();
+    validate_nodes(&nodes, false)
+        .map_err(|e| format!("section holds content outside the schema ({e})"))?;
+    Ok(blocks)
+}
+
 fn fill(
     txn: &mut TransactionMut,
     parent: &impl XmlFragment,
@@ -694,6 +704,41 @@ mod tests {
         assert_eq!(marks[1]["attrs"]["id"], "s9");
         let md = markdown(&blocks);
         assert!(md.contains("c1") && md.contains("s9"), "{md}");
+    }
+
+    #[test]
+    fn reads_report_unknown_types_instead_of_dropping_them() {
+        let doc = Doc::new();
+        {
+            let frag = doc.get_or_insert_xml_fragment(FRAGMENT);
+            let mut txn = doc.transact_mut();
+            let p = frag.push_back(&mut txn, yrs::XmlElementPrelim::empty("paragraph"));
+            let t = p.push_back(&mut txn, yrs::XmlTextPrelim::new(""));
+            let mut attrs = Attrs::new();
+            attrs.insert("highlight".into(), json_to_any(&json!({})));
+            t.insert_with_attributes(&mut txn, 0, "lantern", attrs);
+            frag.push_back(&mut txn, yrs::XmlElementPrelim::empty("table"));
+        }
+        let err = decode_checked(&doc).unwrap_err();
+        assert!(err.contains("highlight"), "{err}");
+        let ok = Doc::new();
+        encode(&ok, &json!({"type":"doc","content":[{"type":"paragraph"}]})).unwrap();
+        assert_eq!(decode_checked(&ok).unwrap().len(), 1);
+    }
+
+    /// The validator's lists are the schema's (exported by mcp-fixture.test.ts).
+    #[test]
+    fn allowed_types_match_coauthor_schema() {
+        let f: Value = serde_json::from_str(
+            &std::fs::read_to_string(fixture("synthetic-section.json")).unwrap(),
+        )
+        .unwrap();
+        let list =
+            |k: &str| -> Vec<String> { serde_json::from_value(f["schema"][k].clone()).unwrap() };
+        assert_eq!(list("blockNodes"), BLOCK_NODE_TYPES);
+        assert_eq!(list("inlineNodes"), INLINE_NODE_TYPES);
+        assert_eq!(list("marks"), MARK_ORDER);
+        assert_eq!(list("nonExclusiveMarks"), NON_EXCLUSIVE_MARKS);
     }
 
     #[test]

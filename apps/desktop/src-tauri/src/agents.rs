@@ -177,26 +177,24 @@ impl Store {
 
     /// Revoke an agent and all of its tokens.
     pub fn revoke_agent(&self, agent_id: &str) -> Result<(), StorageError> {
-        let hashes = self.with_conn(|c| {
-            let mut st = c.prepare("SELECT token_hash FROM agent_tokens WHERE agent_id = ?1")?;
-            let rows = st
-                .query_map([agent_id], |r| r.get::<_, String>(0))?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(rows)
-        })?;
-        self.forget_token_hashes(&hashes);
+        // One transaction for both updates; the token cache is evicted after commit while the
+        // connection lock is still held, so no authentication can interleave.
         self.with_conn(|c| {
-            let n = c.execute(
+            let tx = c.unchecked_transaction()?;
+            let hashes = token_hashes(&tx, "agent_id", agent_id)?;
+            let n = tx.execute(
                 &format!("UPDATE agents SET revoked_at = {NOW} WHERE id = ?1 AND revoked_at IS NULL"),
                 [agent_id],
             )?;
-            c.execute(
+            tx.execute(
                 &format!("UPDATE agent_tokens SET revoked_at = {NOW} WHERE agent_id = ?1 AND revoked_at IS NULL"),
                 [agent_id],
             )?;
-            if n == 0 && !exists(c, "agents", agent_id)? {
+            if n == 0 && !exists(&tx, "agents", agent_id)? {
                 return Err(StorageError::NotFound(format!("agent {agent_id}")));
             }
+            tx.commit()?;
+            self.forget_token_hashes(&hashes);
             Ok(())
         })
     }
@@ -253,22 +251,18 @@ impl Store {
     }
 
     pub fn revoke_token(&self, token_id: &str) -> Result<(), StorageError> {
-        let hashes = self.with_conn(|c| {
-            let mut st = c.prepare("SELECT token_hash FROM agent_tokens WHERE id = ?1")?;
-            let rows = st
-                .query_map([token_id], |r| r.get::<_, String>(0))?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(rows)
-        })?;
-        self.forget_token_hashes(&hashes);
         self.with_conn(|c| {
-            let n = c.execute(
+            let tx = c.unchecked_transaction()?;
+            let hashes = token_hashes(&tx, "id", token_id)?;
+            let n = tx.execute(
                 &format!("UPDATE agent_tokens SET revoked_at = {NOW} WHERE id = ?1 AND revoked_at IS NULL"),
                 [token_id],
             )?;
-            if n == 0 && !exists(c, "agent_tokens", token_id)? {
+            if n == 0 && !exists(&tx, "agent_tokens", token_id)? {
                 return Err(StorageError::NotFound(format!("token {token_id}")));
             }
+            tx.commit()?;
+            self.forget_token_hashes(&hashes);
             Ok(())
         })
     }
@@ -301,6 +295,9 @@ impl Store {
                 )
                 .optional()?;
             if let Some(p) = &p {
+                // Cache under the connection lock so a concurrent revoke (which evicts under the
+                // same lock after commit) can't be undone by a late insert.
+                self.remember_token_hash(hash.clone());
                 // Best effort and at most once a minute: a failed write must not fail auth.
                 let _ = c.execute(
                     &format!(
@@ -324,6 +321,21 @@ fn exists(c: &rusqlite::Connection, table: &str, id: &str) -> Result<bool, Stora
     )
     .optional()?
     .is_some())
+}
+
+/// Token hashes in `agent_tokens` where `col` (`id` or `agent_id`) equals `val`.
+fn token_hashes(
+    c: &rusqlite::Connection,
+    col: &str,
+    val: &str,
+) -> Result<Vec<String>, StorageError> {
+    let mut st = c.prepare(&format!(
+        "SELECT token_hash FROM agent_tokens WHERE {col} = ?1"
+    ))?;
+    let rows = st
+        .query_map([val], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
 }
 
 #[cfg(test)]

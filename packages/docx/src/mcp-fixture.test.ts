@@ -8,7 +8,14 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { type DocNode, type Mark } from '@coauthor/schema';
+import {
+  BLOCK_NODE_TYPES,
+  INLINE_NODE_TYPES,
+  MARK_TYPES,
+  NON_EXCLUSIVE_MARKS,
+  type DocNode,
+  type Mark,
+} from '@coauthor/schema';
 import { docToYDoc, markKey, yDocToDoc } from './ydoc';
 import { readView } from './model';
 
@@ -99,6 +106,13 @@ function build() {
           doc: yDocToDoc(ydoc),
           readView: readView(SECTION),
           markKeys: MARKS.map((m) => [m, markKey(m)]),
+          // The schema's allowed types; the Rust validator asserts it uses the same lists.
+          schema: {
+            blockNodes: BLOCK_NODE_TYPES,
+            inlineNodes: INLINE_NODE_TYPES,
+            marks: MARK_TYPES,
+            nonExclusiveMarks: NON_EXCLUSIVE_MARKS,
+          },
         },
         null,
         2,

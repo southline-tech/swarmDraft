@@ -254,7 +254,6 @@ async fn auth(State(gate): State<Gate>, mut req: Request, next: Next) -> Respons
             unauthorized()
         };
     };
-    gate.store.remember_token_hash(hash);
     if !gate.allow_token(&principal.token_id) {
         return too_many();
     }

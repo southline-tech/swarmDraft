@@ -150,7 +150,7 @@ impl CoauthorMcp {
     ) -> Result<(crate::manuscripts::Section, Vec<content::Block>), ToolErr> {
         let s = self.store.get_section(manuscript_id, section_id)?;
         let doc = self.store.load_doc(&s.doc_id)?;
-        Ok((s, content::decode(&doc)))
+        Ok((s, content::decode_checked(&doc).map_err(ToolErr::invalid)?))
     }
 }
 
@@ -189,7 +189,8 @@ impl CoauthorMcp {
             |_| {
                 let mut out = Vec::new();
                 for s in self.store.list_sections(&a.manuscript_id)? {
-                    let blocks = content::decode(&self.store.load_doc(&s.doc_id)?);
+                    let blocks = content::decode_checked(&self.store.load_doc(&s.doc_id)?)
+                        .map_err(ToolErr::invalid)?;
                     out.push(json!({
                         "id": s.id, "kind": s.kind, "title": s.title, "position": s.position,
                         "parentId": s.parent_id, "wordCount": content::word_count(&blocks),
@@ -278,7 +279,7 @@ impl CoauthorMcp {
             let limit = a.limit.unwrap_or(20).clamp(1, 100);
             let mut hits = Vec::new();
             'outer: for s in self.store.list_sections(&a.manuscript_id)? {
-                for b in content::decode(&self.store.load_doc(&s.doc_id)?) {
+                for b in content::decode_checked(&self.store.load_doc(&s.doc_id)?).map_err(ToolErr::invalid)? {
                     let text: Vec<char> = content::block_text(&b.node).chars().collect();
                     let lower: Vec<char> = text.iter().map(|c| c.to_lowercase().next().unwrap_or(*c)).collect();
                     let mut i = 0;
