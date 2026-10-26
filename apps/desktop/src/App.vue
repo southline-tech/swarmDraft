@@ -41,6 +41,9 @@ async function dismissRecovery() {
   }
 }
 const openError = ref('');
+/** Persistent: nothing can be opened safely until restart. */
+const fatalError = ref('');
+const REOPEN_BACKOFF_MS = [250, 500, 1000];
 const importing = ref(false);
 const saveError = ref('');
 /** Shown while edits are unsaved; cleared once a save succeeds. Edits are never dropped. */
@@ -156,6 +159,17 @@ function open(next: ManuscriptSession) {
   selectedId.value = next.outline.value.find((s) => s.kind === 'chapter')?.id;
 }
 
+/** Reopen the newest manuscript with backoff; if that keeps failing, clear the editor for good. */
+async function reopenAfterFailure(delays = REOPEN_BACKOFF_MS) {
+  for (const ms of [0, ...delays]) {
+    if (ms) await new Promise((r) => setTimeout(r, ms));
+    const back = await reopenLatest(persistHooks).catch(() => null);
+    if (back) return open(back);
+  }
+  session.value = null;
+  fatalError.value = "Couldn't reopen the manuscript. Please restart coAuthor.";
+}
+
 async function onFile(e: Event) {
   const input = e.target as HTMLInputElement;
   const file = input.files?.[0];
@@ -168,11 +182,9 @@ async function onFile(e: Event) {
     try {
       open(await importAndOpen(bytes, persistHooks, current));
     } catch (err) {
-      // The current manuscript was closed but the import failed: reopen it from the database.
-      if (current?.closed && !(err instanceof UnsavedEditsError)) {
-        const back = await reopenLatest(persistHooks).catch(() => null);
-        if (back) open(back);
-      }
+      // The current manuscript was closed but the import failed: never leave the closed session
+      // on screen; reopen the newest stored manuscript (the import, if it was written).
+      if (current?.closed) await reopenAfterFailure();
       throw err;
     }
   } catch (err) {
@@ -285,6 +297,7 @@ defineExpose({ open });
         @change="onFile"
       />
     </label>
+    <p v-if="fatalError" role="alert" data-test="fatal-error">{{ fatalError }}</p>
     <p v-if="openError" role="alert" data-test="open-error">{{ openError }}</p>
     <p v-if="saveError" role="alert" data-test="save-error">{{ saveError }}</p>
     <p v-if="!session" data-test="no-manuscript">Import a manuscript to see its outline.</p>
@@ -301,6 +314,7 @@ defineExpose({ open });
         v-if="selectedDoc"
         :key="`${selected!.docId}#${reloads}`"
         :doc="selectedDoc"
+        :readonly="session.closed"
         @reload="reloads++"
       />
     </div>

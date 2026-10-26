@@ -18,7 +18,6 @@ import {
   type ImportedManuscript,
 } from '@coauthor/docx';
 import {
-  deleteManuscript,
   openLatestManuscript,
   persistImport,
   saveSectionUpdate,
@@ -82,7 +81,7 @@ export function openSession(
     (next) => (outline.value = normalizeOutline(next).sections),
   );
   const saver = persist ? watchSections(manuscript, sections, persist) : undefined;
-  let closed = false;
+  const closed = shallowRef(false); // reactive, so a closed session's editor turns read-only
   return {
     id,
     title,
@@ -93,17 +92,17 @@ export function openSession(
     repairs,
     outlineLocked,
     get closed() {
-      return closed;
+      return closed.value;
     },
     save: (next) => writeStructure(manuscript, next),
     flush: () => saver?.flush() ?? Promise.resolve(),
     close: async (opts) => {
-      if (closed) return;
+      if (closed.value) return;
       // If the flush fails, stay open (observers and retries keep running) and rethrow, so the
       // caller can keep this session instead of losing its unsaved edits.
       if (opts?.discard) saver?.discard();
       else await saver?.flush();
-      closed = true;
+      closed.value = true;
       off();
       saver?.stop();
     },
@@ -345,8 +344,8 @@ export function openStored(
  * Import a .docx in place of `current`: parse it, close `current` (its edits must be saved, or
  * this rejects with `UnsavedEditsError` and `current` stays open, still retrying), and only then
  * save the import, so a failed switch never leaves an orphan import that would reopen as the
- * newest manuscript. If anything fails after the write, the import is deleted again. The new
- * session uses the stored ids and saves edits; without a database it is in memory only.
+ * newest manuscript. The write is atomic and is never undone: if opening fails after it, the
+ * caller reopens the newest manuscript, which is the import. The new session uses the stored ids and saves edits; without a database it is in memory only.
  */
 export async function importAndOpen(
   bytes: Uint8Array,
@@ -358,15 +357,9 @@ export async function importAndOpen(
   const payload = importPayload(imported);
   await current?.close();
   const saved = await persistImport(payload);
-  if (!saved) return sessionFromImported(imported, id);
-  try {
-    return openStored(saved, imported.report, persistHooks);
-  } catch (err) {
-    await deleteManuscript(saved.manuscript.id).catch((e: unknown) =>
-      console.error('Could not roll back the import', e),
-    );
-    throw err;
-  }
+  return saved
+    ? openStored(saved, imported.report, persistHooks)
+    : sessionFromImported(imported, id);
 }
 
 /** Reopen the most recent stored manuscript (null if none or no database). */

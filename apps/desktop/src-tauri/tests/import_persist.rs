@@ -335,26 +335,3 @@ fn a_resent_full_state_recovers_lost_edits_idempotently() {
     assert_eq!(latest.manuscript.id, mid);
     assert!(latest.sections.iter().any(|s| s.section.id == sid));
 }
-
-#[test]
-fn a_rolled_back_import_leaves_the_original_as_latest() {
-    let tmp = tempfile::tempdir().unwrap();
-    let store = Store::open(tmp.path()).unwrap();
-    let (orig, _) = store
-        .import_manuscript("Original", &synthetic_import())
-        .unwrap();
-    let (newer, _) = store
-        .import_manuscript("Orphan", &synthetic_import())
-        .unwrap();
-    assert_eq!(
-        store.latest_manuscript().unwrap().unwrap().manuscript.id,
-        newer.id
-    );
-    store.delete_manuscript(&newer.id).unwrap();
-    store.delete_manuscript(&newer.id).unwrap(); // idempotent
-    let store = Store::open(tmp.path()).unwrap(); // relaunch
-    let latest = store.latest_manuscript().unwrap().unwrap();
-    assert_eq!(latest.manuscript.id, orig.id);
-    assert!(latest.sections.iter().all(|s| !s.state.is_empty()));
-    assert!(store.load_manuscript(&newer.id).is_err());
-}
