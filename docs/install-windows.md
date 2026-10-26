@@ -4,9 +4,9 @@ The P1 builds are **unsigned**. Code signing is deferred until a certificate is 
 
 1. Open the latest successful **CI** run on `main` (Actions tab) and download the
    `coauthor-windows-unsigned-<sha>` artifact. Unzip it.
-2. Run either installer:
-   - `coAuthor_<version>_x64_en-US.msi` (MSI), or
-   - `coAuthor_<version>_x64-setup.exe` (NSIS).
+2. The zip contains two subfolders; run either installer:
+   - `msi/coAuthor_<version>_x64_en-US.msi` (MSI), or
+   - `nsis/coAuthor_<version>_x64-setup.exe` (NSIS).
 3. Windows SmartScreen will show **"Windows protected your PC"** / unknown publisher, because the
    build is unsigned. Click **More info** then **Run anyway**.
 4. If WebView2 is missing (rare on Windows 10/11), the installer downloads it.
