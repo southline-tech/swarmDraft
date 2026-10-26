@@ -1,0 +1,68 @@
+# Self-review checklist
+
+Built from review, design and QA findings on PRs #1–#46. Most common first. Tick every item that applies before asking for review.
+
+## 1. Persistence and data safety (≈20 PRs)
+
+- [ ] Typed text survives **save → reload → app restart** and a section switch away and back. Test through the real stored path, not just the in-memory Y.Doc. _Why: QA's most frequent fail; text has been silently lost before._
+- [ ] Saves and errors surface to the user ("Not saved, retrying"); no `catch` that swallows a failure. _Why: silent failures hid data loss (≈15 PRs)._
+- [ ] Backend reads used for validation happen inside the same transaction as the write. _Why: race between check and write._
+
+## 2. Yjs, undo and review integrity (≈24 PRs)
+
+- [ ] Agent/remote updates applied with `REMOTE_ORIGIN`; the saver skips them; no new `Doc::new`/`with_client_id` in Rust. _Why: echo loops and duplicate marks._
+- [ ] Navigation, focus and selection changes don't modify the doc or add an undo step (`addToHistory: false`; assert doc `eq` and undo depth). _Why: moving around must not edit the book._
+- [ ] Accept/reject only via `review/apply.ts` → `@coauthor/editor/trusted`; undo/redo keeps the decision log in step. _Why: human-approval gating of bot edits._
+- [ ] Concurrent cases tested: typing mid-word while an agent update lands, edits in another section, non-ASCII text (`naïve café — 😀`). _Why: repeatedly requested._
+- [ ] Bulk actions decide on the set snapshotted when confirmed, not on what's visible at click time. _Why: live polls slipped extra changes in._
+
+## 3. Tests (≈17 PRs flagged missing/weak tests)
+
+- [ ] Every acceptance criterion has a test through real wiring (mounted component / mocked `invoke` with exact args), not a stub of the thing under test.
+- [ ] Assert the behavior, not a proxy (e.g. read-only: assert `isEditable === false` and typing leaves doc unchanged, not just `childCount`).
+- [ ] Two-window/two-editor sync tested when state is shared. _Why: QA tests with two windows open._
+
+## 4. Design tokens, theme and contrast (≈18 PRs)
+
+- [ ] Colors, spacing and radii use `var(--ct-*)` tokens from `docs/design-system.md`; no hex values, no undefined vars (e.g. `--color-muted`). _Why: most common Designer finding._
+- [ ] Checked in **light and dark** themes; text and selected states meet WCAG AA contrast. _Why: dark-mode highlights and selected rows have failed._
+- [ ] Layout checked at a narrow window (≈900px) and short window (500px), and zoom 50–200%: nothing clipped, all panels scroll to the end.
+- [ ] Matches the Designer's mockup/spec copy exactly (button text, confirm wording, order).
+
+## 5. Focus, keyboard and accessibility (≈16 PRs)
+
+- [ ] Dialogs take focus, close on Esc, return focus to the opener; Cancel first in destructive confirms.
+- [ ] Global shortcuts do nothing while focus is in an input/textarea/select/other contenteditable or when the panel is hidden.
+- [ ] Every enabled control works; tooltips/`aria-keyshortcuts` list only shortcuts that are actually bound; disabled controls are `aria-disabled`.
+- [ ] Interactive regions have roles and labels.
+
+## 6. MCP server and agent tokens (≈18 PRs)
+
+- [ ] Tokens never appear in logs, errors, IPC responses or UI; token re-checked per request.
+- [ ] No new MCP tool can accept/reject or write text directly.
+- [ ] Agent names render as text only (mustache, no `v-html`).
+
+## 7. Unicode and names (≈7 PRs)
+
+- [ ] Name checks in the backend: strip zero-width/bidi controls, NFKC + case fold (ß→ss), trim; reject reserved and duplicate names.
+- [ ] Render user/agent names in `<bdi dir=auto>`; long/RTL names truncate without hiding adjacent pills.
+- [ ] Word counts and regexes handle combining marks (`\p{M}`) and non-Latin scripts.
+
+## 8. Process (≈17 PRs needed a main merge or conflict fix)
+
+- [ ] `main` merged in; lint, format, typecheck, tests, build, clippy, cargo test all pass.
+- [ ] `Closes #N` only when the PR finishes the issue; `Part of #N` for epics.
+- [ ] Lockfile changes limited to what the PR needs (e.g. no Cargo.lock version bump).
+- [ ] Async reloads deduped/throttled; stale replies dropped; timers and listeners cleared on unmount.
+- [ ] No competitor names, no hard-coded personal data.
+
+## Review learnings
+
+Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/Designer: when a new kind of finding shows up a second time, promote it into a checklist item above.
+
+Format: `YYYY-MM-DD · #PR · finding · rule`
+
+- 2026-10-26 · #33 · reserved/duplicate name check bypassed with zero-width and fullwidth chars · normalize (strip invisibles, NFKC, fold) before comparing names
+- 2026-10-26 · #33 · `--color-muted` not defined, notes not muted · use only `--ct-*` tokens that exist in tokens.css
+- 2026-10-26 · #44 · review shortcuts fired while typing in settings · scope global shortcuts to the panel and editor focus
+- 2026-10-26 · #46 · outline click inserted a paragraph (doc edit + undo step) · navigation never changes the document

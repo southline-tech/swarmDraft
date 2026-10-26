@@ -1,0 +1,20 @@
+---
+description: coAuthor coding standards and PR flow
+alwaysApply: true
+---
+
+Read `AGENTS.md` (project map, commands, PR flow) and `docs/review-checklist.md` (self-review checklist) before coding and before asking for review.
+
+Top rules:
+
+1. Text must survive save, reload, restart and section switch; test through the real stored path.
+2. Bots are suggest-only; accept/reject only via `review/apply.ts` → trusted path. Never silently edit text.
+3. Navigation/focus never modifies the doc or adds an undo step. Remote updates use `REMOTE_ORIGIN`.
+4. Every acceptance criterion gets a test through real wiring; assert behavior, not proxies.
+5. UI uses only `var(--ct-*)` tokens; check light + dark, AA contrast, narrow/short windows.
+6. Focus: dialogs trap/return focus, Esc closes; shortcuts inert in inputs; no dead controls or fake shortcut hints.
+7. Agent tokens never logged or returned; names render as text in `<bdi dir=auto>`; normalize names (strip invisibles, NFKC, fold) in the backend.
+8. No swallowed errors; surface save failures.
+9. Before review: merge main; run lint, format:check, typecheck, test, build, clippy, cargo test; self-check against the issue and the Designer's spec. `Closes #N` for small fixes, `Part of #N` for epics. No stacked PRs.
+10. For every review, design or QA finding, add a line to "Review learnings" in `docs/review-checklist.md` (`YYYY-MM-DD · #PR · finding · rule`) in the same PR before asking for re-review.
+11. No competitor product names, parity lists or competitive analysis anywhere in the repo, commits or PRs.
