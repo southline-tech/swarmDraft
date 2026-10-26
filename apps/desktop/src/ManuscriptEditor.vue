@@ -12,6 +12,8 @@ import { EditorContent, useEditor } from '@tiptap/vue-3';
 import type { EditorOptions, JSONContent } from '@tiptap/core';
 import type * as Y from 'yjs';
 import EditorToolbar from './toolbar/EditorToolbar.vue';
+import ZoomControl from './desk/ZoomControl.vue';
+import { loadZoom, saveZoom } from './desk/zoom';
 import {
   collaborativeEditorOptions,
   collectReviewItems,
@@ -34,6 +36,10 @@ const emit = defineEmits<{
 }>();
 /** Review list visibility, driven by the toolbar's review toggle. */
 const reviewOpen = shallowRef(true);
+
+/** Page zoom in percent (RAD-255): scales the 6x9 page without reflowing it, persisted per user. */
+const zoom = shallowRef(loadZoom());
+watch(zoom, (z) => saveZoom(z));
 
 const review = shallowRef<ReviewItem[]>([]);
 /** Set when the content does not fit the schema; the editor is then read-only and never emits. */
@@ -85,7 +91,15 @@ const LABELS: Record<ReviewItem['type'], string> = {
       @toggle-review="reviewOpen = !reviewOpen"
     />
     <div class="body" :class="{ 'no-review': !reviewOpen }">
-      <EditorContent :editor="editor" class="page" />
+      <div class="desk flex min-w-0 justify-center overflow-y-auto bg-bg" data-test="desk">
+        <div
+          class="page-sheet box-border mt-8 mb-8 h-fit min-h-216 w-144 flex-none bg-paper p-18 text-text shadow-2"
+          data-test="page"
+          :style="{ zoom: zoom / 100 }"
+        >
+          <EditorContent :editor="editor" class="page" />
+        </div>
+      </div>
       <aside
         v-if="reviewOpen"
         class="review"
@@ -109,6 +123,13 @@ const LABELS: Record<ReviewItem['type'], string> = {
         <p class="muted">Comments and suggestions are read-only here.</p>
       </aside>
     </div>
+    <div
+      class="flex h-7 items-center gap-4.5 border-t border-border bg-surface px-3.5 font-ui text-xs text-muted"
+      data-test="status-bar"
+    >
+      <span class="flex-1" />
+      <ZoomControl v-model="zoom" />
+    </div>
   </div>
 </template>
 
@@ -118,7 +139,14 @@ const LABELS: Record<ReviewItem['type'], string> = {
   color: #b00020;
   padding: 0.5rem 0.75rem;
 }
+.manuscript-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
 .manuscript-editor .body {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: 1fr 16rem;
   gap: 1rem;
@@ -126,11 +154,23 @@ const LABELS: Record<ReviewItem['type'], string> = {
 .manuscript-editor .body.no-review {
   grid-template-columns: 1fr;
 }
+.manuscript-editor .body > .desk {
+  min-height: 0;
+}
+/* 6x9 in trim (576x864 px at 100%), 72 px margins -> 432 px text block. A rule marks each 864 px
+   page height until real pagination lands (RAD-227). */
+.manuscript-editor .page-sheet {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0 863px,
+    var(--ct-border) 863px 864px
+  );
+}
 .manuscript-editor .page .tiptap {
-  font-family: Georgia, serif;
-  line-height: 1.6;
-  max-width: 36rem;
-  padding: 1rem;
+  font-family: var(--ct-font-manuscript);
+  font-size: var(--ct-text-page);
+  line-height: var(--ct-leading-body);
+  color: var(--ct-text);
   outline: none;
 }
 .tiptap p {
@@ -163,7 +203,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
   margin: 1em 0;
 }
 .tiptap .page-break {
-  border-top: 1px dashed #999;
+  border-top: 1px dashed var(--ct-border-strong);
   margin: 1em 0;
 }
 .smallcaps {
