@@ -329,6 +329,8 @@ interface Ctx {
   commentDefCount: Map<string, number>;
   /** Last mapped id used for each original w:id (for continued ranges). */
   lastCommentId: Map<string, string>;
+  /** Original docx w:id for each anchor id we assigned (for orphan_anchor reports). */
+  anchorOrig: Map<string, string>;
   /** "id: snippet" detail for report warnings. */
   commentDetail: (orig: string, id?: string) => string;
   freshId: () => string;
@@ -577,6 +579,7 @@ function extractParagraph(p: XmlElement, ctx: Ctx): Para {
               ctx.commentDetail(orig, id),
             );
           ctx.lastCommentId.set(orig, id);
+          ctx.anchorOrig.set(id, orig);
           ctx.startedComments.add(orig);
           st.open.add(id);
           if (!continued) st.empty.add(id);
@@ -782,6 +785,7 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
     commentRemapped: new Set(),
     commentDefCount: new Map(),
     lastCommentId: new Map(),
+    anchorOrig: new Map(),
     commentDetail: (orig, id) => {
       const body = (commentDefs.get(id ?? orig) ?? commentDefs.get(orig))?.body ?? '';
       const snip = body.replace(/\s+/g, ' ').slice(0, 40);
@@ -1037,7 +1041,13 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
   const orphanText = new Map<string, string>();
   const stripOrphans = (nodes: unknown[] | undefined): void => {
     for (const n of nodes ?? []) {
-      const node = n as { type?: string; text?: string; marks?: Mark[]; content?: unknown[] };
+      const node = n as {
+        type?: string;
+        text?: string;
+        marks?: Mark[];
+        content?: unknown[];
+        attrs?: { content?: unknown[] };
+      };
       if (node.marks?.length) {
         node.marks = node.marks.filter((m) => {
           if (m.type !== 'comment_anchor') return true;
@@ -1050,6 +1060,8 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
         if (!node.marks.length) delete node.marks;
       }
       stripOrphans(node.content);
+      // Footnote and endnote bodies live in attrs.content.
+      if (Array.isArray(node.attrs?.content)) stripOrphans(node.attrs.content);
     }
   };
   for (const s of doc.sections) stripOrphans(s.content.content);
@@ -1058,7 +1070,7 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
       'warning',
       'orphan_anchor',
       'Comment range had no matching comment; the empty anchor was removed',
-      `${id}: ${snippet.trim().slice(0, 40) || '(no text)'}`,
+      `${ctx.anchorOrig.get(id) || id}: ${snippet.trim().slice(0, 40) || '(no text)'}`,
     );
   }
 

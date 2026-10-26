@@ -497,4 +497,45 @@ describe('orphan comment anchors', () => {
     expect(JSON.stringify(manuscript.sections)).not.toContain('comment_anchor');
     expect(report.items.find((i) => i.code === 'orphan_anchor')?.samples[0]).toMatch(/^9: /);
   });
+
+  it('drops orphan anchors inside footnotes and endnotes too', () => {
+    const ref = (kind: string) => `<w:r><w:${kind}Reference w:id="1"/></w:r>`;
+    const note = (kind: string, id: string, text: string) =>
+      `<w:${kind}s ${NS}><w:${kind} w:id="1">${p(
+        `<w:commentRangeStart w:id="${id}"/>${r(text)}<w:commentRangeEnd w:id="${id}"/>`,
+      )}</w:${kind}></w:${kind}s>`;
+    const zip = zipSync({
+      'word/document.xml': strToU8(
+        `<w:document ${NS}><w:body>${p(r('Body') + ref('footnote') + ref('endnote'))}</w:body></w:document>`,
+      ),
+      'word/footnotes.xml': strToU8(note('footnote', '51', 'foot words')),
+      'word/endnotes.xml': strToU8(note('endnote', '52', 'end words')),
+    });
+    const manuscript = importDocx(zip, { manuscriptId: 'm1' });
+    const json = JSON.stringify(manuscript.sections);
+    expect(json).toContain('foot words');
+    expect(json).toContain('end words');
+    expect(json).not.toContain('comment_anchor');
+    const item = manuscript.report.items.find((i) => i.code === 'orphan_anchor');
+    expect(item?.samples).toEqual(expect.arrayContaining(['51: foot words', '52: end words']));
+  });
+
+  it('reports the original docx id, not a reassigned one', () => {
+    // Overlapping ranges reuse id 5 with no comments.xml: the inner one gets a fresh id.
+    const body = p(
+      '<w:commentRangeStart w:id="5"/>' +
+        r('one') +
+        '<w:commentRangeStart w:id="5"/>' +
+        r('two') +
+        '<w:commentRangeEnd w:id="5"/><w:commentRangeEnd w:id="5"/>',
+    );
+    const zip = zipSync({
+      'word/document.xml': strToU8(`<w:document ${NS}><w:body>${body}</w:body></w:document>`),
+    });
+    const manuscript = importDocx(zip, { manuscriptId: 'm1' });
+    const samples = manuscript.report.items.find((i) => i.code === 'orphan_anchor')?.samples ?? [];
+    expect(samples.length).toBeGreaterThan(0);
+    for (const s of samples) expect(s).toMatch(/^5: /);
+    expect(samples.join()).not.toMatch(/100000\d/);
+  });
 });
