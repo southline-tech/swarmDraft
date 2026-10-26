@@ -65,6 +65,17 @@ describe('SectionNav', () => {
     w.unmount();
   });
 
+  it('a row click asks to focus the editor; keyboard moves and renaming do not', async () => {
+    const w = setup();
+    await w.find('[data-test="section-ch-1"]').trigger('click');
+    expect(w.emitted('activate')).toEqual([['ch-1']]);
+    await w.find('[data-test="section-ch-1"]').trigger('keydown', { key: 'ArrowDown' });
+    await w.find('[data-test="add-scene"]').trigger('click');
+    await settle();
+    expect(w.emitted('activate')).toHaveLength(1);
+    w.unmount();
+  });
+
   it('reorders with the arrow buttons', async () => {
     const w = setup({ selectedId: 'sc-2' });
     await w.find('[data-test="move-up"]').trigger('click');

@@ -42,7 +42,11 @@ export function collaborativeEditorOptions(
   opts: Partial<EditorOptions> = {},
   field = YJS_FRAGMENT,
 ): Partial<EditorOptions> {
-  const { json, error } = readYDoc(doc, field);
+  // A brand-new section's doc has no content yet (#42). That is not invalid content: open it as
+  // one empty body paragraph, which the binding writes to the doc. Incoming updates that empty
+  // an existing doc are still checked strictly by the guard below.
+  const { json, error } =
+    doc.getXmlFragment(field).length === 0 ? { json: EMPTY_DOC } : readYDoc(doc, field);
   if (error) {
     return manuscriptEditorOptions({
       ...opts,

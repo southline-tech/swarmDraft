@@ -11,6 +11,7 @@ import { onBeforeUnmount, shallowRef, toRaw, watch } from 'vue';
 import { EditorContent, useEditor } from '@tiptap/vue-3';
 import type { Editor, EditorOptions, JSONContent } from '@tiptap/core';
 import { TextSelection } from '@tiptap/pm/state';
+import type { Node as PMNode } from '@tiptap/pm/model';
 import type * as Y from 'yjs';
 import EditorToolbar from './toolbar/EditorToolbar.vue';
 import StatusBar, { type SaveState } from './status/StatusBar.vue';
@@ -109,26 +110,77 @@ watch(
   { immediate: true },
 );
 
-/**
- * Put the cursor at the start of the first body text, not in the chapter heading, so typing
- * right after opening goes into the prose. Only while the cursor is still at the very start
- * (the author has not moved it); returns whether it moved.
- */
-function placeCursorInBody(e: Editor): boolean {
-  const { doc, selection } = e.state;
-  if (!selection.empty || selection.from > 1) return false;
+const isHeading = (n: PMNode) => n.type.name === 'heading' || n.attrs.style === 'heading';
+
+/** Start of the first body text (not a heading or scene break), or -1 when there is none. */
+function firstBodyPos(doc: PMNode): number {
   let target = -1;
   doc.descendants((node, pos) => {
     if (target >= 0) return false;
     if (!node.isTextblock) return true;
-    const heading = node.type.name === 'heading' || node.attrs.style === 'heading';
-    if (!heading && node.type.name !== 'scene_break') target = pos + 1;
+    if (!isHeading(node) && node.type.name !== 'scene_break') target = pos + 1;
     return false;
   });
-  if (target < 0 || target === selection.from) return false;
+  return target;
+}
+
+/**
+ * Put the cursor at the start of the first body text, not in the chapter heading, so typing
+ * right after opening goes into the prose. Only while the cursor is still at the very start
+ * (the author has not moved it), unless `force`; returns whether it moved.
+ */
+function placeCursorInBody(e: Editor, force = false): boolean {
+  const { doc, selection } = e.state;
+  if (!force && (!selection.empty || selection.from > 1)) return false;
+  const target = firstBodyPos(doc);
+  if (target < 0 || (selection.empty && target === selection.from)) return false;
   e.view.dispatch(e.state.tr.setSelection(TextSelection.create(doc, target)));
   return true;
 }
+
+/**
+ * Outline click (#36): focus the editor with the cursor at the start of the first body
+ * paragraph. A section with no body yet (only its heading) gets one empty body paragraph right
+ * after the heading; nothing already there is changed. Read-only editors only take focus.
+ */
+function landInBody(e: Editor) {
+  if (e.isDestroyed) return;
+  if (firstBodyPos(e.state.doc) < 0 && e.isEditable) {
+    const { doc } = e.state;
+    let at = doc.content.size;
+    let offset = 0;
+    for (let i = 0; i < doc.childCount; i++) {
+      const child = doc.child(i);
+      offset += child.nodeSize;
+      if (isHeading(child)) {
+        at = offset;
+        break;
+      }
+    }
+    const paragraph = e.schema.nodes.paragraph!.create({ style: 'body' });
+    const tr = e.state.tr.insert(at, paragraph);
+    e.view.dispatch(tr.setSelection(TextSelection.create(tr.doc, at + 1)));
+  } else placeCursorInBody(e, true);
+  e.view.focus();
+}
+
+/** Set by `focusBody` before the editor exists; applied once it is created. */
+let focusPending = false;
+let focusTimer: ReturnType<typeof setTimeout> | undefined;
+/** Focus the editor at the start of the section's body (see `landInBody`). */
+function focusBody() {
+  const e = editor.value;
+  if (!e) {
+    focusPending = true;
+    return;
+  }
+  focusPending = false;
+  landInBody(e);
+  // A bound doc may render its content just after create; land again once it has.
+  clearTimeout(focusTimer);
+  focusTimer = setTimeout(() => landInBody(e));
+}
+defineExpose({ focusBody });
 
 /** Set when the content does not fit the schema; the editor is then read-only and never emits. */
 const loadError = shallowRef<string>('');
@@ -144,6 +196,7 @@ const options: Partial<EditorOptions> = {
     // A bound doc may render its content just after create; try again once it has.
     if (!placeCursorInBody(editor))
       cursorTimer = setTimeout(() => !editor.isDestroyed && placeCursorInBody(editor));
+    if (focusPending) setTimeout(focusBody);
   },
   onSelectionUpdate: ({ editor }) => countSelection(editor),
   onUpdate: ({ editor }) => {
@@ -179,6 +232,7 @@ onBeforeUnmount(() => {
   stopBook();
   stopChapter();
   clearTimeout(cursorTimer);
+  clearTimeout(focusTimer);
   editor.value?.destroy();
 });
 

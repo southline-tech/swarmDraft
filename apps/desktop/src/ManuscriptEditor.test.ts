@@ -85,4 +85,81 @@ describe('ManuscriptEditor', () => {
     expect(editor.state.doc.child(1).textContent).toBe('XBody.');
     w.unmount();
   });
+
+  const heading = (text: string) => ({
+    type: 'heading',
+    attrs: { level: 1 },
+    content: [{ type: 'text', text }],
+  });
+  async function mounted(content: object) {
+    const w = mount(ManuscriptEditor, { props: { content }, attachTo: document.body });
+    await flushPromises();
+    await new Promise((r) => setTimeout(r, 0));
+    const editor = (
+      w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+    ).editor;
+    return { w, editor };
+  }
+
+  it('focusBody focuses and puts the cursor at the start of the first body paragraph', async () => {
+    const { w, editor } = await mounted({
+      type: 'doc',
+      content: [
+        heading('Synthetic Heading'),
+        {
+          type: 'paragraph',
+          attrs: { style: 'body' },
+          content: [{ type: 'text', text: 'Alpha.' }],
+        },
+        { type: 'paragraph', attrs: { style: 'body' }, content: [{ type: 'text', text: 'Beta.' }] },
+      ],
+    });
+    editor.commands.setTextSelection(editor.state.doc.content.size - 1); // author moved away
+    (w.vm as unknown as { focusBody: () => void }).focusBody();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(editor.isFocused).toBe(true);
+    expect(editor.state.selection.$from.parent.textContent).toBe('Alpha.');
+    expect(editor.state.selection.$from.parentOffset).toBe(0);
+    expect(editor.state.doc.childCount).toBe(3);
+    w.unmount();
+  });
+
+  it('focusBody adds one empty body paragraph after a lone heading, keeping the heading', async () => {
+    const { w, editor } = await mounted({
+      type: 'doc',
+      content: [heading('Synthetic Heading'), { type: 'scene_break' }],
+    });
+    const focus = (w.vm as unknown as { focusBody: () => void }).focusBody;
+    focus();
+    focus(); // a second click must not add another paragraph
+    await new Promise((r) => setTimeout(r, 0));
+    const { doc } = editor.state;
+    expect(doc.childCount).toBe(3);
+    expect(doc.child(0).textContent).toBe('Synthetic Heading');
+    expect(doc.child(1).type.name).toBe('paragraph');
+    expect(doc.child(1).attrs.style).toBe('body');
+    expect(doc.child(2).type.name).toBe('scene_break');
+    expect(editor.state.selection.$from.index(0)).toBe(1);
+    expect(editor.isFocused).toBe(true);
+    editor.view.dispatch(editor.state.tr.insertText('Typed'));
+    expect(editor.state.doc.child(0).textContent).toBe('Synthetic Heading');
+    expect(editor.state.doc.child(1).textContent).toBe('Typed');
+    w.unmount();
+  });
+
+  it('focusBody on a read-only editor focuses without changing the text', async () => {
+    const content = { type: 'doc', content: [heading('Synthetic Heading')] };
+    const w = mount(ManuscriptEditor, {
+      props: { content, readonly: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    const editor = (
+      w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+    ).editor;
+    (w.vm as unknown as { focusBody: () => void }).focusBody();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(editor.state.doc.childCount).toBe(1);
+    w.unmount();
+  });
 });

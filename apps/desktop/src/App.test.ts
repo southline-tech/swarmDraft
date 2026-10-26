@@ -206,6 +206,60 @@ describe('App', () => {
     w.unmount();
   });
 
+  it.each(['part', 'chapter', 'scene', 'front_matter', 'back_matter'] as const)(
+    'a new %s from the navigator opens editable and takes typing (#42)',
+    async (kind) => {
+      const { w, session } = await withManuscript();
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const chapter = readStructure(session.manuscript).find((s) => s.kind === 'chapter')!;
+      await w.find(`[data-test="section-${chapter.id}"]`).trigger('click');
+      await settle();
+      const before = new Set(readStructure(session.manuscript).map((s) => s.id));
+      await w.find(`[data-test="add-${kind}"]`).trigger('click');
+      await settle();
+      await w.find('[data-test="rename-input"]').trigger('keydown', { key: 'Enter' });
+      await settle();
+      const added = readStructure(session.manuscript).find((s) => !before.has(s.id))!;
+      expect(added.kind).toBe(kind);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(w.find('[data-test="load-error"]').exists()).toBe(false);
+      const editor = (
+        w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+      ).editor;
+      expect(editor.isEditable).toBe(true);
+      editor.view.dispatch(editor.state.tr.insertText('Synthetic typing'));
+      await flushPromises();
+      expect(JSON.stringify(yDocToDoc(session.sections.get(added.docId)!))).toContain(
+        'Synthetic typing',
+      );
+      expect(errors.mock.calls.flat().join(' ')).not.toContain('Invalid content');
+      errors.mockRestore();
+      w.unmount();
+    },
+  );
+
+  it('clicking an outline row focuses the editor in the body, not the heading (#36)', async () => {
+    const { w, session } = await withManuscript();
+    const editorOf = () =>
+      (w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }).editor;
+    const chapters = readStructure(session.manuscript).filter((s) => s.kind === 'chapter');
+    for (const ch of chapters.slice(0, 2)) {
+      await w.find(`[data-test="section-${ch.id}"]`).trigger('click');
+      await settle();
+      await new Promise((r) => setTimeout(r, 0));
+      const editor = editorOf();
+      expect(editor.isFocused).toBe(true);
+      const { $from } = editor.state.selection;
+      expect($from.parent.type.name).toBe('paragraph');
+      expect($from.parent.attrs.style).not.toBe('heading');
+      expect($from.parentOffset).toBe(0);
+      // It sits after the heading: no heading comes later than the cursor's block.
+      const headingBefore = editor.state.doc.child(0).type.name === 'heading';
+      if (headingBefore) expect($from.index(0)).toBeGreaterThan(0);
+    }
+    w.unmount();
+  });
+
   it('keeps typed text and the same editor across a navigator close/open', async () => {
     const { w } = await withManuscript();
     const editorUid = w.findComponent({ name: 'ManuscriptEditor' }).vm.$.uid;
