@@ -139,8 +139,8 @@ exposed over MCP.
 | Tool                                                                       | Purpose                                                        | Scope          |
 | -------------------------------------------------------------------------- | -------------------------------------------------------------- | -------------- |
 | `list_documents`                                                           | Manuscripts available locally                                  | read           |
-| `list_sections(manuscript_id)`                                             | Ordered parts/chapters/scenes with ids, kinds, word counts     | read           |
-| `read_section(manuscript_id, section_id, format=markdown\|json)`           | Text with stable block ids, plus open suggestions and comments | read           |
+| `list_chapters(manuscript_id)`                                             | Ordered parts/chapters/scenes with ids, kinds, word counts     | read           |
+| `read_chapter(manuscript_id, section_id, format=markdown\|json)`           | Text with stable block ids, plus open suggestions and comments | read           |
 | `search_text(manuscript_id, query)`                                        | Find passages; returns anchors                                 | read           |
 | `list_suggestions(manuscript_id, status?, author?)`                        | Review queue                                                   | read           |
 | `add_comment(section_id, anchor, body, thread_id?)`                        | Anchored comment or reply                                      | comment        |
@@ -153,6 +153,17 @@ exposed over MCP.
 Resources: `coauthor://manuscript/{id}/section/{sid}` (read-only text). Anchors use quoted text +
 block id so they survive concurrent edits; the server resolves them to Yjs relative positions and
 errors if ambiguous or stale. Every call is written to AuditEvent.
+
+**Implementation.** The server is Rust inside the Tauri process, built on `rmcp` (the official
+MCP Rust SDK) with axum, on port 7337 by default. Reasons over a TypeScript sidecar: one process
+and no Node runtime to bundle or supervise; it shares the app's SQLite connection and Yjs
+documents directly instead of over IPC; tokens are checked in the same place they are stored.
+The cost is a Rust reading of the Yjs content model (`src-tauri/src/content.rs`), which is kept
+in step with the TypeScript encoder by the shared fixture in `fixtures/mcp/`. The server runs
+stateless (JSON responses, no sessions), rejects non-loopback `Host` headers and any browser
+`Origin`, rate limits each token, and returns 401 with `WWW-Authenticate: Bearer` for missing,
+unknown or revoked tokens. `list_chapters` / `read_chapter` return every section kind (front
+matter, parts, chapters, scenes, back matter), not only chapters.
 
 ## 9. Export requirements (KDP)
 
