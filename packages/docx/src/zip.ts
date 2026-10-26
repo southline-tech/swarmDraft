@@ -47,8 +47,10 @@ export function safeUnzip(
   const out: Record<string, Uint8Array> = {};
   let total = 0;
   const dec = new TextDecoder();
+  const seen = new Set<string>();
   for (let e = 0; e < count; e++) {
     if (p + 46 > bytes.length || u32(p) !== 0x02014b50) throw new Error('Corrupt zip directory');
+    const flags = u16(p + 8);
     const method = u16(p + 10);
     const crc = u32(p + 16);
     const csize = u32(p + 20);
@@ -59,7 +61,14 @@ export function safeUnzip(
     const off = u32(p + 42);
     const name = dec.decode(bytes.subarray(p + 46, p + 46 + nlen));
     p += 46 + nlen + xlen + clen;
+    if (seen.has(name))
+      throw new Error(`Duplicate zip entry "${name}"; file is corrupt or tampered`);
+    seen.add(name);
     if (!wanted(name)) continue;
+    if (flags & 0x1 || method === 99)
+      throw new Error(
+        `Part ${name} is encrypted; remove the password in Word, re-save, then import`,
+      );
     if (off + 30 > bytes.length || u32(off) !== 0x04034b50)
       throw new Error(`Corrupt zip entry ${name}`);
     const start = off + 30 + u16(off + 26) + u16(off + 28);
