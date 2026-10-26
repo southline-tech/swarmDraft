@@ -220,7 +220,7 @@ describe('EditorToolbar', () => {
     return { e, w };
   }
 
-  it('lays out the groups in the specified order', () => {
+  it('lays out the groups in the specified order (alignment, comment and Find in the … menu)', () => {
     const { w } = mountBar();
     const order = w
       .find('[role="toolbar"]')
@@ -238,15 +238,20 @@ describe('EditorToolbar', () => {
       'tb-italic',
       'tb-underline',
       '|',
+      'tb-overflow',
+      'tb-overflow-menu',
       'tb-align-left',
       'tb-align-center',
       'tb-align-right',
       'tb-align-justify',
-      '|',
       'tb-comment',
-      'tb-overflow',
       'tb-find',
-      '|',
+      'tb-menu-smallcaps',
+      'tb-menu-strike',
+      'tb-menu-style-first',
+      'tb-menu-style-epigraph',
+      'tb-menu-style-verse',
+      'tb-menu-pageBreak',
       'tb-review',
     ]);
     w.unmount();
@@ -292,7 +297,7 @@ describe('EditorToolbar', () => {
   it('puts less-common actions in the overflow menu', async () => {
     const { e, w } = mountBar();
     select(e, 'plain');
-    expect(w.find('[data-test="tb-overflow-menu"]').exists()).toBe(false);
+    expect(w.find('[data-test="tb-overflow-menu"]').isVisible()).toBe(false);
     await w.find('[data-test="tb-overflow"]').trigger('click');
     expect(w.find('[data-test="tb-overflow"]').attributes('aria-expanded')).toBe('true');
     const items = w.findAll('[role^="menuitem"]').map((i) => i.text());
@@ -306,7 +311,7 @@ describe('EditorToolbar', () => {
     ]);
     await w.find('[data-test="tb-menu-smallcaps"]').trigger('click');
     expect(toolbarState(e).smallcaps).toBe(true);
-    expect(w.find('[data-test="tb-overflow-menu"]').exists()).toBe(false);
+    expect(w.find('[data-test="tb-overflow-menu"]').isVisible()).toBe(false);
     w.unmount();
   });
 
@@ -509,13 +514,13 @@ describe('EditorToolbar', () => {
     await menu.trigger('keydown', { key: 'Home' });
     expect(document.activeElement).toBe(items()[0]);
     await menu.trigger('keydown', { key: 'Escape' });
-    expect(w.find('[data-test="tb-overflow-menu"]').exists()).toBe(false);
+    expect(w.find('[data-test="tb-overflow-menu"]').isVisible()).toBe(false);
     expect(document.activeElement).toBe(more.element);
     await more.trigger('click');
-    expect(w.find('[data-test="tb-overflow-menu"]').exists()).toBe(true);
+    expect(w.find('[data-test="tb-overflow-menu"]').isVisible()).toBe(true);
     document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
     await flushPromises();
-    expect(w.find('[data-test="tb-overflow-menu"]').exists()).toBe(false);
+    expect(w.find('[data-test="tb-overflow-menu"]').isVisible()).toBe(false);
     w.unmount();
   });
 

@@ -318,38 +318,6 @@ const btn =
     </button>
     <span class="mx-1.5 h-5 w-px bg-border" aria-hidden="true" />
 
-    <button
-      v-for="a in ALIGNS"
-      :key="a.id"
-      type="button"
-      :data-test="`tb-align-${a.id}`"
-      :class="btn"
-      :aria-pressed="state.align === a.id"
-      :aria-label="a.label"
-      :title="SUPPORTED_ALIGN.includes(a.id) ? ftip(a.label) : soon(a.label)"
-      v-bind="SUPPORTED_ALIGN.includes(a.id) ? ro : SOON_ATTRS"
-      @click="SUPPORTED_ALIGN.includes(a.id) && run(`align:${a.id}`)"
-    >
-      <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true"><path :d="a.path" /></svg>
-    </button>
-    <span class="mx-1.5 h-5 w-px bg-border" aria-hidden="true" />
-
-    <button
-      type="button"
-      data-test="tb-comment"
-      :class="btn"
-      aria-label="Add comment"
-      :title="props.commentEnabled ? 'Add comment' : soon('Add comment')"
-      :aria-disabled="props.commentEnabled ? undefined : 'true'"
-      :aria-description="props.commentEnabled ? undefined : SOON"
-      @click="props.commentEnabled && emit('comment')"
-    >
-      <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
-        <path
-          d="M3 4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v5A1.5 1.5 0 0 1 11.5 11H7l-3 2.5V11h0A1 1 0 0 1 3 10z"
-        />
-      </svg>
-    </button>
     <div ref="wrapEl" class="relative" @keydown.esc="closeMenu()">
       <button
         ref="moreBtn"
@@ -369,14 +337,69 @@ const btn =
         </svg>
       </button>
       <div
-        v-if="menuOpen"
+        v-show="menuOpen"
         ref="menuEl"
         role="menu"
         aria-label="More formatting"
         data-test="tb-overflow-menu"
-        class="absolute top-9 left-0 z-10 w-56 rounded-md border border-border bg-surface p-1.5 shadow-3"
+        class="absolute top-9 left-0 z-10 w-64 rounded-md border border-border bg-surface p-1.5 shadow-3"
         @keydown="onMenuKey"
       >
+        <!-- Designer pass (#66): alignment, comment, Find and the editor's view actions live here. -->
+        <div
+          class="mb-1 flex flex-wrap items-center gap-0.5 border-b border-border pb-1"
+          role="group"
+          aria-label="Paragraph and view"
+        >
+          <button
+            v-for="a in ALIGNS"
+            :key="a.id"
+            type="button"
+            :data-test="`tb-align-${a.id}`"
+            :class="btn"
+            :aria-pressed="state.align === a.id"
+            :aria-label="a.label"
+            :title="SUPPORTED_ALIGN.includes(a.id) ? ftip(a.label) : soon(a.label)"
+            v-bind="SUPPORTED_ALIGN.includes(a.id) ? ro : SOON_ATTRS"
+            @click="SUPPORTED_ALIGN.includes(a.id) && run(`align:${a.id}`)"
+          >
+            <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true"><path :d="a.path" /></svg>
+          </button>
+
+          <button
+            type="button"
+            data-test="tb-comment"
+            :class="btn"
+            aria-label="Add comment"
+            :title="props.commentEnabled ? 'Add comment' : soon('Add comment')"
+            :aria-disabled="props.commentEnabled ? undefined : 'true'"
+            :aria-description="props.commentEnabled ? undefined : SOON"
+            @click="props.commentEnabled && emit('comment')"
+          >
+            <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
+              <path
+                d="M3 4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v5A1.5 1.5 0 0 1 11.5 11H7l-3 2.5V11h0A1 1 0 0 1 3 10z"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
+            data-test="tb-find"
+            :class="[btn, 'px-2.5']"
+            aria-label="Find"
+            :title="props.findEnabled ? 'Find' : soon('Find')"
+            :aria-disabled="props.findEnabled ? undefined : 'true'"
+            :aria-description="props.findEnabled ? undefined : SOON"
+            @click="props.findEnabled && emit('find')"
+          >
+            <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
+              <circle cx="7" cy="7" r="3.8" />
+              <path d="m10 10 3 3" />
+            </svg>
+            Find
+          </button>
+          <slot name="menu" />
+        </div>
         <button
           v-for="o in OVERFLOW"
           :key="o.cmd"
@@ -398,23 +421,6 @@ const btn =
 
     <span class="flex-1" />
     <slot name="end" />
-    <button
-      type="button"
-      data-test="tb-find"
-      :class="[btn, 'px-2.5']"
-      aria-label="Find"
-      :title="props.findEnabled ? 'Find' : soon('Find')"
-      :aria-disabled="props.findEnabled ? undefined : 'true'"
-      :aria-description="props.findEnabled ? undefined : SOON"
-      @click="props.findEnabled && emit('find')"
-    >
-      <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
-        <circle cx="7" cy="7" r="3.8" />
-        <path d="m10 10 3 3" />
-      </svg>
-      Find
-    </button>
-    <span class="mx-1.5 h-5 w-px bg-border" aria-hidden="true" />
     <button
       type="button"
       data-test="tb-review"

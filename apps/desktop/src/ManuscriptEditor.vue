@@ -41,6 +41,8 @@ const props = defineProps<{
   navigatorOpen?: boolean;
   /** Status bar (RAD-256): the open chapter's title, when known. */
   chapterTitle?: string;
+  /** Display-only label above the chapter heading ("Chapter Three"); not part of the doc. */
+  chapterLabel?: string;
   /** Every section doc of the manuscript, for the live book word count. */
   /** Every section doc in outline order; re-derived from the outline so adds/deletes show. */
   bookDocs?: readonly Y.Doc[];
@@ -277,6 +279,8 @@ const LABELS: Record<ReviewItem['type'], string> = {
           </svg>
           Track changes · {{ tracking ? 'On' : 'Off' }}
         </button>
+      </template>
+      <template #menu>
         <button
           type="button"
           class="sh-tbtn sh-icon"
@@ -310,6 +314,9 @@ const LABELS: Record<ReviewItem['type'], string> = {
           data-test="page"
           :style="{ zoom: zoom / 100 }"
         >
+          <p v-if="chapterLabel" class="chapter-label" data-test="chapter-label" aria-hidden="true">
+            {{ chapterLabel }}
+          </p>
           <EditorContent :editor="editor" class="page" @contextmenu.prevent="openMenu" />
         </div>
         <!-- Margin notes (wp1): suggestion callouts beside the page, read-only. -->
@@ -436,8 +443,8 @@ const LABELS: Record<ReviewItem['type'], string> = {
 
 <style>
 .manuscript-editor .load-error {
-  border: 1px solid #b00020;
-  color: #b00020;
+  border: 1px solid var(--ct-danger);
+  color: var(--ct-danger);
   padding: 0.5rem 0.75rem;
 }
 .manuscript-editor {
@@ -474,6 +481,20 @@ const LABELS: Record<ReviewItem['type'], string> = {
   line-height: var(--ct-leading-body);
   color: var(--ct-text);
   outline: none;
+}
+.manuscript-editor .page .tiptap h1 {
+  font-family: var(--ct-font-manuscript);
+  font-weight: 400;
+  text-align: center;
+}
+.manuscript-editor .chapter-label {
+  margin: 0 0 var(--ct-space-2);
+  font-family: var(--ct-font-manuscript);
+  font-variant: small-caps;
+  letter-spacing: 0.18em;
+  text-align: center;
+  text-transform: lowercase;
+  color: var(--ct-text-muted);
 }
 .tiptap p {
   margin: 0;
@@ -512,11 +533,11 @@ const LABELS: Record<ReviewItem['type'], string> = {
   font-variant: small-caps;
 }
 .tiptap ins.suggestion-insert {
-  color: #1a7f37;
+  color: var(--ct-success);
   text-decoration: underline;
 }
 .tiptap del.suggestion-delete {
-  color: #b00020;
+  color: var(--ct-danger);
 }
 .tiptap .comment-anchor {
   background: #fff3b0;

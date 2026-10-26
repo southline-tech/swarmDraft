@@ -374,6 +374,38 @@ const breadcrumb = computed(() => {
   return `${where}${sel.title || 'Untitled'}`;
 });
 
+const NUMBER_WORDS = [
+  'One',
+  'Two',
+  'Three',
+  'Four',
+  'Five',
+  'Six',
+  'Seven',
+  'Eight',
+  'Nine',
+  'Ten',
+  'Eleven',
+  'Twelve',
+  'Thirteen',
+  'Fourteen',
+  'Fifteen',
+  'Sixteen',
+  'Seventeen',
+  'Eighteen',
+  'Nineteen',
+  'Twenty',
+];
+/** Display-only chapter label above the H1 ("Chapter Three"); never written into the doc. */
+const chapterLabel = computed(() => {
+  const s = session.value;
+  const sel = selected.value;
+  if (!s || !sel || sel.kind !== 'chapter') return '';
+  const n =
+    s.outline.value.filter((x) => x.kind === 'chapter').findIndex((c) => c.id === sel.id) + 1;
+  return n ? `Chapter ${NUMBER_WORDS[n - 1] ?? n}` : '';
+});
+
 defineExpose({ open });
 </script>
 
@@ -383,25 +415,30 @@ defineExpose({ open });
     <header v-show="!focusMode" class="topbar">
       <span class="topbar__name">{{ session && !choosingBook ? session.title : 'coAuthor' }}</span>
       <span v-if="breadcrumb" class="topbar__crumb" data-test="breadcrumb">— {{ breadcrumb }}</span>
-      <button
-        v-if="session && !choosingBook"
-        type="button"
-        class="topbar__button topbar__open"
-        data-test="open-another"
-        @click="choosingBook = true"
-      >
-        Open another book
-      </button>
-      <button
-        ref="settingsButton"
-        type="button"
-        class="topbar__button"
-        data-test="settings-open"
-        :aria-expanded="settingsOpen"
-        @click="settingsOpen = !settingsOpen"
-      >
-        Settings
-      </button>
+      <details class="topbar__menu" data-test="app-menu">
+        <summary class="topbar__icon" aria-label="Book menu" title="Book menu">⋯</summary>
+        <div class="topbar__menu-list">
+          <button
+            v-if="session && !choosingBook"
+            type="button"
+            class="topbar__button topbar__open"
+            data-test="open-another"
+            @click="choosingBook = true"
+          >
+            Open another book
+          </button>
+          <button
+            ref="settingsButton"
+            type="button"
+            class="topbar__button"
+            data-test="settings-open"
+            :aria-expanded="settingsOpen"
+            @click="settingsOpen = !settingsOpen"
+          >
+            Settings
+          </button>
+        </div>
+      </details>
     </header>
     <section
       v-if="settingsOpen"
@@ -551,6 +588,7 @@ defineExpose({ open });
         :readonly="session.closed"
         :navigator-open="navigatorOpen"
         :chapter-title="selected!.title"
+        :chapter-label="chapterLabel"
         :book-docs="outlineDocs(session.outline.value, session.sections)"
         :chapter-docs="sectionTreeDocs(session.outline.value, selectedId, session.sections)"
         :save-state="saveError ? 'offline' : undefined"
@@ -605,6 +643,33 @@ body {
   margin-right: var(--ct-space-2);
 }
 .btn,
+.topbar__menu {
+  position: relative;
+  margin-left: auto;
+}
+.topbar__icon {
+  list-style: none;
+  padding: 0 var(--ct-space-2);
+  color: var(--ct-text-muted);
+  cursor: pointer;
+}
+.topbar__icon::-webkit-details-marker {
+  display: none;
+}
+.topbar__menu-list {
+  position: absolute;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-space-1);
+  padding: var(--ct-space-2);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-md);
+  background: var(--ct-surface);
+  box-shadow: var(--ct-shadow-3, none);
+  white-space: nowrap;
+}
 .topbar__button {
   min-height: var(--ct-space-12);
   padding: 0 var(--ct-space-4);

@@ -299,6 +299,21 @@ describe('App', () => {
 });
 
 describe('App keyboard and placement on an imported manuscript', () => {
+  it('groups front matter under one collapsible row and shows a display-only chapter label', async () => {
+    const { w, session } = await withManuscript();
+    const before = JSON.stringify(readStructure(session.manuscript));
+    const group = w.find('[data-test="front-matter-group"]');
+    expect(group.exists()).toBe(true);
+    expect(group.attributes('aria-expanded')).toBe('false');
+    await group.trigger('click');
+    await settle();
+    expect(w.find('[data-test="front-matter-group"]').attributes('aria-expanded')).toBe('true');
+    const label = w.find('[data-test="chapter-label"]');
+    if (label.exists()) expect(label.attributes('aria-hidden')).toBe('true');
+    expect(JSON.stringify(readStructure(session.manuscript))).toBe(before);
+    w.unmount();
+  });
+
   it('selects rows with arrow keys and renames with Enter', async () => {
     const { w, session } = await withManuscript();
     const outline = readStructure(session.manuscript);
