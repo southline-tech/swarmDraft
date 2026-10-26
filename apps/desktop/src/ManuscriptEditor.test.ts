@@ -64,4 +64,25 @@ describe('ManuscriptEditor', () => {
     expect(w.emitted('reload')).toHaveLength(1);
     w.unmount();
   });
+
+  it('opens with the cursor in the first body paragraph, after the heading', async () => {
+    const content = {
+      type: 'doc',
+      content: [
+        { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Chapter One' }] },
+        { type: 'paragraph', attrs: { style: 'body' }, content: [{ type: 'text', text: 'Body.' }] },
+      ],
+    };
+    const w = mount(ManuscriptEditor, { props: { content }, attachTo: document.body });
+    await flushPromises();
+    await new Promise((r) => setTimeout(r, 0));
+    const editor = (
+      w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+    ).editor;
+    expect(editor.state.selection.$from.parent.type.name).toBe('paragraph');
+    editor.view.dispatch(editor.state.tr.insertText('X')); // what a keystroke does
+    expect(editor.state.doc.child(0).textContent).toBe('Chapter One');
+    expect(editor.state.doc.child(1).textContent).toBe('XBody.');
+    w.unmount();
+  });
 });

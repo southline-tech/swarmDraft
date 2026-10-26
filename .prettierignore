@@ -5,3 +5,4 @@ dist
 **/src-tauri/icons
 # generated cross-language round-trip fixtures (rewritten by tests)
 fixtures/mcp/roundtrip
+fixtures/mcp/live-agent-updates.json

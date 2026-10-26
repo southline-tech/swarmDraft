@@ -214,22 +214,39 @@ const closeQuietly = (s?: ManuscriptSession | null) =>
 function open(next: ManuscriptSession) {
   if (session.value !== next) closeQuietly(session.value);
   saveError.value = '';
+  // A manuscript is open again, so an earlier "please restart" or open failure no longer holds.
+  fatalError.value = '';
+  openError.value = '';
   // Anyone with a book open is past first run: never flash the welcome at them.
   markWelcomed();
   choosingBook.value = false;
   session.value = next;
-  selectedId.value = next.outline.value.find((s) => s.kind === 'chapter')?.id;
+  // Open where the prose starts: an imported chapter's doc often holds only its heading and the
+  // text lives in its scenes, so prefer the first chapter's first scene (#25 QA: typing right
+  // after opening went into the heading).
+  const rows = next.outline.value;
+  const chapter = rows.find((s) => s.kind === 'chapter');
+  selectedId.value = chapter
+    ? (rows.find((s) => s.kind === 'scene' && s.parentId === chapter.id) ?? chapter).id
+    : undefined;
 }
 
-/** Reopen the newest manuscript with backoff; if that keeps failing, clear the editor for good. */
-async function reopenAfterFailure(delays = REOPEN_BACKOFF_MS) {
+/**
+ * Reopen the newest manuscript with backoff; if that keeps failing, clear the editor for good.
+ * Returns the reopened session, or null.
+ */
+async function reopenAfterFailure(delays = REOPEN_BACKOFF_MS): Promise<ManuscriptSession | null> {
   for (const ms of [0, ...delays]) {
     if (ms) await new Promise((r) => setTimeout(r, ms));
     const back = await reopenLatest(persistHooks).catch(() => null);
-    if (back) return open(back);
+    if (back) {
+      open(back);
+      return back;
+    }
   }
   session.value = null;
   fatalError.value = "Couldn't reopen the manuscript. Please restart coAuthor.";
+  return null;
 }
 
 async function onFile(e: Event) {
@@ -263,7 +280,14 @@ async function importFile(file: File) {
     } catch (err) {
       // The current manuscript was closed but the import failed: never leave the closed session
       // on screen; reopen the newest stored manuscript (the import, if it was written).
-      if (current?.closed) await reopenAfterFailure();
+      // A refused close keeps the current manuscript on screen: keep following agent writes.
+      if (current && !current.closed && session.value === current) current.resumeLive?.();
+      if (current?.closed) {
+        const back = await reopenAfterFailure();
+        // The newest manuscript is not the one we closed, so the import was saved and is now
+        // open: the import worked and there is nothing to report.
+        if (back && back.id !== current.id) return;
+      }
       throw err;
     }
   } catch (err) {
