@@ -13,7 +13,9 @@ describe('App', () => {
   });
 });
 
-vi.mock('./backend', () => ({
+vi.mock('./backend', async (orig) => ({
+  ...(await orig<typeof import('./backend')>()),
+  agentsApi: { list: vi.fn(async () => []), tokens: vi.fn(async () => []) },
   getAppInfo: vi.fn(async () => ({ version: '0.1.0', dataDir: '/tmp/x', schemaVersion: 1 })),
   createBackup: vi.fn(async () => '/tmp/x/backups/b.zip'),
   restoreBackup: vi.fn(async () => ({ manifest: {}, preRestoreSnapshot: '/tmp/x/backups/p.zip' })),

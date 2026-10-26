@@ -215,7 +215,7 @@ pub fn create_backup(
         .prefix(".backup-")
         .tempdir_in(store.data_dir())?;
     let snap = tmp.path().join("snapshot.db");
-    store.with_conn(|c| {
+    store.with_sql(|c| {
         c.execute("VACUUM INTO ?1", [snap.to_string_lossy()])
             .map(|_| ())
     })?;
@@ -538,7 +538,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(tmp.path()).unwrap();
         store
-            .with_conn(|c| {
+            .with_sql(|c| {
                 c.execute_batch(
                     "CREATE TABLE IF NOT EXISTS t (id INTEGER PRIMARY KEY, body TEXT, blob BLOB);
                      INSERT INTO t (body, blob) VALUES ('Synthetic chapter one.', x'0102ff');
@@ -554,9 +554,7 @@ mod tests {
 
     fn meta(store: &Store) -> String {
         store
-            .with_conn(|c| {
-                c.query_row("SELECT value FROM app_meta WHERE key='k'", [], |r| r.get(0))
-            })
+            .with_sql(|c| c.query_row("SELECT value FROM app_meta WHERE key='k'", [], |r| r.get(0)))
             .unwrap()
     }
 
@@ -569,7 +567,7 @@ mod tests {
         assert!(!zip.with_extension("zip.part").exists());
 
         store
-            .with_conn(|c| c.execute_batch("UPDATE app_meta SET value='v2'; DELETE FROM t;"))
+            .with_sql(|c| c.execute_batch("UPDATE app_meta SET value='v2'; DELETE FROM t;"))
             .unwrap();
         std::fs::remove_dir_all(tmp.path().join("files")).unwrap();
         std::fs::write(tmp.path().join("files-marker"), b"x").unwrap();
@@ -577,7 +575,7 @@ mod tests {
         let r = restore_backup(&store, "0.1.0", &zip).unwrap();
         assert_eq!(meta(&store), "v1");
         let (body, blob): (String, Vec<u8>) = store
-            .with_conn(|c| {
+            .with_sql(|c| {
                 c.query_row("SELECT body, blob FROM t", [], |r| {
                     Ok((r.get(0)?, r.get(1)?))
                 })
@@ -771,7 +769,7 @@ mod tests {
             let zip = tmp.path().join("b.zip");
             create_backup(&store, "0", &zip).unwrap();
             store
-                .with_conn(|c| c.execute_batch("UPDATE app_meta SET value='v2';"))
+                .with_sql(|c| c.execute_batch("UPDATE app_meta SET value='v2';"))
                 .unwrap();
             let img = tmp.path().join("files/images/cover.png");
             std::fs::write(&img, b"changed").unwrap();

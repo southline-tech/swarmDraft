@@ -11,11 +11,35 @@ pub enum StorageError {
     Io(#[from] std::io::Error),
     #[error("sqlite: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("{0}")]
+    Invalid(String),
+    #[error("not found: {0}")]
+    NotFound(String),
 }
 
 /// Ordered migrations; index + 1 is the schema version.
-const MIGRATIONS: &[&str] =
-    &["CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);"];
+const MIGRATIONS: &[&str] = &[
+    "CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+    // RAD-205: agent principals and their bearer tokens (only a SHA-256 hash is stored).
+    "CREATE TABLE agents (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        color TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        revoked_at TEXT
+     );
+     CREATE TABLE agent_tokens (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL REFERENCES agents(id),
+        token_hash TEXT NOT NULL UNIQUE,
+        prefix TEXT NOT NULL,
+        scopes TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        last_used_at TEXT,
+        revoked_at TEXT
+     );
+     CREATE INDEX agent_tokens_agent ON agent_tokens(agent_id);",
+];
 
 pub struct Store {
     dir: PathBuf,
@@ -38,8 +62,17 @@ impl Store {
         &self.dir
     }
 
-    /// Run `f` with the shared connection.
-    pub fn with_conn<T>(
+    /// Run `f` with the locked connection (used by sibling modules such as `agents`).
+    pub(crate) fn with_conn<T>(
+        &self,
+        f: impl FnOnce(&Connection) -> Result<T, StorageError>,
+    ) -> Result<T, StorageError> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        f(&conn)
+    }
+
+    /// Like `with_conn`, for closures returning plain rusqlite results.
+    pub(crate) fn with_sql<T>(
         &self,
         f: impl FnOnce(&Connection) -> rusqlite::Result<T>,
     ) -> Result<T, StorageError> {

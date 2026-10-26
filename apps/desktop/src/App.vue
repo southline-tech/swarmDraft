@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { DEFAULT_TRIM } from '@coauthor/schema';
 import { createBackup, getAppInfo, restoreBackup, type AppInfo } from './backend';
+import AgentsSettings from './AgentsSettings.vue';
 
 const info = ref<AppInfo | null>(null);
 onMounted(async () => {
@@ -63,6 +64,7 @@ async function onRestore(): Promise<void> {
       <p v-if="backupStatus" data-test="backup-status">{{ backupStatus }}</p>
     </section>
     <p v-else data-test="browser-mode">Running in browser mode (no desktop backend).</p>
+    <AgentsSettings v-if="info" />
   </main>
 </template>
 
