@@ -18,7 +18,24 @@ describe('ManuscriptEditor', () => {
     expect(items[0]).toContain('Delete');
     expect(items[1]).toContain('Insert');
     expect(items[2]).toContain('Comment');
-    expect(w.find('[data-test="review"] button').exists()).toBe(false);
+    expect(w.find('[data-test="review"] button:not([role="tab"])').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('shows the chapter label above the page as display only, never in the document', async () => {
+    const w = mount(ManuscriptEditor, {
+      props: { content: SAMPLE_DOC, chapterLabel: 'Chapter Three' },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    const label = w.find('[data-test="chapter-label"]');
+    expect(label.exists()).toBe(true);
+    expect(label.text()).toBe('Chapter Three');
+    expect(label.attributes('aria-hidden')).toBe('true');
+    // Outside the editable area and absent from the editor's document and history.
+    expect(label.element.closest('.tiptap')).toBeNull();
+    expect(w.find('.tiptap').text()).not.toContain('Chapter Three');
+    expect(w.emitted('change')).toBeUndefined();
     w.unmount();
   });
 

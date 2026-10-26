@@ -79,7 +79,9 @@ describe('logo', () => {
 
   it('title bar shows the small logo next to the name', () => {
     const src = read('./App.vue');
-    expect(src).toMatch(/<header class="topbar">[\s\S]*<AppLogo :size="24" \/>[\s\S]*<\/header>/);
+    expect(src).toMatch(
+      /<header[^>]*class="topbar"[^>]*>[\s\S]*<AppLogo :size="24" \/>[\s\S]*<\/header>/,
+    );
   });
 });
 
