@@ -1,11 +1,17 @@
 /**
  * Content node and mark names the editor works with (docs/mvp-spec.md section 7).
- *
- * These mirror the shared content model. Main's `@coauthor/schema` does not ship the
- * ProseMirror JSON types yet (they arrive with the .docx import work), so the editor keeps
- * the names it needs here. Once they land in the schema package, this file should re-export
- * from there instead.
+ * The shared model lives in `@coauthor/schema`; this file adds editor-only helpers.
  */
+import type { ParagraphStyle } from '@coauthor/schema';
+
+export type { ParagraphStyle } from '@coauthor/schema';
+export {
+  BLOCK_NODE_TYPES,
+  INLINE_NODE_TYPES,
+  MARK_TYPES,
+  NON_EXCLUSIVE_MARKS,
+} from '@coauthor/schema';
+
 export const PARAGRAPH_STYLES = [
   'body',
   'first',
@@ -13,8 +19,7 @@ export const PARAGRAPH_STYLES = [
   'epigraph',
   'verse',
   'centered',
-] as const;
-export type ParagraphStyle = (typeof PARAGRAPH_STYLES)[number];
+] as const satisfies readonly ParagraphStyle[];
 
 export const PARAGRAPH_STYLE_LABELS: Record<ParagraphStyle, string> = {
   body: 'Body',
