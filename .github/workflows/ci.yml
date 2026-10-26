@@ -1,16 +1,17 @@
 name: CI
 
+# Single minimal Linux job on PRs to main only. No Windows runners, no push,
+# no manual dispatch. Windows builds/installers run on a local Windows test
+# machine with each action approved by Brett, not in GitHub Actions.
 on:
   pull_request:
-  push:
     branches: [main]
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 env:
@@ -22,8 +23,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  js:
-    name: Lint, typecheck, test (JS)
+  check:
+    name: Lint and test (JS + Rust)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -41,16 +42,7 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
-  rust:
-    name: rustfmt, clippy, cargo test
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/desktop/src-tauri
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Tauri Linux deps
-        working-directory: .
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev
@@ -62,55 +54,10 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri
       - name: Placeholder frontend dist (generate_context! needs it)
-        run: mkdir -p ../dist && echo '<!doctype html>' > ../dist/index.html
-      - run: cargo fmt --check
-      - run: cargo clippy --all-targets --locked -- -D warnings
-      - run: cargo test --locked
-
-  tools:
-    name: Pinned export tools (Typst, Pandoc)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: typst-community/setup-typst@48aeee7543d37f01afd1ffb27307dc277387ba13 # v4
-        with:
-          typst-version: ${{ env.TYPST_VERSION }}
-      - uses: pandoc/actions/setup@86321b6dd4675f5014c611e05088e10d4939e09e # v1
-        with:
-          version: ${{ env.PANDOC_VERSION }}
-      - run: typst --version && pandoc --version | head -1
-
-  windows:
-    name: Windows build (tauri build)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          workspaces: apps/desktop/src-tauri
-      - run: pnpm install --frozen-lockfile
-      - name: Placeholder frontend dist (generate_context! needs it; tauri build rebuilds it)
-        shell: bash
         run: mkdir -p apps/desktop/dist && echo '<!doctype html>' > apps/desktop/dist/index.html
-      - name: cargo test (runs the Windows-only retry and locked-file paths)
+      - run: cargo fmt --check
         working-directory: apps/desktop/src-tauri
-        run: cargo test --locked
-      - name: Build unsigned installers (.msi + NSIS)
-        run: pnpm tauri build --bundles msi,nsis
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: coauthor-windows-unsigned-${{ github.sha }}
-          path: |
-            apps/desktop/src-tauri/target/release/bundle/msi/*.msi
-            apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
-          if-no-files-found: error
-          retention-days: 14
+      - run: cargo clippy --all-targets --locked -- -D warnings
+        working-directory: apps/desktop/src-tauri
+      - run: cargo test --locked
+        working-directory: apps/desktop/src-tauri
