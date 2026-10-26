@@ -99,11 +99,44 @@ describe('SectionNav', () => {
     expect(w.props('selectedId')).toBe('sc-1');
     await row('sc-1').trigger('keydown', { key: 'ArrowLeft' });
     expect(w.props('selectedId')).toBe('ch-1');
+    await row('ch-1').trigger('keydown', { key: 'ArrowRight' });
+    expect(w.props('selectedId')).toBe('sc-1');
+    await row('sc-1').trigger('keydown', { key: 'ArrowRight' }); // no children: stays
+    expect(w.props('selectedId')).toBe('sc-1');
+    await row('sc-1').trigger('keydown', { key: 'ArrowLeft' });
     await row('ch-1').trigger('keydown', { key: 'ArrowDown', altKey: true });
     await settle();
     expect(titles(w).slice(2, 4)).toEqual(['Chapter 2', 'Chapter 1']);
     await row('ch-1').trigger('keydown', { key: 'F2' });
     expect(w.find('[data-test="rename-input"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('refuses to drag a section into its own subtree', async () => {
+    const w = setup();
+    const before = w.props('sections');
+    await w.find('[data-test="section-part-1"]').trigger('dragstart');
+    await w.find('[data-test="section-ch-1"]').trigger('drop');
+    await settle();
+    await w.find('[data-test="section-ch-1"]').trigger('dragstart');
+    await w.find('[data-test="section-sc-2"]').trigger('drop');
+    await settle();
+    expect(w.props('sections')).toEqual(before);
+    w.unmount();
+  });
+
+  it('opens the delete dialog with Cancel first and focused; Escape closes it', async () => {
+    const w = setup({ selectedId: 'ch-1' });
+    await w.find('[data-test="delete"]').trigger('click');
+    await settle();
+    const buttons = w.findAll('[data-test="confirm-delete"] button');
+    expect(buttons[0]!.attributes('data-test')).toBe('confirm-delete-cancel');
+    expect(document.activeElement).toBe(buttons[0]!.element);
+    await w.find('[data-test="confirm-delete"]').trigger('keydown', { key: 'Escape' });
+    await settle();
+    expect(w.find('[data-test="confirm-delete"]').exists()).toBe(false);
+    expect(titles(w)).toHaveLength(7);
+    expect(document.activeElement).toBe(w.find('[data-test="section-ch-1"]').element);
     w.unmount();
   });
 
@@ -151,13 +184,15 @@ describe('SectionNav', () => {
       { id: 'c', kind: 'chapter', title: 'C again', docId: 'd/c2' },
     ];
     const w = setup({ sections: corrupt });
-    expect(titles(w).sort()).toEqual(['A', 'B', 'C']);
+    // The second 'c' lives in another doc: kept under a fresh id, not dropped.
+    expect(titles(w).sort()).toEqual(['A', 'B', 'C', 'C again']);
     expect(w.find('[data-test="outline-repaired"]').exists()).toBe(true);
     await w.find('[data-test="section-c"]').trigger('dragstart');
     await w.find('[data-test="section-b"]').trigger('drop');
     await settle();
     const saved = w.props('sections');
-    expect(saved.map((s) => s.id).sort()).toEqual(['a', 'b', 'c']);
+    expect(saved.map((s) => s.id).sort()).toEqual(['a', 'b', 'c', 'c~2']);
+    expect(saved.find((s) => s.id === 'c~2')!.docId).toBe('d/c2');
     expect(saved.find((s) => s.id === 'c')!.parentId).toBe('b');
     expect(w.find('[data-test="outline-repaired"]').exists()).toBe(false);
     w.unmount();

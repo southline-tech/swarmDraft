@@ -7,6 +7,7 @@ import {
   canNest,
   canPromoteChildren,
   cleanTitle,
+  titleLength,
   deleteSection,
   MAX_TITLE_LENGTH,
   normalizeOutline,
@@ -111,11 +112,15 @@ describe('outline hardening', () => {
   });
 
   it('shows every section once when parents form a two-node cycle', () => {
-    const s = [sec('a', 'part', 'b'), sec('b', 'part', 'a'), sec('c', 'chapter', 'a')];
+    const s = [sec('a', 'part', 'b'), sec('b', 'chapter', 'a'), sec('c', 'scene', 'b')];
     const { sections, issues } = normalizeOutline(s);
     expect(ids(sections).sort()).toEqual(['a', 'b', 'c']);
     expect(issues.filter((i) => i.problem === 'parent-cycle').map((i) => i.id)).toEqual(['a']);
-    expect(buildOutline(s).map((n) => n.id)).toEqual(['a', 'b']);
+    // Only the cycle node moves to the top; b and its scene stay under it.
+    const tree = buildOutline(s);
+    expect(tree.map((n) => n.id)).toEqual(['a']);
+    expect(tree[0]!.children.map((n) => n.id)).toEqual(['b']);
+    expect(tree[0]!.children[0]!.children.map((n) => n.id)).toEqual(['c']);
   });
 
   it('dropSection terminates and keeps everything on cyclic input', () => {
@@ -142,6 +147,50 @@ describe('outline hardening', () => {
       'missing-parent',
       'parent-cycle',
     ]);
+  });
+
+  it('keeps a repeated id on a different doc as its own section with a fresh id', () => {
+    const s = [
+      { ...sec('c1', 'chapter'), docId: 'd2' },
+      { ...sec('c1', 'chapter'), docId: 'd3', title: 'other' },
+      { ...sec('c1', 'chapter'), docId: 'd2' },
+    ];
+    const { sections, issues } = normalizeOutline(s);
+    expect(sections.map((x) => [x.id, x.docId])).toEqual([
+      ['c1', 'd2'],
+      ['c1~2', 'd3'],
+    ]);
+    expect(sections[1]!.title).toBe('other');
+    expect(issues.filter((i) => i.problem === 'duplicate-id')).toHaveLength(2);
+    expect(normalizeOutline(sections).issues).toEqual([]);
+  });
+
+  it('breaks a longer cycle at one node and keeps its subtree', () => {
+    const s = [sec('c', 'chapter', 'p'), sec('x', 'scene', 'c'), sec('p', 'part', 'x')];
+    const { issues } = normalizeOutline(s);
+    // c breaks the cycle; p then fails nesting (a part under a scene) on its own.
+    expect(issues.map((i) => [i.id, i.problem])).toEqual([
+      ['c', 'parent-cycle'],
+      ['p', 'invalid-nesting'],
+    ]);
+    const tree = buildOutline(s);
+    expect(tree.map((n) => n.id)).toEqual(['c', 'p']);
+    expect(tree[0]!.children.map((n) => n.id)).toEqual(['x']);
+  });
+
+  it('caps titles by grapheme and strips bidi and zero-width characters', () => {
+    const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}';
+    const capped = cleanTitle(family.repeat(250));
+    expect(titleLength(capped)).toBe(MAX_TITLE_LENGTH);
+    expect(capped).toBe(family.repeat(MAX_TITLE_LENGTH));
+    expect(titleLength(cleanTitle('e\u0301'.repeat(300)))).toBe(MAX_TITLE_LENGTH);
+    expect(cleanTitle('a\u202Eb\u2066c\u200Bd\uFEFFe\u200Ff')).toBe('abcdef');
+  });
+
+  it('dropSection refuses to move a section into its own subtree', () => {
+    const s = [sec('p', 'part'), sec('c', 'chapter', 'p'), sec('x', 'scene', 'c')];
+    expect(dropSection(s, 'p', { parentId: 'c' })).toEqual(s);
+    expect(dropSection(s, 'c', { beforeId: 'x' })).toEqual(s);
   });
 
   it('cleans titles: control characters, whitespace and length', () => {

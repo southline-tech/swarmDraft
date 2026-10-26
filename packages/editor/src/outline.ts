@@ -21,13 +21,38 @@ export function canNest(child: SectionKind, parent: SectionKind | undefined): bo
 
 export const MAX_TITLE_LENGTH = 200;
 
-/** Strip control characters, collapse whitespace and cap the length (in code points). */
+/**
+ * Invisible characters that only cause trouble in a title: bidi embeddings, overrides and
+ * isolates (they can make a title display reversed), marks, and zero-width spaces/joiners
+ * that carry no meaning on their own. ZWJ and ZWNJ (U+200C/U+200D) stay: emoji sequences and
+ * several scripts need them.
+ */
+const INVISIBLE = /[\u061C\u200B\u200E\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/gu;
+
+const graphemes = (t: string): string[] =>
+  typeof Intl !== 'undefined' && 'Segmenter' in Intl
+    ? Array.from(
+        new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(t),
+        (g) => g.segment,
+      )
+    : [...t];
+
+/** Title length as a reader counts it (grapheme clusters), the unit of MAX_TITLE_LENGTH. */
+export function titleLength(title: string): number {
+  return graphemes(title).length;
+}
+
+/**
+ * Strip control and invisible formatting characters, collapse whitespace and cap the length
+ * at MAX_TITLE_LENGTH graphemes, so an emoji or accented letter is never cut in half.
+ */
 export function cleanTitle(title: string): string {
   const t = title
+    .replace(INVISIBLE, '')
     .replace(/[\p{Cc}\u2028\u2029]+/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  return [...t].slice(0, MAX_TITLE_LENGTH).join('').trim();
+  return graphemes(t).slice(0, MAX_TITLE_LENGTH).join('').trim();
 }
 
 export interface OutlineIssue {
@@ -36,26 +61,33 @@ export interface OutlineIssue {
 }
 
 /**
- * Repair a stored outline so every function here can trust it: drops repeated ids (keeps the
- * first), detaches sections whose parent is missing, part of a parent cycle, or not allowed to
- * hold them (moving them to the top level), and cleans titles. Returns what it changed.
+ * Repair a stored outline so every function here can trust it. A repeated id on a different
+ * docId is a distinct section (its text lives in that doc), so it gets a fresh id and keeps its
+ * docId; only an exact repeat (same id and docId) is dropped. Sections whose parent is missing
+ * or cannot hold them move to the top level. A parent cycle is broken by moving one section on
+ * it to the top level; its subtree stays under it. Titles are cleaned. Returns what it changed.
  */
 export function normalizeOutline(sections: readonly Section[]): {
   sections: Section[];
   issues: OutlineIssue[];
 } {
   const issues: OutlineIssue[] = [];
-  const seen = new Set<string>();
+  const docOf = new Map<string, string>();
   const list: Section[] = [];
   for (const s of sections) {
-    if (seen.has(s.id)) {
-      issues.push({ id: s.id, problem: 'duplicate-id' });
-      continue;
+    let id = s.id;
+    if (docOf.has(id)) {
+      issues.push({ id, problem: 'duplicate-id' });
+      if (docOf.get(id) === s.docId) continue; // the same section listed twice
+      // Deterministic fresh id, so repairing twice gives the same outline.
+      let n = 2;
+      while (docOf.has(`${s.id}~${n}`) || sections.some((x) => x.id === `${s.id}~${n}`)) n++;
+      id = `${s.id}~${n}`;
     }
-    seen.add(s.id);
+    docOf.set(id, s.docId);
     const title = cleanTitle(typeof s.title === 'string' ? s.title : '');
-    if (title !== s.title) issues.push({ id: s.id, problem: 'bad-title' });
-    list.push({ ...s, title });
+    if (title !== s.title) issues.push({ id, problem: 'bad-title' });
+    list.push({ ...s, id, title });
   }
   const byId = new Map(list.map((s) => [s.id, s]));
   const detach = (s: Section, problem: OutlineIssue['problem']) => {
@@ -68,14 +100,15 @@ export function normalizeOutline(sections: readonly Section[]): {
       detach(s, 'missing-parent');
       continue;
     }
-    // Walk up with a visited set; a revisit means s sits on (or under) a cycle.
+    // Walk up; only a walk that returns to s itself means s is on a cycle. Detaching s breaks
+    // that cycle, so sections merely under it (and the rest of the cycle) keep their parents.
     const visited = new Set([s.id]);
     let p: string | undefined = s.parentId;
     while (p !== undefined && !visited.has(p)) {
       visited.add(p);
       p = byId.get(p)?.parentId;
     }
-    if (p !== undefined) detach(s, 'parent-cycle');
+    if (p === s.id) detach(s, 'parent-cycle');
   }
   for (const s of list) {
     const parent = s.parentId === undefined ? undefined : byId.get(s.parentId);

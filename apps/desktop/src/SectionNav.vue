@@ -8,10 +8,9 @@
  * Every change is one all-or-nothing edit: it is validated, handed to `save` (if given), and only
  * emitted once saving succeeded. A stored outline that needed repair on load is flagged.
  */
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import type { Section, SectionKind } from '@coauthor/schema';
 import {
-  MAX_TITLE_LENGTH,
   addSection,
   applyOutlineEdit,
   buildOutline,
@@ -167,6 +166,12 @@ async function moveTo(value: string) {
 }
 
 const confirmingDelete = ref<string>();
+const deleteDialog = ref<HTMLElement>();
+const deleteCancel = ref<HTMLButtonElement>();
+watch(confirmingDelete, (id, was) => {
+  if (id) void nextTick(() => (deleteCancel.value ?? deleteDialog.value)?.focus());
+  else if (was) focusRow(was);
+});
 const deleteInfo = computed(() => {
   const id = confirmingDelete.value;
   if (!id) return undefined;
@@ -227,6 +232,11 @@ function onKey(e: KeyboardEvent, row: Row) {
     Home: () => go(0),
     End: () => go(ids.length - 1),
     ArrowLeft: () => row.section.parentId && go(ids.indexOf(row.section.parentId)),
+    // Rows are always expanded, so Right goes to the first child when there is one.
+    ArrowRight: () => {
+      const child = rows.value.find((r) => r.section.parentId === row.section.id);
+      if (child) go(ids.indexOf(child.section.id));
+    },
     Enter: () => select(row.section.id),
     F2: () => startRename(row.section.id, row.section.title),
     Delete: () => (confirmingDelete.value = row.section.id),
@@ -284,7 +294,6 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
           v-model="draft"
           data-test="rename-input"
           aria-label="Section title"
-          :maxlength="MAX_TITLE_LENGTH"
           @click.stop
           @keydown.stop.enter="commitRename"
           @keydown.stop.esc="cancelRename"
@@ -328,10 +337,14 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
     </div>
     <div
       v-if="deleteInfo"
+      ref="deleteDialog"
       role="alertdialog"
+      aria-modal="true"
       aria-label="Delete section"
       class="confirm"
       data-test="confirm-delete"
+      tabindex="-1"
+      @keydown.esc.stop.prevent="confirmingDelete = undefined"
     >
       <p>
         Delete {{ KIND_LABELS[deleteInfo.section.kind].toLowerCase() }} “{{
@@ -340,8 +353,14 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
           and the {{ deleteInfo.inside }} section(s) inside it</template
         >? Its text is deleted too.
       </p>
-      <button type="button" data-test="confirm-delete-all" @click="confirmDelete('delete')">
-        Delete{{ deleteInfo.inside ? ` all ${deleteInfo.inside + 1}` : '' }}
+      <!-- Safest first; Cancel takes focus when the dialog opens. -->
+      <button
+        ref="deleteCancel"
+        type="button"
+        data-test="confirm-delete-cancel"
+        @click="confirmingDelete = undefined"
+      >
+        Cancel
       </button>
       <button
         v-if="deleteInfo.inside"
@@ -353,8 +372,8 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
       >
         Delete only this, keep what is inside
       </button>
-      <button type="button" data-test="confirm-delete-cancel" @click="confirmingDelete = undefined">
-        Cancel
+      <button type="button" data-test="confirm-delete-all" @click="confirmDelete('delete')">
+        Delete{{ deleteInfo.inside ? ` all ${deleteInfo.inside + 1}` : '' }}
       </button>
     </div>
   </nav>
