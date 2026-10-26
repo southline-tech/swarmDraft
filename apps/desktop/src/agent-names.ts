@@ -82,7 +82,7 @@ export const agentIdOf = (author: string) =>
 export interface AgentName {
   name: string;
   note?: string;
-  /** True for agent authors: shown with an "Agent" tag, and "(agent)" in hover text. */
+  /** True for agent authors: shown with a "Bot" tag, and "(agent)" in hover text. */
   agent?: boolean;
 }
 

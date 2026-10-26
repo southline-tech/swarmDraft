@@ -310,7 +310,7 @@ describe('agent display names (RAD-263)', () => {
     w.unmount();
   });
 
-  it('comments: injection-safe names and saved names, Agent tag, colour keyed by agent id', async () => {
+  it('comments: injection-safe names and saved names, Bot tag, colour keyed by agent id', async () => {
     setAgents([agent('a1', EVIL)]);
     const row = (id: string, authorId: string, authorName: string) => ({
       id,
@@ -341,7 +341,7 @@ describe('agent display names (RAD-263)', () => {
     expect(authors[0]!.find('[data-test=agent-name]').text()).toBe(EVIL);
     expect(authors[1]!.find('[data-test=agent-name]').text()).toBe(`${EVIL} (revoked)`);
     expect(authors[1]!.find('[data-test=agent-note]').text()).toBe('(removed)');
-    expect(authors.every((a) => a.find('[data-test=agent-tag]').text() === 'Agent')).toBe(true);
+    expect(authors.every((a) => a.find('[data-test=agent-tag]').text() === 'Bot')).toBe(true);
     expect(c.find('.badge').exists()).toBe(false);
 
     // Same agent id, different saved names: same swatch colour.
