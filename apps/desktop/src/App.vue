@@ -318,7 +318,6 @@ defineExpose({ open });
         :manuscript-id="session.id"
         :selected-id="selectedId"
         :save="session.save"
-        :locked="session.outlineLocked"
         @select="selectedId = $event"
       />
       <ManuscriptEditor
