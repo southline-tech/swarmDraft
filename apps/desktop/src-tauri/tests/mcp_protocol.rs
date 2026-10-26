@@ -972,7 +972,7 @@ async fn oversized_declared_content_length_is_refused_before_reading() {
 fn raw_keys(s: &Server, sid: &str) -> Vec<String> {
     use yrs::types::text::YChange;
     use yrs::types::xml::{XmlFragment, XmlOut};
-    use yrs::{ReadTxn, Text, Transact};
+    use yrs::{Text, Transact};
     let sec = s.store.get_section(&s.manuscript_id, sid).unwrap();
     let doc = s.store.load_doc(&sec.doc_id).unwrap();
     let frag = doc.get_or_insert_xml_fragment(coauthor_lib::content::FRAGMENT);
