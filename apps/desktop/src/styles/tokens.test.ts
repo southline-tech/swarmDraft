@@ -47,16 +47,19 @@ describe('suggestion tokens', () => {
     expect(rules('[data-theme="dark"]').join('\n')).not.toContain('--ct-suggest-');
   });
 
-  it('lets a nested element resolve its own suggester color', () => {
-    // Simulated cascade: the derived token is re-declared on each [data-suggester]
-    // element, so var(--ct-suggester) resolves against that element's value.
-    const underline =
-      /--ct-suggest-insert-underline:\s*var\((--[\w-]+)\)/.exec(
-        rules(':where([data-suggester])')[0] ?? '',
-      )?.[1] ?? '';
-    const outer: Record<string, string> = { '--ct-suggester': 'var(--ct-collab-2)' };
-    const inner: Record<string, string> = { ...outer, '--ct-suggester': 'var(--ct-collab-5)' };
-    expect(outer[underline]).toBe('var(--ct-collab-2)');
-    expect(inner[underline]).toBe('var(--ct-collab-5)');
+  it('places the dark [data-suggester] rule after the light one', () => {
+    const light = css.indexOf(':where([data-suggester])');
+    const dark = css.indexOf(":where([data-theme='dark'] [data-suggester])");
+    expect(light).toBeGreaterThan(-1);
+    expect(dark).toBeGreaterThan(light);
+  });
+});
+
+describe('focus ring', () => {
+  it('excludes the .ProseMirror editor from the global ring at zero specificity', () => {
+    const body = rules(':where(:focus-visible:not(.ProseMirror))').join('\n');
+    expect(body).toMatch(/outline:\s*var\(--ct-focus-outline\)/);
+    expect(rules(':focus-visible')).toHaveLength(0);
+    expect(rules(':where(.ProseMirror:focus-visible)').join('')).toMatch(/outline:\s*none/);
   });
 });

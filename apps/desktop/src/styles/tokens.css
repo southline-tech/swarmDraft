@@ -191,7 +191,13 @@ body {
   color: var(--ct-text);
   background: var(--ct-bg);
 }
-:focus-visible {
+/* Global focus ring at zero specificity, so any component focus style wins.
+   The manuscript editor (.ProseMirror) is excluded: it is a text surface, not a control. */
+:where(:focus-visible:not(.ProseMirror)) {
   outline: var(--ct-focus-outline);
   outline-offset: var(--ct-focus-offset);
+}
+/* Also suppress the browser's default focus outline on the editor (author origin beats UA). */
+:where(.ProseMirror:focus-visible) {
+  outline: none;
 }
