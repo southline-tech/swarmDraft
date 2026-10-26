@@ -37,6 +37,12 @@ async function chooseFile(w: ReturnType<typeof mount>) {
   await settle();
 }
 
+async function openSettings(w: ReturnType<typeof mount>) {
+  if (!w.find('[data-test="settings"]').exists()) {
+    await w.find('[data-test="settings-open"]').trigger('click');
+  }
+}
+
 describe('App', () => {
   it('saves an imported .docx to the backend before opening it', async () => {
     const backend = await import('./backend');
@@ -162,6 +168,7 @@ describe('App', () => {
     const w = mount(App);
     await flushPromises();
     expect(w.text()).toContain('coAuthor');
+    await openSettings(w);
     expect(w.find('[data-test="browser-mode"]').exists()).toBe(true);
     expect(w.find('[data-test="no-manuscript"]').exists()).toBe(true);
     expect(w.findAll('.row')).toHaveLength(0);
@@ -447,6 +454,7 @@ describe('restore confirmation', () => {
       return e;
     });
     editor.commands.insertContentAt(1, 'PENDING ');
+    await openSettings(w);
     await w.find('[data-test="restore-path"]').setValue('C:\\b.zip');
     await w.find('[data-test="restore-button"]').trigger('click');
     await w.find('[data-test="restore-confirm-yes"]').trigger('click');
@@ -644,6 +652,7 @@ describe('restore confirmation', () => {
       return e;
     });
     editor.commands.insertContentAt(1, 'UNSAVED ');
+    await openSettings(w);
     await w.find('[data-test="restore-path"]').setValue('C:\\b.zip');
     await w.find('[data-test="restore-button"]').trigger('click');
     await w.find('[data-test="restore-confirm-yes"]').trigger('click');
@@ -663,6 +672,7 @@ describe('restore confirmation', () => {
     const backend = await import('./backend');
     const wrapper = mount(App);
     await flushPromises();
+    await openSettings(wrapper);
     await wrapper.find('[data-test="restore-path"]').setValue('C:\\Users\\a\\b.zip');
     await wrapper.find('[data-test="restore-button"]').trigger('click');
     expect(backend.restoreBackup).not.toHaveBeenCalled();
@@ -683,6 +693,7 @@ describe('restore confirmation', () => {
 
 describe('tokens-revoked notice', () => {
   async function restoreOnce(wrapper: ReturnType<typeof mount>): Promise<void> {
+    await openSettings(wrapper);
     await wrapper.find('[data-test="restore-path"]').setValue('C:\\b.zip');
     await wrapper.find('[data-test="restore-button"]').trigger('click');
     await wrapper.find('[data-test="restore-confirm-yes"]').trigger('click');
@@ -726,6 +737,7 @@ describe('backup dialogs', () => {
     vi.mocked(backend.restoreBackup).mockClear();
     const wrapper = mount(App);
     await flushPromises();
+    await openSettings(wrapper);
     await wrapper.find('[data-test="restore-pick"]').trigger('click');
     await flushPromises();
     expect(backend.restoreBackup).not.toHaveBeenCalled();
@@ -739,6 +751,7 @@ describe('backup dialogs', () => {
     const backend = await import('./backend');
     const wrapper = mount(App);
     await flushPromises();
+    await openSettings(wrapper);
     await wrapper.find('[data-test="backup-button"]').trigger('click');
     await flushPromises();
     expect(backend.createBackup).toHaveBeenCalledWith('D:\\Backups\\new.zip', true);
@@ -821,6 +834,7 @@ describe('recovery notice', () => {
 
 describe('restore closes the open manuscript', () => {
   async function restore(w: ReturnType<typeof mount>) {
+    await openSettings(w);
     await w.find('[data-test="restore-path"]').setValue('C:\\b.zip');
     await w.find('[data-test="restore-button"]').trigger('click');
     await w.find('[data-test="restore-confirm-yes"]').trigger('click');
@@ -858,5 +872,179 @@ describe('restore closes the open manuscript', () => {
     expect(w.find('[data-test="no-manuscript"]').exists()).toBe(false);
     expect(w.find('.tiptap').exists()).toBe(true);
     w.unmount();
+  });
+});
+
+describe('home screen', () => {
+  it('shows the welcome once, then the open screen, and remembers it', async () => {
+    localStorage.removeItem('coauthor.welcomed');
+    const w = mount(App);
+    await flushPromises();
+    expect(w.find('[data-test="home-welcome"]').text()).toContain('Welcome to coAuthor');
+    expect(w.find('[data-test="open-manuscript"]').exists()).toBe(false);
+    await w.find('[data-test="get-started"]').trigger('click');
+    expect(w.find('[data-test="home-open"]').text()).toContain("Let's open your book");
+    expect(localStorage.getItem('coauthor.welcomed')).toBe('1');
+    w.unmount();
+    const again = mount(App);
+    await flushPromises();
+    expect(again.find('[data-test="home-welcome"]').exists()).toBe(false);
+    expect(again.find('[data-test="open-manuscript"]').text()).toContain('Open my Word manuscript');
+    again.unmount();
+  });
+
+  it('"Open my Word manuscript" opens the Word file picker', async () => {
+    localStorage.setItem('coauthor.welcomed', '1');
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    const input = w.find('[data-test="open-docx"]').element as HTMLInputElement;
+    const click = vi.spyOn(input, 'click').mockImplementation(() => {});
+    await w.find('[data-test="open-manuscript"]').trigger('click');
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(input.accept).toContain('.docx');
+    w.unmount();
+  });
+
+  it('opens a manuscript dropped on the drop zone', async () => {
+    localStorage.setItem('coauthor.welcomed', '1');
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    const file = new File([bytes()], 'synthetic.docx');
+    Object.defineProperty(file, 'arrayBuffer', { value: async () => bytes().buffer });
+    await w.find('[data-test="drop-zone"]').trigger('drop', { dataTransfer: { files: [file] } });
+    await settle();
+    expect(w.find('[data-test="home"]').exists()).toBe(false);
+    expect(w.findAll('.row').length).toBeGreaterThan(0);
+    w.unmount();
+  });
+
+  it('keeps backup, restore and agents behind Settings', async () => {
+    const w = mount(App);
+    await flushPromises();
+    expect(w.find('[data-test="backup"]').exists()).toBe(false);
+    expect(w.find('[data-test="app-info"]').exists()).toBe(false);
+    await w.find('[data-test="settings-open"]').trigger('click');
+    expect(w.find('[data-test="backup"]').exists()).toBe(true);
+    expect(w.find('[data-test="app-info"]').exists()).toBe(true);
+    await w.find('[data-test="settings-close"]').trigger('click');
+    expect(w.find('[data-test="settings"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('moves focus to the open button after Get started', async () => {
+    localStorage.removeItem('coauthor.welcomed');
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await w.find('[data-test="get-started"]').trigger('click');
+    await settle();
+    expect(document.activeElement).toBe(w.find('[data-test="open-manuscript"]').element);
+    w.unmount();
+  });
+
+  it('rejects a dropped file that is not Word, keeping the open book', async () => {
+    const backend = await import('./backend');
+    const persist = vi.mocked(backend.persistImport);
+    const { w, session } = await withManuscript();
+    persist.mockClear();
+    await w.find('[data-test="open-another"]').trigger('click');
+    const bad = new File(['hello'], 'notes.txt');
+    await w.find('[data-test="drop-zone"]').trigger('drop', { dataTransfer: { files: [bad] } });
+    await settle();
+    expect(w.find('[data-test="open-error"]').text()).toBe(
+      "That file isn't a Word manuscript. Please choose a Word file.",
+    );
+    expect(persist).not.toHaveBeenCalled();
+    expect(session.closed).toBe(false);
+    await w.find('[data-test="open-cancel"]').trigger('click');
+    expect(w.find('.tiptap').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('opens a second manuscript from inside an open one', async () => {
+    const { w } = await withManuscript();
+    expect(w.find('[data-test="home"]').exists()).toBe(false);
+    await w.find('[data-test="open-another"]').trigger('click');
+    expect(w.find('[data-test="home-open"]').exists()).toBe(true);
+    await chooseFile(w);
+    expect(w.find('[data-test="home"]').exists()).toBe(false);
+    expect(w.findAll('.row').length).toBeGreaterThan(0);
+    w.unmount();
+  });
+
+  it('skips the welcome for a returning user whose book reopens', async () => {
+    localStorage.removeItem('coauthor.welcomed');
+    const { w } = await withManuscript();
+    expect(localStorage.getItem('coauthor.welcomed')).toBe('1');
+    w.unmount();
+  });
+
+  it('focuses Settings when it opens and closes it on Esc', async () => {
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await w.find('[data-test="settings-open"]').trigger('click');
+    await settle();
+    const panel = w.find('[data-test="settings"]');
+    expect(document.activeElement).toBe(panel.element);
+    await panel.trigger('keydown', { key: 'Escape' });
+    expect(w.find('[data-test="settings"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('lets OS file drops reach the page (Tauri drag-drop off)', () => {
+    const conf = JSON.parse(
+      readFileSync(resolve(__dirname, '../src-tauri/tauri.conf.json'), 'utf8'),
+    ) as { app: { windows: { dragDropEnabled?: boolean }[] } };
+    expect(conf.app.windows[0]!.dragDropEnabled).toBe(false);
+  });
+
+  it('returns focus to the Settings button when Settings closes', async () => {
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    const button = w.find('[data-test="settings-open"]');
+    await button.trigger('click');
+    await settle();
+    await w.find('[data-test="settings"]').trigger('keydown', { key: 'Escape' });
+    await settle();
+    expect(document.activeElement).toBe(button.element);
+    await button.trigger('click');
+    await settle();
+    await w.find('[data-test="settings-close"]').trigger('click');
+    await settle();
+    expect(document.activeElement).toBe(button.element);
+    w.unmount();
+  });
+
+  it('swallows a file dropped outside the drop zone without importing or closing', async () => {
+    const backend = await import('./backend');
+    const persist = vi.mocked(backend.persistImport);
+    const { w, session } = await withManuscript();
+    persist.mockClear();
+    const file = new File(['x'], 'other.docx');
+    for (const target of [w.find('.tiptap').element, w.find('.topbar').element]) {
+      for (const type of ['dragover', 'drop']) {
+        const ev = new Event(type, { bubbles: true, cancelable: true });
+        Object.defineProperty(ev, 'dataTransfer', { value: { files: [file] } });
+        target.dispatchEvent(ev);
+        expect(ev.defaultPrevented).toBe(true);
+      }
+    }
+    await settle();
+    expect(persist).not.toHaveBeenCalled();
+    expect(session.closed).toBe(false);
+    expect(w.find('.tiptap').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('removes the window drop guard on unmount', async () => {
+    const add = vi.spyOn(window, 'addEventListener');
+    const remove = vi.spyOn(window, 'removeEventListener');
+    const w = mount(App);
+    await flushPromises();
+    const added = add.mock.calls.filter(([t]) => t === 'drop' || t === 'dragover');
+    expect(added).toHaveLength(2);
+    w.unmount();
+    for (const [type, fn] of added) expect(remove).toHaveBeenCalledWith(type, fn);
+    add.mockRestore();
+    remove.mockRestore();
   });
 });
