@@ -17,6 +17,8 @@ import { refreshAgents, reloadOnFocus } from './agent-names';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
 import HomeScreen from './HomeScreen.vue';
+import ShellsPreview from './shells/ShellsPreview.vue';
+import { applyThemeParam, readPreview } from './shells/preview';
 import { flushOnClose } from './close-flush';
 import { outlineDocs, sectionTreeDocs } from './status/wordcount';
 import {
@@ -91,6 +93,13 @@ async function getStarted() {
 /** "Open another book" from inside an open manuscript shows the open screen over it. */
 const choosingBook = ref(false);
 const settingsOpen = ref(false);
+// UI-shell previews (Part of #36): `?preview=<id|all>`, or Settings → Preview new screens.
+applyThemeParam(window.location.search, document.documentElement);
+const preview = ref(readPreview(window.location.search));
+function openPreview(id: 'all' | 'tc5') {
+  settingsOpen.value = false;
+  preview.value = id;
+}
 const settingsPanel = ref<HTMLElement | null>(null);
 const settingsButton = ref<HTMLButtonElement | null>(null);
 watch(settingsOpen, async (isOpen) => {
@@ -317,7 +326,8 @@ defineExpose({ open });
 </script>
 
 <template>
-  <main class="shell">
+  <ShellsPreview v-if="preview" class="shell" :initial="preview" @close="preview = null" />
+  <main v-else class="shell">
     <header class="topbar">
       <span class="topbar__name">coAuthor</span>
       <button
@@ -354,6 +364,14 @@ defineExpose({ open });
       <button type="button" class="btn" data-test="settings-close" @click="settingsOpen = false">
         Close
       </button>
+      <p>
+        <button type="button" class="btn" data-test="open-name-color" @click="openPreview('tc5')">
+          Your name &amp; color…
+        </button>
+        <button type="button" class="btn" data-test="open-previews" @click="openPreview('all')">
+          Preview new screens
+        </button>
+      </p>
       <p>Default trim: {{ DEFAULT_TRIM }}</p>
       <p v-if="info" data-test="app-info">
         v{{ info.version }} · data: {{ info.dataDir }} · db schema {{ info.schemaVersion }}

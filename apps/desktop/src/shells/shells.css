@@ -1,0 +1,27 @@
+/* Shared button styles for the UI shells. Tokens only. */
+.sh-btn {
+  min-height: var(--ct-space-10);
+  padding: 0 var(--ct-space-4);
+  border: 1px solid var(--ct-border-strong);
+  border-radius: var(--ct-radius-md);
+  background: var(--ct-surface);
+  color: var(--ct-text);
+  font: inherit;
+  font-size: var(--ct-text-sm);
+  font-weight: var(--ct-weight-medium);
+  cursor: pointer;
+}
+.sh-btn--primary {
+  border-color: var(--ct-accent);
+  background: var(--ct-accent);
+  color: var(--ct-accent-contrast);
+}
+.sh-btn--link {
+  border: 0;
+  background: none;
+  text-decoration: underline;
+}
+.sh-btn:focus-visible {
+  outline: var(--ct-focus-outline);
+  outline-offset: var(--ct-focus-offset);
+}
