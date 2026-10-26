@@ -33,7 +33,12 @@ const props = defineProps<{
   /** Persist a new outline; throw (or reject) to refuse it. */
   save?: (next: Section[]) => void | Promise<void>;
 }>();
-const emit = defineEmits<{ 'update:sections': [Section[]]; select: [id: string] }>();
+const emit = defineEmits<{
+  'update:sections': [Section[]];
+  select: [id: string];
+  /** A row was clicked: the parent should move focus into that section's text (#36). */
+  activate: [id: string];
+}>();
 
 const KIND_LABELS: Record<SectionKind, string> = {
   front_matter: 'Front matter',
@@ -208,6 +213,11 @@ async function onDrop(target: Section) {
 function select(id: string) {
   emit('select', id);
 }
+/** Mouse click on a row: select it and hand focus to the editor. Not while renaming it. */
+function activate(id: string) {
+  select(id);
+  if (editingId.value !== id) emit('activate', id);
+}
 function focusRow(id: string) {
   void nextTick(() =>
     (
@@ -284,7 +294,7 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
         @dragstart="dragId = row.section.id"
         @dragover.prevent
         @drop.prevent="onDrop(row.section)"
-        @click="select(row.section.id)"
+        @click="activate(row.section.id)"
         @dblclick="startRename(row.section.id, row.section.title)"
         @keydown="onKey($event, row)"
       >

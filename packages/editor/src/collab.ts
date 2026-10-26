@@ -11,7 +11,7 @@
  * reports the error through `onContentError`. The Y.Doc itself is left untouched.
  */
 import { Extension, getSchema, type EditorOptions, type JSONContent } from '@tiptap/core';
-import { Plugin } from '@tiptap/pm/state';
+import { Plugin, Selection, TextSelection } from '@tiptap/pm/state';
 import Collaboration from '@tiptap/extension-collaboration';
 import { yXmlFragmentToProsemirrorJSON, ySyncPluginKey } from '@tiptap/y-tiptap';
 import type * as Y from 'yjs';
@@ -42,7 +42,11 @@ export function collaborativeEditorOptions(
   opts: Partial<EditorOptions> = {},
   field = YJS_FRAGMENT,
 ): Partial<EditorOptions> {
-  const { json, error } = readYDoc(doc, field);
+  // A brand-new section's doc has no content yet (#42). That is not invalid content: open it as
+  // one empty body paragraph, which the binding writes to the doc. Incoming updates that empty
+  // an existing doc are still checked strictly by the guard below.
+  const { json, error } =
+    doc.getXmlFragment(field).length === 0 ? { json: EMPTY_DOC } : readYDoc(doc, field);
   if (error) {
     return manuscriptEditorOptions({
       ...opts,
@@ -68,12 +72,40 @@ export function collaborativeEditorOptions(
     // Start from the stored content so the binding has nothing to write back on load.
     content: json?.content?.length ? json : EMPTY_DOC,
     extensions: [
+      TextSelectionAtLoad,
       Collaboration.configure({ document: doc, field }),
       TrustBindingRenders,
       ...(opts.extensions ?? []),
     ],
   });
 }
+
+/**
+ * A doc that starts with a scene break opens with a node selection on it. The y-sync binding's
+ * first render turns the old selection into a text selection at the same positions, which
+ * then points outside any text (a console warning). Move the selection into text first: this
+ * plugin's view is created just before the binding's (higher priority), and it only changes
+ * the selection, never the doc.
+ */
+const TextSelectionAtLoad = Extension.create({
+  name: 'textSelectionAtLoad',
+  priority: 1001, // before Collaboration (1000)
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        view: (view) => {
+          const { selection, doc } = view.state;
+          if (!(selection instanceof TextSelection)) {
+            const near = Selection.findFrom(doc.resolve(0), 1, true);
+            if (near)
+              view.dispatch(view.state.tr.setSelection(near).setMeta('addToHistory', false));
+          }
+          return {};
+        },
+      }),
+    ];
+  },
+});
 
 /**
  * Mark the exact transactions the y-sync binding dispatches (see ./ysource) so the review guard
