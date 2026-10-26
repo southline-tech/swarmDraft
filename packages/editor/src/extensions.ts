@@ -156,6 +156,66 @@ export const HardBreak = Node.create({
   },
 });
 
+/**
+ * Inline note reference (footnote or endnote). The note body is kept in attrs as imported
+ * (schema `FootnoteNode`), rendered as a superscript marker; editing notes is out of scope.
+ */
+export const Footnote = Node.create({
+  name: 'footnote',
+  group: 'inline',
+  inline: true,
+  atom: true,
+  selectable: true,
+  addAttributes() {
+    return {
+      id: { default: '', parseHTML: (el: HTMLElement) => el.getAttribute('data-id') ?? '' },
+      kind: {
+        default: 'footnote',
+        parseHTML: (el: HTMLElement) => el.getAttribute('data-kind') ?? 'footnote',
+      },
+      text: { default: '', parseHTML: (el: HTMLElement) => el.getAttribute('data-text') ?? '' },
+      content: { default: [], rendered: false },
+    };
+  },
+  parseHTML: () => [{ tag: 'sup[data-note]' }],
+  renderHTML: ({ node }) => [
+    'sup',
+    {
+      'data-note': '',
+      'data-id': String(node.attrs.id),
+      'data-kind': String(node.attrs.kind),
+      'data-text': String(node.attrs.text),
+      title: String(node.attrs.text),
+      class: node.attrs.kind === 'endnote' ? 'note endnote' : 'note footnote',
+    },
+    node.attrs.kind === 'endnote' ? '\u2020' : '*',
+  ],
+});
+
+/** Placeholder for an image that is not imported yet (RAD-217); shows its description. */
+export const ImagePlaceholder = Node.create({
+  name: 'image',
+  group: 'inline',
+  inline: true,
+  atom: true,
+  selectable: true,
+  addAttributes() {
+    return {
+      alt: { default: '', parseHTML: (el: HTMLElement) => el.getAttribute('data-alt') ?? '' },
+    };
+  },
+  parseHTML: () => [{ tag: 'span[data-image-placeholder]' }],
+  renderHTML: ({ node }) => [
+    'span',
+    {
+      'data-image-placeholder': '',
+      'data-alt': String(node.attrs.alt),
+      class: 'image-placeholder',
+    },
+    `[image${node.attrs.alt ? `: ${String(node.attrs.alt)}` : ''}]`,
+  ],
+});
+
 function formatMark(
   name: 'italic' | 'bold' | 'smallcaps' | 'underline' | 'strike',
   tag: string,
@@ -270,6 +330,8 @@ export function manuscriptExtensions(): Extensions {
     SceneBreak,
     PageBreak,
     HardBreak,
+    Footnote,
+    ImagePlaceholder,
     Italic,
     Bold,
     Smallcaps,

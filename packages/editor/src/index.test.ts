@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Editor, JSONContent } from '@tiptap/core';
 import {
+  BLOCK_NODE_TYPES,
+  INLINE_NODE_TYPES,
+  MARK_TYPES,
+  NON_EXCLUSIVE_MARKS,
+} from '@coauthor/schema';
+import {
   ALLOW_REVIEW_EDITS,
+  REVIEW_MARKS,
   collectReviewItems,
   createManuscriptEditor,
   markKey,
@@ -97,21 +104,13 @@ describe('manuscript schema', () => {
   it('only knows the manuscript nodes and marks', () => {
     make();
     expect(Object.keys(editor.schema.nodes).sort()).toEqual(
-      ['doc', 'hard_break', 'heading', 'page_break', 'paragraph', 'scene_break', 'text'].sort(),
+      ['doc', ...BLOCK_NODE_TYPES, ...INLINE_NODE_TYPES].sort(),
     );
-    expect(Object.keys(editor.schema.marks).sort()).toEqual(
-      [
-        'bold',
-        'comment_anchor',
-        'italic',
-        'link',
-        'smallcaps',
-        'strike',
-        'suggestion_delete',
-        'suggestion_insert',
-        'underline',
-      ].sort(),
-    );
+    expect(Object.keys(editor.schema.marks).sort()).toEqual([...MARK_TYPES].sort());
+  });
+
+  it('review marks are exactly the schema non-exclusive marks', () => {
+    expect([...REVIEW_MARKS].sort()).toEqual([...NON_EXCLUSIVE_MARKS].sort());
   });
 
   it('keys review marks type--id like the Yjs encoding', () => {
