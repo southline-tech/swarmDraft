@@ -403,14 +403,14 @@ const LABELS: Record<ReviewItem['type'], string> = {
   font-variant: small-caps;
 }
 .tiptap ins.suggestion-insert {
-  color: #1a7f37;
+  color: var(--ct-success);
   text-decoration: underline;
 }
 .tiptap del.suggestion-delete {
-  color: #b00020;
+  color: var(--ct-danger);
 }
 .tiptap .comment-anchor {
-  background: #fff3b0;
+  background: var(--ct-comment-bg);
 }
 .manuscript-editor .review ul {
   padding-left: 1rem;

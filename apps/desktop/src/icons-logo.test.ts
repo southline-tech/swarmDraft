@@ -25,6 +25,7 @@ const SWEPT = [
   './HomeScreen.vue',
   './SectionNav.vue',
   './AgentsSettings.vue',
+  './ManuscriptEditor.vue',
   './comments/CommentsPanel.vue',
   './AppLogo.vue',
   './icons/AppIcon.vue',
@@ -60,6 +61,14 @@ describe('logo', () => {
     expect(logo24Url).not.toBe(logo48Url);
     expect(small.attributes('width')).toBe('24');
     expect(big.attributes('alt')).toBe('');
+  });
+
+  it('defaults to the 64px caret SVG when no size is given', () => {
+    const img = mount(AppLogo).get('img');
+    expect(img.attributes('width')).toBe('64');
+    expect(img.attributes('height')).toBe('64');
+    expect(img.attributes('src')).toBe(logoUrl);
+    expect(img.attributes('srcset')).toBeUndefined();
   });
 
   it('welcome screen shows the logo, not a text placeholder', () => {
