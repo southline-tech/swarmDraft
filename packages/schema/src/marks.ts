@@ -2,8 +2,10 @@
  * Yjs attribute keys for marks (y-prosemirror encoding). Exclusive marks are keyed by type.
  * Marks that may overlap another of the same type (comments, suggestions) are keyed
  * `type--<8 base64>`: y-prosemirror only parses `--` plus exactly 8 chars as an overlap key, so
- * the suffix is a 32-bit FNV-1a hash of the mark id
- * (48 bits, base64). The id itself stays in the attrs.
+ * the suffix is a 48-bit FNV-1a hash of the mark id as 8 base64 chars. The id itself stays in the
+ * attrs, and readers must identify a mark by `attrs.id`, never by its key: the editor binding
+ * rewrites the suffix with its own hash whenever it writes the run (e.g. `fwe1SmhZ` becomes
+ * `Ql7mhpA0` after typing in that paragraph).
  * Rust mirrors this; test vector: markIdHash('c1') === MARK_ID_HASH_TEST_VECTOR[1].
  */
 import { NON_EXCLUSIVE_MARKS } from './content';

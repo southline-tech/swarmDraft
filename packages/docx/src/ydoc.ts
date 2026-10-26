@@ -1,11 +1,17 @@
 /**
  * ProseMirror JSON <-> Yjs, using the same encoding as y-prosemirror
  * (Y.XmlFragment named "prosemirror"; nodes are Y.XmlElement, marks are
- * Y.XmlText format attributes keyed by mark type, or `type--<8 hex>` (see
+ * Y.XmlText format attributes keyed by mark type, or `type--<8 base64>` (see
  * markKeys in @coauthor/schema) for marks that may overlap another of the same type).
  */
 import * as Y from 'yjs';
-import { markKeys, markTypeFromKey } from '@coauthor/schema';
+import {
+  isParseableMarkKey,
+  markIdHash,
+  markKey,
+  markKeys,
+  markTypeFromKey,
+} from '@coauthor/schema';
 import { sortMarks, type DocNode, type InlineNode, type Mark } from './model';
 import type { ImportedManuscript } from './import';
 
@@ -107,9 +113,11 @@ function texts(el: Y.XmlFragment | Y.XmlElement, out: Y.XmlText[] = []): Y.XmlTe
 }
 
 /**
- * Re-key mark attributes written in an older form (e.g. `comment_anchor--c1` from RAD-218) to
- * the current `type--<8 base64>` keys, keeping each mark's attrs (and so its id). Idempotent:
- * returns the number of text runs changed, 0 when the doc is already current. Runs in one
+ * Re-key mark attributes the editor binding cannot parse (e.g. `comment_anchor--c1` from RAD-218)
+ * to `type--<8 base64>` keys, keeping each mark's attrs (and so its id). Keys the binding can
+ * parse, including the ones it writes itself, are left alone, so running this on every load does
+ * not fight the binding. Idempotent: returns the number of text runs changed, 0 when nothing
+ * needed re-keying. Runs in one
  * transaction with origin `REKEY_ORIGIN`.
  */
 export const REKEY_ORIGIN = 'coauthor:rekey-marks';
@@ -120,17 +128,26 @@ export function rekeyMarks(ydoc: Y.Doc): number {
     for (const d of t.toDelta() as { insert: unknown; attributes?: Record<string, unknown> }[]) {
       const len = typeof d.insert === 'string' ? d.insert.length : 1;
       const entries = Object.entries(d.attributes ?? {});
-      const marks = entries.map(([k, attrs]) => ({
-        type: markTypeFromKey(k),
-        attrs: (attrs && typeof attrs === 'object' ? attrs : {}) as Record<string, unknown>,
-      }));
-      const keys = markKeys(marks);
-      if (entries.some(([k], i) => k !== keys[i])) {
-        const fmt: Record<string, unknown> = {};
-        for (const [k] of entries) fmt[k] = null;
-        entries.forEach(([, v], i) => (fmt[keys[i]!] = v));
-        ops.push([t, index, len, fmt]);
+      if (entries.every(([k]) => isParseableMarkKey(k))) {
+        index += len;
+        continue;
       }
+      // Keep parseable keys; give each unparseable one a fresh key not used on this run.
+      const used = new Set(entries.map(([k]) => k).filter(isParseableMarkKey));
+      const fmt: Record<string, unknown> = {};
+      for (const [k, v] of entries) {
+        if (isParseableMarkKey(k)) continue;
+        const attrs = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+        const type = markTypeFromKey(k);
+        const id = attrs.id === undefined ? undefined : String(attrs.id);
+        let key = markKey({ type, attrs });
+        for (let n = 1; id !== undefined && used.has(key); n++)
+          key = `${type}--${markIdHash(`${id}:${n}`)}`;
+        used.add(key);
+        fmt[k] = null;
+        fmt[key] = v;
+      }
+      ops.push([t, index, len, fmt]);
       index += len;
     }
   }

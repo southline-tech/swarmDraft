@@ -8,6 +8,7 @@ import {
   ReplaceStep,
   type Step,
 } from '@tiptap/pm/transform';
+import { ySyncPluginKey } from '@tiptap/y-tiptap';
 import { REVIEW_MARKS, SUGGESTION_MARKS, type ReviewMarkType } from './content';
 
 /**
@@ -16,7 +17,8 @@ import { REVIEW_MARKS, SUGGESTION_MARKS, type ReviewMarkType } from './content';
  * review mark, pastes one in, or edits text inside a pending suggestion. Code that legitimately
  * changes them (a future accept/reject flow) marks the transaction with `allowReviewEdits(tr)`
  * from `@coauthor/editor/trusted`. The meta is an unforgeable token: a plain
- * `setMeta('allowReviewEdits', true)` from a plugin or bot is ignored.
+ * `setMeta('allowReviewEdits', true)` from a plugin or bot is ignored. Changes the Yjs binding
+ * applies from the section's Y.Doc pass, since the Y.Doc is the source of truth.
  */
 export const reviewGuardKey = new PluginKey('coauthorReviewGuard');
 /** Module-private token; only `allowReviewEdits` in ./trusted can attach it. */
@@ -81,6 +83,9 @@ export const ReviewGuard = Extension.create({
         filterTransaction: (tr) =>
           !tr.docChanged ||
           tr.getMeta(reviewGuardKey) === REVIEW_EDIT_TOKEN ||
+          // Changes applied from the bound Y.Doc (peers, agents); validated in collab.ts.
+          (tr.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | undefined)
+            ?.isChangeOrigin === true ||
           !transactionChangesReview(tr),
       }),
     ];

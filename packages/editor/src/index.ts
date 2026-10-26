@@ -1,6 +1,5 @@
 /**
- * Editor package: the Tiptap manuscript editor (RAD-202). The Yjs binding, local persistence
- * and the parts/chapters/scenes outline land here next (RAD-203, RAD-214).
+ * Editor package: the Tiptap manuscript editor (RAD-202) and its Yjs binding (`./collab`).
  */
 import { Editor, Extension, type EditorOptions, type JSONContent } from '@tiptap/core';
 import { Plugin } from '@tiptap/pm/state';
@@ -26,10 +25,10 @@ export const EMPTY_DOC: JSONContent = {
   content: [{ type: 'paragraph', attrs: { style: 'body' } }],
 };
 
-/** Options for a manuscript editor; pass the result to `new Editor()` or Vue's `useEditor()`. */
 /**
- * The content check guards loading (and, via Collaboration, every remote Yjs change). Once the
- * view exists, later pastes/inserts go back to lenient parsing (unknown HTML dropped as usual).
+ * The content check guards loading. Once the view exists, later pastes/inserts go back to
+ * lenient parsing (unknown HTML dropped as usual); incoming Yjs changes are validated separately
+ * by `collaborativeEditorOptions` (see collab.ts).
  */
 const LenientAfterLoad = Extension.create({
   name: 'lenientAfterLoad',
@@ -47,6 +46,8 @@ const LenientAfterLoad = Extension.create({
 });
 
 /**
+ * Options for a manuscript editor; pass the result to `new Editor()` or Vue's `useEditor()`.
+ *
  * Content that does not fit the manuscript schema (unknown nodes or marks) is never silently
  * dropped: the content check is on, and on a content error the editor turns read-only, a bound
  * Yjs document is detached (so nothing is written back to stored content), and
