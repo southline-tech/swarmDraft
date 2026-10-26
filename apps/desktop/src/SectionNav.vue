@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppIcon from './icons/AppIcon.vue';
 /**
  * Parts / chapters / scenes navigation (RAD-214). Shows the outline as an indented tree; select a
  * section to open it, add sections, rename (double-click, F2 or Rename), reorder (arrow buttons,
@@ -355,13 +356,34 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
           :disabled="busy || !parentFor(kind)"
           @click="add(kind)"
         >
-          + {{ KIND_LABELS[kind] }}
+          <AppIcon name="plus" />
+          {{ KIND_LABELS[kind] }}
         </button>
       </div>
     </details>
     <div v-if="selected" class="actions" role="toolbar" aria-label="Selected section">
-      <button type="button" data-test="move-up" :disabled="busy" @click="move(-1)">↑</button>
-      <button type="button" data-test="move-down" :disabled="busy" @click="move(1)">↓</button>
+      <button
+        type="button"
+        class="icon-btn"
+        data-test="move-up"
+        aria-label="Move up"
+        title="Move up"
+        :disabled="busy"
+        @click="move(-1)"
+      >
+        <AppIcon name="arrow-up" />
+      </button>
+      <button
+        type="button"
+        class="icon-btn"
+        data-test="move-down"
+        aria-label="Move down"
+        title="Move down"
+        :disabled="busy"
+        @click="move(1)"
+      >
+        <AppIcon name="arrow-down" />
+      </button>
       <button
         type="button"
         data-test="rename"
@@ -441,6 +463,12 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
 </template>
 
 <style scoped>
+.icon-btn,
+.actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ct-space-1);
+}
 .confirm .danger {
   background: var(--ct-danger);
   border-color: var(--ct-danger);
@@ -460,6 +488,7 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
 }
 .row.selected {
   background: var(--ct-selected-bg);
+  color: var(--ct-text);
 }
 .row .title {
   flex: 1;
@@ -485,7 +514,8 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
   cursor: default;
 }
 .row:focus-visible {
-  outline: 2px solid var(--ct-focus-ring-color);
+  outline: var(--ct-focus-outline);
+  outline-offset: calc(var(--ct-focus-offset) * -1);
 }
 .group-row {
   list-style: none;
@@ -512,8 +542,8 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
   cursor: pointer;
 }
 .kind {
-  font-size: 0.75rem;
-  color: #666;
+  font-size: var(--ct-text-xs);
+  color: var(--ct-text-muted);
   min-width: 5.5rem;
 }
 .actions {
@@ -525,8 +555,9 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
   color: var(--ct-warning);
 }
 .confirm {
-  border: 1px solid #c33;
-  padding: 0.5rem;
-  margin-top: 0.5rem;
+  border: 1px solid var(--ct-danger);
+  border-radius: var(--ct-radius-md);
+  padding: var(--ct-space-2);
+  margin-top: var(--ct-space-2);
 }
 </style>

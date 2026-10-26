@@ -17,6 +17,7 @@ import { refreshAgents, reloadOnFocus } from './agent-names';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
 import HomeScreen from './HomeScreen.vue';
+import AppLogo from './AppLogo.vue';
 import ShellsPreview from './shells/ShellsPreview.vue';
 import { applyThemeParam, readPreview } from './shells/preview';
 import { flushOnClose } from './close-flush';
@@ -419,7 +420,12 @@ defineExpose({ open });
   <ShellsPreview v-if="preview" class="shell" :initial="preview" @close="preview = null" />
   <main v-else class="shell">
     <header v-show="!focusMode" class="topbar">
-      <span class="topbar__name">{{ session && !choosingBook ? session.title : 'coAuthor' }}</span>
+      <span class="topbar__brand">
+        <AppLogo :size="24" />
+        <span class="topbar__name">{{
+          session && !choosingBook ? session.title : 'coAuthor'
+        }}</span>
+      </span>
       <span v-if="breadcrumb" class="topbar__crumb" data-test="breadcrumb">— {{ breadcrumb }}</span>
       <details class="topbar__menu" data-test="app-menu">
         <summary class="topbar__icon" aria-label="Book menu" title="Book menu">⋯</summary>
@@ -637,6 +643,11 @@ body {
   border-bottom: 1px solid var(--ct-border);
   background: var(--ct-surface);
 }
+.topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-space-2);
+}
 .topbar__name {
   font-weight: var(--ct-weight-semibold);
   font-size: var(--ct-text-sm);
@@ -678,7 +689,6 @@ body {
   border: 1px solid var(--ct-border);
   border-radius: var(--ct-radius-md);
   background: var(--ct-surface);
-  box-shadow: var(--ct-shadow-3, none);
   white-space: nowrap;
 }
 .topbar__button {

@@ -495,8 +495,10 @@ const LABELS: Record<ReviewItem['type'], string> = {
 <style>
 .manuscript-editor .load-error {
   border: 1px solid var(--ct-danger);
+  border-radius: var(--ct-radius-md);
+  background: var(--ct-danger-bg);
   color: var(--ct-danger);
-  padding: 0.5rem 0.75rem;
+  padding: var(--ct-space-2) var(--ct-space-3);
 }
 .manuscript-editor {
   display: flex;

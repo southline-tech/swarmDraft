@@ -93,3 +93,4 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #66 · 'doc unchanged' test built a Y.Doc the component never received · (and the click loop never reached Save) · a no-mutation test must pass the real doc into the component and actually trigger every write path
 - 2026-10-26 · #66 · settings defaults hard-coded real-looking names · use neutral sample names in defaults and fixtures
 - 2026-10-26 · #66 · inline card marked role=dialog without modal behavior · use role=dialog only with aria-modal, focus in, Tab trap, Esc and focus return; otherwise an inline card
+- 2026-10-26 · #69 · in-app logo used the superseded plain-c masters, not the c-with-caret pack · take logo assets from the Designer's latest pack and test the exact asset per size
