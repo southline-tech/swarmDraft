@@ -43,93 +43,112 @@ coAuthor is a bot-native collaborative word processor. Humans and AI agents co-w
 - I list documents and chapters and read chapter text with stable anchors.
 - I leave a comment anchored to a passage.
 - I propose an edit as a tracked suggestion; the human decides.
-- If granted, I apply paragraph styles (e.g. scene break, epigraph) and trigger an export and get a download link.
-- I cannot accept my own suggestions unless the human explicitly granted that.
+- I suggest paragraph styles (e.g. scene break, epigraph) and can trigger a local export.
+- I can never accept or reject suggestions; only the human can.
 
 ## 5. Architecture
 
+coAuthor is a local-first Tauri desktop app (Windows first). Everything runs on the author's
+machine; there is no hosted server.
+
 ```
-Browser (Vue 3 + Tiptap/ProseMirror + y-prosemirror)
-        │  WebSocket (Yjs sync + awareness)
+Tauri window: Vue 3 + Tiptap/ProseMirror + y-prosemirror
+        │  Tauri commands / events
         ▼
-Collab server (Hocuspocus, Node/TS) ── persistence ──► Postgres (Yjs updates/snapshots, metadata)
-        ▲                                          └──► Object storage (exports, fonts, imports)
-        │ in-process Yjs doc access
-API server (Fastify/TS): REST + **MCP server** (Streamable HTTP)  ◄── Agents (Grok Bot, Claude, etc.)
-        │ job queue (pg-boss)
-        ▼
-Export worker: ProseMirror JSON → manuscript AST → Typst (PDF) / Pandoc (EPUB3, .docx)
+Rust backend (in-process)
+  ├─ storage: SQLite in the app data dir (metadata, Yjs updates/snapshots, comments, audit log)
+  │           + files (imports, exports, backups, fonts)
+  ├─ MCP server: Streamable HTTP on 127.0.0.1 only  ◄── local agents (bearer token per agent)
+  └─ export: ProseMirror JSON → manuscript AST → Typst (PDF) / Pandoc (EPUB3, .docx)
+Optional: Yjs sync provider for multi-device / remote collaboration (post-P1).
 ```
 
-- Single Yjs doc per manuscript; one Y.XmlFragment per chapter (keeps chapters loadable independently and reduces bot-edit blast radius).
-- Bots edit via a server-side Yjs client so their changes flow through the same CRDT path as humans (with origin = agent id).
-- Suggestions are ProseMirror marks (`suggestion_insert`, `suggestion_delete`) with author/id attributes, stored in the CRDT; accept/reject is a transaction.
+- One Yjs doc per section (chapter/scene), addressed as `manuscript/{id}/section/{sid}`, plus a
+  manuscript doc for metadata and outline. Sections load, persist and sync independently, which
+  also limits the blast radius of agent activity.
+- Agent activity flows through the same Yjs path as human edits (origin = agent id), but agents can
+  only add comments and suggestions; they never change accepted text.
+- Suggestions are ProseMirror marks (`suggestion_insert`, `suggestion_delete`, `format_change`)
+  with author/id attributes, stored in the CRDT. Accepting or rejecting is a human-only action in
+  the UI.
 
 ## 6. Stack choices
 
-| Area            | Choice                                                                   | Rationale                                                          |
-| --------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------ |
-| Frontend        | Vue 3 + Vite + TS                                                        | Brett's strength; Tiptap has first-class Vue 3 bindings.           |
-| Editor          | Tiptap 2/3 (ProseMirror)                                                 | Schema control, marks for suggestions, ecosystem.                  |
-| CRDT            | Yjs + y-prosemirror                                                      | Mature, ProseMirror binding, awareness for cursors.                |
-| Collab server   | Hocuspocus                                                               | Yjs server with auth hooks, persistence, server-side doc access.   |
-| API + MCP       | Node/TS, Fastify, official `@modelcontextprotocol/sdk` (Streamable HTTP) | Same language as collab server; shared schema code.                |
-| DB              | Postgres (+ pg-boss for jobs)                                            | One datastore for metadata, Yjs state, and the queue.              |
-| Storage         | S3-compatible (local MinIO/disk in dev)                                  | Exports, fonts, imports.                                           |
-| PDF typesetting | **Typst**                                                                | See below.                                                         |
-| EPUB3 / .docx   | Pandoc                                                                   | Best-in-class converters; reference.docx and EPUB CSS for theming. |
-| Auth            | Email magic link / single-owner for pilot; per-agent tokens              | Minimal for pilot.                                                 |
-| Hosting         | Single VPS / Fly.io with Docker Compose                                  | Cheap, simple.                                                     |
+| Area            | Choice                                             | Rationale                                                    |
+| --------------- | -------------------------------------------------- | ------------------------------------------------------------ |
+| Shell           | Tauri v2 (Rust)                                    | Small native installer (.msi/NSIS), local file + SQLite I/O. |
+| Frontend        | Vue 3 + Vite + TS                                  | Brett's strength; Tiptap has first-class Vue 3 bindings.     |
+| Editor          | Tiptap (ProseMirror)                               | Schema control, marks for suggestions, ecosystem.            |
+| CRDT            | Yjs + y-prosemirror                                | Mature, ProseMirror binding, offline-first.                  |
+| Storage         | SQLite (rusqlite) + files in the app data dir      | Local-first, single file DB, easy backup.                    |
+| MCP             | In-app server on 127.0.0.1 (Streamable HTTP)       | Local agents connect like any MCP connector.                 |
+| PDF typesetting | **Typst**                                          | See below.                                                   |
+| EPUB3 / .docx   | Pandoc                                             | Mature converters; reference.docx and EPUB CSS for theming.  |
+| Auth            | Single local user; per-agent bearer tokens         | Minimal for P1.                                              |
+| Distribution    | Unsigned Windows installer built in GitHub Actions | Signing deferred.                                            |
 
-**Typst vs Paged.js → Typst.** Typst is a deterministic, fast (sub-second for a novel), single-binary typesetter with native support for page sizes, inside/outside (mirrored) margins, odd/even running headers, page-number control, embedded OTF fonts, and widow/orphan handling; it produces PDF directly with no headless browser. Paged.js depends on Chromium print, whose PDF output, font embedding, and fragmentation (widows/orphans, blank-verso insertion, drop caps across page breaks) are less predictable and slower for 300+ page books. Trade-off: Typst themes aren't CSS, so preview uses Typst-rendered page images (or Typst's SVG output) rather than DOM; we accept that because the preview then exactly matches the print file. Revisit if theme authoring in Typst proves too costly.
+**Typst vs Paged.js → Typst.** Typst is a deterministic, fast, single-binary typesetter with native
+support for page sizes, mirrored margins, odd/even running headers, page-number control, embedded
+OTF fonts, and widow/orphan handling; it produces PDF directly with no headless browser. Paged.js
+depends on Chromium print, whose PDF output and fragmentation are less predictable and slower for
+300+ page books. Trade-off: preview uses Typst-rendered page images or SVG rather than DOM, so the
+preview exactly matches the print file.
 
-## 7. Data model
+## 7. Data model (SQLite + Yjs)
 
-- **User**(id, name, email, color)
-- **Agent**(id, name, color, avatar, owner_user_id, created_at, revoked_at)
-- **AgentToken**(id, agent_id, hashed_token, scopes[], manuscript_ids[] | all, last_used_at)
-- **Manuscript**(id, title, subtitle, author_name, owner_id, theme_id, trim_size, settings json, yjs_doc_id)
-- **Membership**(manuscript_id, principal_type user|agent, principal_id, role: owner|editor|suggester|commenter|viewer, can_self_accept=false)
-- **Yjs doc** (per manuscript): `meta` Y.Map; `structure` Y.Array of sections {id, kind: front_matter|chapter|part|back_matter, subtype: title|copyright|dedication|toc|epigraph|acknowledgments|about_author, title, fragmentKey}; one Y.XmlFragment per section.
-- **ProseMirror schema**: doc > section blocks: paragraph(style: body|first|block_quote|epigraph|verse|centered), heading(level), scene_break, page_break; marks: italic, bold, smallcaps, link, `comment_anchor(id)`, `suggestion_insert(id, author, ts)`, `suggestion_delete(id, author, ts)`, `format_change(id, author, attrs)`.
-- **Comment**(id, manuscript_id, section_id, anchor (Yjs relative positions), author principal, body, thread_id, resolved_at)
-- **Suggestion** index (id, manuscript_id, section_id, author principal, kind, status: open|accepted|rejected, decided_by, decided_at, summary) — CRDT marks are source of truth; table is a queryable index.
-- **Theme**(id, name, typst_template, epub_css, reference_docx, fonts[], options json: drop_caps, scene_break_glyph, chapter_heading_style, header/footer content)
-- **ExportJob**(id, manuscript_id, format pdf|epub|docx, trim, theme_id, requested_by principal, status, artifact_url, log, created_at)
-- **AuditEvent**(id, manuscript_id, principal, action, payload, ts) — every agent tool call.
+- **Agent**(id, name, color, created_at, revoked_at)
+- **AgentToken**(id, agent_id, hashed_token, scopes, last_used_at). Scopes are a subset of
+  `read`, `comment`, `suggest`.
+- **Manuscript**(id, title, subtitle, author_name, theme_id, trim_size default 6x9, settings json)
+- **Section**(id, manuscript_id, kind: front_matter, part, chapter, scene, back_matter; parent_id,
+  position, title, doc_id)
+- **Yjs docs**: manuscript doc (`meta` Y.Map, `structure` Y.Array of section refs); one doc per
+  section holding a Y.XmlFragment. Updates and snapshots are stored in SQLite.
+- **ProseMirror schema**: paragraph (style: body, first, block_quote, epigraph, verse, centered),
+  heading, scene_break, page_break; marks: italic, bold, smallcaps, link, `comment_anchor(id)`,
+  `suggestion_insert(id, author, ts)`, `suggestion_delete(id, author, ts)`,
+  `format_change(id, author, attrs)`.
+- **Comment**(id, section_id, anchor, author principal, body, thread_id, resolved_at)
+- **Suggestion** index (id, section_id, author principal, kind, status: open, accepted, rejected;
+  decided_at, summary). CRDT marks are the source of truth; the table is a queryable index.
+  Decisions are always made by the human.
+- **Theme**(id, name, typst_template, epub_css, reference_docx, fonts, options json)
+- **Export**(id, manuscript_id, format, trim, theme_id, status, file_path, log, created_at)
+- **AuditEvent**(id, manuscript_id, principal, action, payload, ts): every agent tool call.
 
 ## 8. Native MCP server (first-class MVP feature)
 
-coAuthor ships its own MCP server at `https://<host>/mcp` (Streamable HTTP, MCP spec 2025-06-18+). Agents connect to it like any connector.
+The app runs its own MCP server at `http://127.0.0.1:<port>/mcp` (Streamable HTTP), listening on
+loopback only. Local agents connect to it like any connector.
 
-**Identity.** Each agent gets its own token (created by the human in Settings → Agents; shown once; hashed at rest; revocable). The token maps to an Agent principal with name and cursor color, so all edits, comments, and suggestions are attributed to that agent, visible in awareness (presence/cursor) and in the audit log. OAuth 2.1 (MCP auth spec) is a post-MVP upgrade; bearer tokens are MVP.
+**Identity.** Each agent gets its own bearer token, created by the author in Settings → Agents,
+shown once, hashed at rest, revocable. The token maps to an Agent principal with name and color,
+so every comment and suggestion is attributed to that agent and recorded in the audit log. P1
+agent: Grok Bot.
 
-**Permissions.** Scopes: `read`, `comment`, `suggest`, `edit_direct`, `style`, `export`, `decide`. Default for a new agent: read+comment+suggest. `decide` (accept/reject) is human-gated by default: an agent can only accept/reject when the owner explicitly grants `decide`, and never its own suggestions unless `can_self_accept` is set.
+**Permissions.** Agents can only `read`, `comment` and `suggest`. There is no scope for direct
+edits or for deciding suggestions: accepting or rejecting a suggestion is human-only and is not
+exposed over MCP.
 
 **Tools.**
 
-| Tool                                                                               | Purpose                                                                                                  | Scope                                                                  |
-| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `list_documents`                                                                   | Manuscripts the agent can access                                                                         | read                                                                   |
-| `list_chapters(manuscript_id)`                                                     | Ordered sections with ids, kinds, titles, word counts                                                    | read                                                                   |
-| `read_chapter(manuscript_id, section_id, format=markdown                           | json)`                                                                                                   | Text with stable block ids/anchors, plus open suggestions and comments | read                          |
-| `search_text(manuscript_id, query)`                                                | Find passages; returns anchors                                                                           | read                                                                   |
-| `add_comment(section_id, anchor, body, thread_id?)`                                | Anchored comment/reply                                                                                   | comment                                                                |
-| `suggest_edit(section_id, anchor/range, replacement, rationale)`                   | Tracked insert/delete suggestion; never applies silently                                                 | suggest                                                                |
-| `list_suggestions(manuscript_id, status?, author?)`                                | Review queue                                                                                             | read                                                                   |
-| `accept_suggestion` / `reject_suggestion(id)`                                      | Decide; human-gated by default                                                                           | decide                                                                 |
-| `apply_style(section_id, block_id, style)`                                         | Paragraph/section styles (scene_break, epigraph…) — recorded as a format suggestion unless `edit_direct` | style                                                                  |
-| `trigger_export(manuscript_id, format pdf                                          | epub                                                                                                     | docx, trim?, theme?)`                                                  | Queues export; returns job id | export                                     |
-| `list_notes` / `write_note(manuscript_id, title, body)`                            | Planning/working notes                                                                                   | read / comment                                                         |
-| `list_story_bible` / `upsert_story_bible_entry(kind, name, aliases, fields, body)` | Story bible entries                                                                                      | read / suggest                                                         |
-| `insert_image(section_id, anchor, image_url                                        | upload, role=inline                                                                                      | chapter_opener                                                         | scene_break)`                 | Images, as a suggestion unless edit_direct | suggest |
-| `run_preflight(manuscript_id, target)`                                             | KDP preflight report                                                                                     | export                                                                 |
-| `create_revision(label)` / `list_revisions`                                        | Named snapshots                                                                                          | read / suggest                                                         |
-| `get_export(job_id)`                                                               | Status + signed download URL                                                                             | export                                                                 |
+| Tool                                                                       | Purpose                                                        | Scope          |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------- | -------------- |
+| `list_documents`                                                           | Manuscripts available locally                                  | read           |
+| `list_sections(manuscript_id)`                                             | Ordered parts/chapters/scenes with ids, kinds, word counts     | read           |
+| `read_section(manuscript_id, section_id, format=markdown\|json)`           | Text with stable block ids, plus open suggestions and comments | read           |
+| `search_text(manuscript_id, query)`                                        | Find passages; returns anchors                                 | read           |
+| `list_suggestions(manuscript_id, status?, author?)`                        | Review queue                                                   | read           |
+| `add_comment(section_id, anchor, body, thread_id?)`                        | Anchored comment or reply                                      | comment        |
+| `suggest_edit(section_id, anchor, replacement, rationale)`                 | Tracked insert/delete suggestion; never applied silently       | suggest        |
+| `suggest_style(section_id, block_id, style)`                               | Paragraph style change, recorded as a format suggestion        | suggest        |
+| `trigger_export(manuscript_id, format=pdf\|epub\|docx, trim?)`             | Starts a local export; returns export id and file path         | read           |
+| `list_notes` / `write_note(manuscript_id, title, body)`                    | Planning/working notes                                         | read / comment |
+| `list_story_bible` / `suggest_story_bible_entry(kind, name, fields, body)` | Story bible entries; agent entries are suggestions             | read / suggest |
 
-Resources: `coauthor://manuscript/{id}/chapter/{sid}` (read-only text). Anchors use quoted text + block id so they survive concurrent edits; server resolves to Yjs relative positions and errors if ambiguous/stale. Rate limits per token; every call written to AuditEvent.
-
-A small REST API mirrors the same operations for non-MCP bots and for the frontend.
+Resources: `coauthor://manuscript/{id}/section/{sid}` (read-only text). Anchors use quoted text +
+block id so they survive concurrent edits; the server resolves them to Yjs relative positions and
+errors if ambiguous or stale. Every call is written to AuditEvent.
 
 ## 9. Export requirements (KDP)
 
@@ -152,8 +171,8 @@ A small REST API mirrors the same operations for non-MCP bots and for the fronte
 
 ## 10. Milestones
 
-- **M0 — Repo & scaffold**: monorepo (pnpm), Vue app, collab server, API, CI, Docker Compose, Postgres.
-- **M1 — Editor + Yjs**: Tiptap editor, Yjs sync via Hocuspocus, persistence, human presence/cursors.
+- **M0 — Repo & scaffold**: pnpm monorepo, Tauri desktop shell, SQLite storage, CI with Windows build.
+- **M1 — Editor + Yjs**: Tiptap editor, Yjs with local persistence and autosave, parts/chapters/scenes.
 - **M2 — Bot collaborators + suggestions + native MCP server**: agent identity/tokens, suggestion marks & review UI, comments, MCP server with full tool surface, permissions, audit.
 - **M3 — Manuscript structure**: sections/chapters model, front matter, scene breaks, styles, .docx import.
 - **M4 — Export pipeline**: AST, Typst PDF (both trims), Pandoc EPUB3/.docx, export jobs (incl. MCP trigger_export).
@@ -184,7 +203,7 @@ Implementation is local (no cloud agents approved). First user is on **Windows**
 
 1. Hosting/tenancy: single-user self-hosted pilot only, or multi-user accounts from day one?
 2. Typst over Paged.js OK, given preview is page images rather than live DOM? (React or Vue — confirm Vue.)
-3. Should any agent ever get `edit_direct` or `decide` in the pilot, or strictly suggest-only?
+3. Resolved: agents are strictly read/comment/suggest; accept/reject is human-only.
 4. Which agents must work at launch (Grok Bot, Claude Desktop, ChatGPT)? Bearer token OK vs OAuth?
 5. What does your wife's manuscript look like today (Word? Google Docs), and which trim/theme does she want first?
 6. Need ebook-only features (KDP Kindle via EPUB) for pilot, or print first?
@@ -192,7 +211,7 @@ Implementation is local (no cloud agents approved). First user is on **Windows**
 ## 14. Differentiators
 
 - Unlimited named agent collaborators, each with own identity, color, live cursor (Yjs real-time).
-- Human-approval gating by scope (comment/suggest/decide), per agent, with audit log.
+- Human approval of every agent change (agents comment/suggest only), per agent, with audit log.
 - Native MCP server as a first-class product surface.
-- Open source and self-hostable (Docker Compose).
+- Open source, local-first; runs entirely on the author's machine.
 - KDP print PDF + EPUB 3 + .docx from one model, with print preflight and EPUBCheck validation.

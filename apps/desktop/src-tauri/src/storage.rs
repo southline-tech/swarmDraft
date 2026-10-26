@@ -25,9 +25,9 @@ pub struct Store {
 impl Store {
     pub fn open(dir: &Path) -> Result<Self, StorageError> {
         std::fs::create_dir_all(dir)?;
-        let conn = Connection::open(dir.join("coauthor.db"))?;
+        let mut conn = Connection::open(dir.join("coauthor.db"))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
-        migrate(&conn)?;
+        migrate(&mut conn)?;
         Ok(Self {
             dir: dir.to_path_buf(),
             conn: Mutex::new(conn),
@@ -44,12 +44,17 @@ impl Store {
     }
 }
 
-fn migrate(conn: &Connection) -> Result<(), StorageError> {
-    let current: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    for (i, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
-        conn.execute_batch(sql)?;
-        conn.pragma_update(None, "user_version", (i + 1) as i64)?;
+fn migrate(conn: &mut Connection) -> Result<(), StorageError> {
+    // All pending migrations and the user_version bump commit atomically.
+    let tx = conn.transaction()?;
+    let current: i64 = tx.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    for sql in MIGRATIONS.iter().skip(current as usize) {
+        tx.execute_batch(sql)?;
     }
+    if (current as usize) < MIGRATIONS.len() {
+        tx.pragma_update(None, "user_version", MIGRATIONS.len() as i64)?;
+    }
+    tx.commit()?;
     Ok(())
 }
 
@@ -66,5 +71,19 @@ mod tests {
         let store = Store::open(tmp.path()).unwrap();
         assert_eq!(store.schema_version().unwrap(), MIGRATIONS.len() as i64);
         assert!(tmp.path().join("coauthor.db").exists());
+    }
+
+    #[test]
+    fn failed_migration_rolls_back_version() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        let tx = conn.transaction().unwrap();
+        tx.execute_batch("CREATE TABLE t (x INTEGER);").unwrap();
+        tx.pragma_update(None, "user_version", 1).unwrap();
+        assert!(tx.execute_batch("NOT VALID SQL").is_err());
+        drop(tx); // rollback
+        let v: i64 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 0);
     }
 }
