@@ -128,6 +128,9 @@ describe('MCP cross-language fixture', () => {
       writeFileSync(dir + 'synthetic-section.json', json);
     }
     expect(readFileSync(dir + 'synthetic-section.yupdate').equals(update)).toBe(true);
-    expect(readFileSync(dir + 'synthetic-section.json', 'utf8')).toBe(json);
+    // Compare structurally: the checked-in file is prettier-formatted.
+    expect(JSON.parse(readFileSync(dir + 'synthetic-section.json', 'utf8'))).toEqual(
+      JSON.parse(json),
+    );
   });
 });
