@@ -15,10 +15,15 @@ pub struct Server {
     pub token: String,
     pub manuscript_id: String,
     pub section_id: String,
+    pub stats: std::sync::Arc<mcp::GateStats>,
     _tmp: tempfile::TempDir,
 }
 
 pub async fn start(scopes: &[&str], limit: u32) -> Server {
+    start_with(scopes, |c| c.rate_limit = limit).await
+}
+
+pub async fn start_with(scopes: &[&str], tune: impl FnOnce(&mut mcp::McpConfig)) -> Server {
     let tmp = tempfile::tempdir().unwrap();
     let store = Store::open(tmp.path()).unwrap();
     let agent = store.create_agent("Grok Bot", "#3366ff").unwrap();
@@ -35,7 +40,11 @@ pub async fn start(scopes: &[&str], limit: u32) -> Server {
         .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let app = mcp::router_with_limit(store.clone(), limit);
+    let mut cfg = mcp::McpConfig::new(addr.port());
+    cfg.auth_failure_floor = std::time::Duration::from_millis(20);
+    tune(&mut cfg);
+    let (app, stats) = mcp::router_with_stats(store.clone(), cfg);
+    let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     Server {
         url: format!("http://{addr}/mcp"),
@@ -43,6 +52,7 @@ pub async fn start(scopes: &[&str], limit: u32) -> Server {
         token,
         manuscript_id: m.id,
         section_id: s.id,
+        stats,
         _tmp: tmp,
     }
 }
@@ -265,36 +275,140 @@ async fn auth_is_required_and_enforced() {
     assert_eq!(post(&s.url, Some(&s.token), body).await.status(), 401);
 }
 
+fn lookups(s: &Server) -> u64 {
+    s.stats
+        .auth_lookups
+        .load(std::sync::atomic::Ordering::Relaxed)
+}
+
 #[tokio::test]
-async fn host_origin_and_rate_limit() {
-    let s = start(&["read"], 3).await;
+async fn rebinding_host_or_origin_is_refused_before_any_lookup() {
+    let s = start(&["read"], 1000).await;
+    let port = s
+        .url
+        .split(':')
+        .nth(2)
+        .unwrap()
+        .split('/')
+        .next()
+        .unwrap()
+        .to_string();
     let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}});
     let client = reqwest::Client::new();
-    let base = || {
-        client
+    let send = |host: Option<String>, origin: Option<&str>| {
+        let mut r = client
             .post(&s.url)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json, text/event-stream")
             .bearer_auth(&s.token)
-            .json(&body)
+            .json(&body);
+        if let Some(h) = host {
+            r = r.header("Host", h);
+        }
+        if let Some(o) = origin {
+            r = r.header("Origin", o);
+        }
+        r.send()
     };
-    // DNS-rebinding guard: a non-loopback Host is refused.
-    let r = base()
-        .header("Host", "attacker.example")
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(r.status(), 403);
-    // Browser pages may not call the server.
-    let r = base()
-        .header("Origin", "https://attacker.example")
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(r.status(), 403);
-    // Auth and the per-token limit run first, so the refused calls above count too.
-    assert_eq!(base().send().await.unwrap().status(), 200);
-    let r = base().send().await.unwrap();
+    let refused = [
+        (Some("attacker.example".to_string()), None),
+        (Some(format!("attacker.example:{port}")), None),
+        (Some("127.0.0.1:1".to_string()), None),
+        (Some("127.0.0.1".to_string()), None),
+        (Some(format!("127.0.0.1.attacker.example:{port}")), None),
+        (None, Some("https://attacker.example")),
+        (None, Some("http://127.0.0.1")),
+    ];
+    for (host, origin) in refused {
+        let r = send(host.clone(), origin).await.unwrap();
+        assert_eq!(r.status(), 403, "{host:?} {origin:?}");
+    }
+    assert_eq!(lookups(&s), 0, "refused before the token lookup");
+    for host in [
+        format!("localhost:{port}"),
+        format!("127.0.0.1:{port}"),
+        format!("LOCALHOST:{port}"),
+    ] {
+        assert_eq!(send(Some(host), None).await.unwrap().status(), 200);
+    }
+    assert_eq!(lookups(&s), 3);
+}
+
+#[tokio::test]
+async fn per_token_rate_limit() {
+    let s = start(&["read"], 2).await;
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}});
+    assert_eq!(
+        post(&s.url, Some(&s.token), body.clone()).await.status(),
+        200
+    );
+    assert_eq!(
+        post(&s.url, Some(&s.token), body.clone()).await.status(),
+        200
+    );
+    let r = post(&s.url, Some(&s.token), body).await;
     assert_eq!(r.status(), 429);
     assert_eq!(r.headers().get("retry-after").unwrap(), "60");
+}
+
+#[tokio::test]
+async fn auth_failures_look_identical_and_are_throttled_per_client() {
+    let floor = std::time::Duration::from_millis(150);
+    let s = start_with(&["read"], |c| {
+        c.auth_failure_floor = floor;
+        c.auth_failures_per_client = 4;
+    })
+    .await;
+    let agent = &s.store.list_agents().unwrap()[0];
+    let revoked = s.store.create_token(&agent.id, None).unwrap();
+    s.store.revoke_token(&revoked.info.id).unwrap();
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}});
+
+    let mut seen = Vec::new();
+    for token in [
+        None,
+        Some("garbage"),
+        Some("cat_not-a-real-token"),
+        Some(revoked.token.as_str()),
+    ] {
+        let t0 = std::time::Instant::now();
+        let r = post(&s.url, token, body.clone()).await;
+        let elapsed = t0.elapsed();
+        assert_eq!(r.status(), 401);
+        assert!(elapsed >= floor, "{token:?} answered in {elapsed:?}");
+        let www = r
+            .headers()
+            .get("www-authenticate")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        seen.push((www, r.text().await.unwrap()));
+    }
+    assert!(seen.windows(2).all(|w| w[0] == w[1]), "{seen:?}");
+
+    // Budget spent: even the valid token is refused, without touching the database.
+    let before = lookups(&s);
+    let t0 = std::time::Instant::now();
+    let r = post(&s.url, Some(&s.token), body).await;
+    assert_eq!(r.status(), 429);
+    assert!(t0.elapsed() >= floor);
+    assert_eq!(lookups(&s), before);
+}
+
+#[tokio::test]
+async fn auth_failures_are_throttled_globally() {
+    let s = start_with(&["read"], |c| {
+        c.auth_failures_per_client = 100;
+        c.auth_failures_global = 2;
+    })
+    .await;
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}});
+    for _ in 0..2 {
+        assert_eq!(
+            post(&s.url, Some("cat_wrong"), body.clone()).await.status(),
+            401
+        );
+    }
+    assert_eq!(post(&s.url, Some(&s.token), body).await.status(), 429);
 }
