@@ -160,9 +160,11 @@ and no Node runtime to bundle or supervise; it shares the app's SQLite connectio
 documents directly instead of over IPC; tokens are checked in the same place they are stored.
 The cost is a Rust reading of the Yjs content model (`src-tauri/src/content.rs`), which is kept
 in step with the TypeScript encoder by the shared fixture in `fixtures/mcp/`. The server runs
-stateless (JSON responses, no sessions), rejects non-loopback `Host` headers and any browser
-`Origin`, rate limits each token, and returns 401 with `WWW-Authenticate: Bearer` for missing,
-unknown or revoked tokens. `list_chapters` / `read_chapter` return every section kind (front
+stateless (JSON responses, no sessions). Before any token lookup it requires `Host` to be
+exactly `127.0.0.1`, `localhost` or `[::1]` plus its port and refuses any `Origin` header
+(DNS-rebinding guard). Missing, malformed, unknown and revoked tokens all get the same 401
+(`WWW-Authenticate: Bearer`) after the same minimum delay; failed attempts are throttled per
+client and globally (429), and each valid token is rate limited. `list_chapters` / `read_chapter` return every section kind (front
 matter, parts, chapters, scenes, back matter), not only chapters.
 
 ## 9. Export requirements (KDP)
