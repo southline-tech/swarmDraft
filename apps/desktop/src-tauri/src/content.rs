@@ -23,7 +23,9 @@ pub const FRAGMENT: &str = "prosemirror";
 
 /// The one way to create a section document: UTF-16 offsets, like Yjs in JS and y-prosemirror.
 /// (yrs defaults to UTF-8 bytes, which shifts mark ranges after any non-ASCII text.)
-/// `Doc::new` is banned by clippy.toml.
+/// `Doc::new`, `Doc::with_client_id` and `Doc::with_options` are banned by clippy.toml; clippy can't target the
+/// `Default` impl, so tests/utf16_docs.rs scans the sources for `Doc::default` and friends.
+#[allow(clippy::disallowed_methods)] // the one sanctioned constructor
 pub fn new_doc() -> Doc {
     Doc::with_options(yrs::Options {
         offset_kind: yrs::OffsetKind::Utf16,
@@ -782,7 +784,7 @@ mod tests {
         let doc = load_ts_fixture();
         let before: Vec<String> = decode(&doc).into_iter().map(|b| b.id).collect();
         // Another replica inserts a block at the front and edits text; sync it back.
-        let other = Doc::with_client_id(99);
+        let other = new_doc();
         let full = doc
             .transact()
             .encode_state_as_update_v1(&yrs::StateVector::default());
@@ -802,7 +804,7 @@ mod tests {
             .unwrap();
         let after: Vec<String> = decode(&doc).into_iter().map(|b| b.id).collect();
         assert_eq!(after.len(), before.len() + 1);
-        assert!(after[0].starts_with("b99."));
+        assert!(after[0].starts_with(&format!("b{}.", other.client_id())));
         assert_eq!(&after[1..], &before[..]);
         let _ = sv.encode_v1();
     }

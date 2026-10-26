@@ -58,6 +58,14 @@ pub async fn start_with(scopes: &[&str], tune: impl FnOnce(&mut mcp::McpConfig))
 }
 
 pub async fn post(url: &str, token: Option<&str>, body: Value) -> reqwest::Response {
+    post_result(url, token, body).await.unwrap()
+}
+
+pub async fn post_result(
+    url: &str,
+    token: Option<&str>,
+    body: Value,
+) -> reqwest::Result<reqwest::Response> {
     let mut req = reqwest::Client::new()
         .post(url)
         .header("Content-Type", "application/json")
@@ -67,7 +75,7 @@ pub async fn post(url: &str, token: Option<&str>, body: Value) -> reqwest::Respo
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
-    req.send().await.unwrap()
+    req.send().await
 }
 
 pub async fn rpc(s: &Server, method: &str, params: Value) -> Value {
@@ -578,6 +586,222 @@ async fn cached_token_revoked_out_of_band_gets_401() {
     assert!(!s.store.is_known_token_hash(&hash));
 }
 
+// ---- RAD-210 write tools ----
+
+async fn chapter_two(s: &Server) -> (String, String) {
+    let ch = call(
+        s,
+        "list_chapters",
+        json!({"manuscript_id": s.manuscript_id}),
+    )
+    .await;
+    let sid = ch["structuredContent"]["sections"][1]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let js = call(
+        s,
+        "read_chapter",
+        json!({"manuscript_id": s.manuscript_id, "section_id": sid, "format": "json"}),
+    )
+    .await;
+    let bid = js["structuredContent"]["blocks"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    (sid, bid)
+}
+
+async fn read_json(s: &Server, sid: &str) -> Value {
+    call(
+        s,
+        "read_chapter",
+        json!({"manuscript_id": s.manuscript_id, "section_id": sid, "format": "json"}),
+    )
+    .await["structuredContent"]
+        .clone()
+}
+
+async fn read_md(s: &Server, sid: &str) -> String {
+    text(
+        &call(
+            s,
+            "read_chapter",
+            json!({"manuscript_id": s.manuscript_id, "section_id": sid}),
+        )
+        .await,
+    )
+}
+
+#[tokio::test]
+async fn write_tools_listed_and_decisions_absent() {
+    let s = start(&["read", "comment", "suggest"], 1000).await;
+    let list = rpc(&s, "tools/list", json!({})).await;
+    let names: Vec<&str> = list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    for t in ["add_comment", "suggest_edit", "suggest_style"] {
+        assert!(names.contains(&t), "missing {t}");
+    }
+    assert_eq!(names.len(), 7, "{names:?}");
+    let r = call(&s, "accept_suggestion", json!({"id": "x"})).await;
+    let r2 = rpc(
+        &s,
+        "tools/call",
+        json!({"name": "accept_suggestion", "arguments": {"id": "x"}}),
+    )
+    .await;
+    assert!(r.is_null() || r["isError"] == true, "{r}");
+    assert!(
+        r2.get("error").is_some() || r2["result"]["isError"] == true,
+        "{r2}"
+    );
+}
+
+#[tokio::test]
+async fn add_comment_is_anchored_and_attributed() {
+    let s = start(&["read", "comment"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    let r = call(&s, "add_comment", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "lantern", "body": "Which lantern?"})).await;
+    assert_ne!(r["isError"], true, "{r}");
+    let c = &r["structuredContent"]["comment"];
+    let cid = c["id"].as_str().unwrap();
+    assert_eq!(c["author"]["kind"], "agent");
+    assert_eq!(c["author"]["name"], "Grok Bot");
+
+    let md = read_md(&s, &sid).await;
+    assert!(
+        md.contains(&format!(
+            "The {{==lantern==}}{{>>comment:{cid}<<}} flickered twice."
+        )),
+        "{md}"
+    );
+    assert!(md.contains(&format!("comment:{cid} by Grok Bot")), "{md}");
+
+    let reply = call(&s, "add_comment", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "thread_id": cid, "body": "Follow-up."})).await;
+    assert_eq!(reply["structuredContent"]["comment"]["blockId"], bid);
+    assert_eq!(
+        read_json(&s, &sid).await["comments"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let stale = call(&s, "add_comment", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "candle", "body": "x"})).await;
+    assert_eq!(stale["isError"], true);
+    assert!(text(&stale).contains("stale anchor"));
+    let amb = call(&s, "add_comment", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "e", "body": "x"})).await;
+    assert!(text(&amb).contains("ambiguous anchor"), "{amb}");
+    let bad_block = call(&s, "add_comment", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": "b1.999999", "quote": "lantern", "body": "x"})).await;
+    assert!(text(&bad_block).contains("not found"));
+
+    // No suggest scope on this token.
+    let denied = call(&s, "suggest_edit", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "twice", "replacement": "again"})).await;
+    assert!(text(&denied).contains("'suggest' scope"));
+    let log = s.store.audit_log().unwrap();
+    assert_eq!(log.last().unwrap().1, "suggest_edit");
+    assert_eq!(log.last().unwrap().2, "denied");
+}
+
+#[tokio::test]
+async fn suggest_edit_is_tracked_never_applied() {
+    let s = start(&["read", "suggest"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    let r = call(&s, "suggest_edit", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "flickered", "replacement": "guttered", "rationale": "Stronger verb."})).await;
+    assert_ne!(r["isError"], true, "{r}");
+    let x = &r["structuredContent"]["suggestion"];
+    let xid = x["id"].as_str().unwrap();
+    assert_eq!(x["kind"], "replace");
+    assert_eq!(x["status"], "open");
+
+    let md = read_md(&s, &sid).await;
+    assert!(md.contains(&format!("The lantern {{--flickered--}}{{>>suggestion:{xid}<<}}{{++guttered++}}{{>>suggestion:{xid}<<}} twice.")), "{md}");
+    let js = read_json(&s, &sid).await;
+    // Nothing is applied: the original text is still there, marked for deletion.
+    let content0 = js["blocks"][0]["node"]["content"].as_array().unwrap();
+    let del = content0.iter().find(|n| n["text"] == "flickered").unwrap();
+    assert_eq!(del["marks"][0]["type"], "suggestion_delete");
+    let content = js["blocks"][0]["node"]["content"].as_array().unwrap();
+    let ins = content.iter().find(|n| n["text"] == "guttered").unwrap();
+    assert_eq!(ins["marks"][0]["type"], "suggestion_insert");
+    assert_eq!(
+        ins["marks"][0]["attrs"]["author"],
+        format!("agent:{}", x["author"]["id"].as_str().unwrap())
+    );
+
+    // Search sees the visible text, not the pending insert.
+    let hits = call(
+        &s,
+        "search_text",
+        json!({"manuscript_id": s.manuscript_id, "query": "guttered"}),
+    )
+    .await;
+    assert!(hits["structuredContent"]["matches"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+
+    let overlap = call(&s, "suggest_edit", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "flickered", "replacement": "dimmed"})).await;
+    assert!(text(&overlap).contains("pending suggestion"), "{overlap}");
+
+    let del = call(&s, "suggest_edit", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": " twice", "replacement": ""})).await;
+    assert_eq!(del["structuredContent"]["suggestion"]["kind"], "delete");
+
+    let st = call(&s, "suggest_style", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "style": "centered"})).await;
+    assert_eq!(st["structuredContent"]["suggestion"]["kind"], "style");
+    let bad = call(&s, "suggest_style", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "style": "huge"})).await;
+    assert!(text(&bad).contains("unknown style"));
+    assert_eq!(
+        read_json(&s, &sid).await["suggestions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    // The paragraph style itself is unchanged.
+    assert_eq!(
+        read_json(&s, &sid).await["blocks"][0]["node"]["attrs"]["style"],
+        "body"
+    );
+}
+
+#[tokio::test]
+async fn concurrent_suggestions_merge() {
+    let s = start(&["read", "suggest"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    let a = json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "lantern", "replacement": "lamp"});
+    let b = json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "twice", "replacement": "once"});
+    let (ra, rb) = tokio::join!(call(&s, "suggest_edit", a), call(&s, "suggest_edit", b));
+    assert_ne!(ra["isError"], true);
+    assert_ne!(rb["isError"], true);
+    let md = read_md(&s, &sid).await;
+    assert!(
+        md.contains("{--lantern--}") && md.contains("{++lamp++}"),
+        "{md}"
+    );
+    assert!(
+        md.contains("{--twice--}") && md.contains("{++once++}"),
+        "{md}"
+    );
+    let hits = call(
+        &s,
+        "search_text",
+        json!({"manuscript_id": s.manuscript_id, "query": "The lantern flickered twice."}),
+    )
+    .await;
+    assert_eq!(
+        hits["structuredContent"]["matches"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
 #[tokio::test]
 async fn cached_token_is_rejected_after_a_restore() {
     let s = start(&["read"], 100).await;
@@ -597,4 +821,466 @@ async fn cached_token_is_rejected_after_a_restore() {
         "restore clears the token cache"
     );
     assert_eq!(post(&s.url, Some(&s.token), body).await.status(), 401);
+}
+
+#[tokio::test]
+async fn oversized_text_is_refused_with_a_clear_error() {
+    let s = start(&["read", "comment", "suggest"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    let m = &s.manuscript_id;
+    let long = |n: usize| "é".repeat(n); // multi-byte: limits count characters
+    let cases = [
+        (
+            "add_comment",
+            json!({"manuscript_id": m, "section_id": sid, "block_id": bid, "quote": "lantern", "body": long(4001)}),
+            "body is too long (4001 characters; the limit is 4000)",
+        ),
+        (
+            "add_comment",
+            json!({"manuscript_id": m, "section_id": sid, "block_id": bid, "quote": long(2001), "body": "Hm."}),
+            "quote is too long (2001 characters; the limit is 2000)",
+        ),
+        (
+            "suggest_edit",
+            json!({"manuscript_id": m, "section_id": sid, "block_id": bid, "quote": long(2001), "replacement": "x"}),
+            "quote is too long",
+        ),
+        (
+            "suggest_edit",
+            json!({"manuscript_id": m, "section_id": sid, "block_id": bid, "quote": "lantern", "replacement": long(4001)}),
+            "replacement is too long (4001 characters; the limit is 4000)",
+        ),
+        (
+            "suggest_edit",
+            json!({"manuscript_id": m, "section_id": sid, "block_id": bid, "quote": "lantern", "replacement": "lamp", "rationale": long(2001)}),
+            "rationale is too long",
+        ),
+        (
+            "suggest_style",
+            json!({"manuscript_id": m, "section_id": sid, "block_id": bid, "style": "verse", "rationale": long(2001)}),
+            "rationale is too long",
+        ),
+        (
+            "search_text",
+            json!({"manuscript_id": m, "query": long(501)}),
+            "query is too long (501 characters; the limit is 500)",
+        ),
+    ];
+    let before = read_md(&s, &sid).await;
+    for (tool, args, want) in cases {
+        let r = call(&s, tool, args).await;
+        assert_eq!(r["isError"], true, "{tool}: {r}");
+        assert!(text(&r).contains(want), "{tool}: {}", text(&r));
+    }
+    assert_eq!(
+        read_md(&s, &sid).await,
+        before,
+        "refused calls change nothing"
+    );
+
+    // At the limit is fine.
+    let r = call(&s, "add_comment", json!({"manuscript_id": m, "section_id": sid, "block_id": bid, "quote": "lantern", "body": long(4000)})).await;
+    assert_ne!(r["isError"], true, "{r}");
+    let r = call(
+        &s,
+        "search_text",
+        json!({"manuscript_id": m, "query": long(500)}),
+    )
+    .await;
+    assert_ne!(r["isError"], true, "{r}");
+}
+
+#[tokio::test]
+async fn oversized_ids_are_refused() {
+    let s = start(&["read", "comment", "suggest"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    let m = s.manuscript_id.clone();
+    let id = "x".repeat(129);
+    let cases = [
+        (
+            "add_comment",
+            json!({"manuscript_id": id, "section_id": sid, "block_id": bid, "quote": "lantern", "body": "Hm."}),
+            "manuscript_id is too long (129 characters; the limit is 128)",
+        ),
+        (
+            "add_comment",
+            json!({"manuscript_id": m, "section_id": sid, "thread_id": id, "body": "Hm."}),
+            "thread_id is too long",
+        ),
+        (
+            "suggest_edit",
+            json!({"manuscript_id": m, "section_id": id, "block_id": bid, "quote": "lantern", "replacement": "lamp"}),
+            "section_id is too long",
+        ),
+        (
+            "suggest_style",
+            json!({"manuscript_id": m, "section_id": sid, "block_id": id, "style": "verse"}),
+            "block_id is too long",
+        ),
+        (
+            "search_text",
+            json!({"manuscript_id": id, "query": "lantern"}),
+            "manuscript_id is too long",
+        ),
+    ];
+    for (tool, args, want) in cases {
+        let r = call(&s, tool, args).await;
+        assert_eq!(r["isError"], true, "{tool}: {r}");
+        assert!(text(&r).contains(want), "{tool}: {}", text(&r));
+    }
+}
+
+#[tokio::test]
+async fn body_limit_applies_to_mcp() {
+    let s = start(&["read", "comment"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    let big = "y".repeat(mcp::MAX_BODY_BYTES);
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"add_comment","arguments":{"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "lantern", "body": big}}});
+    let before = refusal_snapshot(&s, &sid);
+    assert_refused_early(post_result(&s.url, Some(&s.token), body).await, 413);
+    assert_nothing_happened(&s, &sid, &before).await;
+    assert!(s.store.open_comments(&sid).unwrap().is_empty());
+    // Without a valid token the body is never read: plain 401.
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"pad": "y".repeat(mcp::MAX_BODY_BYTES)}});
+    let before = refusal_snapshot(&s, &sid);
+    assert_refused_early(post_result(&s.url, None, body).await, 401);
+    assert_nothing_happened(&s, &sid, &before).await;
+}
+
+/// What a refused request must leave untouched: audit rows, raw doc updates, suggestions.
+#[derive(Debug, PartialEq)]
+struct RefusalSnapshot {
+    audit: Vec<(String, String, String, String)>,
+    doc_updates: i64,
+    suggestions: usize,
+}
+
+fn refusal_snapshot(s: &Server, sid: &str) -> RefusalSnapshot {
+    RefusalSnapshot {
+        audit: s.store.audit_log().unwrap(),
+        doc_updates: s
+            .store
+            .with_conn_mut(|c| c.query_row("SELECT COUNT(*) FROM doc_updates", [], |r| r.get(0)))
+            .unwrap(),
+        suggestions: s.store.open_suggestions(sid).unwrap().len(),
+    }
+}
+
+/// A dropped connection alone can't tell an early refusal from a panic or a mid-handler drop,
+/// so also check that nothing was audited or written and that the server still serves the token.
+async fn assert_nothing_happened(s: &Server, sid: &str, before: &RefusalSnapshot) {
+    let after = refusal_snapshot(s, sid);
+    assert!(
+        !after.audit[before.audit.len().min(after.audit.len())..]
+            .iter()
+            .any(|(_, action, _, _)| action == "add_comment" || action == "tools/list"),
+        "no audit row for the refused call: {:?}",
+        after.audit
+    );
+    assert_eq!(&after, before, "nothing was audited or written");
+    let r = post(
+        &s.url,
+        Some(&s.token),
+        json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}),
+    )
+    .await;
+    assert_eq!(r.status(), 200, "the server still serves the same token");
+}
+
+/// The server answers before reading an oversized body and closes the connection. Windows may
+/// then abort the client's still-uploading request (WSAECONNABORTED/RESET) before it reads the
+/// response, so a connection abort counts as refused too.
+fn assert_refused_early(r: reqwest::Result<reqwest::Response>, status: u16) {
+    match r {
+        Ok(r) => assert_eq!(r.status(), status),
+        Err(e) => {
+            let io = std::error::Error::source(&e).and_then(|s| {
+                let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(s);
+                while let Some(c) = cur {
+                    if let Some(io) = c.downcast_ref::<std::io::Error>() {
+                        return Some(io.kind());
+                    }
+                    cur = c.source();
+                }
+                None
+            });
+            assert!(
+                matches!(
+                    io,
+                    Some(
+                        std::io::ErrorKind::ConnectionAborted | std::io::ErrorKind::ConnectionReset
+                    ) | Some(std::io::ErrorKind::BrokenPipe)
+                ),
+                "expected {status} or an aborted upload, got {e:?}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn oversized_declared_content_length_is_refused_before_reading() {
+    let s = start(&["read"], 1000).await;
+    let addr = s
+        .url
+        .trim_start_matches("http://")
+        .trim_end_matches("/mcp")
+        .to_string();
+    let token = s.token.clone();
+    // Declare a body far over the cap but send none of it: the server must answer 413 without
+    // waiting for the body (a read-first server would block until the read timeout).
+    let status = tokio::task::spawn_blocking(move || {
+        use std::io::{Read, Write};
+        let mut c = std::net::TcpStream::connect(&addr).unwrap();
+        c.set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let req = format!(
+            "POST /mcp HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {token}\r\n\
+             Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\n\
+             Content-Length: {}\r\n\r\n",
+            mcp::MAX_BODY_BYTES * 100
+        );
+        c.write_all(req.as_bytes()).unwrap();
+        let mut buf = [0u8; 64];
+        let n = c
+            .read(&mut buf)
+            .expect("server answered before the body arrived");
+        String::from_utf8_lossy(&buf[..n]).to_string()
+    })
+    .await
+    .unwrap();
+    assert!(status.starts_with("HTTP/1.1 413"), "{status}");
+}
+
+fn raw_keys(s: &Server, sid: &str) -> Vec<String> {
+    use yrs::types::text::YChange;
+    use yrs::types::xml::{XmlFragment, XmlOut};
+    use yrs::{Text, Transact};
+    let sec = s.store.get_section(&s.manuscript_id, sid).unwrap();
+    let doc = s.store.load_doc(&sec.doc_id).unwrap();
+    let frag = doc.get_or_insert_xml_fragment(coauthor_lib::content::FRAGMENT);
+    let txn = doc.transact();
+    let mut keys = Vec::new();
+    for c in frag.children(&txn) {
+        if let XmlOut::Element(e) = c {
+            for t in e.children(&txn) {
+                if let XmlOut::Text(t) = t {
+                    for d in t.diff(&txn, YChange::identity) {
+                        // Attrs is a hash map: sort each run's keys so comparisons are stable.
+                        let mut run: Vec<String> = d
+                            .attributes
+                            .iter()
+                            .flat_map(|a| a.keys())
+                            .map(|k| k.to_string())
+                            .collect();
+                        run.sort();
+                        keys.extend(run);
+                    }
+                }
+            }
+        }
+    }
+    keys
+}
+
+#[tokio::test]
+async fn write_tools_key_marks_with_the_shared_hash() {
+    let s = start(&["read", "comment", "suggest"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    let c = call(&s, "add_comment", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "lantern", "body": "note"})).await;
+    let cid = c["structuredContent"]["comment"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let keys = raw_keys(&s, &sid);
+    let want = format!(
+        "comment_anchor--{}",
+        coauthor_lib::content::mark_id_hash(&cid)
+    );
+    assert!(keys.contains(&want), "{keys:?}");
+    assert!(
+        keys.iter().all(|k| !k.contains(&cid)),
+        "keys never carry the raw id"
+    );
+    // Read back by attrs.id.
+    let js = read_json(&s, &sid).await;
+    assert!(js.to_string().contains(&cid));
+}
+
+#[tokio::test]
+async fn writes_that_would_leave_unknown_marks_are_refused() {
+    use yrs::{ReadTxn, Text, Transact};
+    let s = start(&["read", "comment", "suggest"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    // Plant a mark the schema doesn't know (as a foreign client might).
+    let sec = s.store.get_section(&s.manuscript_id, &sid).unwrap();
+    let doc = s.store.load_doc(&sec.doc_id).unwrap();
+    let sv = coauthor_lib::manuscripts::state_vector(&doc);
+    {
+        use yrs::types::xml::{XmlFragment, XmlOut};
+        let frag = doc.get_or_insert_xml_fragment(coauthor_lib::content::FRAGMENT);
+        let mut txn = doc.transact_mut();
+        let XmlOut::Element(p) = frag.get(&txn, 0).unwrap() else {
+            panic!()
+        };
+        let XmlOut::Text(t) = p.get(&txn, 0).unwrap() else {
+            panic!()
+        };
+        let mut a = yrs::types::Attrs::new();
+        a.insert("highlight".into(), yrs::Any::Bool(true));
+        t.format(&mut txn, 0, 3, a);
+    }
+    // A validated save refuses it...
+    let err = s
+        .store
+        .save_doc_changes(&sec.doc_id, &doc, &sv)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("unknown mark type: highlight"),
+        "{err}"
+    );
+    // ...so plant it as a raw sync update, the way a foreign client's edit arrives.
+    let update = doc.transact().encode_state_as_update_v1(&sv);
+    s.store.append_doc_update(&sec.doc_id, &update).unwrap();
+    let before = raw_keys(&s, &sid);
+    let r = call(&s, "add_comment", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "lantern", "body": "note"})).await;
+    assert_eq!(r["isError"], true, "{r}");
+    assert!(text(&r).contains("unknown mark type: highlight"), "{r}");
+    let r = call(&s, "suggest_edit", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "lantern", "replacement": "lamp"})).await;
+    assert_eq!(r["isError"], true, "{r}");
+    assert_eq!(raw_keys(&s, &sid), before, "nothing was saved");
+    assert!(
+        s.store.open_comments(&sid).unwrap().is_empty(),
+        "no comment record on a refused write"
+    );
+    assert!(
+        s.store.open_suggestions(&sid).unwrap().is_empty(),
+        "no suggestion record on a refused write"
+    );
+}
+
+#[tokio::test]
+async fn suggest_style_only_accepts_allowlisted_styles() {
+    let s = start(&["read", "suggest"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    for bad in ["huge", "", "Body", "body ", "body;drop", "heading"] {
+        let r = call(&s, "suggest_style", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "style": bad})).await;
+        assert_eq!(r["isError"], true, "{bad:?}: {r}");
+        assert!(text(&r).contains("unknown style"), "{bad:?}: {r}");
+    }
+    assert!(s.store.open_suggestions(&sid).unwrap().is_empty());
+    for ok in coauthor_lib::mcp::PARAGRAPH_STYLES {
+        let r = call(&s, "suggest_style", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "style": ok})).await;
+        assert_ne!(r["isError"], true, "{ok}: {r}");
+    }
+}
+
+#[tokio::test]
+async fn malformed_content_length_is_a_400() {
+    let s = start(&["read"], 1000).await;
+    let addr = s
+        .url
+        .trim_start_matches("http://")
+        .trim_end_matches("/mcp")
+        .to_string();
+    let token = s.token.clone();
+    let status = tokio::task::spawn_blocking(move || {
+        use std::io::{Read, Write};
+        let mut c = std::net::TcpStream::connect(&addr).unwrap();
+        c.set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let req = format!(
+            "POST /mcp HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {token}\r\n\
+             Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\n\
+             Content-Length: not-a-number\r\n\r\n{{}}"
+        );
+        c.write_all(req.as_bytes()).unwrap();
+        let mut buf = [0u8; 64];
+        let n = c.read(&mut buf).expect("server answered");
+        String::from_utf8_lossy(&buf[..n]).to_string()
+    })
+    .await
+    .unwrap();
+    assert!(status.starts_with("HTTP/1.1 400"), "{status}");
+}
+
+#[tokio::test]
+async fn writes_never_touch_existing_review_marks() {
+    let s = start(&["read", "comment", "suggest"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    let a = |q: &str, extra: Value| {
+        let mut v = json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": q});
+        v.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        v
+    };
+    let r = call(&s, "add_comment", a("lantern", json!({"body": "note"}))).await;
+    assert_ne!(r["isError"], true, "{r}");
+    // Suggesting inside commented text keeps the comment anchor intact.
+    let r = call(
+        &s,
+        "suggest_edit",
+        a("lantern", json!({"replacement": "lamp"})),
+    )
+    .await;
+    assert_ne!(r["isError"], true, "{r}");
+    let before = raw_keys(&s, &sid);
+    let n = s.store.open_suggestions(&sid).unwrap().len();
+    // Editing text inside an existing suggestion is refused and saves nothing.
+    for q in ["lantern", "lamp", "ante"] {
+        let r = call(&s, "suggest_edit", a(q, json!({"replacement": "torch"}))).await;
+        assert_eq!(r["isError"], true, "{q}: {r}");
+    }
+    assert_eq!(raw_keys(&s, &sid), before, "nothing was saved");
+    assert_eq!(s.store.open_suggestions(&sid).unwrap().len(), n);
+}
+
+#[tokio::test]
+async fn suggest_only_no_tool_can_accept_or_reject() {
+    let s = start(&["read", "comment", "suggest"], 1000).await;
+    let list = rpc(&s, "tools/list", json!({})).await;
+    let mut names: Vec<String> = list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect();
+    names.sort();
+    // The exact tool surface: reading, commenting and suggesting. Nothing decides.
+    assert_eq!(
+        names,
+        [
+            "add_comment",
+            "list_chapters",
+            "list_documents",
+            "read_chapter",
+            "search_text",
+            "suggest_edit",
+            "suggest_style"
+        ]
+    );
+    for name in [
+        "accept_suggestion",
+        "reject_suggestion",
+        "resolve_suggestion",
+    ] {
+        let r = rpc(
+            &s,
+            "tools/call",
+            json!({"name": name, "arguments": {"suggestion_id": "s1"}}),
+        )
+        .await;
+        assert!(
+            r.get("error").is_some() || r["result"]["isError"] == true,
+            "{name} must not exist: {r}"
+        );
+    }
+    // No MCP source can change a suggestion's status.
+    let src = concat!(
+        include_str!("../src/mcp/mod.rs"),
+        include_str!("../src/mcp/tools.rs")
+    )
+    .to_lowercase();
+    assert!(!src.contains("update suggestions"));
+    assert!(!src.contains("'accepted'") && !src.contains("'rejected'"));
 }

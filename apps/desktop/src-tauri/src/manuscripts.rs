@@ -295,11 +295,63 @@ impl Store {
         doc: &Doc,
         since: &StateVector,
     ) -> Result<(), StorageError> {
+        validate_saved_doc(doc)?;
         let update = doc.transact().encode_state_as_update_v1(since);
         if update.len() > 2 {
             self.append_doc_update(doc_id, &update)?;
         }
         Ok(())
+    }
+
+    /// One agent write, all-or-nothing: in a single transaction under the connection lock,
+    /// re-check that the token (and its agent) is still active, then append the doc update
+    /// (validated first) and insert the comment or suggestion. A token revoked after the
+    /// request authenticated is refused here and nothing is written.
+    pub fn agent_write(&self, token_id: &str, w: AgentWrite<'_>) -> Result<(), StorageError> {
+        let update = match w.doc {
+            Some((_, doc, since)) => {
+                validate_saved_doc(doc)?;
+                Some(doc.transact().encode_state_as_update_v1(since))
+            }
+            None => None,
+        };
+        #[cfg(test)]
+        if let Some(hook) = BEFORE_AGENT_WRITE.with(|h| h.borrow_mut().take()) {
+            hook();
+        }
+        self.with_conn(|c| {
+            let tx = c.unchecked_transaction()?;
+            let active = tx
+                .query_row(
+                    "SELECT 1 FROM agent_tokens t JOIN agents a ON a.id = t.agent_id
+                     WHERE t.id = ?1 AND t.revoked_at IS NULL AND a.revoked_at IS NULL",
+                    [token_id],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some();
+            if !active {
+                return Err(StorageError::Invalid(
+                    "token has been revoked; nothing was written".into(),
+                ));
+            }
+            if let (Some((doc_id, _, _)), Some(u)) = (w.doc, &update) {
+                if u.len() > 2 {
+                    tx.execute(
+                        "INSERT INTO doc_updates (doc_id, data) VALUES (?1, ?2)",
+                        params![doc_id, u],
+                    )?;
+                }
+            }
+            if let Some(c) = w.comment {
+                insert_comment_on(&tx, w.manuscript_id, c)?;
+            }
+            if let Some(x) = w.suggestion {
+                insert_suggestion_on(&tx, w.manuscript_id, x)?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
     }
 
     /// Create a section from ProseMirror JSON (e.g. the .docx importer's output).
@@ -310,6 +362,7 @@ impl Store {
         title: &str,
         pm_doc: &Value,
     ) -> Result<Section, StorageError> {
+        crate::content::validate_doc(pm_doc).map_err(StorageError::Invalid)?;
         let doc = crate::content::new_doc();
         crate::content::encode(&doc, pm_doc).map_err(StorageError::Invalid)?;
         let s = self.add_section(manuscript_id, kind, title, None)?;
@@ -365,6 +418,23 @@ impl Store {
         })
     }
 
+    /// Current UTC time as stored in the database (ISO 8601 with milliseconds).
+    pub fn now(&self) -> Result<String, StorageError> {
+        self.with_conn(|c| Ok(c.query_row(&format!("SELECT {NOW}"), [], |r| r.get(0))?))
+    }
+
+    pub fn insert_comment(&self, manuscript_id: &str, c: &Comment) -> Result<(), StorageError> {
+        self.with_conn(|conn| insert_comment_on(conn, manuscript_id, c))
+    }
+
+    pub fn insert_suggestion(
+        &self,
+        manuscript_id: &str,
+        x: &Suggestion,
+    ) -> Result<(), StorageError> {
+        self.with_conn(|conn| insert_suggestion_on(conn, manuscript_id, x))
+    }
+
     /// Record one agent (or human) action in the audit log.
     pub fn audit(
         &self,
@@ -402,6 +472,74 @@ impl Store {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    // Test-only: runs once in `agent_write` after the tool's checks and before the write
+    // transaction, so a test can revoke a token in that window. Compiled out of release.
+    pub(crate) static BEFORE_AGENT_WRITE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
+}
+
+/// What one agent write stores (see [`Store::agent_write`]).
+pub struct AgentWrite<'a> {
+    pub manuscript_id: &'a str,
+    /// (doc id, edited doc, state vector it was loaded at)
+    pub doc: Option<(&'a str, &'a Doc, &'a StateVector)>,
+    pub comment: Option<&'a Comment>,
+    pub suggestion: Option<&'a Suggestion>,
+}
+
+/// Every save of section content is schema-checked first.
+fn validate_saved_doc(doc: &Doc) -> Result<(), StorageError> {
+    let nodes: Vec<Value> = crate::content::decode(doc)
+        .into_iter()
+        .map(|b| b.node)
+        .collect();
+    crate::content::validate_doc(&serde_json::json!({ "type": "doc", "content": nodes }))
+        .map_err(StorageError::Invalid)
+}
+
+fn insert_comment_on(
+    conn: &rusqlite::Connection,
+    manuscript_id: &str,
+    c: &Comment,
+) -> Result<(), StorageError> {
+    conn.execute(
+        "INSERT INTO comments (id, manuscript_id, section_id, block_id, quote, body, thread_id,
+           author_kind, author_id, author_name, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            c.id,
+            manuscript_id,
+            c.section_id,
+            c.block_id,
+            c.quote,
+            c.body,
+            c.thread_id,
+            c.author.kind,
+            c.author.id,
+            c.author.name,
+            c.created_at
+        ],
+    )?;
+    Ok(())
+}
+
+fn insert_suggestion_on(
+    conn: &rusqlite::Connection,
+    manuscript_id: &str,
+    x: &Suggestion,
+) -> Result<(), StorageError> {
+    conn.execute(
+        "INSERT INTO suggestions (id, manuscript_id, section_id, block_id, kind, quote, replacement,
+           rationale, author_kind, author_id, author_name, status, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        params![x.id, manuscript_id, x.section_id, x.block_id, x.kind, x.quote, x.replacement,
+            x.rationale, x.author.kind, x.author.id, x.author.name, x.status, x.created_at],
+    )?;
+    Ok(())
+}
+
 /// Current state vector of a doc (pair with `save_doc_changes`).
 pub fn state_vector(doc: &Doc) -> StateVector {
     doc.transact().state_vector()
@@ -411,6 +549,24 @@ pub fn state_vector(doc: &Doc) -> StateVector {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn import_section_json_validates_before_saving() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = Store::open(tmp.path()).unwrap();
+        let m = s.create_manuscript("Sample Manuscript").unwrap();
+        for bad in [
+            json!({"type":"doc","content":[{"type":"table","content":[]}]}),
+            json!({"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"x","marks":[{"type":"highlight"}]}]}]}),
+        ] {
+            let e = s.import_section_json(&m.id, "chapter", "Bad", &bad);
+            assert!(matches!(e, Err(StorageError::Invalid(_))), "{e:?}");
+        }
+        assert!(
+            s.list_sections(&m.id).unwrap().is_empty(),
+            "nothing was added"
+        );
+    }
 
     #[test]
     fn sections_and_docs_persist() {

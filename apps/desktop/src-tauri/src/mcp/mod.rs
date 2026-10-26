@@ -15,6 +15,7 @@
 //!   and is never exposed as an MCP tool.
 
 mod tools;
+pub use tools::PARAGRAPH_STYLES;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -261,6 +262,36 @@ async fn auth(State(gate): State<Gate>, mut req: Request, next: Next) -> Respons
     next.run(req).await
 }
 
+/// Largest accepted request body. Checked after auth, so unauthenticated bodies are never read.
+pub const MAX_BODY_BYTES: usize = 1024 * 1024;
+
+/// The MCP service reads raw bodies (not through axum extractors), so axum's default limit
+/// doesn't apply; buffer up to the cap here and refuse anything larger with 413.
+async fn body_limit(req: Request, next: Next) -> Response {
+    // A declared Content-Length over the cap is refused up front, before any body is read.
+    let declared = req
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .map(|v| v.to_str().ok().and_then(|s| s.trim().parse::<u64>().ok()));
+    match declared {
+        Some(Some(n)) if n > MAX_BODY_BYTES as u64 => return too_large(),
+        Some(None) => return (StatusCode::BAD_REQUEST, "invalid content-length").into_response(),
+        _ => {}
+    }
+    let (parts, body) = req.into_parts();
+    match axum::body::to_bytes(body, MAX_BODY_BYTES).await {
+        Ok(bytes) => {
+            next.run(Request::from_parts(parts, axum::body::Body::from(bytes)))
+                .await
+        }
+        Err(_) => too_large(),
+    }
+}
+
+fn too_large() -> Response {
+    (StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response()
+}
+
 /// The `/mcp` router plus its counters. Layers run outermost first: Host/Origin guard, then
 /// auth and throttling, then the MCP service (which repeats its own Origin check).
 pub fn router_with_stats(store: Store, cfg: McpConfig) -> (axum::Router, Arc<GateStats>) {
@@ -295,6 +326,7 @@ pub fn router_with_stats(store: Store, cfg: McpConfig) -> (axum::Router, Arc<Gat
     let stats = gate.stats.clone();
     let app = axum::Router::new()
         .nest_service("/mcp", service)
+        .layer(axum::middleware::from_fn(body_limit))
         .layer(axum::middleware::from_fn_with_state(gate.clone(), auth))
         .layer(axum::middleware::from_fn_with_state(gate, host_guard));
     (app, stats)
