@@ -90,10 +90,12 @@ async function getStarted() {
 const choosingBook = ref(false);
 const settingsOpen = ref(false);
 const settingsPanel = ref<HTMLElement | null>(null);
+const settingsButton = ref<HTMLButtonElement | null>(null);
 watch(settingsOpen, async (isOpen) => {
-  if (!isOpen) return;
   await nextTick();
-  settingsPanel.value?.focus();
+  // Into the panel on open; back to the button that opened it on close.
+  if (isOpen) settingsPanel.value?.focus();
+  else settingsButton.value?.focus();
 });
 const fileInput = ref<HTMLInputElement | null>(null);
 const chooseFile = () => fileInput.value?.click();
@@ -281,6 +283,7 @@ defineExpose({ open });
         Open another book
       </button>
       <button
+        ref="settingsButton"
         type="button"
         class="topbar__button"
         data-test="settings-open"

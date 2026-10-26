@@ -996,4 +996,21 @@ describe('home screen', () => {
     ) as { app: { windows: { dragDropEnabled?: boolean }[] } };
     expect(conf.app.windows[0]!.dragDropEnabled).toBe(false);
   });
+
+  it('returns focus to the Settings button when Settings closes', async () => {
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    const button = w.find('[data-test="settings-open"]');
+    await button.trigger('click');
+    await settle();
+    await w.find('[data-test="settings"]').trigger('keydown', { key: 'Escape' });
+    await settle();
+    expect(document.activeElement).toBe(button.element);
+    await button.trigger('click');
+    await settle();
+    await w.find('[data-test="settings-close"]').trigger('click');
+    await settle();
+    expect(document.activeElement).toBe(button.element);
+    w.unmount();
+  });
 });
