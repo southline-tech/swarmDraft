@@ -186,9 +186,35 @@ describe('App', () => {
     await nav.trigger('click');
     expect(nav.attributes('aria-pressed')).toBe('false');
     expect(sidebar().isVisible()).toBe(false);
+    // The grid collapses so the editor takes the full width, not the old 18rem column.
+    const ws = w.find('[data-test="workspace"]');
+    expect(ws.classes()).toContain('grid-cols-1');
+    expect(ws.classes()).not.toContain('grid-cols-[18rem_1fr]');
+    expect(nav.attributes('aria-controls')).toBe(sidebar().attributes('id'));
     await nav.trigger('click');
     expect(nav.attributes('aria-pressed')).toBe('true');
     expect(sidebar().isVisible()).toBe(true);
+    expect(w.find('[data-test="workspace"]').classes()).toContain('grid-cols-[18rem_1fr]');
+    w.unmount();
+  });
+
+  it('keeps typed text and the same editor across a navigator close/open', async () => {
+    const { w } = await withManuscript();
+    const editorUid = w.findComponent({ name: 'ManuscriptEditor' }).vm.$.uid;
+    const pm = w.find('.ProseMirror').element;
+    const editorOf = () =>
+      (w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }).editor;
+    const editor = editorOf();
+    editor.commands.insertContentAt(1, 'NAVKEEP ');
+    await flushPromises();
+    const nav = w.find('[data-test="tb-navigator"]');
+    await nav.trigger('click');
+    await nav.trigger('click');
+    await flushPromises();
+    expect(w.find('.ProseMirror').text()).toContain('NAVKEEP ');
+    expect(w.findComponent({ name: 'ManuscriptEditor' }).vm.$.uid).toBe(editorUid);
+    expect(w.find('.ProseMirror').element).toBe(pm);
+    expect(editorOf()).toBe(editor);
     w.unmount();
   });
 

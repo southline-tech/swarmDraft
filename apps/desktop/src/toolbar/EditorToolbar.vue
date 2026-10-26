@@ -217,6 +217,7 @@ const btn =
       aria-label="Chapters"
       title="Chapters"
       :aria-pressed="props.navigatorOpen"
+      aria-controls="chapter-navigator"
       @click="emit('toggle-navigator')"
     >
       <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">

@@ -303,9 +303,15 @@ defineExpose({ open });
     <p v-if="openError" role="alert" data-test="open-error">{{ openError }}</p>
     <p v-if="saveError" role="alert" data-test="save-error">{{ saveError }}</p>
     <p v-if="!session" data-test="no-manuscript">Import a manuscript to see its outline.</p>
-    <div v-else class="workspace">
+    <div
+      v-else
+      class="workspace grid gap-4"
+      :class="navigatorOpen ? 'grid-cols-[18rem_1fr]' : 'grid-cols-1'"
+      data-test="workspace"
+    >
       <SectionNav
         v-show="navigatorOpen"
+        id="chapter-navigator"
         :sections="session.outline.value"
         :manuscript-id="session.id"
         :selected-id="selectedId"
@@ -333,10 +339,5 @@ body {
 }
 .shell {
   padding: 2rem;
-}
-.workspace {
-  display: grid;
-  grid-template-columns: 18rem 1fr;
-  gap: 1rem;
 }
 </style>
