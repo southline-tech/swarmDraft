@@ -14,6 +14,8 @@ export {
   yDocToDoc,
   manuscriptToYDocs,
   markKey,
+  rekeyMarks,
+  REKEY_ORIGIN,
   markTypeFromKey,
   FRAGMENT_NAME,
 } from './ydoc';

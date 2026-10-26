@@ -10,6 +10,8 @@ import {
   type AppInfo,
 } from './backend';
 import AgentsSettings from './AgentsSettings.vue';
+import ManuscriptEditor from './ManuscriptEditor.vue';
+import { SAMPLE_DOC } from './sample';
 
 const info = ref<AppInfo | null>(null);
 onMounted(async () => {
@@ -107,6 +109,7 @@ async function onRestore(): Promise<void> {
     </section>
     <p v-else data-test="browser-mode">Running in browser mode (no desktop backend).</p>
     <AgentsSettings v-if="info" />
+    <ManuscriptEditor :content="SAMPLE_DOC" />
   </main>
 </template>
 
