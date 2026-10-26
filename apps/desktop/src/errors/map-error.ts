@@ -80,7 +80,7 @@ const COPY: Record<ErrorCode, Omit<MappedError, 'code'>> = {
     tone: 'warning',
   },
   'not-found': {
-    title: "We couldn't find that",
+    title: "We couldn't find that file",
     message: 'It may have been moved or deleted. Try opening it again.',
     action: 'choose-another-file',
     actionLabel: 'Choose another file',

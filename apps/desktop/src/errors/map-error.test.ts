@@ -69,6 +69,10 @@ describe('mapError', () => {
     });
   });
 
+  it('names the missing thing as a file', () => {
+    expect(mapError('not found: manuscript abc', 'open').title).toBe("We couldn't find that file");
+  });
+
   it('rawErrorText handles any thrown value', () => {
     expect(rawErrorText(new Error('a'))).toBe('a');
     expect(rawErrorText('b')).toBe('b');
