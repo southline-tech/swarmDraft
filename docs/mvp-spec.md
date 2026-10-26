@@ -105,9 +105,13 @@ preview exactly matches the print file.
 - **Yjs docs**: manuscript doc (`meta` Y.Map, `structure` Y.Array of section refs); one doc per
   section holding a Y.XmlFragment. Updates and snapshots are stored in SQLite.
 - **ProseMirror schema**: paragraph (style: body, first, block_quote, epigraph, verse, centered),
-  heading, scene_break, page_break; marks: italic, bold, smallcaps, link, `comment_anchor(id)`,
-  `suggestion_insert(id, author, ts)`, `suggestion_delete(id, author, ts)`,
-  `format_change(id, author, attrs)`.
+  heading, scene_break, page_break; inline: hard_break, `footnote(id, kind, text, content)`
+  (footnote or endnote with rich paragraphs), `image(alt)` placeholder; marks: italic, bold,
+  smallcaps, underline, strike, link, `comment_anchor(id)`, `suggestion_insert(id, author, ts)`,
+  `suggestion_delete(id, author, ts)`, `format_change(id, author, attrs)`. Types live in
+  `@coauthor/schema` (`content.ts`). In Yjs, comment and suggestion marks are keyed `type--hash`
+  so overlapping ranges don't clobber each other. Agent reads expose notes as `[^id]` markers
+  plus a notes list (`readView`).
 - **Comment**(id, section_id, anchor, author principal, body, thread_id, resolved_at)
 - **Suggestion** index (id, section_id, author principal, kind, status: open, accepted, rejected;
   decided_at, summary). CRDT marks are the source of truth; the table is a queryable index.
