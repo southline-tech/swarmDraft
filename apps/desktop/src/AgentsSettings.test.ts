@@ -53,7 +53,9 @@ describe('AgentsSettings', () => {
     await w.find('[data-test="mint"]').trigger('click');
     await flushPromises();
     expect(api.createToken).toHaveBeenCalledWith('a0', ['read', 'comment', 'suggest']);
-    expect(w.find('[data-test="token-once"]').text()).toContain('cat_abcdefSECRET');
+    expect((w.find('[data-test="token-value"]').element as HTMLInputElement).value).toBe(
+      'cat_abcdefSECRET',
+    );
     expect(w.find('[data-test="token"]').text()).not.toContain('SECRET');
 
     await w.find('[data-test="token-done"]').trigger('click');
@@ -78,22 +80,49 @@ describe('AgentsSettings', () => {
     await flushPromises();
     expect(writeClipboard).toHaveBeenCalledWith('cat_abcdefSECRET');
     expect(w.find('[data-test="copied"]').text()).toBe('Copied');
+    expect(w.find('[data-test="copy-failed"]').exists()).toBe(false);
+    expect(w.find('[data-test="token-once"]').exists()).toBe(true);
   });
 
-  it('reports a failed copy', async () => {
+  it.each([
+    ['rejects', vi.fn(async (): Promise<void> => Promise.reject(new Error('denied')))],
+    [
+      'is unavailable',
+      vi.fn((): Promise<void> => {
+        throw new TypeError("Cannot read properties of undefined (reading 'writeText')");
+      }),
+    ],
+  ])('keeps the token visible and selectable when the clipboard %s', async (_, writeClipboard) => {
     const api = fakeApi();
-    const writeClipboard = vi.fn(async () => {
-      throw new Error('denied');
+    const w = mount(AgentsSettings, {
+      props: { api, writeClipboard: writeClipboard as (text: string) => Promise<void> },
+      attachTo: document.body,
     });
-    const w = mount(AgentsSettings, { props: { api, writeClipboard } });
     await w.find('[data-test="create-agent"]').trigger('submit');
     await flushPromises();
     await w.find('[data-test="mint"]').trigger('click');
     await flushPromises();
     await w.find('[data-test="copy-token"]').trigger('click');
     await flushPromises();
+    expect(writeClipboard).toHaveBeenCalledWith('cat_abcdefSECRET');
     expect(w.find('[data-test="copied"]').exists()).toBe(false);
-    expect(w.find('[data-test="error"]').text()).toContain('copy it manually');
+    expect(w.find('[data-test="copy-failed"]').text()).toContain('copy it manually');
+    const input = w.find('[data-test="token-value"]');
+    const el = input.element as HTMLInputElement;
+    expect(w.find('[data-test="token-once"]').exists()).toBe(true);
+    expect(el.value).toBe('cat_abcdefSECRET');
+    expect(el.readOnly).toBe(true);
+    await input.trigger('focus');
+    expect(el.selectionStart).toBe(0);
+    expect(el.selectionEnd).toBe('cat_abcdefSECRET'.length);
+
+    // A retry that succeeds swaps the failure message for the confirmation.
+    writeClipboard.mockImplementation(async () => undefined as never);
+    await w.find('[data-test="copy-token"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test="copy-failed"]').exists()).toBe(false);
+    expect(w.find('[data-test="copied"]').text()).toBe('Copied');
+    w.unmount();
   });
 
   it('clears the token when the page is hidden or the view unmounts', async () => {
