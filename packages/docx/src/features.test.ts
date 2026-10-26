@@ -225,3 +225,93 @@ describe('hostile input', () => {
     }
   });
 });
+
+describe('id collisions and zip integrity', () => {
+  const docx = (body: string, comments: string) =>
+    zipSync({
+      'word/document.xml': strToU8(`<w:document ${NS}><w:body>${body}</w:body></w:document>`),
+      'word/comments.xml': strToU8(`<w:comments ${NS}>${comments}</w:comments>`),
+    });
+  const patchCentral = (zip: Uint8Array, fn: (dv: DataView, at: number) => void) => {
+    const dv = new DataView(zip.buffer);
+    for (let i = 0; i + 4 <= zip.length; i++) if (dv.getUint32(i, true) === 0x02014b50) fn(dv, i);
+    return zip;
+  };
+
+  it('gives duplicate/missing comment and revision ids fresh ids and keeps every comment', () => {
+    const body = p(
+      '<w:commentRangeStart w:id="5"/>' +
+        r('first') +
+        '<w:commentRangeEnd w:id="5"/>' +
+        '<w:commentRangeStart w:id="5"/>' +
+        r(' second') +
+        '<w:commentRangeEnd w:id="5"/>' +
+        '<w:commentRangeStart/>' +
+        r(' third') +
+        '<w:commentRangeEnd/>' +
+        '<w:ins w:id="9" w:author="Ann">' +
+        '<w:ins w:id="9" w:author="Bo">' +
+        r(' nested') +
+        '</w:ins></w:ins>' +
+        '<w:del w:author="Cy">' +
+        `<w:r><w:delText> gone</w:delText></w:r></w:del>`,
+    );
+    const comments =
+      `<w:comment w:id="5" w:author="Ann">${p(r('one'))}</w:comment>` +
+      `<w:comment w:id="5" w:author="Bo">${p(r('two'))}</w:comment>` +
+      `<w:comment w:author="Cy">${p(r('three'))}</w:comment>`;
+    const m = importDocx(docx(body, comments));
+    expect(m.comments.map((c) => c.body)).toEqual(['one', 'two', 'three']);
+    expect(new Set(m.comments.map((c) => c.id)).size).toBe(3);
+    const all = m.sections.flatMap((s) => s.content.content);
+    const text = all.flatMap((b) => ('content' in b ? (b.content ?? []) : [])) as InlineNode[];
+    const ids = (t: string, type: string) => {
+      const n = text.find((x) => x.type === 'text' && x.text === t)!;
+      return n.type === 'text'
+        ? (n.marks ?? [])
+            .filter((k) => k.type === type)
+            .map((k) => (k as { attrs: { id: string } }).attrs.id)
+        : [];
+    };
+    const [c1] = ids('first', 'comment_anchor');
+    const [c2] = ids(' second', 'comment_anchor');
+    const [c3] = ids(' third', 'comment_anchor');
+    expect(m.comments.map((c) => c.id)).toEqual([c1, c2, c3]);
+    const ins = ids(' nested', 'suggestion_insert');
+    expect(ins).toHaveLength(2);
+    expect(new Set(ins).size).toBe(2);
+    expect(ids(' gone', 'suggestion_delete')[0]).toMatch(/^docx-\d+$/);
+    expect(m.report.items.filter((i) => i.code === 'duplicate_id').length).toBeGreaterThanOrEqual(
+      4,
+    );
+    expect(m.report.items.map((i) => i.code)).not.toContain('orphan_comment');
+    // Fresh ids survive a round trip.
+    const b = importDocx(exportDocx(m));
+    expect(b.comments.map((c) => c.body)).toEqual(['one', 'two', 'three']);
+    expect(b.report.items.map((i) => i.code)).not.toContain('duplicate_id');
+  });
+
+  it('throws on duplicate zip entry names instead of letting the last one win', () => {
+    const zip = zipSync({
+      'word/document.xml': strToU8(
+        `<w:document ${NS}><w:body>${p(r('real'))}</w:body></w:document>`,
+      ),
+      'word/documenX.xml': strToU8(
+        `<w:document ${NS}><w:body>${p(r('shadow'))}</w:body></w:document>`,
+      ),
+    });
+    // Rename every "documenX" to "document" (local + central headers).
+    const name = strToU8('word/documenX.xml');
+    for (let i = 0; i + name.length <= zip.length; i++)
+      if (name.every((c, j) => zip[i + j] === c)) zip[i + name.length - 5] = 't'.charCodeAt(0);
+    expect(() => importDocx(zip)).toThrow(/Duplicate zip entry "word\/document.xml"/);
+  });
+
+  it('rejects encrypted entries with a clear error', () => {
+    const zip = zipSync({
+      'word/document.xml': strToU8(`<w:document ${NS}><w:body/></w:document>`),
+    });
+    patchCentral(zip, (dv, at) => dv.setUint16(at + 8, dv.getUint16(at + 8, true) | 1, true));
+    expect(() => importDocx(zip)).toThrow(/encrypted/);
+  });
+});

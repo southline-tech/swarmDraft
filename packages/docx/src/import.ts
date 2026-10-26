@@ -249,6 +249,13 @@ interface Ctx {
   report: ReportBuilder;
   openComments: Set<string>;
   usedComments: Set<string>;
+  /** Unique ids for comments.xml entries, in file order, per original w:id. */
+  commentIds: Map<string, string[]>;
+  /** Fresh comment ids already reported while reading comments.xml. */
+  commentRemapped: Set<string>;
+  /** Original comment w:id -> queue of currently open mapped ids. */
+  openCommentMap: Map<string, string[]>;
+  freshId: () => string;
   suggestions: Set<string>;
 }
 
@@ -431,8 +438,18 @@ function extractParagraph(p: XmlElement, ctx: Ctx): Para {
           break;
         case 'w:ins':
         case 'w:del': {
+          let raw = c.attrs['w:id'];
+          if (!raw || ctx.suggestions.has(`docx-${raw}`)) {
+            ctx.report.add(
+              'warning',
+              'duplicate_id',
+              `Tracked change with ${raw ? 'duplicate' : 'missing'} id given a new id`,
+              raw ?? '',
+            );
+            raw = ctx.freshId();
+          }
           const attrs = {
-            id: `docx-${c.attrs['w:id'] ?? ctx.suggestions.size}`,
+            id: `docx-${raw}`,
             author: c.attrs['w:author'] ?? 'Unknown',
             ts: c.attrs['w:date'] ?? '',
           };
@@ -441,13 +458,30 @@ function extractParagraph(p: XmlElement, ctx: Ctx): Para {
           walk(c, [...extra, { type, attrs }], deleted || c.name === 'w:del');
           break;
         }
-        case 'w:commentRangeStart':
-          ctx.openComments.add(c.attrs['w:id'] ?? '');
-          ctx.usedComments.add(c.attrs['w:id'] ?? '');
+        case 'w:commentRangeStart': {
+          const orig = c.attrs['w:id'] ?? '';
+          // Duplicate ids pair up with comments.xml entries in document order.
+          const queued = ctx.commentIds.get(orig)?.shift();
+          const id = queued ?? (!orig || ctx.usedComments.has(orig) ? ctx.freshId() : orig);
+          if (id !== orig && !ctx.commentRemapped.has(id))
+            ctx.report.add(
+              'warning',
+              'duplicate_id',
+              `Comment with ${orig ? 'duplicate' : 'missing'} id given a new id`,
+              orig,
+            );
+          ctx.openComments.add(id);
+          ctx.usedComments.add(id);
+          const open = ctx.openCommentMap.get(orig) ?? [];
+          open.push(id);
+          ctx.openCommentMap.set(orig, open);
           break;
-        case 'w:commentRangeEnd':
-          ctx.openComments.delete(c.attrs['w:id'] ?? '');
+        }
+        case 'w:commentRangeEnd': {
+          const id = ctx.openCommentMap.get(c.attrs['w:id'] ?? '')?.shift();
+          if (id) ctx.openComments.delete(id);
           break;
+        }
         case 'w:hyperlink':
           ctx.report.add('info', 'hyperlink', 'Hyperlinks imported as plain text', textOf(c));
           walk(c, extra, deleted);
@@ -611,13 +645,33 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
     report,
     openComments: new Set(),
     usedComments: new Set(),
+    commentIds: new Map(),
+    commentRemapped: new Set(),
+    openCommentMap: new Map(),
+    freshId: (() => {
+      let n = 1_000_000;
+      return () => String(++n);
+    })(),
     suggestions: new Set(),
   };
-  ctx.footnotes = readNotes(read('footnotes', 'word/footnotes.xml'), 'w:footnote', ctx);
-  ctx.endnotes = readNotes(read('endnotes', 'word/endnotes.xml'), 'w:endnote', ctx);
   const commentDefs = new Map<string, { author: string; date: string; body: string }>();
   for (const c of kids(read('comments', 'word/comments.xml'), 'w:comment')) {
-    commentDefs.set(c.attrs['w:id'] ?? '', {
+    const orig = c.attrs['w:id'] ?? '';
+    let id = orig;
+    if (!orig || commentDefs.has(orig)) {
+      id = ctx.freshId();
+      ctx.commentRemapped.add(id);
+      report.add(
+        'warning',
+        'duplicate_id',
+        `Comment with ${orig ? 'duplicate' : 'missing'} id given a new id`,
+        orig,
+      );
+    }
+    const q = ctx.commentIds.get(orig) ?? [];
+    q.push(id);
+    ctx.commentIds.set(orig, q);
+    commentDefs.set(id, {
       author: c.attrs['w:author'] ?? 'Unknown',
       date: c.attrs['w:date'] ?? '',
       body: kids(c, 'w:p')
@@ -626,6 +680,8 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
         .trim(),
     });
   }
+  ctx.footnotes = readNotes(read('footnotes', 'word/footnotes.xml'), 'w:footnote', ctx);
+  ctx.endnotes = readNotes(read('endnotes', 'word/endnotes.xml'), 'w:endnote', ctx);
   for (const kind of ['header', 'footer'])
     for (const target of relAll(pkg, kind))
       report.add(
