@@ -16,7 +16,13 @@ import AgentsSettings from './AgentsSettings.vue';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
 import { flushOnClose } from './close-flush';
-import { importAndOpen, reopenLatest, type ManuscriptSession } from './manuscript-session';
+import {
+  importAndOpen,
+  reopenLatest,
+  switchSession,
+  UnsavedEditsError,
+  type ManuscriptSession,
+} from './manuscript-session';
 
 const info = ref<AppInfo | null>(null);
 const session = shallowRef<ManuscriptSession | null>(null);
@@ -128,7 +134,7 @@ async function onRestore(): Promise<void> {
 }
 onBeforeUnmount(() => {
   stopCloseFlush();
-  void session.value?.close();
+  closeQuietly(session.value);
 });
 
 /** Close the open manuscript, if any, and clear the selection. */
@@ -140,8 +146,13 @@ function closeSession() {
 }
 
 /** Open an imported manuscript (exposed for tests and the Tauri open-file flow). */
+/** A rejected close keeps that session open and retrying; just log it. */
+const closeQuietly = (s?: ManuscriptSession | null) =>
+  void s?.close().catch((err: unknown) => console.error('Edits not saved yet; retrying', err));
+
 function open(next: ManuscriptSession) {
-  void session.value?.close();
+  if (session.value !== next) closeQuietly(session.value);
+  saveError.value = '';
   session.value = next;
   selectedId.value = next.outline.value.find((s) => s.kind === 'chapter')?.id;
 }
@@ -153,9 +164,13 @@ async function onFile(e: Event) {
   openError.value = '';
   importing.value = true;
   try {
-    open(await importAndOpen(new Uint8Array(await file.arrayBuffer()), persistHooks));
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    open(await switchSession(session.value, () => importAndOpen(bytes, persistHooks)));
   } catch (err) {
-    openError.value = `Could not import ${file.name}: ${err instanceof Error ? err.message : String(err)}`;
+    openError.value =
+      err instanceof UnsavedEditsError
+        ? `Couldn't open ${file.name}: some edits in the current manuscript aren't saved yet`
+        : `Could not import ${file.name}: ${err instanceof Error ? err.message : String(err)}`;
   } finally {
     importing.value = false;
     input.value = '';

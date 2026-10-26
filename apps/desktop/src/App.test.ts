@@ -410,6 +410,67 @@ describe('restore confirmation', () => {
     vi.mocked(backend.restoreBackup).mockClear();
   });
 
+  it("won't import over a manuscript whose edits aren't saved, and keeps it open", async () => {
+    const backend = await import('./backend');
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    vi.mocked(backend.persistImport).mockClear();
+    vi.mocked(backend.saveSectionUpdate).mockRejectedValue(new Error('database is locked'));
+    const editor = await vi.waitFor(() => {
+      const e = (
+        w.find('.tiptap').element as unknown as { editor?: import('@tiptap/core').Editor } | null
+      )?.editor;
+      if (!e) throw new Error('editor not mounted yet');
+      return e;
+    });
+    editor.commands.insertContentAt(1, 'UNSAVED ');
+    await chooseFile(w);
+    await flushPromises();
+    expect(backend.persistImport).not.toHaveBeenCalled();
+    expect(w.find('[data-test="open-error"]').text()).toBe(
+      "Couldn't open synthetic.docx: some edits in the current manuscript aren't saved yet",
+    );
+    expect(w.find('.tiptap').text()).toContain('UNSAVED ');
+    // Saves recover: the retry clears the banner, and now the import goes through.
+    vi.mocked(backend.saveSectionUpdate).mockReset();
+    vi.mocked(backend.saveSectionUpdate).mockResolvedValue(undefined);
+    await new Promise((r) => setTimeout(r, 1100));
+    await flushPromises();
+    expect(w.find('[data-test="save-error"]').exists()).toBe(false);
+    await chooseFile(w);
+    expect(backend.persistImport).toHaveBeenCalledTimes(1);
+    expect(w.find('[data-test="open-error"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('unmounting with unsaved edits logs, does not reject, and keeps retrying', async () => {
+    const backend = await import('./backend');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    vi.mocked(backend.saveSectionUpdate).mockRejectedValue(new Error('database is locked'));
+    const editor = await vi.waitFor(() => {
+      const e = (
+        w.find('.tiptap').element as unknown as { editor?: import('@tiptap/core').Editor } | null
+      )?.editor;
+      if (!e) throw new Error('editor not mounted yet');
+      return e;
+    });
+    editor.commands.insertContentAt(1, 'BYE ');
+    w.unmount();
+    await flushPromises();
+    await vi.waitFor(() => expect(log).toHaveBeenCalled());
+    const n = vi.mocked(backend.saveSectionUpdate).mock.calls.length;
+    vi.mocked(backend.saveSectionUpdate).mockReset();
+    vi.mocked(backend.saveSectionUpdate).mockResolvedValue(undefined);
+    await new Promise((r) => setTimeout(r, 1100));
+    expect(n).toBeGreaterThan(0);
+    expect(backend.saveSectionUpdate).toHaveBeenCalled(); // the retry ran after unmount
+    log.mockRestore();
+  });
+
   it('cancels the restore with a clear error if pending edits cannot be saved', async () => {
     const backend = await import('./backend');
     vi.mocked(backend.saveSectionUpdate).mockRejectedValue(new Error('database is locked'));

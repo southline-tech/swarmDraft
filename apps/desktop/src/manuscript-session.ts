@@ -48,7 +48,8 @@ export interface ManuscriptSession {
   flush(): Promise<void>;
   /**
    * Stop observing. Pending edits are flushed first unless `discard` (e.g. after a restore
-   * replaced storage, when writing the old docs back would be wrong).
+   * replaced storage, when writing the old docs back would be wrong). If they can't be saved it
+   * rejects with `UnsavedEditsError` and the session stays open, still retrying.
    */
   close(opts?: { discard?: boolean }): Promise<void>;
 }
@@ -92,15 +93,13 @@ export function openSession(
     flush: () => saver?.flush() ?? Promise.resolve(),
     close: async (opts) => {
       if (closed) return;
+      // If the flush fails, stay open (observers and retries keep running) and rethrow, so the
+      // caller can keep this session instead of losing its unsaved edits.
+      if (opts?.discard) saver?.discard();
+      else await saver?.flush();
       closed = true;
       off();
-      if (!saver) return;
-      try {
-        if (opts?.discard) saver.discard();
-        else await saver.flush();
-      } finally {
-        saver.stop();
-      }
+      saver?.stop();
     },
   };
 }
@@ -140,6 +139,8 @@ export interface SectionPersister {
   save: SaveSectionUpdate;
   /** Quiet time before pending edits are written (ms). */
   debounceMs?: number;
+  /** A save that takes longer than this (ms, default 10 s) counts as failed. */
+  saveTimeoutMs?: number;
   /** First retry delay after a failed save (ms); doubles per failure up to 30 s. */
   retryMs?: number;
   /** Called when a save fails; the edits are kept and retried (nothing is ever dropped). */
@@ -166,6 +167,44 @@ export class UnsavedEditsError extends Error {
 export const LOAD_ORIGIN = 'coauthor:load';
 export const SAVE_DEBOUNCE_MS = 500;
 export const RETRY_MAX_MS = 30_000;
+export const SAVE_TIMEOUT_MS = 10_000;
+
+function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`save timed out after ${ms} ms`)), ms);
+    work.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e: unknown) => {
+        clearTimeout(t);
+        reject(e as Error);
+      },
+    );
+  });
+}
+
+/**
+ * Replace `current` with the session `makeNext` opens, without losing unsaved edits: the current
+ * session's edits are saved first (before anything is imported or written), and it is closed only
+ * once they are. If they can't be saved, this rejects with `UnsavedEditsError`, `current` stays
+ * open (still retrying) and any session `makeNext` opened is closed again.
+ */
+export async function switchSession(
+  current: ManuscriptSession | null | undefined,
+  makeNext: () => Promise<ManuscriptSession>,
+): Promise<ManuscriptSession> {
+  await current?.flush();
+  const next = await makeNext();
+  try {
+    await current?.close();
+  } catch (err) {
+    await next.close({ discard: true });
+    throw err;
+  }
+  return next;
+}
 
 /**
  * Collect every local update to the section docs and write them, merged per section, after
@@ -210,7 +249,7 @@ function watchSections(manuscript: Y.Doc, docs: Map<string, Y.Doc>, p: SectionPe
         const full = dirtyFull.has(docId);
         const update = full ? Y.encodeStateAsUpdate(doc) : Y.mergeUpdates(batch.get(docId)!);
         try {
-          await p.save(sectionId, update);
+          await withTimeout(p.save(sectionId, update), p.saveTimeoutMs ?? SAVE_TIMEOUT_MS);
           // A full state covers edits made while it was in flight only if they're in `pending`;
           // those stay queued and are sent as their own delta.
           dirtyFull.delete(docId);
