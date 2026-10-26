@@ -12,6 +12,7 @@ use base64::Engine as _;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use unicode_normalization::UnicodeNormalization;
 
 use crate::storage::{StorageError, Store};
 
@@ -138,19 +139,90 @@ fn row_token(r: &rusqlite::Row) -> rusqlite::Result<TokenInfo> {
     })
 }
 
+/// Names an agent may not take, so it can't pass for the local user or a UI fallback label
+/// (RAD-263). The app has no user display-name setting yet, so the user is reserved as "You";
+/// [`reserved_name`] also takes the user's own name once one exists.
+pub const RESERVED_AGENT_NAMES: &[&str] = &["You", "Unnamed agent", "Removed agent"];
+
+/// Whether `name` is reserved: one of [`RESERVED_AGENT_NAMES`] or the local user's display name
+/// (if set). Compared by [`name_key`].
+fn reserved_name(name: &str, user_display_name: Option<&str>) -> bool {
+    let key = name_key(name);
+    RESERVED_AGENT_NAMES
+        .iter()
+        .copied()
+        .chain(user_display_name.filter(|n| !n.trim().is_empty()))
+        .any(|r| name_key(r) == key)
+}
+
+/// Zero-width characters and bidi controls, invisible in labels; stripped before comparing.
+fn invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}'
+    )
+}
+
+/// Agent name as stored: invisible characters removed, trimmed, NFC.
+fn clean_name(name: &str) -> String {
+    let visible: String = name.chars().filter(|&c| !invisible(c)).collect();
+    visible.trim().nfc().collect()
+}
+
+/// Comparison key for agent names: invisible characters removed, trimmed, NFKC (so fullwidth
+/// and compatibility forms match), then case-folded (lowercase plus the full folds that
+/// `to_lowercase` leaves out: ß/ẞ -> ss, final sigma -> sigma).
+fn name_key(name: &str) -> String {
+    let visible: String = name.chars().filter(|&c| !invisible(c)).collect();
+    let folded: String = visible
+        .trim()
+        .nfkc()
+        .collect::<String>()
+        .to_lowercase()
+        .chars()
+        .flat_map(|c| match c {
+            '\u{DF}' => vec!['s', 's'],
+            '\u{3C2}' => vec!['\u{3C3}'],
+            c => vec![c],
+        })
+        .collect();
+    // Folding can produce new compatibility/composition forms; normalize once more.
+    folded.nfkc().collect()
+}
+
 const TOKEN_COLS: &str = "id, agent_id, prefix, scopes, created_at, last_used_at, revoked_at";
 
 impl Store {
     pub fn create_agent(&self, name: &str, color: &str) -> Result<Agent, StorageError> {
-        let name = name.trim();
+        let name = clean_name(name);
+        let name = name.as_str();
         if name.is_empty() || name.chars().count() > 64 {
             return Err(StorageError::Invalid("name must be 1-64 characters".into()));
+        }
+        let key = name_key(name);
+        // No user display-name setting exists yet, so only "You" stands for the user.
+        if reserved_name(name, None) {
+            return Err(StorageError::Invalid(format!(
+                "\"{name}\" is reserved; choose another agent name"
+            )));
         }
         if !valid_color(color) {
             return Err(StorageError::Invalid("color must look like #rrggbb".into()));
         }
         let id = new_id();
         self.with_conn(|c| {
+            let taken = {
+                let mut st = c.prepare("SELECT name FROM agents")?;
+                let names = st
+                    .query_map([], |r| r.get::<_, String>(0))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                names.iter().any(|n| name_key(n) == key)
+            };
+            if taken {
+                return Err(StorageError::Invalid(format!(
+                    "an agent named \"{name}\" already exists; choose another name"
+                )));
+            }
             c.execute(
                 &format!(
                     "INSERT INTO agents (id, name, color, created_at) VALUES (?1, ?2, ?3, {NOW})"
@@ -345,6 +417,84 @@ fn token_hashes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invisible_characters_and_case_folds_cannot_dodge_the_checks() {
+        let (_t, s) = store();
+        for bad in [
+            "You\u{200E}",
+            "\u{200B}You",
+            "Y\u{FEFF}ou",
+            "\u{2066}you\u{2069}",
+            "\u{FF39}\u{FF4F}\u{FF55}", // fullwidth "You"
+            "Removed\u{2060} agent",
+        ] {
+            let e = s.create_agent(bad, "#3366ff").unwrap_err();
+            assert!(
+                matches!(e, StorageError::Invalid(ref m) if m.contains("reserved")),
+                "{bad:?}"
+            );
+        }
+        let a = s.create_agent("Stra\u{DF}e Bot", "#3366ff").unwrap();
+        assert_eq!(a.name, "Stra\u{DF}e Bot");
+        for dup in [
+            "STRASSE BOT",
+            "strasse bot",
+            "Stra\u{1E9E}e Bot",
+            "Stra\u{DF}e\u{200D} Bot",
+        ] {
+            let e = s.create_agent(dup, "#3366ff").unwrap_err();
+            assert!(
+                matches!(e, StorageError::Invalid(ref m) if m.contains("already exists")),
+                "{dup:?}"
+            );
+        }
+        // Stored names have invisible characters removed.
+        let b = s.create_agent("\u{202E}Mirror\u{200F}", "#3366ff").unwrap();
+        assert_eq!(b.name, "Mirror");
+    }
+
+    #[test]
+    fn reserves_the_users_display_name_when_set() {
+        // Synthetic name; trimmed, NFC and case-insensitive.
+        assert!(reserved_name("  jo\u{308}rn ", Some("J\u{f6}rn")));
+        assert!(reserved_name("you", Some("J\u{f6}rn")));
+        assert!(!reserved_name("Helper", Some("J\u{f6}rn")));
+        // No name set (or blank): only the fixed list.
+        assert!(!reserved_name("J\u{f6}rn", None));
+        assert!(!reserved_name("Helper", Some("  ")));
+        assert!(reserved_name("You", None));
+    }
+
+    #[test]
+    fn agent_names_reject_reserved_and_duplicates() {
+        let (_t, s) = store();
+        for bad in ["you", "  YOU ", "unnamed AGENT", "Removed agent"] {
+            let e = s.create_agent(bad, "#3366ff").unwrap_err();
+            assert!(
+                matches!(e, StorageError::Invalid(ref m) if m.contains("reserved")),
+                "{bad}"
+            );
+        }
+        // Personal names are not hard-coded.
+        for ok in ["Author", "Me", "Sam"] {
+            s.create_agent(ok, "#3366ff").unwrap();
+        }
+        s.create_agent("Caf\u{e9} Helper", "#3366ff").unwrap();
+        // Same name decomposed (e + combining acute), different case and padding.
+        let e = s
+            .create_agent("  cafe\u{301} HELPER ", "#3366ff")
+            .unwrap_err();
+        assert!(matches!(e, StorageError::Invalid(ref m) if m.contains("already exists")));
+        // Revoked agents still hold their name.
+        let r = s.create_agent("Line Editor", "#3366ff").unwrap();
+        s.revoke_agent(&r.id).unwrap();
+        assert!(s.create_agent("line editor", "#3366ff").is_err());
+        assert_eq!(s.list_agents().unwrap().len(), 5);
+        // Names are stored NFC.
+        let d = s.create_agent("Nai\u{308}ve", "#3366ff").unwrap();
+        assert_eq!(d.name, "Na\u{ef}ve");
+    }
 
     fn store() -> (tempfile::TempDir, Store) {
         let tmp = tempfile::tempdir().unwrap();
