@@ -43,7 +43,9 @@
         "headerImage": "windows/nsis-header.bmp",
         "installerIcon": "icons/icon.ico",
         "displayLanguageSelector": false,
-        "languages": ["English"]
+        "languages": ["English"],
+        "template": "windows/installer.nsi",
+        "uninstallerIcon": "icons/icon.ico"
       }
     },
     "copyright": "© 2026 Radiance Lux Technologies LLC"

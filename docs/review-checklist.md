@@ -79,3 +79,7 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #44 · review shortcuts fired while typing in settings · scope global shortcuts to the panel and editor focus
 - 2026-10-26 · #46 · outline click inserted a paragraph (doc edit + undo step) · navigation never changes the document
 - 2026-10-26 · #63 · checklist had wrong typecheck tool and bulk-lock timing · verify every doc claim against the code before review
+- 2026-10-26 · #64 · installer art used the retired "oA" BMPs, not the Ribbon mark · take logo assets only from the current logo-final set and check which mark they show
+- 2026-10-26 · #64 · finish page copy promised a desktop shortcut the user may untick · copy states only what always happens, or matches the option shown
+- 2026-10-26 · #64 · uninstall docs pointed to a Start menu uninstall entry Tauri doesn't create · document only UI paths verified in the actual build
+- 2026-10-26 · #64 · docs said app data is kept, but the uninstaller can delete it via a checkbox · docs describe the real behavior, including opt-in deletes and which folders they remove
