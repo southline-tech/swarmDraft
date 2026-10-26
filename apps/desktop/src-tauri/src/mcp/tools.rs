@@ -464,6 +464,7 @@ impl CoauthorMcp {
                     (None, Some(b), Some(q)) => {
                         let doc = self.store.load_doc(&s.doc_id)?;
                         let sv = crate::manuscripts::state_vector(&doc);
+                        let review_before = review_marks(&doc);
                         {
                             let mut txn = yrs::Transact::transact_mut(&doc);
                             let r = crate::anchor::resolve(&doc, &txn, b, q)
@@ -471,6 +472,7 @@ impl CoauthorMcp {
                             crate::anchor::add_comment_mark(&mut txn, &r, &id);
                         }
                         check_schema(&doc)?;
+                        check_review_marks(&review_before, &review_marks(&doc))?;
                         self.store.save_doc_changes(&s.doc_id, &doc, &sv)?;
                         (Some(b.clone()), Some(q.clone()))
                     }
@@ -530,6 +532,7 @@ impl CoauthorMcp {
                 let ts = self.store.now()?;
                 let doc = self.store.load_doc(&s.doc_id)?;
                 let sv = crate::manuscripts::state_vector(&doc);
+                let review_before = review_marks(&doc);
                 {
                     let mut txn = yrs::Transact::transact_mut(&doc);
                     let r = crate::anchor::resolve(&doc, &txn, &a.block_id, &a.quote)
@@ -549,6 +552,7 @@ impl CoauthorMcp {
                     );
                 }
                 check_schema(&doc)?;
+                check_review_marks(&review_before, &review_marks(&doc))?;
                 self.store.save_doc_changes(&s.doc_id, &doc, &sv)?;
                 let x = crate::manuscripts::Suggestion {
                     id,
@@ -644,6 +648,79 @@ impl CoauthorMcp {
     }
 }
 
+const REVIEW_MARKS: &[&str] = &["comment_anchor", "suggestion_insert", "suggestion_delete"];
+
+/// Review marks in a section, keyed by (mark type, attrs.id): their attrs and the text they cover,
+/// in document order.
+pub(crate) type ReviewMarks =
+    std::collections::BTreeMap<(String, String), (serde_json::Value, String)>;
+
+fn collect_review(node: &serde_json::Value, out: &mut ReviewMarks) {
+    if node["type"] == "text" {
+        let text = node["text"].as_str().unwrap_or("");
+        for m in node["marks"].as_array().into_iter().flatten() {
+            let ty = m["type"].as_str().unwrap_or("");
+            if REVIEW_MARKS.contains(&ty) {
+                let id = m["attrs"]["id"].as_str().unwrap_or("").to_string();
+                let e = out
+                    .entry((ty.to_string(), id))
+                    .or_insert_with(|| (m["attrs"].clone(), String::new()));
+                if e.0 != m["attrs"] {
+                    // Same id, different attrs within one doc: record as a mismatch sentinel.
+                    e.0 = serde_json::Value::Null;
+                }
+                e.1.push_str(text);
+            }
+        }
+    }
+    for c in node["content"].as_array().into_iter().flatten() {
+        collect_review(c, out);
+    }
+    if let Some(c) = node["attrs"]["content"].as_array() {
+        for c in c {
+            collect_review(c, out);
+        }
+    }
+}
+
+pub(crate) fn review_marks_of(nodes: &[serde_json::Value]) -> ReviewMarks {
+    let mut out = ReviewMarks::new();
+    for n in nodes {
+        collect_review(n, &mut out);
+    }
+    out
+}
+
+fn review_marks(doc: &yrs::Doc) -> ReviewMarks {
+    let nodes: Vec<serde_json::Value> = crate::content::decode(doc)
+        .into_iter()
+        .map(|b| b.node)
+        .collect();
+    review_marks_of(&nodes)
+}
+
+/// Agent writes may only add review marks. Every existing comment anchor and suggestion mark
+/// (matched by type and attrs.id) must survive with the same attrs over the same text, so a
+/// write can neither remove nor move nor edit inside one.
+pub(crate) fn check_review_marks(before: &ReviewMarks, after: &ReviewMarks) -> Result<(), ToolErr> {
+    for ((ty, id), (attrs, text)) in before {
+        match after.get(&(ty.clone(), id.clone())) {
+            None => {
+                return Err(ToolErr::invalid(format!(
+                    "write refused: it would remove {ty} {id}"
+                )))
+            }
+            Some((a, t)) if a != attrs || t != text => {
+                return Err(ToolErr::invalid(format!(
+                    "write refused: it would change {ty} {id}"
+                )))
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// Every MCP write must leave the section with only schema-known nodes and marks; otherwise the
 /// call fails and nothing is saved (the edited doc is a per-call copy).
 fn check_schema(doc: &yrs::Doc) -> Result<(), ToolErr> {
@@ -664,5 +741,57 @@ impl ServerHandler for CoauthorMcp {
              suggest_style. Anchor comments and suggestions with a block id plus an exact quote. \
              Accepting or rejecting suggestions is reserved for the human author.",
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn t(text: &str, marks: serde_json::Value) -> serde_json::Value {
+        json!({"type": "paragraph", "content": [{"type": "text", "text": text, "marks": marks}]})
+    }
+    fn c(id: &str) -> serde_json::Value {
+        json!({"type": "comment_anchor", "attrs": {"id": id}})
+    }
+    fn d(id: &str) -> serde_json::Value {
+        json!({"type": "suggestion_delete", "attrs": {"id": id, "author": "a", "ts": "1"}})
+    }
+    fn check(before: &[serde_json::Value], after: &[serde_json::Value]) -> Result<(), String> {
+        check_review_marks(&review_marks_of(before), &review_marks_of(after)).map_err(|e| e.message)
+    }
+
+    #[test]
+    fn adding_review_marks_is_allowed() {
+        let before = [t("lantern", json!([c("c1")]))];
+        let after = [t("lantern", json!([c("c1"), c("c2"), d("s1")]))];
+        assert!(check(&before, &after).is_ok());
+    }
+
+    #[test]
+    fn removing_a_review_mark_is_refused() {
+        let before = [t("lantern", json!([c("c1"), d("s1")]))];
+        let e = check(&before, &[t("lantern", json!([d("s1")]))]).unwrap_err();
+        assert!(e.contains("remove comment_anchor c1"), "{e}");
+        let e = check(&before, &[t("lantern", json!([c("c1")]))]).unwrap_err();
+        assert!(e.contains("remove suggestion_delete s1"), "{e}");
+    }
+
+    #[test]
+    fn changing_attrs_or_covered_text_is_refused() {
+        let before = [t("lantern", json!([d("s1")]))];
+        let other =
+            json!({"type": "suggestion_delete", "attrs": {"id": "s1", "author": "b", "ts": "1"}});
+        let e = check(&before, &[t("lantern", json!([other]))]).unwrap_err();
+        assert!(e.contains("change suggestion_delete s1"), "{e}");
+        // Editing text inside a suggestion (or a comment anchor) changes what it covers.
+        let e = check(&before, &[t("lamp", json!([d("s1")]))]).unwrap_err();
+        assert!(e.contains("change suggestion_delete s1"), "{e}");
+        let e = check(
+            &[t("lantern", json!([c("c1")]))],
+            &[t("lanXtern", json!([c("c1")]))],
+        )
+        .unwrap_err();
+        assert!(e.contains("change comment_anchor c1"), "{e}");
     }
 }

@@ -1103,3 +1103,35 @@ async fn malformed_content_length_is_a_400() {
     .unwrap();
     assert!(status.starts_with("HTTP/1.1 400"), "{status}");
 }
+
+#[tokio::test]
+async fn writes_never_touch_existing_review_marks() {
+    let s = start(&["read", "comment", "suggest"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    let a = |q: &str, extra: Value| {
+        let mut v = json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": q});
+        v.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        v
+    };
+    let r = call(&s, "add_comment", a("lantern", json!({"body": "note"}))).await;
+    assert_ne!(r["isError"], true, "{r}");
+    // Suggesting inside commented text keeps the comment anchor intact.
+    let r = call(
+        &s,
+        "suggest_edit",
+        a("lantern", json!({"replacement": "lamp"})),
+    )
+    .await;
+    assert_ne!(r["isError"], true, "{r}");
+    let before = raw_keys(&s, &sid);
+    let n = s.store.open_suggestions(&sid).unwrap().len();
+    // Editing text inside an existing suggestion is refused and saves nothing.
+    for q in ["lantern", "lamp", "ante"] {
+        let r = call(&s, "suggest_edit", a(q, json!({"replacement": "torch"}))).await;
+        assert_eq!(r["isError"], true, "{q}: {r}");
+    }
+    assert_eq!(raw_keys(&s, &sid), before, "nothing was saved");
+    assert_eq!(s.store.open_suggestions(&sid).unwrap().len(), n);
+}
