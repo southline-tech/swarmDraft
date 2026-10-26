@@ -267,14 +267,28 @@ pub const MAX_BODY_BYTES: usize = 1024 * 1024;
 /// The MCP service reads raw bodies (not through axum extractors), so axum's default limit
 /// doesn't apply; buffer up to the cap here and refuse anything larger with 413.
 async fn body_limit(req: Request, next: Next) -> Response {
+    // A declared Content-Length over the cap is refused up front, before any body is read.
+    let declared = req
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .map(|v| v.to_str().ok().and_then(|s| s.trim().parse::<u64>().ok()));
+    match declared {
+        Some(Some(n)) if n > MAX_BODY_BYTES as u64 => return too_large(),
+        Some(None) => return (StatusCode::BAD_REQUEST, "invalid content-length").into_response(),
+        _ => {}
+    }
     let (parts, body) = req.into_parts();
     match axum::body::to_bytes(body, MAX_BODY_BYTES).await {
         Ok(bytes) => {
             next.run(Request::from_parts(parts, axum::body::Body::from(bytes)))
                 .await
         }
-        Err(_) => (StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response(),
+        Err(_) => too_large(),
     }
+}
+
+fn too_large() -> Response {
+    (StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response()
 }
 
 /// The `/mcp` router plus its counters. Layers run outermost first: Host/Origin guard, then

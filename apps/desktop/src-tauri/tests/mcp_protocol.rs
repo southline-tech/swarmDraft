@@ -933,3 +933,37 @@ async fn body_limit_applies_to_mcp() {
     let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"pad": "y".repeat(mcp::MAX_BODY_BYTES)}});
     assert_eq!(post(&s.url, None, body).await.status(), 401);
 }
+
+#[tokio::test]
+async fn oversized_declared_content_length_is_refused_before_reading() {
+    let s = start(&["read"], 1000).await;
+    let addr = s
+        .url
+        .trim_start_matches("http://")
+        .trim_end_matches("/mcp")
+        .to_string();
+    let token = s.token.clone();
+    // Declare a body far over the cap but send none of it: the server must answer 413 without
+    // waiting for the body (a read-first server would block until the read timeout).
+    let status = tokio::task::spawn_blocking(move || {
+        use std::io::{Read, Write};
+        let mut c = std::net::TcpStream::connect(&addr).unwrap();
+        c.set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let req = format!(
+            "POST /mcp HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {token}\r\n\
+             Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\n\
+             Content-Length: {}\r\n\r\n",
+            mcp::MAX_BODY_BYTES * 100
+        );
+        c.write_all(req.as_bytes()).unwrap();
+        let mut buf = [0u8; 64];
+        let n = c
+            .read(&mut buf)
+            .expect("server answered before the body arrived");
+        String::from_utf8_lossy(&buf[..n]).to_string()
+    })
+    .await
+    .unwrap();
+    assert!(status.starts_with("HTTP/1.1 413"), "{status}");
+}
