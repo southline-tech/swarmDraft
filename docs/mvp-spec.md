@@ -152,7 +152,11 @@ exposed over MCP.
 
 Resources: `coauthor://manuscript/{id}/section/{sid}` (read-only text). Anchors use quoted text +
 block id so they survive concurrent edits; the server resolves them to Yjs relative positions and
-errors if ambiguous or stale. Every call is written to AuditEvent.
+errors if ambiguous or stale. Every call is written to AuditEvent. All positions over MCP
+(`search_text` offsets and lengths, anchor offsets) are UTF-16 code units, the same as JavaScript
+strings, Yjs and the editor; the Rust side creates every Yjs document with UTF-16 offsets
+(`content::new_doc`, with `Doc::new` banned by clippy) so mark ranges line up after curly quotes,
+dashes or emoji.
 
 **Implementation.** The server is Rust inside the Tauri process, built on `rmcp` (the official
 MCP Rust SDK) with axum, on port 7337 by default. Reasons over a TypeScript sidecar: one process
@@ -170,7 +174,9 @@ wrong-token budget is spent, only tokens that authenticated before (plus one pro
 others) are looked up, so a valid token keeps working. Token lookups are capped at 4 at a time and
 authenticated requests at 64 in flight; extra requests wait up to 5 s for an in-flight slot and
 2 s for a lookup slot, then get 503 with `Retry-After`. Revoking a token or agent removes its
-hashes from the known-token cache. Known limitation: a flood of wrong tokens from a local
+hashes from the known-token cache, and every cached token is still checked against the database
+on each request (a failed check evicts it), so a restore or out-of-band edit can't revive a
+revoked token; restore also clears the cache. Known limitation: a flood of wrong tokens from a local
 process can delay a brand-new token's first request (it shares the single probe slot and may
 see 429 until the window resets); tokens that authenticated before are unaffected. The `Bearer` scheme is matched
 case-insensitively, and each valid token is rate limited. `list_chapters` / `read_chapter` return every section kind (front

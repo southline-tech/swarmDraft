@@ -21,6 +21,16 @@ use yrs::{
 /// Name of the Y.XmlFragment that holds a section (same as y-prosemirror / `FRAGMENT_NAME`).
 pub const FRAGMENT: &str = "prosemirror";
 
+/// The one way to create a section document: UTF-16 offsets, like Yjs in JS and y-prosemirror.
+/// (yrs defaults to UTF-8 bytes, which shifts mark ranges after any non-ASCII text.)
+/// `Doc::new` is banned by clippy.toml.
+pub fn new_doc() -> Doc {
+    Doc::with_options(yrs::Options {
+        offset_kind: yrs::OffsetKind::Utf16,
+        ..Default::default()
+    })
+}
+
 /// Marks that may overlap with another mark of the same type; keyed `type--hash` in Yjs.
 pub const NON_EXCLUSIVE_MARKS: &[&str] =
     &["comment_anchor", "suggestion_insert", "suggestion_delete"];
@@ -577,7 +587,7 @@ mod tests {
 
     fn load_ts_fixture() -> Doc {
         let bytes = std::fs::read(fixture("synthetic-section.yupdate")).unwrap();
-        let doc = Doc::new();
+        let doc = new_doc();
         doc.transact_mut()
             .apply_update(Update::decode_v1(&bytes).unwrap())
             .unwrap();
@@ -616,7 +626,7 @@ mod tests {
             &std::fs::read_to_string(fixture("synthetic-section.json")).unwrap(),
         )
         .unwrap();
-        let doc = Doc::new();
+        let doc = new_doc();
         encode(&doc, &expected["doc"]).unwrap();
         let blocks = decode(&doc);
         let got = Value::Array(blocks.iter().map(|b| b.node.clone()).collect());
@@ -679,7 +689,7 @@ mod tests {
     #[test]
     fn rekeyed_marks_are_read_by_attrs_id() {
         // The editor binding re-keys marks with its own hash on edit (fwe1SmhZ -> Ql7mhpA0).
-        let doc = Doc::new();
+        let doc = new_doc();
         {
             let frag = doc.get_or_insert_xml_fragment(FRAGMENT);
             let mut txn = doc.transact_mut();
@@ -708,7 +718,7 @@ mod tests {
 
     #[test]
     fn reads_report_unknown_types_instead_of_dropping_them() {
-        let doc = Doc::new();
+        let doc = new_doc();
         {
             let frag = doc.get_or_insert_xml_fragment(FRAGMENT);
             let mut txn = doc.transact_mut();
@@ -721,7 +731,7 @@ mod tests {
         }
         let err = decode_checked(&doc).unwrap_err();
         assert!(err.contains("highlight"), "{err}");
-        let ok = Doc::new();
+        let ok = new_doc();
         encode(&ok, &json!({"type":"doc","content":[{"type":"paragraph"}]})).unwrap();
         assert_eq!(decode_checked(&ok).unwrap().len(), 1);
     }

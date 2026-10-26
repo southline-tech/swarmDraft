@@ -263,7 +263,7 @@ impl CoauthorMcp {
     }
 
     #[tool(
-        description = "Case-insensitive text search across a manuscript. Returns section id, block id, character offset in the block, a snippet, and the exact matched text to use as `quote` when anchoring a comment or suggestion."
+        description = "Case-insensitive text search across a manuscript. Returns section id, block id, offset and length in UTF-16 code units (as in JavaScript strings), a snippet, and the exact matched text to use as `quote` when anchoring a comment or suggestion."
     )]
     async fn search_text(
         &self,
@@ -271,39 +271,55 @@ impl CoauthorMcp {
         Parameters(a): Parameters<SearchArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let args = json!({ "manuscriptId": a.manuscript_id, "query": a.query, "limit": a.limit });
-        self.run(&parts, "read", "search_text", Some(&a.manuscript_id), args, |_| {
-            let q: Vec<char> = a.query.to_lowercase().chars().collect();
-            if q.is_empty() {
-                return Err(ToolErr::invalid("query must not be empty"));
-            }
-            let limit = a.limit.unwrap_or(20).clamp(1, 100);
-            let mut hits = Vec::new();
-            'outer: for s in self.store.list_sections(&a.manuscript_id)? {
-                for b in content::decode_checked(&self.store.load_doc(&s.doc_id)?).map_err(ToolErr::invalid)? {
-                    let text: Vec<char> = content::block_text(&b.node).chars().collect();
-                    let lower: Vec<char> = text.iter().map(|c| c.to_lowercase().next().unwrap_or(*c)).collect();
-                    let mut i = 0;
-                    while i + q.len() <= lower.len() {
-                        if lower[i..i + q.len()] == q[..] {
-                            let from = i.saturating_sub(40);
-                            let to = (i + q.len() + 40).min(text.len());
-                            hits.push(json!({
-                                "sectionId": s.id, "sectionTitle": s.title, "blockId": b.id, "offset": i,
-                                "quote": text[i..i + q.len()].iter().collect::<String>(),
-                                "snippet": text[from..to].iter().collect::<String>(),
-                            }));
-                            if hits.len() >= limit {
-                                break 'outer;
+        self.run(
+            &parts,
+            "read",
+            "search_text",
+            Some(&a.manuscript_id),
+            args,
+            |_| {
+                let q: Vec<char> = a.query.to_lowercase().chars().collect();
+                if q.is_empty() {
+                    return Err(ToolErr::invalid("query must not be empty"));
+                }
+                let limit = a.limit.unwrap_or(20).clamp(1, 100);
+                let mut hits = Vec::new();
+                'outer: for s in self.store.list_sections(&a.manuscript_id)? {
+                    for b in content::decode_checked(&self.store.load_doc(&s.doc_id)?)
+                        .map_err(ToolErr::invalid)?
+                    {
+                        let text: Vec<char> = content::block_text(&b.node).chars().collect();
+                        let lower: Vec<char> = text
+                            .iter()
+                            .map(|c| c.to_lowercase().next().unwrap_or(*c))
+                            .collect();
+                        let mut i = 0;
+                        while i + q.len() <= lower.len() {
+                            if lower[i..i + q.len()] == q[..] {
+                                let from = i.saturating_sub(40);
+                                let to = (i + q.len() + 40).min(text.len());
+                                // Positions are UTF-16 code units, like the editor and Yjs.
+                                let u16 =
+                                    |cs: &[char]| cs.iter().map(|c| c.len_utf16()).sum::<usize>();
+                                hits.push(json!({
+                                    "sectionId": s.id, "sectionTitle": s.title, "blockId": b.id,
+                                    "offset": u16(&text[..i]), "length": u16(&text[i..i + q.len()]),
+                                    "quote": text[i..i + q.len()].iter().collect::<String>(),
+                                    "snippet": text[from..to].iter().collect::<String>(),
+                                }));
+                                if hits.len() >= limit {
+                                    break 'outer;
+                                }
+                                i += q.len();
+                            } else {
+                                i += 1;
                             }
-                            i += q.len();
-                        } else {
-                            i += 1;
                         }
                     }
                 }
-            }
-            Ok(Output::Json(json!({ "matches": hits })))
-        })
+                Ok(Output::Json(json!({ "matches": hits })))
+            },
+        )
     }
 }
 

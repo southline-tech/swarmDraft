@@ -275,7 +275,7 @@ impl Store {
                 .collect::<Result<_, _>>()?;
             Ok(rows)
         })?;
-        let doc = Doc::new();
+        let doc = crate::content::new_doc();
         {
             let mut txn = doc.transact_mut();
             for u in updates {
@@ -310,7 +310,7 @@ impl Store {
         title: &str,
         pm_doc: &Value,
     ) -> Result<Section, StorageError> {
-        let doc = Doc::new();
+        let doc = crate::content::new_doc();
         crate::content::encode(&doc, pm_doc).map_err(StorageError::Invalid)?;
         let s = self.add_section(manuscript_id, kind, title, None)?;
         self.save_doc_changes(&s.doc_id, &doc, &StateVector::default())?;
