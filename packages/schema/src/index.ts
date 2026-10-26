@@ -48,3 +48,4 @@ export function manuscriptDocId(manuscriptId: string): string {
 export function sectionDocId(manuscriptId: string, sectionId: string): string {
   return `manuscript/${manuscriptId}/section/${sectionId}`;
 }
+export * from './content';
