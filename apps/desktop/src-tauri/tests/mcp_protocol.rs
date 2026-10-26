@@ -1047,7 +1047,18 @@ async fn writes_that_would_leave_unknown_marks_are_refused() {
         a.insert("highlight".into(), yrs::Any::Bool(true));
         t.format(&mut txn, 0, 3, a);
     }
-    s.store.save_doc_changes(&sec.doc_id, &doc, &sv).unwrap();
+    // A validated save refuses it...
+    let err = s
+        .store
+        .save_doc_changes(&sec.doc_id, &doc, &sv)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("unknown mark type: highlight"),
+        "{err}"
+    );
+    // ...so plant it as a raw sync update, the way a foreign client's edit arrives.
+    let update = doc.transact().encode_state_as_update_v1(&sv);
+    s.store.append_doc_update(&sec.doc_id, &update).unwrap();
     let before = raw_keys(&s, &sid);
     let r = call(&s, "add_comment", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "lantern", "body": "note"})).await;
     assert_eq!(r["isError"], true, "{r}");
