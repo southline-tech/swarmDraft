@@ -3,7 +3,7 @@
  * The sidebar reads the outline from `structure` and saves edits back to it; changes from any
  * other writer (another window, an agent) show up through the structure observer.
  */
-import { shallowRef, type ShallowRef } from 'vue';
+import { markRaw, shallowRef, type ShallowRef } from 'vue';
 import * as Y from 'yjs';
 import type { Section } from '@coauthor/schema';
 import { normalizeOutline, type OutlineIssue } from '@coauthor/editor';
@@ -36,6 +36,10 @@ export function openSession(
   sections: Map<string, Y.Doc>,
   report: ImportReport,
 ): ManuscriptSession {
+  // Y.Docs must never be wrapped in Vue reactive proxies: Yjs observers compare types by identity,
+  // so a proxied doc silently stops delivering remote changes. (ManuscriptEditor also toRaw's.)
+  markRaw(manuscript);
+  for (const d of sections.values()) markRaw(d);
   // Repair and save back right away, so every id the sidebar shows (e.g. a renamed duplicate)
   // exists in the stored structure and resolves to its doc before the first edit.
   const { sections: repaired, issues: repairs } = normalizeOutline(readStructure(manuscript));

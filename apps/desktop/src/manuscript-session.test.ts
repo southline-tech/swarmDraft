@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { isProxy, reactive } from 'vue';
 import * as Y from 'yjs';
 import type { Section } from '@coauthor/schema';
 import { readStructure, writeStructure } from '@coauthor/docx';
@@ -68,5 +69,18 @@ describe('openSession repair and concurrent peers', () => {
       ['c~2', 'd2'],
     ]);
     session.close();
+  });
+});
+
+describe('openSession keeps Y.Docs raw', () => {
+  it('marks the manuscript and section docs raw so reactive() never proxies them', () => {
+    const a = new Y.Doc();
+    const d1 = new Y.Doc();
+    writeStructure(a, [ch('c', 'C1', 'd1')]);
+    const s = openSession('m', 'M', a, new Map([['d1', d1]]), report);
+    const r = reactive({ m: s.manuscript, d: s.sections.get('d1')! });
+    expect(isProxy(r.m)).toBe(false);
+    expect(isProxy(r.d)).toBe(false);
+    s.close();
   });
 });
