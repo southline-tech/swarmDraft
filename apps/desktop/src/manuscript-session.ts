@@ -56,6 +56,12 @@ export interface ManuscriptSession {
   close(opts?: { discard?: boolean }): Promise<void>;
   /** True once `close` has succeeded (edits typed after that are ignored). */
   readonly closed: boolean;
+  /**
+   * Resume following writes made elsewhere (RAD-264). `close` stops following before it tries
+   * to close, so a refused close never leaves a poll running; call this when a refused close
+   * keeps the session on screen.
+   */
+  resumeLive?(): void;
 }
 
 export function openSession(
@@ -345,6 +351,7 @@ export function followUpdates(
   cursor: number,
   poll: PollUpdates,
   intervalMs = LIVE_POLL_MS,
+  onCursor?: (cursor: number) => void,
 ): () => void {
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -360,6 +367,7 @@ export function followUpdates(
         }
         const advanced = r.cursor > cursor;
         cursor = Math.max(cursor, r.cursor);
+        onCursor?.(cursor);
         if (!advanced || !r.updates.length) break;
       }
     } catch {
@@ -416,11 +424,21 @@ export function sessionFromStored(
   if (!live || stored.updatesCursor === undefined) return session;
   // Follow writes made elsewhere until the session closes. `sections` is the session's own map,
   // so docs added to it later are followed too.
-  const stop = followUpdates(sections, stored.updatesCursor, live);
+  let cursor = stored.updatesCursor;
+  let stop: (() => void) | undefined;
+  const follow = () => {
+    stop ??= followUpdates(sections, cursor, live, LIVE_POLL_MS, (c) => (cursor = c));
+  };
+  follow();
   const close = session.close;
-  session.close = async (opts) => {
-    await close(opts);
-    stop();
+  // Stop first: a refused close (unsaved edits on switch or import) must not leave it polling.
+  session.close = (opts) => {
+    stop?.();
+    stop = undefined;
+    return close(opts);
+  };
+  session.resumeLive = () => {
+    if (!session.closed) follow();
   };
   return session;
 }

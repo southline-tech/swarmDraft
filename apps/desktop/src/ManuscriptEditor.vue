@@ -71,6 +71,8 @@ function placeCursorInBody(e: Editor): boolean {
 
 /** Set when the content does not fit the schema; the editor is then read-only and never emits. */
 const loadError = shallowRef<string>('');
+/** Retry of the opening cursor placement; cleared when the editor closes. */
+let cursorTimer: ReturnType<typeof setTimeout> | undefined;
 const options: Partial<EditorOptions> = {
   onContentError: ({ error }) => {
     loadError.value = String((error as Error & { cause?: unknown }).cause ?? error.message);
@@ -79,7 +81,7 @@ const options: Partial<EditorOptions> = {
     review.value = collectReviewItems(editor.state.doc);
     // A bound doc may render its content just after create; try again once it has.
     if (!placeCursorInBody(editor))
-      setTimeout(() => !editor.isDestroyed && placeCursorInBody(editor));
+      cursorTimer = setTimeout(() => !editor.isDestroyed && placeCursorInBody(editor));
   },
   onUpdate: ({ editor }) => {
     review.value = collectReviewItems(editor.state.doc);
@@ -105,7 +107,10 @@ watch(
   },
   { immediate: true },
 );
-onBeforeUnmount(() => editor.value?.destroy());
+onBeforeUnmount(() => {
+  clearTimeout(cursorTimer);
+  editor.value?.destroy();
+});
 
 const LABELS: Record<ReviewItem['type'], string> = {
   comment_anchor: 'Comment',

@@ -7,9 +7,17 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as Y from 'yjs';
+import type { Editor } from '@tiptap/core';
 import { flushPromises, mount } from '@vue/test-utils';
 import ManuscriptEditor from './ManuscriptEditor.vue';
-import { followUpdates, LIVE_POLL_MS, sessionFromStored } from './manuscript-session';
+import {
+  followUpdates,
+  LIVE_POLL_MS,
+  REMOTE_ORIGIN,
+  sessionFromStored,
+  UnsavedEditsError,
+} from './manuscript-session';
 import type { StoredManuscript, UpdatesSince } from './backend';
 
 const fixture = JSON.parse(
@@ -29,6 +37,67 @@ function agentPoll() {
 }
 
 afterEach(() => vi.useRealTimers());
+
+const [one, two, three] = fixture.stored.sections.map((s) => s.docId) as [string, string, string];
+/** Client ids that wrote the agent's updates (none of them is the author's editor). */
+const agentClients = new Set(
+  fixture.live.updates.flatMap((u) =>
+    Y.decodeUpdate(Uint8Array.from(u.update)).structs.map((s) => s.id.client),
+  ),
+);
+const clientsOf = (update: Uint8Array) => Y.decodeUpdate(update).structs.map((s) => s.id.client);
+
+const editorOf = (w: ReturnType<typeof mount>) =>
+  (w.vm as unknown as { $: { setupState: { editor: Editor } } }).$.setupState.editor;
+
+/** ProseMirror position of the start of `text` (first match) in the editor's doc. */
+function posOf(e: Editor, text: string): number {
+  let at = -1;
+  e.state.doc.descendants((n, pos) => {
+    if (at >= 0) return false;
+    const i = n.isText ? n.text!.indexOf(text) : -1;
+    if (i >= 0) at = pos + i;
+    return true;
+  });
+  if (at < 0) throw new Error(`no "${text}" in ${e.state.doc.textContent}`);
+  return at;
+}
+const typeAt = (e: Editor, pos: number, text: string) =>
+  e.view.dispatch(e.state.tr.insertText(text, pos));
+
+async function openLive(
+  poll: ReturnType<typeof vi.fn>,
+  save: (docId: string, update: Uint8Array) => Promise<void> = async () => {},
+) {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const session = sessionFromStored(
+    fixture.stored,
+    null,
+    { save, debounceMs: 10 },
+    undefined,
+    poll,
+  );
+  const mounted: ReturnType<typeof mount>[] = [];
+  const show = async (docId: string) => {
+    const w = mount(ManuscriptEditor, {
+      props: { doc: session.sections.get(docId)! },
+      attachTo: document.body,
+    });
+    mounted.push(w);
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(0);
+    return w;
+  };
+  const tick = async () => {
+    await vi.advanceTimersByTimeAsync(LIVE_POLL_MS + 10);
+    await flushPromises();
+  };
+  const done = async () => {
+    await session.close({ discard: true });
+    mounted.forEach((w) => w.unmount());
+  };
+  return { session, save, show, tick, done };
+}
 
 describe('live agent updates (RAD-264)', () => {
   it('shows an MCP suggest_edit and add_comment in the open editor, keeping typed text', async () => {
@@ -76,13 +145,126 @@ describe('live agent updates (RAD-264)', () => {
     await session.flush();
     const saved = save.mock.calls as unknown as [string, Uint8Array][];
     expect(saved.length).toBeGreaterThan(0);
-    for (const [, update] of saved) expect(update.length).toBeLessThan(200);
+    for (const [, update] of saved)
+      expect(clientsOf(update).some((c) => agentClients.has(c))).toBe(false);
 
     await session.close();
     const calls = poll.mock.calls.length;
     await vi.advanceTimersByTimeAsync(LIVE_POLL_MS * 4);
     expect(poll.mock.calls.length).toBe(calls); // stops on close
     w.unmount();
+  });
+
+  it('stops polling before close, so a refused close leaves no poll running', async () => {
+    const poll = agentPoll();
+    const save = vi.fn(async () => {
+      throw new Error('disk full');
+    });
+    const { session, show, tick } = await openLive(poll, save);
+    const w = await show(one);
+    typeAt(editorOf(w), posOf(editorOf(w), 'twice'), 'only ');
+    await expect(session.close()).rejects.toBeInstanceOf(UnsavedEditsError);
+    expect(session.closed).toBe(false);
+    const calls = poll.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(LIVE_POLL_MS * 4);
+    expect(poll.mock.calls.length).toBe(calls);
+    // The app resumes it when the refused close keeps the manuscript on screen.
+    session.resumeLive?.();
+    await tick();
+    const resumed = poll.mock.calls.length;
+    expect(resumed).toBeGreaterThan(calls);
+    expect(poll).toHaveBeenCalledWith(fixture.stored.updatesCursor);
+    await session.close({ discard: true });
+    await vi.advanceTimersByTimeAsync(LIVE_POLL_MS * 4);
+    expect(poll.mock.calls.length).toBe(resumed);
+    w.unmount();
+  });
+
+  it('keeps typing in the middle of the word the agent is suggesting on (flick|ered)', async () => {
+    const { show, tick, done } = await openLive(agentPoll());
+    const w = await show(one);
+    const e = editorOf(w);
+    typeAt(e, posOf(e, 'flickered') + 'flick'.length, 'X');
+    expect(e.state.doc.textContent).toContain('flickXered');
+    await tick();
+    const page = w.find('.tiptap');
+    // Both survive: the author's letter stays inside the word, the agent's insert follows it.
+    expect(page.text()).toContain('The lantern flickXeredguttered twice.');
+    expect(page.find('ins.suggestion-insert').text()).toBe('guttered');
+    const deleted = page
+      .findAll('del.suggestion-delete')
+      .map((d) => d.text())
+      .join('');
+    expect(['flickered', 'flickXered']).toContain(deleted);
+    await done();
+  });
+
+  it('keeps typing in another section while the agent edit lands', async () => {
+    const { show, tick, done } = await openLive(agentPoll());
+    const a = await show(one);
+    const b = await show(two);
+    const eb = editorOf(b);
+    typeAt(eb, posOf(eb, 'out.'), 'right ');
+    await tick();
+    expect(b.find('.tiptap').text()).toBe('The tide went right out.');
+    expect(b.find('ins, del, .comment-anchor').exists()).toBe(false);
+    expect(a.find('ins.suggestion-insert').text()).toBe('guttered');
+    expect(a.find('del.suggestion-delete').text()).toBe('flickered');
+    await done();
+  });
+
+  it('marks exactly the quoted non-ASCII text from MCP suggest_edit', async () => {
+    const { show, tick, done } = await openLive(agentPoll());
+    const w = await show(three);
+    await tick();
+    const page = w.find('.tiptap');
+    expect(page.find('del.suggestion-delete').text()).toBe('café — 😀');
+    expect(page.find('ins.suggestion-insert').text()).toBe('bistro');
+    expect(page.text()).toBe('She said naïve café — 😀bistro twice.');
+    await done();
+  });
+
+  it("applies an echo of the author's own save and duplicate agent updates once", async () => {
+    const saved: Uint8Array[] = [];
+    const save = vi.fn(async (_doc: string, u: Uint8Array) => void saved.push(u));
+    const served: { echo?: UpdatesSince } = {};
+    const poll = vi.fn(async (after: number): Promise<UpdatesSince> =>
+      served.echo && after < fixture.live.cursor
+        ? served.echo
+        : { cursor: Math.max(after, fixture.live.cursor), updates: [] },
+    );
+    const { session, show, tick, done } = await openLive(poll, save);
+    const w = await show(one);
+    const e = editorOf(w);
+    typeAt(e, posOf(e, 'twice'), 'only ');
+    await vi.advanceTimersByTimeAsync(50);
+    await session.flush();
+    expect(saved).toHaveLength(1);
+    const own = saved[0]!;
+    const agent = fixture.live.updates.filter((u) => u.docId === one);
+    served.echo = {
+      cursor: fixture.live.cursor,
+      updates: [{ docId: one, update: [...own] }, ...agent, ...agent],
+    };
+    const doc = session.sections.get(one)!;
+    const origins: unknown[] = [];
+    doc.on('update', (_u: Uint8Array, origin: unknown) => origins.push(origin));
+    await tick();
+    await vi.advanceTimersByTimeAsync(100);
+    await session.flush();
+
+    const items = w.findAll('[data-test="review-item"]').map((i) => i.text());
+    expect(items.filter((t) => t.startsWith('Insert'))).toHaveLength(1);
+    expect(items.filter((t) => t.startsWith('Delete'))).toHaveLength(1);
+    expect(items.filter((t) => t.startsWith('Comment'))).toHaveLength(1);
+    expect(w.find('.tiptap').text()).toContain('flickeredguttered only twice.');
+    // Everything from the poll came in as remote, and nothing it carried was saved back.
+    // The echo and the repeats are no-ops for Yjs: only the two agent writes change the doc.
+    expect(origins).toHaveLength(2);
+    expect(origins.every((o) => o === REMOTE_ORIGIN)).toBe(true);
+    expect(saved).toHaveLength(1);
+    for (const u of saved) expect(clientsOf(u).some((c) => agentClients.has(c))).toBe(false);
+    await done();
   });
 
   it('retries a failed poll from the same cursor and ignores unknown docs', async () => {

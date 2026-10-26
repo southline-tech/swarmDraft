@@ -203,6 +203,8 @@ async function onFile(e: Event) {
     } catch (err) {
       // The current manuscript was closed but the import failed: never leave the closed session
       // on screen; reopen the newest stored manuscript (the import, if it was written).
+      // A refused close keeps the current manuscript on screen: keep following agent writes.
+      if (current && !current.closed && session.value === current) current.resumeLive?.();
       if (current?.closed) {
         const back = await reopenAfterFailure();
         // The newest manuscript is not the one we closed, so the import was saved and is now
