@@ -1,5 +1,4 @@
 disallowed-methods = [
   { path = "yrs::Doc::new", reason = "UTF-8 offsets; use content::new_doc() (UTF-16, matches Yjs/y-prosemirror)" },
   { path = "yrs::Doc::with_client_id", reason = "UTF-8 offsets; use content::new_doc() (UTF-16, matches Yjs/y-prosemirror)" },
-  { path = "yrs::Doc::default", reason = "UTF-8 offsets; use content::new_doc() (UTF-16, matches Yjs/y-prosemirror)" },
 ]

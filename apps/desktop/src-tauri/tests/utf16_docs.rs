@@ -1,6 +1,6 @@
-//! Every Yjs doc must use UTF-16 offsets (`content::new_doc`). clippy.toml bans `yrs::Doc::new`,
-//! `yrs::Doc::with_client_id` and `yrs::Doc::default`; clippy may not catch a `Default` impl
-//! reached through a generic or `..Default::default()`, so this also scans the sources.
+//! Every Yjs doc must use UTF-16 offsets (`content::new_doc`). clippy.toml bans `yrs::Doc::new`
+//! and `yrs::Doc::with_client_id`; clippy can't target a trait impl (`Doc::default` is reported
+//! as an unreachable path), so this scans the sources for `Doc::default` and the rest.
 
 fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
     for e in std::fs::read_dir(dir).unwrap() {
