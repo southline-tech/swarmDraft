@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Settings → Agents (RAD-205): create agents, mint tokens (shown once), revoke. */
-import { onMounted, ref } from 'vue';
+import { onBeforeUnmount, onMounted, ref } from 'vue';
 import {
   AGENT_SCOPES,
   agentsApi,
@@ -10,7 +10,14 @@ import {
   type TokenInfo,
 } from './backend';
 
-const props = withDefaults(defineProps<{ api?: AgentsApi }>(), { api: () => agentsApi });
+const props = withDefaults(
+  defineProps<{ api?: AgentsApi; writeClipboard?: (text: string) => Promise<void> }>(),
+  {
+    api: () => agentsApi,
+    // The Clipboard API works in the app webview under our CSP (no network involved).
+    writeClipboard: () => (text: string) => navigator.clipboard.writeText(text),
+  },
+);
 
 const agents = ref<Agent[]>([]);
 const tokens = ref<Record<string, TokenInfo[]>>({});
@@ -19,6 +26,23 @@ const color = ref('#3366ff');
 const scopes = ref<AgentScope[]>([...AGENT_SCOPES]);
 const shownToken = ref<{ agentId: string; token: string } | null>(null);
 const error = ref('');
+const copied = ref(false);
+
+async function copyToken() {
+  if (!shownToken.value) return;
+  try {
+    await props.writeClipboard(shownToken.value.token);
+    copied.value = true;
+  } catch {
+    error.value = 'Could not copy. Select the token and copy it manually.';
+  }
+}
+
+/** The plaintext token only lives in memory until the panel is dismissed or the view goes away. */
+function clearToken() {
+  shownToken.value = null;
+  copied.value = false;
+}
 
 async function guard(fn: () => Promise<void>) {
   error.value = '';
@@ -45,6 +69,7 @@ const create = () =>
 const mint = (agentId: string) =>
   guard(async () => {
     const t = await props.api.createToken(agentId, scopes.value);
+    copied.value = false;
     shownToken.value = { agentId, token: t.token };
     await refresh();
   });
@@ -59,7 +84,14 @@ const revokeAgent = (id: string) =>
     await refresh();
   });
 
-onMounted(() => guard(refresh));
+onMounted(() => {
+  window.addEventListener('pagehide', clearToken);
+  return guard(refresh);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('pagehide', clearToken);
+  clearToken();
+});
 </script>
 
 <template>
@@ -84,7 +116,9 @@ onMounted(() => guard(refresh));
     <div v-if="shownToken" class="token-once" data-test="token-once">
       <strong>Copy this token now. It won't be shown again.</strong>
       <code>{{ shownToken.token }}</code>
-      <button type="button" @click="shownToken = null">Done</button>
+      <button type="button" data-test="copy-token" @click="copyToken">Copy</button>
+      <span v-if="copied" role="status" data-test="copied">Copied</span>
+      <button type="button" data-test="token-done" @click="clearToken">Done</button>
     </div>
     <ul>
       <li v-for="a in agents" :key="a.id" data-test="agent">

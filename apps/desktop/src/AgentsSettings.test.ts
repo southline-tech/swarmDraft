@@ -56,13 +56,63 @@ describe('AgentsSettings', () => {
     expect(w.find('[data-test="token-once"]').text()).toContain('cat_abcdefSECRET');
     expect(w.find('[data-test="token"]').text()).not.toContain('SECRET');
 
-    await w.find('[data-test="token-once"] button').trigger('click');
+    await w.find('[data-test="token-done"]').trigger('click');
     expect(w.find('[data-test="token-once"]').exists()).toBe(false);
     expect(w.html()).not.toContain('SECRET');
 
     await w.find('[data-test="revoke-token"]').trigger('click');
     await flushPromises();
     expect(w.find('[data-test="token"]').text()).toContain('(revoked)');
+  });
+
+  it('copies the token and confirms', async () => {
+    const api = fakeApi();
+    const writeClipboard = vi.fn(async () => {});
+    const w = mount(AgentsSettings, { props: { api, writeClipboard } });
+    await w.find('[data-test="create-agent"]').trigger('submit');
+    await flushPromises();
+    await w.find('[data-test="mint"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test="copied"]').exists()).toBe(false);
+    await w.find('[data-test="copy-token"]').trigger('click');
+    await flushPromises();
+    expect(writeClipboard).toHaveBeenCalledWith('cat_abcdefSECRET');
+    expect(w.find('[data-test="copied"]').text()).toBe('Copied');
+  });
+
+  it('reports a failed copy', async () => {
+    const api = fakeApi();
+    const writeClipboard = vi.fn(async () => {
+      throw new Error('denied');
+    });
+    const w = mount(AgentsSettings, { props: { api, writeClipboard } });
+    await w.find('[data-test="create-agent"]').trigger('submit');
+    await flushPromises();
+    await w.find('[data-test="mint"]').trigger('click');
+    await flushPromises();
+    await w.find('[data-test="copy-token"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test="copied"]').exists()).toBe(false);
+    expect(w.find('[data-test="error"]').text()).toContain('copy it manually');
+  });
+
+  it('clears the token when the page is hidden or the view unmounts', async () => {
+    const api = fakeApi();
+    const w = mount(AgentsSettings, { props: { api } });
+    await w.find('[data-test="create-agent"]').trigger('submit');
+    await flushPromises();
+    await w.find('[data-test="mint"]').trigger('click');
+    await flushPromises();
+    window.dispatchEvent(new Event('pagehide'));
+    await flushPromises();
+    expect(w.html()).not.toContain('SECRET');
+
+    await w.find('[data-test="mint"]').trigger('click');
+    await flushPromises();
+    expect(w.html()).toContain('SECRET');
+    const vm = w.vm as unknown as { $: { setupState: { shownToken: unknown } } };
+    w.unmount();
+    expect(vm.$.setupState.shownToken).toBeNull();
   });
 
   it('shows backend errors', async () => {
