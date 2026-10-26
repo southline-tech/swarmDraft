@@ -47,6 +47,16 @@ pub const MAX_QUOTE: usize = 2000;
 pub const MAX_REPLACEMENT: usize = 4000;
 pub const MAX_RATIONALE: usize = 2000;
 pub const MAX_QUERY: usize = 500;
+pub const MAX_ID: usize = 128;
+
+fn check_ids(ids: &[(&str, Option<&str>)]) -> Result<(), ToolErr> {
+    for (field, v) in ids {
+        if let Some(v) = v {
+            check_len(field, v, MAX_ID)?;
+        }
+    }
+    Ok(())
+}
 
 fn check_len(field: &str, value: &str, max: usize) -> Result<(), ToolErr> {
     let n = value.chars().count();
@@ -363,6 +373,7 @@ impl CoauthorMcp {
             Some(&a.manuscript_id),
             args,
             |_| {
+                check_ids(&[("manuscript_id", Some(&a.manuscript_id))])?;
                 check_len("query", &a.query, MAX_QUERY)?;
                 let q: Vec<char> = a.query.to_lowercase().chars().collect();
                 if q.is_empty() {
@@ -427,6 +438,12 @@ impl CoauthorMcp {
                 if a.body.trim().is_empty() {
                     return Err(ToolErr::invalid("body must not be empty"));
                 }
+                check_ids(&[
+                    ("manuscript_id", Some(&a.manuscript_id)),
+                    ("section_id", Some(&a.section_id)),
+                    ("block_id", a.block_id.as_deref()),
+                    ("thread_id", a.thread_id.as_deref()),
+                ])?;
                 check_len("body", &a.body, MAX_COMMENT)?;
                 if let Some(q) = &a.quote {
                     check_len("quote", q, MAX_QUOTE)?;
@@ -494,6 +511,11 @@ impl CoauthorMcp {
             Some(&a.manuscript_id),
             args,
             |p| {
+                check_ids(&[
+                    ("manuscript_id", Some(&a.manuscript_id)),
+                    ("section_id", Some(&a.section_id)),
+                    ("block_id", Some(&a.block_id)),
+                ])?;
                 check_len("quote", &a.quote, MAX_QUOTE)?;
                 check_len("replacement", &a.replacement, MAX_REPLACEMENT)?;
                 if let Some(r) = &a.rationale {
@@ -565,6 +587,11 @@ impl CoauthorMcp {
             Some(&a.manuscript_id),
             args,
             |p| {
+                check_ids(&[
+                    ("manuscript_id", Some(&a.manuscript_id)),
+                    ("section_id", Some(&a.section_id)),
+                    ("block_id", Some(&a.block_id)),
+                ])?;
                 if let Some(r) = &a.rationale {
                     check_len("rationale", r, MAX_RATIONALE)?;
                 }

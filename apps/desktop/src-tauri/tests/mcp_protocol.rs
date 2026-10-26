@@ -880,3 +880,56 @@ async fn oversized_text_is_refused_with_a_clear_error() {
     .await;
     assert_ne!(r["isError"], true, "{r}");
 }
+
+#[tokio::test]
+async fn oversized_ids_are_refused() {
+    let s = start(&["read", "comment", "suggest"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    let m = s.manuscript_id.clone();
+    let id = "x".repeat(129);
+    let cases = [
+        (
+            "add_comment",
+            json!({"manuscript_id": id, "section_id": sid, "block_id": bid, "quote": "lantern", "body": "Hm."}),
+            "manuscript_id is too long (129 characters; the limit is 128)",
+        ),
+        (
+            "add_comment",
+            json!({"manuscript_id": m, "section_id": sid, "thread_id": id, "body": "Hm."}),
+            "thread_id is too long",
+        ),
+        (
+            "suggest_edit",
+            json!({"manuscript_id": m, "section_id": id, "block_id": bid, "quote": "lantern", "replacement": "lamp"}),
+            "section_id is too long",
+        ),
+        (
+            "suggest_style",
+            json!({"manuscript_id": m, "section_id": sid, "block_id": id, "style": "verse"}),
+            "block_id is too long",
+        ),
+        (
+            "search_text",
+            json!({"manuscript_id": id, "query": "lantern"}),
+            "manuscript_id is too long",
+        ),
+    ];
+    for (tool, args, want) in cases {
+        let r = call(&s, tool, args).await;
+        assert_eq!(r["isError"], true, "{tool}: {r}");
+        assert!(text(&r).contains(want), "{tool}: {}", text(&r));
+    }
+}
+
+#[tokio::test]
+async fn body_limit_applies_to_mcp() {
+    let s = start(&["read", "comment"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    let big = "y".repeat(mcp::MAX_BODY_BYTES);
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"add_comment","arguments":{"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "lantern", "body": big}}});
+    let r = post(&s.url, Some(&s.token), body).await;
+    assert_eq!(r.status(), 413);
+    // Without a valid token the body is never read: plain 401.
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"pad": "y".repeat(mcp::MAX_BODY_BYTES)}});
+    assert_eq!(post(&s.url, None, body).await.status(), 401);
+}
