@@ -485,7 +485,7 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
   cursor: default;
 }
 .row:focus-visible {
-  outline: 2px solid #3b6fd8;
+  outline: 2px solid var(--ct-focus-ring-color);
 }
 .group-row {
   list-style: none;
@@ -522,7 +522,7 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
   gap: 0.25rem;
 }
 .warn {
-  color: #8a3b00;
+  color: var(--ct-warning);
 }
 .confirm {
   border: 1px solid #c33;

@@ -591,7 +591,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
   color: var(--ct-danger);
 }
 .tiptap .comment-anchor {
-  background: #fff3b0;
+  background: var(--ct-warning-bg);
 }
 .manuscript-editor .review ul {
   padding-left: 1rem;
