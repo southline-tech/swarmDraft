@@ -310,9 +310,9 @@ impl Store {
         title: &str,
         pm_doc: &Value,
     ) -> Result<Section, StorageError> {
-        let s = self.add_section(manuscript_id, kind, title, None)?;
         let doc = Doc::new();
-        crate::content::encode(&doc, pm_doc);
+        crate::content::encode(&doc, pm_doc).map_err(StorageError::Invalid)?;
+        let s = self.add_section(manuscript_id, kind, title, None)?;
         self.save_doc_changes(&s.doc_id, &doc, &StateVector::default())?;
         Ok(s)
     }

@@ -97,12 +97,23 @@ pub fn mark_key(mark: &Value) -> String {
     }
 }
 
-/// Keys for all marks on one text run, unique within the run (`markKeys`): on a collision the
-/// later mark in id order is rehashed as `hash(id + ':' + n)` for n = 1, 2, ... until free.
+/// Collision rehash attempts per mark before giving up (`MAX_MARK_KEY_TRIES` in marks.ts).
+pub const MAX_MARK_KEY_TRIES: u32 = 1000;
+
+/// Keys for all marks on one text run, unique within the run (`markKeys`): marks are taken in
+/// (id, position) order and on a collision the mark is rehashed as `hash(id + ':' + n)` for
+/// n = 1, 2, ... until free, erroring after [`MAX_MARK_KEY_TRIES`].
 ///
 /// Keys are write-side only. Readers take the mark type from the key prefix and the id from
 /// the attrs, never from the suffix: the editor binding re-keys marks with its own hash.
-pub fn mark_keys(marks: &[Value]) -> Vec<String> {
+pub fn mark_keys(marks: &[Value]) -> Result<Vec<String>, String> {
+    mark_keys_with(marks, mark_id_hash)
+}
+
+pub fn mark_keys_with(
+    marks: &[Value],
+    hash: impl Fn(&str) -> String,
+) -> Result<Vec<String>, String> {
     let mut order: Vec<(usize, String)> = marks
         .iter()
         .enumerate()
@@ -113,16 +124,25 @@ pub fn mark_keys(marks: &[Value]) -> Vec<String> {
     let mut keys = vec![String::new(); marks.len()];
     for (i, id) in order {
         let ty = marks[i]["type"].as_str().unwrap_or_default();
-        let mut key = mark_key(&marks[i]);
+        let mut key = if id.is_empty() {
+            ty.to_string()
+        } else {
+            format!("{ty}--{}", hash(&id))
+        };
         let mut n = 1;
         while !id.is_empty() && used.contains(&key) {
-            key = format!("{ty}--{}", mark_id_hash(&format!("{id}:{n}")));
+            if n > MAX_MARK_KEY_TRIES {
+                return Err(format!(
+                    "no free key for {ty} mark {id:?} after {MAX_MARK_KEY_TRIES} tries"
+                ));
+            }
+            key = format!("{ty}--{}", hash(&format!("{id}:{n}")));
             n += 1;
         }
         used.insert(key.clone());
         keys[i] = key;
     }
-    keys
+    Ok(keys)
 }
 
 /// Reject any node or mark type the schema doesn't know. Every MCP write is checked with this
@@ -278,7 +298,11 @@ pub fn decode(doc: &Doc) -> Vec<Block> {
         .collect()
 }
 
-fn fill(txn: &mut TransactionMut, parent: &impl XmlFragment, nodes: &[Value]) {
+fn fill(
+    txn: &mut TransactionMut,
+    parent: &impl XmlFragment,
+    nodes: &[Value],
+) -> Result<(), String> {
     let mut i = 0;
     while i < nodes.len() {
         if nodes[i]["type"] == "text" {
@@ -289,7 +313,7 @@ fn fill(txn: &mut TransactionMut, parent: &impl XmlFragment, nodes: &[Value]) {
                 let s = n["text"].as_str().unwrap_or_default();
                 let mut attrs = Attrs::new();
                 let marks = n["marks"].as_array().map_or(&[][..], Vec::as_slice);
-                for (m, key) in marks.iter().zip(mark_keys(marks)) {
+                for (m, key) in marks.iter().zip(mark_keys(marks)?) {
                     let a = m.get("attrs").cloned().unwrap_or_else(|| json!({}));
                     attrs.insert(key.into(), json_to_any(&a));
                 }
@@ -308,20 +332,22 @@ fn fill(txn: &mut TransactionMut, parent: &impl XmlFragment, nodes: &[Value]) {
             el.insert_attribute(txn, k.as_str(), json_to_any(v));
         }
         if let Some(c) = n["content"].as_array() {
-            fill(txn, &el, c);
+            fill(txn, &el, c)?;
         }
         i += 1;
     }
+    Ok(())
 }
 
 /// Append the blocks of a ProseMirror `doc` JSON to a section document (same encoding as
-/// `docToYDoc` in ydoc.ts).
-pub fn encode(doc: &Doc, pm_doc: &Value) {
+/// `docToYDoc` in ydoc.ts). Errors only if a run's mark keys can't be made unique.
+pub fn encode(doc: &Doc, pm_doc: &Value) -> Result<(), String> {
     let frag: XmlFragmentRef = doc.get_or_insert_xml_fragment(FRAGMENT);
     let mut txn = doc.transact_mut();
     if let Some(c) = pm_doc["content"].as_array() {
-        fill(&mut txn, &frag, c);
+        fill(&mut txn, &frag, c)?;
     }
+    Ok(())
 }
 
 fn has_mark(node: &Value, ty: &str) -> bool {
@@ -581,7 +607,7 @@ mod tests {
         )
         .unwrap();
         let doc = Doc::new();
-        encode(&doc, &expected["doc"]);
+        encode(&doc, &expected["doc"]).unwrap();
         let blocks = decode(&doc);
         let got = Value::Array(blocks.iter().map(|b| b.node.clone()).collect());
         assert_eq!(got, expected["doc"]["content"]);
@@ -596,35 +622,48 @@ mod tests {
         }
     }
 
+    /// Shared with marks.ts via fixtures/marks/mark-id-hash-vectors.json (mark-vectors.test.ts).
     #[test]
-    fn mark_id_hash_matches_typescript_vectors() {
-        assert_eq!(mark_id_hash("c1"), "fwe1SmhZ");
-        let expected: Value = serde_json::from_str(
-            &std::fs::read_to_string(fixture("synthetic-section.json")).unwrap(),
-        )
-        .unwrap();
-        let v = expected["markIdHash"].as_object().unwrap();
-        assert_eq!(v["c1"], "fwe1SmhZ");
-        for (input, hash) in v {
-            assert_eq!(mark_id_hash(input), hash.as_str().unwrap(), "{input}");
+    fn mark_keys_match_shared_cross_language_vectors() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../fixtures/marks/mark-id-hash-vectors.json");
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let hashes = v["hash"].as_array().unwrap();
+        assert!(hashes
+            .iter()
+            .any(|h| h["input"] == "c1" && h["hash"] == "fwe1SmhZ"));
+        for h in hashes {
+            let input = h["input"].as_str().unwrap();
+            assert_eq!(
+                mark_id_hash(input),
+                h["hash"].as_str().unwrap(),
+                "{input:?}"
+            );
+        }
+        let cases = v["keys"].as_array().unwrap();
+        assert!(cases.len() >= 5);
+        for c in cases {
+            let marks = c["marks"].as_array().unwrap();
+            let want: Vec<String> = serde_json::from_value(c["keys"].clone()).unwrap();
+            assert_eq!(mark_keys(marks).unwrap(), want, "{}", c["name"]);
         }
     }
 
     #[test]
-    fn colliding_marks_get_distinct_deterministic_keys() {
-        let a = json!({"type":"comment_anchor","attrs":{"id":"c1"}});
-        let b = json!({"type":"comment_anchor","attrs":{"id":"c1"}});
-        let k1 = mark_keys(&[a.clone(), b.clone()]);
-        assert_eq!(k1[0], "comment_anchor--fwe1SmhZ");
-        assert_eq!(k1[1], format!("comment_anchor--{}", mark_id_hash("c1:1")));
-        let c = json!({"type":"comment_anchor","attrs":{"id":"c0"}});
-        // Order-independent: same keys whichever order the marks come in.
-        let x = mark_keys(&[a.clone(), c.clone()]);
-        let y = mark_keys(&[c, a]);
+    fn exclusive_marks_key_by_type_only() {
+        let link = json!({"type":"link","attrs":{"href":"x","id":"c1"}});
+        assert_eq!(mark_key(&link), "link");
         assert_eq!(
-            (x[0].as_str(), x[1].as_str()),
-            (y[1].as_str(), y[0].as_str())
+            mark_keys(&[json!({"type":"bold"}), link]).unwrap(),
+            ["bold", "link"]
         );
+    }
+
+    #[test]
+    fn collision_loop_is_capped() {
+        let a = json!({"type":"comment_anchor","attrs":{"id":"a"}});
+        let err = mark_keys_with(&[a.clone(), a], |_| "AAAAAAAA".into()).unwrap_err();
+        assert!(err.contains("after 1000 tries"), "{err}");
     }
 
     #[test]

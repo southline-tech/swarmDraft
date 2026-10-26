@@ -8,7 +8,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { MARK_ID_HASH_TEST_VECTOR, markIdHash, type DocNode, type Mark } from '@coauthor/schema';
+import { type DocNode, type Mark } from '@coauthor/schema';
 import { docToYDoc, markKey, yDocToDoc } from './ydoc';
 import { readView } from './model';
 
@@ -99,13 +99,6 @@ function build() {
           doc: yDocToDoc(ydoc),
           readView: readView(SECTION),
           markKeys: MARKS.map((m) => [m, markKey(m)]),
-          // markIdHash vectors, including the collision rehash input form `id:n`.
-          markIdHash: Object.fromEntries(
-            [MARK_ID_HASH_TEST_VECTOR[0], 'c1:1', 'c1:2', 's1', 'é✓'].map((s) => [
-              s,
-              markIdHash(s),
-            ]),
-          ),
         },
         null,
         2,
