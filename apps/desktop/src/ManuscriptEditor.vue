@@ -19,12 +19,18 @@ const props = defineProps<{ content: JSONContent }>();
 const emit = defineEmits<{ change: [doc: JSONContent] }>();
 
 const review = shallowRef<ReviewItem[]>([]);
+/** Set when the content does not fit the schema; the editor is then read-only and never emits. */
+const loadError = shallowRef<string>('');
 const editor = useEditor(
   manuscriptEditorOptions({
     content: props.content,
+    onContentError: ({ error }) => {
+      loadError.value = String((error as Error & { cause?: unknown }).cause ?? error.message);
+    },
     onCreate: ({ editor }) => (review.value = collectReviewItems(editor.state.doc)),
     onUpdate: ({ editor }) => {
       review.value = collectReviewItems(editor.state.doc);
+      if (loadError.value) return;
       emit('change', editor.getJSON());
     },
   }),
@@ -57,6 +63,10 @@ const LABELS: Record<ReviewItem['type'], string> = {
 
 <template>
   <div class="manuscript-editor">
+    <p v-if="loadError" class="load-error" role="alert" data-test="load-error">
+      This section has content the editor does not support, so it was opened read-only and nothing
+      will be saved. {{ loadError }}
+    </p>
     <div v-if="editor" class="toolbar" role="toolbar" aria-label="Formatting">
       <select
         data-test="paragraph-style"
@@ -133,6 +143,11 @@ const LABELS: Record<ReviewItem['type'], string> = {
 </template>
 
 <style>
+.manuscript-editor .load-error {
+  border: 1px solid #b00020;
+  color: #b00020;
+  padding: 0.5rem 0.75rem;
+}
 .manuscript-editor .toolbar {
   display: flex;
   gap: 0.25rem;

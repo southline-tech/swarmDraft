@@ -14,10 +14,13 @@ import { REVIEW_MARKS, SUGGESTION_MARKS, type ReviewMarkType } from './content';
  * Comments and tracked changes are read-only in the editor: they come from collaborators and
  * agents and are resolved elsewhere. The guard rejects any transaction that adds or removes a
  * review mark, pastes one in, or edits text inside a pending suggestion. Code that legitimately
- * changes them (loading a document, a future accept/reject flow) sets the `allowReviewEdits` meta.
+ * changes them (a future accept/reject flow) marks the transaction with `allowReviewEdits(tr)`
+ * from `@coauthor/editor/trusted`. The meta is an unforgeable token: a plain
+ * `setMeta('allowReviewEdits', true)` from a plugin or bot is ignored.
  */
 export const reviewGuardKey = new PluginKey('coauthorReviewGuard');
-export const ALLOW_REVIEW_EDITS = 'allowReviewEdits';
+/** Module-private token; only `allowReviewEdits` in ./trusted can attach it. */
+export const REVIEW_EDIT_TOKEN: unique symbol = Symbol('coauthorReviewEdit');
 
 const isReview = (m: PMMark) => (REVIEW_MARKS as readonly string[]).includes(m.type.name);
 const isSuggestion = (m: PMMark) => (SUGGESTION_MARKS as readonly string[]).includes(m.type.name);
@@ -77,7 +80,7 @@ export const ReviewGuard = Extension.create({
         key: reviewGuardKey,
         filterTransaction: (tr) =>
           !tr.docChanged ||
-          tr.getMeta(ALLOW_REVIEW_EDITS) === true ||
+          tr.getMeta(reviewGuardKey) === REVIEW_EDIT_TOKEN ||
           !transactionChangesReview(tr),
       }),
     ];

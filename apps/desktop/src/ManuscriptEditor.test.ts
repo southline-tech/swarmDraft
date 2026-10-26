@@ -40,4 +40,23 @@ describe('ManuscriptEditor', () => {
     expect(w.findAll('.tiptap .scene-break')).toHaveLength(2);
     w.unmount();
   });
+
+  it('refuses content outside the schema with a visible error and never emits it', async () => {
+    const bad = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: 'keep', marks: [{ type: 'mystery_mark' }] }],
+        },
+        { type: 'table' },
+      ],
+    };
+    const w = mount(ManuscriptEditor, { props: { content: bad }, attachTo: document.body });
+    await flushPromises();
+    expect(w.find('[data-test="load-error"]').exists()).toBe(true);
+    expect(w.emitted('change')).toBeUndefined();
+    expect(w.find('.tiptap').attributes('contenteditable')).toBe('false');
+    w.unmount();
+  });
 });

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Editor, JSONContent } from '@tiptap/core';
+import { PluginKey } from '@tiptap/pm/state';
 import {
   BLOCK_NODE_TYPES,
   INLINE_NODE_TYPES,
@@ -7,13 +8,13 @@ import {
   NON_EXCLUSIVE_MARKS,
 } from '@coauthor/schema';
 import {
-  ALLOW_REVIEW_EDITS,
   REVIEW_MARKS,
   collectReviewItems,
   createManuscriptEditor,
   markKey,
   markTypeFromKey,
 } from './index';
+import { allowReviewEdits } from './trusted';
 
 // Synthetic sample text only.
 const by = { author: 'agent:grok', ts: '2026-10-25T00:00:00Z' };
@@ -113,14 +114,16 @@ describe('manuscript schema', () => {
     expect([...REVIEW_MARKS].sort()).toEqual([...NON_EXCLUSIVE_MARKS].sort());
   });
 
-  it('keys review marks type--id like the Yjs encoding', () => {
-    expect(markKey({ type: 'comment_anchor', attrs: { id: 'c1' } })).toBe('comment_anchor--c1');
-    expect(markKey({ type: 'suggestion_insert', attrs: { id: 's1', ...by } })).toBe(
-      'suggestion_insert--s1',
+  it('keys review marks type--hash(id), parseable by y-prosemirror', () => {
+    expect(markKey({ type: 'comment_anchor', attrs: { id: 'c1' } })).toBe(
+      'comment_anchor--fwe1SmhZ',
+    );
+    expect(markKey({ type: 'suggestion_insert', attrs: { id: 's1', ...by } })).toMatch(
+      /^suggestion_insert--[a-zA-Z0-9+/]{8}$/,
     );
     expect(markKey({ type: 'italic' })).toBe('italic');
     expect(markKey({ type: 'link', attrs: { href: 'x' } })).toBe('link');
-    expect(markTypeFromKey('comment_anchor--c1')).toBe('comment_anchor');
+    expect(markTypeFromKey('comment_anchor--fwe1SmhZ')).toBe('comment_anchor');
     expect(markTypeFromKey('bold')).toBe('bold');
   });
 });
@@ -217,11 +220,22 @@ describe('review marks are read-only', () => {
     const from = posOf('Morning');
     const type = editor.schema.marks.comment_anchor!;
     editor.view.dispatch(
-      editor.state.tr
-        .addMark(from, from + 7, type.create({ id: 'c3' }))
-        .setMeta(ALLOW_REVIEW_EDITS, true),
+      allowReviewEdits(editor.state.tr.addMark(from, from + 7, type.create({ id: 'c3' }))),
     );
     expect(collectReviewItems(editor.state.doc).some((r) => r.id === 'c3')).toBe(true);
+  });
+
+  it('ignores a forged allowReviewEdits meta from a plugin or bot', () => {
+    make();
+    const from = posOf('Morning');
+    const type = editor.schema.marks.comment_anchor!;
+    editor.view.dispatch(
+      editor.state.tr
+        .addMark(from, from + 7, type.create({ id: 'c4' }))
+        .setMeta('allowReviewEdits', true)
+        .setMeta(new PluginKey('coauthorReviewGuard'), true),
+    );
+    expect(collectReviewItems(editor.state.doc).some((r) => r.id === 'c4')).toBe(false);
   });
 
   it('lists comments and suggestions in reading order', () => {

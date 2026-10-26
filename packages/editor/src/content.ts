@@ -42,19 +42,10 @@ export interface JSONMark {
   attrs?: Record<string, unknown>;
 }
 
-/**
- * Key a mark is stored under in Yjs text attributes. Review marks can overlap with another
- * mark of the same type, so they are keyed `type--id` (same rule as packages/docx ydoc.ts);
- * every other mark is keyed by its type.
- */
-export function markKey(m: JSONMark): string {
-  const id = m.attrs?.id;
-  return (REVIEW_MARKS as readonly string[]).includes(m.type) && typeof id === 'string' && id
-    ? `${m.type}--${id}`
-    : m.type;
-}
-
-export function markTypeFromKey(key: string): string {
-  const i = key.indexOf('--');
-  return i < 0 ? key : key.slice(0, i);
-}
+export {
+  markIdHash,
+  markKey,
+  markKeys,
+  markTypeFromKey,
+  MARK_ID_HASH_TEST_VECTOR,
+} from '@coauthor/schema';
