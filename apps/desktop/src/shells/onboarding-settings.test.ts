@@ -78,4 +78,15 @@ describe('UI shells (Part of #36)', () => {
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
     w.unmount();
   });
+
+  it('tc4 sample filter narrows review cards by author kind (preview only)', async () => {
+    const w = mount(ShellsPreview, { props: { initial: 'tc4' } });
+    const cards = () => w.findAll('[data-test="preview-tc4"] .pw__card').length;
+    expect(cards()).toBe(3);
+    await w.find('[role="radio"]:nth-child(3)').trigger('click');
+    expect(cards()).toBe(1);
+    await w.find('.pw__card .sh-btn--primary').trigger('click');
+    expect(w.find('[data-test="stub-note"]').text()).toContain('preview only');
+    w.unmount();
+  });
 });

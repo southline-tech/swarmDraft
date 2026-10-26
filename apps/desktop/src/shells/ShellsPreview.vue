@@ -14,6 +14,7 @@ import EmptyState from './EmptyState.vue';
 import ErrorCard from './ErrorCard.vue';
 import ReasonLine from './ReasonLine.vue';
 import { swatchVar } from './colors';
+import PreviewWorkspace from './PreviewWorkspace.vue';
 
 const props = defineProps<{ initial?: ScreenId | 'all' }>();
 const emit = defineEmits<{ close: [] }>();
@@ -112,6 +113,16 @@ const cards = [
       </button>
     </header>
     <p v-if="stubNote" class="sp__note" role="status" data-test="stub-note">{{ stubNote }}</p>
+
+    <section v-if="show('wp1')" class="sp__sec" data-screen="wp1">
+      <h2 class="sp__h">wp1 · Editor with review (wp6 = dark)</h2>
+      <PreviewWorkspace mode="wp1" @stub="stub" />
+    </section>
+
+    <section v-if="show('tc4')" class="sp__sec" data-screen="tc4">
+      <h2 class="sp__h">tc4 · Review changes by author (tc6 = dark)</h2>
+      <PreviewWorkspace mode="tc4" @stub="stub" />
+    </section>
 
     <section v-if="show('tc3')" class="sp__sec" data-screen="tc3">
       <h2 class="sp__h">tc3 · First-time name &amp; color</h2>
