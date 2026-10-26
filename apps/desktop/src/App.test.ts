@@ -367,6 +367,7 @@ vi.mock('./backend', async (orig) => ({
   pickBackupDestination: vi.fn(async () => 'D:\\Backups\\new.zip'),
   getRecoveryNotices: vi.fn(async () => []),
   persistImport: vi.fn(async () => storedFixture()),
+  deleteManuscript: vi.fn(async () => {}),
   openLatestManuscript: vi.fn(async () => null),
   saveSectionUpdate: vi.fn(async () => {}),
   dismissRecoveryNotices: vi.fn(async () => {}),
@@ -408,6 +409,90 @@ describe('restore confirmation', () => {
     w.unmount();
     vi.mocked(backend.saveSectionUpdate).mockReset();
     vi.mocked(backend.restoreBackup).mockClear();
+  });
+
+  it('writes the import only after the current manuscript is closed (edits saved first)', async () => {
+    const backend = await import('./backend');
+    const order: string[] = [];
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    vi.mocked(backend.saveSectionUpdate).mockImplementation(async () => void order.push('save'));
+    vi.mocked(backend.persistImport).mockImplementationOnce(async () => {
+      order.push('write');
+      return storedFixture();
+    });
+    const editor = await vi.waitFor(() => {
+      const e = (
+        w.find('.tiptap').element as unknown as { editor?: import('@tiptap/core').Editor } | null
+      )?.editor;
+      if (!e) throw new Error('editor not mounted yet');
+      return e;
+    });
+    editor.commands.insertContentAt(1, 'BEFORE ');
+    await chooseFile(w);
+    await flushPromises();
+    expect(order).toEqual(['save', 'write']);
+    w.unmount();
+    vi.mocked(backend.saveSectionUpdate).mockReset();
+  });
+
+  it('a failed close writes no import, so relaunch reopens the original manuscript', async () => {
+    const backend = await import('./backend');
+    // A fake database: rows in creation order; open_latest returns the newest.
+    const original = storedFixture();
+    const rows = [original];
+    vi.mocked(backend.openLatestManuscript).mockImplementation(async () => rows.at(-1) ?? null);
+    vi.mocked(backend.persistImport).mockClear();
+    vi.mocked(backend.persistImport).mockImplementation(async () => {
+      const m = storedFixture();
+      m.manuscript.id = 'db-new';
+      rows.push(m);
+      return m;
+    });
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    vi.mocked(backend.saveSectionUpdate).mockRejectedValue(new Error('database is locked'));
+    const editor = await vi.waitFor(() => {
+      const e = (
+        w.find('.tiptap').element as unknown as { editor?: import('@tiptap/core').Editor } | null
+      )?.editor;
+      if (!e) throw new Error('editor not mounted yet');
+      return e;
+    });
+    editor.commands.insertContentAt(1, 'UNSAVED ');
+    await chooseFile(w);
+    expect(backend.persistImport).not.toHaveBeenCalled();
+    expect(rows).toEqual([original]);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    w.unmount();
+    // Relaunch: the newest row is still the original manuscript.
+    expect((await backend.openLatestManuscript())?.manuscript.id).toBe(original.manuscript.id);
+    vi.mocked(backend.saveSectionUpdate).mockReset();
+    vi.mocked(backend.openLatestManuscript).mockReset().mockResolvedValue(null);
+    vi.mocked(backend.persistImport)
+      .mockReset()
+      .mockImplementation(async () => storedFixture());
+    vi.restoreAllMocks();
+  });
+
+  it('rolls the import back if opening it fails after the write, and reopens the original', async () => {
+    const backend = await import('./backend');
+    const original = storedFixture();
+    vi.mocked(backend.openLatestManuscript).mockResolvedValue(original);
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    const bad = storedFixture();
+    bad.manuscript.id = 'db-bad';
+    bad.sections[0]!.state = [255, 255, 255];
+    vi.mocked(backend.persistImport).mockResolvedValueOnce(bad);
+    vi.mocked(backend.deleteManuscript).mockClear();
+    await chooseFile(w);
+    expect(backend.deleteManuscript).toHaveBeenCalledWith('db-bad');
+    expect(w.text()).toContain('Could not import synthetic.docx');
+    expect(w.find('.tiptap').exists()).toBe(true); // the original, reopened from the database
+    w.unmount();
+    vi.mocked(backend.openLatestManuscript).mockReset().mockResolvedValue(null);
   });
 
   it("won't import over a manuscript whose edits aren't saved, and keeps it open", async () => {

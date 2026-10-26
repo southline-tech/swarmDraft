@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { yDocToDoc } from '@coauthor/docx';
-import { sessionFromStored, switchSession, UnsavedEditsError } from './manuscript-session';
+import { sessionFromStored, UnsavedEditsError } from './manuscript-session';
 import { storedFixture } from './stored-fixture.test-helper';
 
 const firstText = (doc: Y.Doc) => {
@@ -179,28 +179,5 @@ describe('sessionFromStored', () => {
     Y.applyUpdate(d, save.mock.calls[1]![1]); // the full state on its own rebuilds the doc
     expect(firstText(d).toString()).toContain('SLOW ');
     await s.close();
-  });
-
-  it('switchSession checks the current edits before opening anything, and keeps it on failure', async () => {
-    const stored = storedFixture();
-    const save = vi.fn().mockRejectedValue(new Error('locked'));
-    const cur = sessionFromStored(stored, null, { save, debounceMs: 60_000, retryMs: 60_000 });
-    firstText(cur.sections.get(stored.sections[1]!.docId)!).insert(0, 'X');
-    const makeNext = vi.fn(async () => sessionFromStored(storedFixture(), null));
-    await expect(switchSession(cur, makeNext)).rejects.toBeInstanceOf(UnsavedEditsError);
-    expect(makeNext).not.toHaveBeenCalled(); // nothing imported or written
-    // An edit that fails between the check and the switch: the new session is closed instead.
-    save.mockReset().mockResolvedValueOnce(undefined).mockRejectedValue(new Error('locked'));
-    await cur.flush().catch(() => {});
-    const next = sessionFromStored(storedFixture(), null);
-    const closeNext = vi.spyOn(next, 'close');
-    await expect(
-      switchSession(cur, async () => {
-        firstText(cur.sections.get(stored.sections[1]!.docId)!).insert(0, 'Y');
-        return next;
-      }),
-    ).rejects.toBeInstanceOf(UnsavedEditsError);
-    expect(closeNext).toHaveBeenCalledWith({ discard: true });
-    await cur.close({ discard: true });
   });
 });

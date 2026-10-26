@@ -18,6 +18,7 @@ import {
   type ImportedManuscript,
 } from '@coauthor/docx';
 import {
+  deleteManuscript,
   openLatestManuscript,
   persistImport,
   saveSectionUpdate,
@@ -52,6 +53,8 @@ export interface ManuscriptSession {
    * rejects with `UnsavedEditsError` and the session stays open, still retrying.
    */
   close(opts?: { discard?: boolean }): Promise<void>;
+  /** True once `close` has succeeded (edits typed after that are ignored). */
+  readonly closed: boolean;
 }
 
 export function openSession(
@@ -89,6 +92,9 @@ export function openSession(
     report,
     repairs,
     outlineLocked,
+    get closed() {
+      return closed;
+    },
     save: (next) => writeStructure(manuscript, next),
     flush: () => saver?.flush() ?? Promise.resolve(),
     close: async (opts) => {
@@ -183,27 +189,6 @@ function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
       },
     );
   });
-}
-
-/**
- * Replace `current` with the session `makeNext` opens, without losing unsaved edits: the current
- * session's edits are saved first (before anything is imported or written), and it is closed only
- * once they are. If they can't be saved, this rejects with `UnsavedEditsError`, `current` stays
- * open (still retrying) and any session `makeNext` opened is closed again.
- */
-export async function switchSession(
-  current: ManuscriptSession | null | undefined,
-  makeNext: () => Promise<ManuscriptSession>,
-): Promise<ManuscriptSession> {
-  await current?.flush();
-  const next = await makeNext();
-  try {
-    await current?.close();
-  } catch (err) {
-    await next.close({ discard: true });
-    throw err;
-  }
-  return next;
 }
 
 /**
@@ -357,20 +342,31 @@ export function openStored(
 }
 
 /**
- * Import a .docx and save it (manuscript, sections with their parents, initial text) before
- * opening it, so agents see it over MCP and it survives a restart. The session uses the stored
- * ids and saves edits. Without a database (plain browser) it opens in memory only.
+ * Import a .docx in place of `current`: parse it, close `current` (its edits must be saved, or
+ * this rejects with `UnsavedEditsError` and `current` stays open, still retrying), and only then
+ * save the import, so a failed switch never leaves an orphan import that would reopen as the
+ * newest manuscript. If anything fails after the write, the import is deleted again. The new
+ * session uses the stored ids and saves edits; without a database it is in memory only.
  */
 export async function importAndOpen(
   bytes: Uint8Array,
   persistHooks?: Pick<SectionPersister, 'onError' | 'onSaved'>,
+  current?: ManuscriptSession | null,
 ): Promise<ManuscriptSession> {
   const id = crypto.randomUUID();
   const imported = importDocx(bytes, { manuscriptId: id });
-  const saved = await persistImport(importPayload(imported));
-  return saved
-    ? openStored(saved, imported.report, persistHooks)
-    : sessionFromImported(imported, id);
+  const payload = importPayload(imported);
+  await current?.close();
+  const saved = await persistImport(payload);
+  if (!saved) return sessionFromImported(imported, id);
+  try {
+    return openStored(saved, imported.report, persistHooks);
+  } catch (err) {
+    await deleteManuscript(saved.manuscript.id).catch((e: unknown) =>
+      console.error('Could not roll back the import', e),
+    );
+    throw err;
+  }
 }
 
 /** Reopen the most recent stored manuscript (null if none or no database). */

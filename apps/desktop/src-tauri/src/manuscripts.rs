@@ -503,6 +503,39 @@ impl Store {
         id.map(|id| self.load_manuscript(&id)).transpose()
     }
 
+    /// Delete a manuscript with its sections, their document updates, comments and
+    /// suggestions, in one transaction (used to roll back an import that was never opened).
+    /// Deleting a manuscript that doesn't exist is a no-op.
+    pub fn delete_manuscript(&self, manuscript_id: &str) -> Result<(), StorageError> {
+        self.with_conn(|c| {
+            let tx = c.unchecked_transaction()?;
+            tx.execute(
+                "DELETE FROM doc_updates WHERE doc_id IN
+                   (SELECT doc_id FROM sections WHERE manuscript_id = ?1)",
+                [manuscript_id],
+            )?;
+            tx.execute(
+                "DELETE FROM comments WHERE manuscript_id = ?1",
+                [manuscript_id],
+            )?;
+            tx.execute(
+                "DELETE FROM suggestions WHERE manuscript_id = ?1",
+                [manuscript_id],
+            )?;
+            tx.execute(
+                "UPDATE sections SET parent_id = NULL WHERE manuscript_id = ?1",
+                [manuscript_id],
+            )?;
+            tx.execute(
+                "DELETE FROM sections WHERE manuscript_id = ?1",
+                [manuscript_id],
+            )?;
+            tx.execute("DELETE FROM manuscripts WHERE id = ?1", [manuscript_id])?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
     /// Save an editor update (Yjs v1) to a section. The update is applied to the stored doc
     /// and the result validated before it is appended, so a malformed edit is refused and
     /// nothing is written.

@@ -183,6 +183,15 @@ fn manuscript_open_latest(
     store.latest_manuscript().map_err(err)
 }
 
+/// Delete a manuscript and everything stored for it (rolls back an import never opened).
+#[tauri::command]
+fn manuscript_delete(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+) -> Result<(), String> {
+    store.delete_manuscript(&manuscript_id).map_err(err)
+}
+
 /// Save an editor's Yjs update to a stored section (validated before it is written).
 #[tauri::command]
 fn section_apply_update(
@@ -263,6 +272,7 @@ pub fn run() {
             manuscript_import_json,
             manuscripts_list,
             manuscript_open_latest,
+            manuscript_delete,
             section_apply_update,
             mcp_status
         ])

@@ -173,6 +173,12 @@ export async function persistImport(payload: ImportPayload): Promise<StoredManus
   });
 }
 
+/** Delete a stored manuscript and everything stored for it (rolls back an unopened import). */
+export async function deleteManuscript(manuscriptId: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('manuscript_delete', { manuscriptId });
+}
+
 /** The most recent manuscript, to reopen at startup; null if none or in a plain browser. */
 export async function openLatestManuscript(): Promise<StoredManuscript | null> {
   if (!isTauri()) return null;

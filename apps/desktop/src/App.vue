@@ -19,7 +19,6 @@ import { flushOnClose } from './close-flush';
 import {
   importAndOpen,
   reopenLatest,
-  switchSession,
   UnsavedEditsError,
   type ManuscriptSession,
 } from './manuscript-session';
@@ -165,7 +164,17 @@ async function onFile(e: Event) {
   importing.value = true;
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    open(await switchSession(session.value, () => importAndOpen(bytes, persistHooks)));
+    const current = session.value;
+    try {
+      open(await importAndOpen(bytes, persistHooks, current));
+    } catch (err) {
+      // The current manuscript was closed but the import failed: reopen it from the database.
+      if (current?.closed && !(err instanceof UnsavedEditsError)) {
+        const back = await reopenLatest(persistHooks).catch(() => null);
+        if (back) open(back);
+      }
+      throw err;
+    }
   } catch (err) {
     openError.value =
       err instanceof UnsavedEditsError
