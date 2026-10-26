@@ -725,13 +725,19 @@ fn restore_with(
     create_backup(store, app_version, &snapshot)?;
 
     let tokens_revoked = match apply(store, &staged, fail, true, &snapshot) {
-        Ok(n) => n,
+        Ok(n) => {
+            // The token table was replaced underneath the MCP auth cache; drop it so a
+            // cached token from before the restore must authenticate against the new db.
+            store.clear_token_cache();
+            n
+        }
         Err(err) if matches!(fail, FailAt::Crash(_)) => return Err(err),
         Err(err) => {
             drop(staged);
             // Rollback returns to the pre-restore state exactly, so tokens valid then stay valid.
             let rb = stage(store, &snapshot)
                 .and_then(|s| apply(store, &s, FailAt::None, false, &snapshot));
+            store.clear_token_cache();
             return Err(match rb {
                 Ok(_) => BackupError::RolledBack(err.to_string()),
                 Err(e2) => BackupError::RollbackFailed(

@@ -139,8 +139,8 @@ exposed over MCP.
 | Tool                                                                       | Purpose                                                        | Scope          |
 | -------------------------------------------------------------------------- | -------------------------------------------------------------- | -------------- |
 | `list_documents`                                                           | Manuscripts available locally                                  | read           |
-| `list_sections(manuscript_id)`                                             | Ordered parts/chapters/scenes with ids, kinds, word counts     | read           |
-| `read_section(manuscript_id, section_id, format=markdown\|json)`           | Text with stable block ids, plus open suggestions and comments | read           |
+| `list_chapters(manuscript_id)`                                             | Ordered parts/chapters/scenes with ids, kinds, word counts     | read           |
+| `read_chapter(manuscript_id, section_id, format=markdown\|json)`           | Text with stable block ids, plus open suggestions and comments | read           |
 | `search_text(manuscript_id, query)`                                        | Find passages; returns anchors                                 | read           |
 | `list_suggestions(manuscript_id, status?, author?)`                        | Review queue                                                   | read           |
 | `add_comment(section_id, anchor, body, thread_id?)`                        | Anchored comment or reply                                      | comment        |
@@ -152,7 +152,35 @@ exposed over MCP.
 
 Resources: `coauthor://manuscript/{id}/section/{sid}` (read-only text). Anchors use quoted text +
 block id so they survive concurrent edits; the server resolves them to Yjs relative positions and
-errors if ambiguous or stale. Every call is written to AuditEvent.
+errors if ambiguous or stale. Every call is written to AuditEvent. All positions over MCP
+(`search_text` offsets and lengths, anchor offsets) are UTF-16 code units, the same as JavaScript
+strings, Yjs and the editor; the Rust side creates every Yjs document with UTF-16 offsets
+(`content::new_doc`, with `Doc::new` banned by clippy) so mark ranges line up after curly quotes,
+dashes or emoji.
+
+**Implementation.** The server is Rust inside the Tauri process, built on `rmcp` (the official
+MCP Rust SDK) with axum, on port 7337 by default. Reasons over a TypeScript sidecar: one process
+and no Node runtime to bundle or supervise; it shares the app's SQLite connection and Yjs
+documents directly instead of over IPC; tokens are checked in the same place they are stored.
+The cost is a Rust reading of the Yjs content model (`src-tauri/src/content.rs`), which is kept
+in step with the TypeScript encoder by the shared fixture in `fixtures/mcp/`. The server runs
+stateless (JSON responses, no sessions). Before any token lookup it requires `Host` to be
+exactly `127.0.0.1`, `localhost` or `[::1]` plus its port (DNS-rebinding guard). Any request
+with an `Origin` header gets 403, so browser-based clients (web pages, browser extensions using
+fetch) cannot connect; agents connect from a local process. Missing, malformed, unknown and
+revoked tokens all get the same 401 (`WWW-Authenticate: Bearer`) after the same minimum delay.
+Wrong tokens count toward a global throttle (429); requests without a token do not. Once the
+wrong-token budget is spent, only tokens that authenticated before (plus one probe at a time for
+others) are looked up, so a valid token keeps working. Token lookups are capped at 4 at a time and
+authenticated requests at 64 in flight; extra requests wait up to 5 s for an in-flight slot and
+2 s for a lookup slot, then get 503 with `Retry-After`. Revoking a token or agent removes its
+hashes from the known-token cache, and every cached token is still checked against the database
+on each request (a failed check evicts it), so a restore or out-of-band edit can't revive a
+revoked token; restore also clears the cache. Known limitation: a flood of wrong tokens from a local
+process can delay a brand-new token's first request (it shares the single probe slot and may
+see 429 until the window resets); tokens that authenticated before are unaffected. The `Bearer` scheme is matched
+case-insensitively, and each valid token is rate limited. `list_chapters` / `read_chapter` return every section kind (front
+matter, parts, chapters, scenes, back matter), not only chapters.
 
 ## 9. Export requirements (KDP)
 

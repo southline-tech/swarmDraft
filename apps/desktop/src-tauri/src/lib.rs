@@ -8,6 +8,8 @@
 
 pub mod agents;
 pub mod backup;
+pub mod content;
+pub mod manuscripts;
 pub mod mcp;
 pub mod storage;
 
@@ -129,6 +131,48 @@ fn restore_backup(
     .map_err(|e| e.to_string())
 }
 
+/// One section of an imported manuscript: ProseMirror JSON from the .docx importer.
+#[derive(serde::Deserialize)]
+pub struct ImportSection {
+    kind: String,
+    title: String,
+    doc: serde_json::Value,
+}
+
+#[tauri::command]
+fn manuscript_import_json(
+    store: tauri::State<'_, storage::Store>,
+    title: String,
+    sections: Vec<ImportSection>,
+) -> Result<manuscripts::Manuscript, String> {
+    let m = store.create_manuscript(&title).map_err(err)?;
+    for s in sections {
+        store
+            .import_section_json(&m.id, &s.kind, &s.title, &s.doc)
+            .map_err(err)?;
+    }
+    Ok(m)
+}
+
+#[tauri::command]
+fn manuscripts_list(
+    store: tauri::State<'_, storage::Store>,
+) -> Result<Vec<manuscripts::Manuscript>, String> {
+    store.list_manuscripts().map_err(err)
+}
+
+/// Where the MCP server is listening, or why it is not.
+#[derive(Clone, serde::Serialize)]
+pub struct McpStatus {
+    url: Option<String>,
+    error: Option<String>,
+}
+
+#[tauri::command]
+fn mcp_status(status: tauri::State<'_, std::sync::Mutex<McpStatus>>) -> McpStatus {
+    status.lock().expect("status poisoned").clone()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -137,7 +181,26 @@ pub fn run() {
             let dir = app.path().app_data_dir()?;
             backup::cleanup_temp(&dir);
             let store = storage::Store::open(&dir)?;
-            app.manage(store);
+            app.manage(store.clone());
+            app.manage(std::sync::Mutex::new(McpStatus {
+                url: None,
+                error: None,
+            }));
+            // The MCP server shares the store. If the port is taken, the app still runs and
+            // the settings screen shows the error.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let result = mcp::serve(store, mcp::DEFAULT_PORT).await;
+                let state = handle.state::<std::sync::Mutex<McpStatus>>();
+                let mut st = state.lock().expect("status poisoned");
+                match result {
+                    Ok(addr) => st.url = Some(format!("http://{addr}/mcp")),
+                    Err(e) => {
+                        eprintln!("MCP server not started: {e}");
+                        st.error = Some(e.to_string());
+                    }
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -150,7 +213,10 @@ pub fn run() {
             agent_token_revoke,
             create_backup,
             take_recovery_notice,
-            restore_backup
+            restore_backup,
+            manuscript_import_json,
+            manuscripts_list,
+            mcp_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running coAuthor");

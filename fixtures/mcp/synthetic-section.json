@@ -1,0 +1,244 @@
+{
+  "doc": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "heading",
+        "attrs": {
+          "level": 1
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Chapter One"
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "attrs": {
+          "style": "first"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "The lamp on the test bench blinked "
+          },
+          {
+            "type": "text",
+            "text": "twice",
+            "marks": [
+              {
+                "type": "italic"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "text": ", then held "
+          },
+          {
+            "type": "text",
+            "text": "steady",
+            "marks": [
+              {
+                "type": "comment_anchor",
+                "attrs": {
+                  "id": "c1"
+                }
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "text": "."
+          },
+          {
+            "type": "footnote",
+            "attrs": {
+              "id": "1",
+              "kind": "footnote",
+              "text": "A placeholder note.",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "attrs": {
+                    "style": "body"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "A placeholder note."
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "attrs": {
+          "style": "body"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Sample text with a "
+          },
+          {
+            "type": "text",
+            "text": "quick ",
+            "marks": [
+              {
+                "type": "suggestion_delete",
+                "attrs": {
+                  "id": "s2",
+                  "author": "agent:fixture",
+                  "ts": "2026-01-01T00:00:00Z"
+                }
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "text": "brief ",
+            "marks": [
+              {
+                "type": "suggestion_insert",
+                "attrs": {
+                  "id": "s1",
+                  "author": "agent:fixture",
+                  "ts": "2026-01-01T00:00:00Z"
+                }
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "text": "edit",
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ]
+          },
+          {
+            "type": "hard_break"
+          },
+          {
+            "type": "text",
+            "text": "and a second line."
+          },
+          {
+            "type": "footnote",
+            "attrs": {
+              "id": "2",
+              "kind": "endnote",
+              "text": "An endnote.",
+              "content": []
+            }
+          }
+        ]
+      },
+      {
+        "type": "scene_break",
+        "attrs": {
+          "marker": "***"
+        }
+      },
+      {
+        "type": "paragraph",
+        "attrs": {
+          "style": "block_quote"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Quoted filler "
+          },
+          {
+            "type": "image",
+            "attrs": {
+              "alt": "diagram"
+            }
+          }
+        ]
+      },
+      {
+        "type": "page_break"
+      }
+    ]
+  },
+  "readView": {
+    "text": "Chapter One\nThe lamp on the test bench blinked twice, then held steady.[^1]\nSample text with a quick brief edit\nand a second line.[^e2]\n***\nQuoted filler [image: diagram]\n",
+    "footnotes": [
+      {
+        "id": "1",
+        "kind": "footnote",
+        "text": "A placeholder note."
+      },
+      {
+        "id": "2",
+        "kind": "endnote",
+        "text": "An endnote."
+      }
+    ]
+  },
+  "markKeys": [
+    [
+      {
+        "type": "italic"
+      },
+      "italic"
+    ],
+    [
+      {
+        "type": "comment_anchor",
+        "attrs": {
+          "id": "c1"
+        }
+      },
+      "comment_anchor--fwe1SmhZ"
+    ],
+    [
+      {
+        "type": "suggestion_insert",
+        "attrs": {
+          "id": "s1",
+          "author": "agent:fixture",
+          "ts": "2026-01-01T00:00:00Z"
+        }
+      },
+      "suggestion_insert--/we1eNFJ"
+    ],
+    [
+      {
+        "type": "suggestion_delete",
+        "attrs": {
+          "id": "s2",
+          "author": "agent:fixture",
+          "ts": "2026-01-01T00:00:00Z"
+        }
+      },
+      "suggestion_delete--/Ae1eMww"
+    ]
+  ],
+  "schema": {
+    "blockNodes": ["paragraph", "heading", "scene_break", "page_break"],
+    "inlineNodes": ["text", "hard_break", "footnote", "image"],
+    "marks": [
+      "bold",
+      "italic",
+      "smallcaps",
+      "underline",
+      "strike",
+      "link",
+      "comment_anchor",
+      "suggestion_insert",
+      "suggestion_delete"
+    ],
+    "nonExclusiveMarks": ["comment_anchor", "suggestion_insert", "suggestion_delete"]
+  }
+}
