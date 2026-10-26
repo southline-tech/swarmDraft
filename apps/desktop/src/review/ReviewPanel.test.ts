@@ -17,7 +17,7 @@ describe('ReviewPanel', () => {
     await w.findAll('[data-test=accept-author]')[0]!.trigger('click');
     await w.find('[data-test=reject-all]').trigger('click');
     expect(w.emitted('decide')).toEqual([
-      [{ kind: 'one', id: 's3' }, 'reject'],
+      [{ kind: 'one', id: 's3', suggestion: 'suggestion_insert' }, 'reject'],
       [{ kind: 'author', author: 'Bot A' }, 'accept'],
       [{ kind: 'all' }, 'reject'],
     ]);

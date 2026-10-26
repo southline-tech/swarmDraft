@@ -5,8 +5,11 @@ import {
   decideSuggestions,
   listSuggestions,
   runDecision,
-  selectSuggestionIds,
+  selectTargets,
+  type DecisionOp,
+  type SuggestionKind,
 } from './decisions';
+import { createReviewPort } from './trusted';
 
 const ins = (id: string, author: string): Mark => ({
   type: 'suggestion_insert',
@@ -16,15 +19,26 @@ const del = (id: string, author: string): Mark => ({
   type: 'suggestion_delete',
   attrs: { id, author, ts: '2026-10-25T00:00:00Z' },
 });
-const para = (...content: { text: string; marks?: Mark[] }[]): DocNode['content'][number] => ({
+type Para = Extract<DocNode['content'][number], { type: 'paragraph' }>;
+const para = (...content: { text: string; marks?: Mark[] }[]): Para => ({
   type: 'paragraph',
   attrs: { style: 'body' },
-  content: content.map((c) => ({ type: 'text', ...c })),
+  content: content.map((c) => ({ type: 'text' as const, ...c })),
 });
 const textOf = (d: DocNode) =>
   d.content.map((b) =>
     ('content' in b ? (b.content ?? []) : []).map((n) => ('text' in n ? n.text : '')).join(''),
   );
+const t = (kind: SuggestionKind, id: string) => ({ kind, id });
+const I = 'suggestion_insert' as const;
+const D = 'suggestion_delete' as const;
+const op = (
+  decision: 'accept' | 'reject',
+  ...targets: { kind: SuggestionKind; id: string }[]
+): DecisionOp => ({
+  targets,
+  decision,
+});
 
 // Synthetic text only.
 const doc: DocNode = {
@@ -40,41 +54,74 @@ const doc: DocNode = {
   ],
 };
 
-describe('listSuggestions', () => {
+describe('listSuggestions / selectTargets', () => {
   it('lists suggestions with authors, ids from attrs', () => {
     expect(listSuggestions(doc).map((i) => [i.id, i.kind, i.author, i.text])).toEqual([
-      ['s1', 'suggestion_insert', 'Bot A', 'flickered'],
-      ['s2', 'suggestion_delete', 'Bot B', ' glowed'],
-      ['s3', 'suggestion_insert', 'Bot A', 'fell'],
+      ['s1', I, 'Bot A', 'flickered'],
+      ['s2', D, 'Bot B', ' glowed'],
+      ['s3', I, 'Bot A', 'fell'],
     ]);
   });
-  it('selects one, by author, all', () => {
+  it('includes suggestions inside footnote content', () => {
+    const withNote: DocNode = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          attrs: { style: 'body' },
+          content: [
+            { type: 'text', text: 'See' },
+            {
+              type: 'footnote',
+              attrs: {
+                id: 'f1',
+                kind: 'footnote',
+                text: 'a note',
+                content: [para({ text: 'a ' }, { text: 'note', marks: [ins('n1', 'Bot C')] })],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    expect(listSuggestions(withNote)).toMatchObject([{ id: 'n1', text: 'note' }]);
+    const r = decideSuggestions(withNote, op('reject', t(I, 'n1')));
+    expect(JSON.stringify(r.doc)).not.toContain('n1');
+    expect(r.decided).toEqual([t(I, 'n1')]);
+  });
+  it('selects one by (kind,id), by author, all', () => {
+    const same: DocNode = {
+      type: 'doc',
+      content: [
+        para({ text: 'x', marks: [ins('dup', 'A')] }, { text: 'y', marks: [del('dup', 'A')] }),
+      ],
+    };
+    expect(selectTargets(listSuggestions(same), { kind: 'one', id: 'dup', suggestion: D })).toEqual(
+      [t(D, 'dup')],
+    );
     const items = listSuggestions(doc);
-    expect([...selectSuggestionIds(items, { kind: 'one', id: 's2' })]).toEqual(['s2']);
-    expect([...selectSuggestionIds(items, { kind: 'one', id: 'nope' })]).toEqual([]);
-    expect([...selectSuggestionIds(items, { kind: 'author', author: 'Bot A' })]).toEqual([
-      's1',
-      's3',
+    expect(selectTargets(items, { kind: 'one', id: 'nope', suggestion: I })).toEqual([]);
+    expect(selectTargets(items, { kind: 'author', author: 'Bot A' })).toEqual([
+      t(I, 's1'),
+      t(I, 's3'),
     ]);
-    expect(selectSuggestionIds(items, { kind: 'all' }).size).toBe(3);
+    expect(selectTargets(items, { kind: 'all' })).toHaveLength(3);
   });
 });
 
-describe('decideSuggestions', () => {
-  it('accept keeps inserts and drops deletes', () => {
-    const r = decideSuggestions(doc, new Set(['s1', 's2', 's3']), 'accept');
+describe('decideSuggestions (reference model)', () => {
+  it('accept keeps inserts and drops deletes, merging text', () => {
+    const r = decideSuggestions(doc, op('accept', t(I, 's1'), t(D, 's2'), t(I, 's3')));
     expect(textOf(r.doc)).toEqual(['The lamp flickered.', 'Rain fell']);
-    expect(listSuggestions(r.doc)).toEqual([]);
-    // Adjacent unmarked text is merged back into one node.
     expect(r.doc.content[0]).toMatchObject({ content: [{ text: 'The lamp flickered.' }] });
   });
   it('reject drops inserts and keeps deleted text', () => {
-    const r = decideSuggestions(doc, new Set(['s1', 's2', 's3']), 'reject');
+    const r = decideSuggestions(doc, op('reject', t(I, 's1'), t(D, 's2'), t(I, 's3')));
     expect(textOf(r.doc)).toEqual(['The lamp  glowed.', 'Rain ']);
   });
-  it('only touches selected ids and does not mutate input', () => {
+  it('only touches targets and does not mutate input', () => {
     const snapshot = JSON.stringify(doc);
-    const r = decideSuggestions(doc, new Set(['s2']), 'reject');
+    const r = decideSuggestions(doc, op('reject', t(D, 's2')));
     expect(listSuggestions(r.doc).map((i) => i.id)).toEqual(['s1', 's3']);
     expect(JSON.stringify(doc)).toBe(snapshot);
   });
@@ -89,64 +136,93 @@ describe('decideSuggestions', () => {
         ),
       ],
     };
-    // Rejecting A's insert removes the text; B's delete survives only on its remaining text.
-    let r = decideSuggestions(overlap, new Set(['x1']), 'reject');
+    let r = decideSuggestions(overlap, op('reject', t(I, 'x1')));
     expect(textOf(r.doc)).toEqual(['a  day']);
     expect(r.superseded).toEqual([]);
-    expect(listSuggestions(r.doc)).toMatchObject([{ id: 'y1', text: ' day' }]);
-    // Accepting B's delete removes the shared range, superseding A's insert entirely.
-    r = decideSuggestions(overlap, new Set(['y1']), 'accept');
+    r = decideSuggestions(overlap, op('accept', t(D, 'y1')));
     expect(textOf(r.doc)).toEqual(['a ']);
-    expect(r.superseded).toEqual(['x1']);
-    // Accepting A keeps the text but B's delete mark stays on it.
-    r = decideSuggestions(overlap, new Set(['x1']), 'accept');
-    expect(listSuggestions(r.doc)).toMatchObject([{ id: 'y1', text: 'bright day' }]);
+    expect(r.superseded).toEqual([t(I, 'x1')]);
   });
   it('is order independent for disjoint suggestions (converges)', () => {
     const a = decideSuggestions(
-      decideSuggestions(doc, new Set(['s1']), 'accept').doc,
-      new Set(['s2']),
-      'reject',
+      decideSuggestions(doc, op('accept', t(I, 's1'))).doc,
+      op('reject', t(D, 's2')),
     );
     const b = decideSuggestions(
-      decideSuggestions(doc, new Set(['s2']), 'reject').doc,
-      new Set(['s1']),
-      'accept',
+      decideSuggestions(doc, op('reject', t(D, 's2'))).doc,
+      op('accept', t(I, 's1')),
     );
     expect(a.doc).toEqual(b.doc);
   });
 });
 
-describe('runDecision', () => {
-  it('applies once and records status, decided_at, decided_by', async () => {
-    const tx = { applyReviewDecision: vi.fn() };
+describe('trusted port + runDecision', () => {
+  it('re-finds targets on the live doc so a concurrent edit outside the suggestion survives', async () => {
+    let live: DocNode = doc;
+    const port = createReviewPort({ read: () => live, commit: (n) => (live = n) });
+    const items = listSuggestions(doc); // panel snapshot, now stale
+    // Concurrent edit elsewhere (another client / the user typing) before the click lands.
+    live = { ...live, content: [...live.content, para({ text: 'A new line.' })] };
+    (live.content[1] as Para).content![0] = { type: 'text', text: 'Cold rain ' };
+    await runDecision(items, { kind: 'one', id: 's1', suggestion: I }, 'accept', {
+      tx: port,
+      decidedBy: 'h',
+    });
+    expect(textOf(live)).toEqual(['The lamp flickered glowed.', 'Cold rain fell', 'A new line.']);
+  });
+  it('records status, decided_at, decided_by from what the port decided', async () => {
+    const tx = {
+      applyReviewDecision: vi.fn(() => ({ decided: [t(I, 's1'), t(I, 's3')], superseded: [] })),
+    };
     const sink = { recordDecisions: vi.fn() };
     const now = () => new Date('2026-10-26T03:00:00Z');
-    await runDecision(doc, { kind: 'author', author: 'Bot A' }, 'accept', {
-      tx,
-      sink,
-      decidedBy: 'human:me',
-      now,
-    });
-    expect(tx.applyReviewDecision).toHaveBeenCalledTimes(1);
+    const out = await runDecision(
+      listSuggestions(doc),
+      { kind: 'author', author: 'Bot A' },
+      'accept',
+      { tx, sink, decidedBy: 'human:me', now },
+    );
+    expect(tx.applyReviewDecision).toHaveBeenCalledWith(op('accept', t(I, 's1'), t(I, 's3')));
     expect(sink.recordDecisions).toHaveBeenCalledWith([
       {
+        kind: I,
         id: 's1',
         status: 'accepted',
         decidedAt: '2026-10-26T03:00:00.000Z',
         decidedBy: 'human:me',
       },
       {
+        kind: I,
         id: 's3',
         status: 'accepted',
         decidedAt: '2026-10-26T03:00:00.000Z',
         decidedBy: 'human:me',
       },
     ]);
+    expect(out.unrecorded).toEqual([]);
+  });
+  it('hands failed sink writes to reconcile', async () => {
+    const tx = { applyReviewDecision: vi.fn(() => ({ decided: [t(D, 's2')], superseded: [] })) };
+    const sink = { recordDecisions: vi.fn(() => Promise.reject(new Error('db locked'))) };
+    const reconcile = vi.fn();
+    const out = await runDecision(listSuggestions(doc), { kind: 'all' }, 'reject', {
+      tx,
+      sink,
+      reconcile,
+      decidedBy: 'h',
+    });
+    expect(reconcile).toHaveBeenCalledWith(
+      [expect.objectContaining({ id: 's2', status: 'rejected' })],
+      expect.any(Error),
+    );
+    expect(out.unrecorded).toHaveLength(1);
   });
   it('does nothing when nothing matches', async () => {
     const tx = { applyReviewDecision: vi.fn() };
-    await runDecision(doc, { kind: 'one', id: 'zz' }, 'reject', { tx, decidedBy: 'h' });
+    await runDecision(listSuggestions(doc), { kind: 'one', id: 'zz', suggestion: I }, 'reject', {
+      tx,
+      decidedBy: 'h',
+    });
     expect(tx.applyReviewDecision).not.toHaveBeenCalled();
   });
 });

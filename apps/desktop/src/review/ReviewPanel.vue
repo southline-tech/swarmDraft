@@ -71,14 +71,14 @@ const label = (i: SuggestionItem) => (i.kind === 'suggestion_insert' ? 'Insert' 
           <button
             data-test="accept"
             :disabled="busy"
-            @click="emit('decide', { kind: 'one', id: item.id }, 'accept')"
+            @click="emit('decide', { kind: 'one', id: item.id, suggestion: item.kind }, 'accept')"
           >
             Accept
           </button>
           <button
             data-test="reject"
             :disabled="busy"
-            @click="emit('decide', { kind: 'one', id: item.id }, 'reject')"
+            @click="emit('decide', { kind: 'one', id: item.id, suggestion: item.kind }, 'reject')"
           >
             Reject
           </button>
