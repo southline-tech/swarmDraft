@@ -14,8 +14,13 @@ import {
 import AgentsSettings from './AgentsSettings.vue';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import { SAMPLE_DOC } from './sample';
+import SectionNav from './SectionNav.vue';
+import { SAMPLE_MANUSCRIPT_ID, sampleOutline } from './outline-sample';
+import type { Section } from '@coauthor/schema';
 
 const info = ref<AppInfo | null>(null);
+const sections = ref<Section[]>(sampleOutline());
+const selectedId = ref<string>();
 /** One-time notice: startup recovery moved folders aside after an interrupted restore. */
 const recoveryNotice = ref<RecoveryNotice | null>(null);
 
@@ -137,6 +142,12 @@ async function onRestore(): Promise<void> {
     </section>
     <p v-else data-test="browser-mode">Running in browser mode (no desktop backend).</p>
     <AgentsSettings v-if="info" />
+    <SectionNav
+      v-model:sections="sections"
+      :manuscript-id="SAMPLE_MANUSCRIPT_ID"
+      :selected-id="selectedId"
+      @select="selectedId = $event"
+    />
     <ManuscriptEditor :content="SAMPLE_DOC" />
   </main>
 </template>
