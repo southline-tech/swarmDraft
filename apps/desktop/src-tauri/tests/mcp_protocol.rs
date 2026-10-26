@@ -983,9 +983,15 @@ fn raw_keys(s: &Server, sid: &str) -> Vec<String> {
             for t in e.children(&txn) {
                 if let XmlOut::Text(t) = t {
                     for d in t.diff(&txn, YChange::identity) {
-                        for k in d.attributes.iter().flat_map(|a| a.keys()) {
-                            keys.push(k.to_string());
-                        }
+                        // Attrs is a hash map: sort each run's keys so comparisons are stable.
+                        let mut run: Vec<String> = d
+                            .attributes
+                            .iter()
+                            .flat_map(|a| a.keys())
+                            .map(|k| k.to_string())
+                            .collect();
+                        run.sort();
+                        keys.extend(run);
                     }
                 }
             }

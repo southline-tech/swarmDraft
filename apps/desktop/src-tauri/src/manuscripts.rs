@@ -310,6 +310,7 @@ impl Store {
         title: &str,
         pm_doc: &Value,
     ) -> Result<Section, StorageError> {
+        crate::content::validate_doc(pm_doc).map_err(StorageError::Invalid)?;
         let doc = crate::content::new_doc();
         crate::content::encode(&doc, pm_doc).map_err(StorageError::Invalid)?;
         let s = self.add_section(manuscript_id, kind, title, None)?;
@@ -446,6 +447,24 @@ pub fn state_vector(doc: &Doc) -> StateVector {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn import_section_json_validates_before_saving() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = Store::open(tmp.path()).unwrap();
+        let m = s.create_manuscript("Sample Manuscript").unwrap();
+        for bad in [
+            json!({"type":"doc","content":[{"type":"table","content":[]}]}),
+            json!({"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"x","marks":[{"type":"highlight"}]}]}]}),
+        ] {
+            let e = s.import_section_json(&m.id, "chapter", "Bad", &bad);
+            assert!(matches!(e, Err(StorageError::Invalid(_))), "{e:?}");
+        }
+        assert!(
+            s.list_sections(&m.id).unwrap().is_empty(),
+            "nothing was added"
+        );
+    }
 
     #[test]
     fn sections_and_docs_persist() {

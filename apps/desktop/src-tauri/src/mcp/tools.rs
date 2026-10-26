@@ -464,7 +464,7 @@ impl CoauthorMcp {
                     (None, Some(b), Some(q)) => {
                         let doc = self.store.load_doc(&s.doc_id)?;
                         let sv = crate::manuscripts::state_vector(&doc);
-                        let review_before = review_marks(&doc);
+                        let review_before = blocks_of(&doc);
                         {
                             let mut txn = yrs::Transact::transact_mut(&doc);
                             let r = crate::anchor::resolve(&doc, &txn, b, q)
@@ -472,7 +472,10 @@ impl CoauthorMcp {
                             crate::anchor::add_comment_mark(&mut txn, &r, &id);
                         }
                         check_schema(&doc)?;
-                        check_review_marks(&review_before, &review_marks(&doc))?;
+                        {
+                            let (b, a) = review_marks_pair(&review_before, &blocks_of(&doc));
+                            check_review_marks(&b, &a)?;
+                        }
                         self.store.save_doc_changes(&s.doc_id, &doc, &sv)?;
                         (Some(b.clone()), Some(q.clone()))
                     }
@@ -532,7 +535,7 @@ impl CoauthorMcp {
                 let ts = self.store.now()?;
                 let doc = self.store.load_doc(&s.doc_id)?;
                 let sv = crate::manuscripts::state_vector(&doc);
-                let review_before = review_marks(&doc);
+                let review_before = blocks_of(&doc);
                 {
                     let mut txn = yrs::Transact::transact_mut(&doc);
                     let r = crate::anchor::resolve(&doc, &txn, &a.block_id, &a.quote)
@@ -552,7 +555,10 @@ impl CoauthorMcp {
                     );
                 }
                 check_schema(&doc)?;
-                check_review_marks(&review_before, &review_marks(&doc))?;
+                {
+                    let (b, a) = review_marks_pair(&review_before, &blocks_of(&doc));
+                    check_review_marks(&b, &a)?;
+                }
                 self.store.save_doc_changes(&s.doc_id, &doc, &sv)?;
                 let x = crate::manuscripts::Suggestion {
                     id,
@@ -650,72 +656,187 @@ impl CoauthorMcp {
 
 const REVIEW_MARKS: &[&str] = &["comment_anchor", "suggestion_insert", "suggestion_delete"];
 
-/// Review marks in a section, keyed by (mark type, attrs.id): their attrs and the text they cover,
-/// in document order.
-pub(crate) type ReviewMarks =
-    std::collections::BTreeMap<(String, String), (serde_json::Value, String)>;
+/// One contiguous stretch of a review mark: where it sits (block id, plus `#fn<n>.<k>` for the
+/// k-th paragraph of the n-th footnote), its UTF-16 start/end there, the text it covers and its
+/// attrs.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct MarkRange {
+    pub block: String,
+    pub start: usize,
+    pub end: usize,
+    pub text: String,
+    pub attrs: serde_json::Value,
+    /// Other review marks on the same text (only compared for ids with inconsistent attrs).
+    pub with: Vec<(String, String)>,
+}
 
-fn collect_review(node: &serde_json::Value, out: &mut ReviewMarks) {
-    if node["type"] == "text" {
-        let text = node["text"].as_str().unwrap_or("");
-        for m in node["marks"].as_array().into_iter().flatten() {
-            let ty = m["type"].as_str().unwrap_or("");
-            if REVIEW_MARKS.contains(&ty) {
+/// Every review mark in a section, keyed by (mark type, attrs.id), as its ordered ranges.
+pub(crate) type ReviewMarks = std::collections::BTreeMap<(String, String), Vec<MarkRange>>;
+
+fn review_keys(node: &serde_json::Value) -> Vec<(String, String, serde_json::Value)> {
+    node["marks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| {
+            let ty = m["type"].as_str()?;
+            REVIEW_MARKS.contains(&ty).then(|| {
                 let id = m["attrs"]["id"].as_str().unwrap_or("").to_string();
-                let e = out
-                    .entry((ty.to_string(), id))
-                    .or_insert_with(|| (m["attrs"].clone(), String::new()));
-                if e.0 != m["attrs"] {
-                    // Same id, different attrs within one doc: record as a mismatch sentinel.
-                    e.0 = serde_json::Value::Null;
-                }
-                e.1.push_str(text);
+                (ty.to_string(), id, m["attrs"].clone())
+            })
+        })
+        .collect()
+}
+
+/// Walk one text container. Text carrying a suggestion_insert whose id is in `skip` (added by
+/// this write) is invisible: it takes no positions and joins no ranges, so positions compare in
+/// the pre-write coordinates.
+fn walk(
+    block: &str,
+    content: &serde_json::Value,
+    skip: &std::collections::BTreeSet<String>,
+    out: &mut ReviewMarks,
+) {
+    let mut pos = 0usize;
+    let mut fns = 0usize;
+    for n in content.as_array().into_iter().flatten() {
+        if n["type"] == "text" {
+            let keys = review_keys(n);
+            if keys
+                .iter()
+                .any(|(t, i, _)| t == "suggestion_insert" && skip.contains(i))
+            {
+                continue;
             }
-        }
-    }
-    for c in node["content"].as_array().into_iter().flatten() {
-        collect_review(c, out);
-    }
-    if let Some(c) = node["attrs"]["content"].as_array() {
-        for c in c {
-            collect_review(c, out);
+            let text = n["text"].as_str().unwrap_or("");
+            let len = text.encode_utf16().count();
+            let all: Vec<(String, String)> = keys
+                .iter()
+                .map(|(t, i, _)| (t.clone(), i.clone()))
+                .collect();
+            for (ty, id, attrs) in keys {
+                let with: Vec<_> = all
+                    .iter()
+                    .filter(|k| **k != (ty.clone(), id.clone()))
+                    .cloned()
+                    .collect();
+                let rs = out.entry((ty, id)).or_default();
+                match rs.last_mut() {
+                    Some(r)
+                        if r.block == block
+                            && r.end == pos
+                            && r.attrs == attrs
+                            && r.with == with =>
+                    {
+                        r.end += len;
+                        r.text.push_str(text);
+                    }
+                    _ => rs.push(MarkRange {
+                        block: block.to_string(),
+                        start: pos,
+                        end: pos + len,
+                        text: text.to_string(),
+                        attrs,
+                        with,
+                    }),
+                }
+            }
+            pos += len;
+        } else {
+            if n["type"] == "footnote" {
+                walk(
+                    &format!("{block}#fn{fns}"),
+                    &n["attrs"]["content"],
+                    skip,
+                    out,
+                );
+                fns += 1;
+            }
+            pos += 1;
         }
     }
 }
 
-pub(crate) fn review_marks_of(nodes: &[serde_json::Value]) -> ReviewMarks {
+fn collect(
+    blocks: &[(String, serde_json::Value)],
+    skip: &std::collections::BTreeSet<String>,
+) -> ReviewMarks {
     let mut out = ReviewMarks::new();
-    for n in nodes {
-        collect_review(n, &mut out);
+    for (id, node) in blocks {
+        walk(id, &node["content"], skip, &mut out);
     }
     out
 }
 
-fn review_marks(doc: &yrs::Doc) -> ReviewMarks {
-    let nodes: Vec<serde_json::Value> = crate::content::decode(doc)
-        .into_iter()
-        .map(|b| b.node)
+/// Review marks before and after a write. Positions after the write ignore text this write
+/// inserted as a new suggestion.
+pub(crate) fn review_marks_pair(
+    before: &[(String, serde_json::Value)],
+    after: &[(String, serde_json::Value)],
+) -> (ReviewMarks, ReviewMarks) {
+    let b = collect(before, &Default::default());
+    let all = collect(after, &Default::default());
+    let new_inserts = all
+        .keys()
+        .filter(|k| k.0 == "suggestion_insert" && !b.contains_key(*k))
+        .map(|k| k.1.clone())
         .collect();
-    review_marks_of(&nodes)
+    (b, collect(after, &new_inserts))
+}
+
+fn blocks_of(doc: &yrs::Doc) -> Vec<(String, serde_json::Value)> {
+    crate::content::decode(doc)
+        .into_iter()
+        .map(|b| (b.id, b.node))
+        .collect()
 }
 
 /// Agent writes may only add review marks. Every existing comment anchor and suggestion mark
-/// (matched by type and attrs.id) must survive with the same attrs over the same text, so a
-/// write can neither remove nor move nor edit inside one.
+/// (matched by type and attrs.id) must keep exactly the same ordered ranges (block, UTF-16
+/// start/end, covered text, attrs), so a write can't remove, move, split, merge or edit inside
+/// one. Ids whose attrs are already inconsistent can't be touched at all, not even by layering
+/// a new mark over them.
 pub(crate) fn check_review_marks(before: &ReviewMarks, after: &ReviewMarks) -> Result<(), ToolErr> {
-    for ((ty, id), (attrs, text)) in before {
-        match after.get(&(ty.clone(), id.clone())) {
-            None => {
-                return Err(ToolErr::invalid(format!(
-                    "write refused: it would remove {ty} {id}"
-                )))
-            }
-            Some((a, t)) if a != attrs || t != text => {
-                return Err(ToolErr::invalid(format!(
-                    "write refused: it would change {ty} {id}"
-                )))
-            }
-            _ => {}
+    for ((ty, id), rs) in before {
+        let Some(now) = after.get(&(ty.clone(), id.clone())) else {
+            return Err(ToolErr::invalid(format!(
+                "write refused: it would remove {ty} {id}"
+            )));
+        };
+        let inconsistent = rs.iter().any(|r| r.attrs != rs[0].attrs);
+        let strip = |v: &[MarkRange]| -> Vec<MarkRange> {
+            v.iter()
+                .map(|r| MarkRange {
+                    with: vec![],
+                    ..r.clone()
+                })
+                .collect()
+        };
+        let same = if inconsistent {
+            now == rs
+        } else {
+            // Merge stretches split only by newly layered marks before comparing.
+            let merge = |v: Vec<MarkRange>| {
+                let mut o: Vec<MarkRange> = Vec::new();
+                for r in v {
+                    match o.last_mut() {
+                        Some(p) if p.block == r.block && p.end == r.start && p.attrs == r.attrs => {
+                            p.end = r.end;
+                            p.text.push_str(&r.text);
+                        }
+                        _ => o.push(r),
+                    }
+                }
+                o
+            };
+            merge(strip(now)) == merge(strip(rs))
+        };
+        if !same {
+            return Err(ToolErr::invalid(if inconsistent {
+                format!("write refused: {ty} {id} has inconsistent attrs and can't be touched")
+            } else {
+                format!("write refused: it would change {ty} {id}")
+            }));
         }
     }
     Ok(())
@@ -747,51 +868,199 @@ impl ServerHandler for CoauthorMcp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
 
-    fn t(text: &str, marks: serde_json::Value) -> serde_json::Value {
-        json!({"type": "paragraph", "content": [{"type": "text", "text": text, "marks": marks}]})
+    /// A text node; `marks` are review marks.
+    fn x(text: &str, marks: Value) -> Value {
+        json!({"type": "text", "text": text, "marks": marks})
     }
-    fn c(id: &str) -> serde_json::Value {
+    fn p(id: &str, content: Vec<Value>) -> (String, Value) {
+        (id.into(), json!({"type": "paragraph", "content": content}))
+    }
+    fn c(id: &str) -> Value {
         json!({"type": "comment_anchor", "attrs": {"id": id}})
     }
-    fn d(id: &str) -> serde_json::Value {
+    fn d(id: &str) -> Value {
         json!({"type": "suggestion_delete", "attrs": {"id": id, "author": "a", "ts": "1"}})
     }
-    fn check(before: &[serde_json::Value], after: &[serde_json::Value]) -> Result<(), String> {
-        check_review_marks(&review_marks_of(before), &review_marks_of(after)).map_err(|e| e.message)
+    fn d_by(id: &str, author: &str) -> Value {
+        json!({"type": "suggestion_delete", "attrs": {"id": id, "author": author, "ts": "1"}})
+    }
+    fn ins(id: &str) -> Value {
+        json!({"type": "suggestion_insert", "attrs": {"id": id, "author": "a", "ts": "2"}})
+    }
+    fn check(before: &[(String, Value)], after: &[(String, Value)]) -> Result<(), String> {
+        let (b, a) = review_marks_pair(before, after);
+        check_review_marks(&b, &a).map_err(|e| e.message)
     }
 
     #[test]
     fn adding_review_marks_is_allowed() {
-        let before = [t("lantern", json!([c("c1")]))];
-        let after = [t("lantern", json!([c("c1"), c("c2"), d("s1")]))];
+        let before = [p("b1", vec![x("lantern", json!([c("c1")]))])];
+        let after = [p(
+            "b1",
+            vec![x("lantern", json!([c("c1"), c("c2"), d("s1")]))],
+        )];
+        assert!(check(&before, &after).is_ok());
+        // A new suggestion's inserted text before an existing mark doesn't shift it.
+        let before = [p(
+            "b1",
+            vec![x("old ", json!([])), x("lantern", json!([c("c1")]))],
+        )];
+        let after = [p(
+            "b1",
+            vec![
+                x("old ", json!([d("s2")])),
+                x("new ", json!([ins("s2")])),
+                x("lantern", json!([c("c1")])),
+            ],
+        )];
         assert!(check(&before, &after).is_ok());
     }
 
     #[test]
     fn removing_a_review_mark_is_refused() {
-        let before = [t("lantern", json!([c("c1"), d("s1")]))];
-        let e = check(&before, &[t("lantern", json!([d("s1")]))]).unwrap_err();
+        let before = [p("b1", vec![x("lantern", json!([c("c1"), d("s1")]))])];
+        let e = check(&before, &[p("b1", vec![x("lantern", json!([d("s1")]))])]).unwrap_err();
         assert!(e.contains("remove comment_anchor c1"), "{e}");
-        let e = check(&before, &[t("lantern", json!([c("c1")]))]).unwrap_err();
-        assert!(e.contains("remove suggestion_delete s1"), "{e}");
     }
 
     #[test]
     fn changing_attrs_or_covered_text_is_refused() {
-        let before = [t("lantern", json!([d("s1")]))];
-        let other =
-            json!({"type": "suggestion_delete", "attrs": {"id": "s1", "author": "b", "ts": "1"}});
-        let e = check(&before, &[t("lantern", json!([other]))]).unwrap_err();
-        assert!(e.contains("change suggestion_delete s1"), "{e}");
-        // Editing text inside a suggestion (or a comment anchor) changes what it covers.
-        let e = check(&before, &[t("lamp", json!([d("s1")]))]).unwrap_err();
-        assert!(e.contains("change suggestion_delete s1"), "{e}");
+        let before = [p("b1", vec![x("lantern", json!([d("s1")]))])];
         let e = check(
-            &[t("lantern", json!([c("c1")]))],
-            &[t("lanXtern", json!([c("c1")]))],
+            &before,
+            &[p("b1", vec![x("lantern", json!([d_by("s1", "b")]))])],
         )
         .unwrap_err();
+        assert!(e.contains("change suggestion_delete s1"), "{e}");
+        let e = check(&before, &[p("b1", vec![x("lamp", json!([d("s1")]))])]).unwrap_err();
+        assert!(e.contains("change suggestion_delete s1"), "{e}");
+    }
+
+    #[test]
+    fn unmarked_text_inside_a_suggestion_is_refused() {
+        let before = [p("b1", vec![x("abcd", json!([d("s1")]))])];
+        let after = [p(
+            "b1",
+            vec![
+                x("ab", json!([d("s1")])),
+                x("XX", json!([])),
+                x("cd", json!([d("s1")])),
+            ],
+        )];
+        let e = check(&before, &after).unwrap_err();
+        assert!(e.contains("change suggestion_delete s1"), "{e}");
+    }
+
+    #[test]
+    fn moving_a_boundary_between_same_id_ranges_is_refused() {
+        // ab|cd -> abc|d with an unmarked gap between the two ranges.
+        let before = [p(
+            "b1",
+            vec![
+                x("ab", json!([c("c1")])),
+                x("-", json!([])),
+                x("cd", json!([c("c1")])),
+            ],
+        )];
+        let after = [p(
+            "b1",
+            vec![
+                x("abc", json!([c("c1")])),
+                x("-", json!([])),
+                x("d", json!([c("c1")])),
+            ],
+        )];
+        let e = check(&before, &after).unwrap_err();
         assert!(e.contains("change comment_anchor c1"), "{e}");
+    }
+
+    #[test]
+    fn merging_ranges_or_moving_to_identical_text_elsewhere_is_refused() {
+        let before = [p(
+            "b1",
+            vec![
+                x("ab", json!([c("c1")])),
+                x("-", json!([])),
+                x("cd", json!([c("c1")])),
+            ],
+        )];
+        let merged = [p("b1", vec![x("ab-cd", json!([c("c1")]))])];
+        assert!(check(&before, &merged)
+            .unwrap_err()
+            .contains("change comment_anchor c1"));
+        let joined = [p(
+            "b1",
+            vec![x("abcd", json!([c("c1")])), x("-", json!([]))],
+        )];
+        assert!(check(&before, &joined).is_err());
+        // Same text, another block.
+        let before = [
+            p("b1", vec![x("lantern", json!([c("c1")]))]),
+            p("b2", vec![x("lantern", json!([]))]),
+        ];
+        let after = [
+            p("b1", vec![x("lantern", json!([]))]),
+            p("b2", vec![x("lantern", json!([c("c1")]))]),
+        ];
+        assert!(check(&before, &after)
+            .unwrap_err()
+            .contains("change comment_anchor c1"));
+    }
+
+    #[test]
+    fn ids_with_inconsistent_attrs_cannot_be_touched() {
+        let before = [p(
+            "b1",
+            vec![
+                x("ab", json!([d_by("s1", "a")])),
+                x("-", json!([])),
+                x("cd", json!([d_by("s1", "b")])),
+            ],
+        )];
+        // Changing one range's attrs (even to "fix" it) is refused.
+        let fixed = [p(
+            "b1",
+            vec![
+                x("ab", json!([d_by("s1", "a")])),
+                x("-", json!([])),
+                x("cd", json!([d_by("s1", "a")])),
+            ],
+        )];
+        let e = check(&before, &fixed).unwrap_err();
+        assert!(e.contains("inconsistent attrs"), "{e}");
+        // Layering a new mark over it is refused too.
+        let layered = [p(
+            "b1",
+            vec![
+                x("ab", json!([d_by("s1", "a"), c("c9")])),
+                x("-", json!([])),
+                x("cd", json!([d_by("s1", "b")])),
+            ],
+        )];
+        assert!(check(&before, &layered)
+            .unwrap_err()
+            .contains("inconsistent attrs"));
+        // Unrelated writes elsewhere still pass.
+        let mut ok = before.to_vec();
+        ok.push(p("b2", vec![x("new", json!([c("c2")]))]));
+        assert!(check(&before, &ok).is_ok());
+    }
+
+    #[test]
+    fn positions_are_utf16_and_footnotes_are_separate() {
+        let before = [p("b1", vec![x("😀ab", json!([c("c1")]))])];
+        let (b, _) = review_marks_pair(&before, &before);
+        let r = &b[&("comment_anchor".to_string(), "c1".to_string())][0];
+        assert_eq!((r.start, r.end), (0, 4));
+        let fnote =
+            json!({"type": "footnote", "attrs": {"content": [x("note", json!([c("c2")]))]}});
+        let before = [p("b1", vec![x("a", json!([])), fnote])];
+        let (b, _) = review_marks_pair(&before, &before);
+        assert_eq!(
+            b[&("comment_anchor".to_string(), "c2".to_string())][0].block,
+            "b1#fn0"
+        );
     }
 }
