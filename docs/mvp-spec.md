@@ -161,10 +161,13 @@ documents directly instead of over IPC; tokens are checked in the same place the
 The cost is a Rust reading of the Yjs content model (`src-tauri/src/content.rs`), which is kept
 in step with the TypeScript encoder by the shared fixture in `fixtures/mcp/`. The server runs
 stateless (JSON responses, no sessions). Before any token lookup it requires `Host` to be
-exactly `127.0.0.1`, `localhost` or `[::1]` plus its port and refuses any `Origin` header
-(DNS-rebinding guard). Missing, malformed, unknown and revoked tokens all get the same 401
-(`WWW-Authenticate: Bearer`) after the same minimum delay; failed attempts are throttled per
-client and globally (429), and each valid token is rate limited. `list_chapters` / `read_chapter` return every section kind (front
+exactly `127.0.0.1`, `localhost` or `[::1]` plus its port (DNS-rebinding guard). Any request
+with an `Origin` header gets 403, so browser-based clients (web pages, browser extensions using
+fetch) cannot connect; agents connect from a local process. Missing, malformed, unknown and
+revoked tokens all get the same 401 (`WWW-Authenticate: Bearer`) after the same minimum delay.
+Wrong tokens count toward a global throttle (429); requests without a token do not, and a valid
+token is checked first so it is never throttled by others' failures. Each valid token is rate
+limited. `list_chapters` / `read_chapter` return every section kind (front
 matter, parts, chapters, scenes, back matter), not only chapters.
 
 ## 9. Export requirements (KDP)

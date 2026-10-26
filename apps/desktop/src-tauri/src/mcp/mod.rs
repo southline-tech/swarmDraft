@@ -6,8 +6,10 @@
 //!   `[::1]`), and any `Origin` header is refused: this is the DNS-rebinding guard.
 //! - Every request carries `Authorization: Bearer <agent token>` (RAD-205). Every auth failure
 //!   (missing, malformed, unknown or revoked token) gets the same 401 body and is held to the
-//!   same minimum response time, so responses don't reveal whether a token exists. Failed
-//!   attempts are throttled per client and globally; valid tokens are rate limited per token.
+//!   same minimum response time, so responses don't reveal whether a token exists. Wrong
+//!   tokens count toward a global throttle; requests with no token never do (a web page can
+//!   send those with an `<img>` tag), and a valid token is never held back by the throttle.
+//!   Valid tokens are rate limited per token.
 //! - Each tool checks its scope and every call is written to `audit_events`.
 //! - Agents may read, comment and suggest. Accepting or rejecting a suggestion is human-only
 //!   and is never exposed as an MCP tool.
@@ -20,7 +22,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use axum::extract::{ConnectInfo, Request, State};
+use axum::extract::{Request, State};
 use axum::http::{header, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -42,9 +44,7 @@ pub struct McpConfig {
     pub port: u16,
     /// Requests per valid token per [`RATE_WINDOW`].
     pub rate_limit: u32,
-    /// Failed auth attempts per client address per window before it is throttled.
-    pub auth_failures_per_client: u32,
-    /// Failed auth attempts across all clients per window before everyone is throttled.
+    /// Wrong-token attempts per window before further wrong tokens get 429.
     pub auth_failures_global: u32,
     /// Every auth failure takes at least this long, whatever the reason.
     pub auth_failure_floor: Duration,
@@ -55,7 +55,6 @@ impl McpConfig {
         Self {
             port,
             rate_limit: RATE_LIMIT,
-            auth_failures_per_client: 10,
             auth_failures_global: 50,
             auth_failure_floor: Duration::from_millis(250),
         }
@@ -87,19 +86,13 @@ fn current(w: &Window, now: Instant) -> u32 {
     }
 }
 
-#[derive(Default)]
-struct Failures {
-    per_client: HashMap<String, Window>,
-    global: Option<Window>,
-}
-
 #[derive(Clone)]
 struct Gate {
     store: Store,
     cfg: McpConfig,
     allowed_hosts: Arc<Vec<String>>,
     per_token: Arc<Mutex<HashMap<String, Window>>>,
-    failures: Arc<Mutex<Failures>>,
+    failures: Arc<Mutex<Option<Window>>>,
     stats: Arc<GateStats>,
 }
 
@@ -111,24 +104,16 @@ impl Gate {
         bump(w, now) <= self.cfg.rate_limit
     }
 
-    fn throttled(&self, client: &str) -> bool {
-        let f = self.failures.lock().expect("limiter poisoned");
-        let now = Instant::now();
-        let c = f.per_client.get(client).map_or(0, |w| current(w, now));
-        let g = f.global.as_ref().map_or(0, |w| current(w, now));
-        c >= self.cfg.auth_failures_per_client || g >= self.cfg.auth_failures_global
-    }
-
-    fn record_failure(&self, client: &str) {
+    /// True when this wrong-token attempt is over the global budget. Counts the attempt.
+    fn wrong_token_throttled(&self) -> bool {
         let mut f = self.failures.lock().expect("limiter poisoned");
         let now = Instant::now();
-        f.per_client
-            .retain(|_, w| now.duration_since(w.0) < RATE_WINDOW);
-        bump(
-            f.per_client.entry(client.to_string()).or_insert((now, 0)),
-            now,
-        );
-        bump(f.global.get_or_insert((now, 0)), now);
+        let w = f.get_or_insert((now, 0));
+        if current(w, now) >= self.cfg.auth_failures_global {
+            return true;
+        }
+        bump(w, now);
+        false
     }
 }
 
@@ -170,35 +155,35 @@ async fn host_guard(State(gate): State<Gate>, req: Request, next: Next) -> Respo
 
 async fn auth(State(gate): State<Gate>, mut req: Request, next: Next) -> Response {
     let deadline = tokio::time::Instant::now() + gate.cfg.auth_failure_floor;
-    let client = req
-        .extensions()
-        .get::<ConnectInfo<SocketAddr>>()
-        .map_or_else(|| "unknown".to_string(), |c| c.0.ip().to_string());
-    if gate.throttled(&client) {
-        tokio::time::sleep_until(deadline).await;
-        return too_many();
-    }
     let token = req
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .map(|t| t.trim().to_string());
-    let principal = match token {
-        Some(token) => {
-            gate.stats.auth_lookups.fetch_add(1, Ordering::Relaxed);
-            let store = gate.store.clone();
-            match tokio::task::spawn_blocking(move || store.authenticate(&token)).await {
-                Ok(Ok(p)) => p,
-                _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-            }
-        }
-        None => None,
-    };
-    let Some(principal) = principal else {
-        gate.record_failure(&client);
+    // No token: plain 401, not counted, so a web page can't use it to lock out agents.
+    let Some(token) = token else {
         tokio::time::sleep_until(deadline).await;
         return unauthorized();
+    };
+    // The token is checked before any throttling, so a valid token always gets through.
+    gate.stats.auth_lookups.fetch_add(1, Ordering::Relaxed);
+    let store = gate.store.clone();
+    let principal = match tokio::task::spawn_blocking(move || store.authenticate(&token)).await {
+        Ok(Ok(p)) => p,
+        _ => {
+            tokio::time::sleep_until(deadline).await;
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    let Some(principal) = principal else {
+        let throttled = gate.wrong_token_throttled();
+        tokio::time::sleep_until(deadline).await;
+        return if throttled {
+            too_many()
+        } else {
+            unauthorized()
+        };
     };
     if !gate.allow_token(&principal.token_id) {
         return too_many();

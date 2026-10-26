@@ -352,13 +352,9 @@ async fn per_token_rate_limit() {
 }
 
 #[tokio::test]
-async fn auth_failures_look_identical_and_are_throttled_per_client() {
+async fn auth_failures_look_identical() {
     let floor = std::time::Duration::from_millis(150);
-    let s = start_with(&["read"], |c| {
-        c.auth_failure_floor = floor;
-        c.auth_failures_per_client = 4;
-    })
-    .await;
+    let s = start_with(&["read"], |c| c.auth_failure_floor = floor).await;
     let agent = &s.store.list_agents().unwrap()[0];
     let revoked = s.store.create_token(&agent.id, None).unwrap();
     s.store.revoke_token(&revoked.info.id).unwrap();
@@ -386,23 +382,11 @@ async fn auth_failures_look_identical_and_are_throttled_per_client() {
         seen.push((www, r.text().await.unwrap()));
     }
     assert!(seen.windows(2).all(|w| w[0] == w[1]), "{seen:?}");
-
-    // Budget spent: even the valid token is refused, without touching the database.
-    let before = lookups(&s);
-    let t0 = std::time::Instant::now();
-    let r = post(&s.url, Some(&s.token), body).await;
-    assert_eq!(r.status(), 429);
-    assert!(t0.elapsed() >= floor);
-    assert_eq!(lookups(&s), before);
 }
 
 #[tokio::test]
-async fn auth_failures_are_throttled_globally() {
-    let s = start_with(&["read"], |c| {
-        c.auth_failures_per_client = 100;
-        c.auth_failures_global = 2;
-    })
-    .await;
+async fn wrong_tokens_are_throttled_but_a_valid_token_still_works() {
+    let s = start_with(&["read"], |c| c.auth_failures_global = 2).await;
     let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}});
     for _ in 0..2 {
         assert_eq!(
@@ -410,5 +394,24 @@ async fn auth_failures_are_throttled_globally() {
             401
         );
     }
-    assert_eq!(post(&s.url, Some(&s.token), body).await.status(), 429);
+    let r = post(&s.url, Some("cat_wrong"), body.clone()).await;
+    assert_eq!(r.status(), 429);
+    assert_eq!(r.headers().get("retry-after").unwrap(), "60");
+    assert_eq!(post(&s.url, Some(&s.token), body).await.status(), 200);
+}
+
+#[tokio::test]
+async fn no_token_flood_cannot_lock_out_the_agent() {
+    // What a web page can do with <img src=http://127.0.0.1:PORT/mcp>: no token, no Origin.
+    let s = start_with(&["read"], |c| c.auth_failures_global = 3).await;
+    let client = reqwest::Client::new();
+    let flood: Vec<_> = (0..60)
+        .map(|_| tokio::spawn(client.get(&s.url).send()))
+        .collect();
+    for h in flood {
+        assert_eq!(h.await.unwrap().unwrap().status(), 401);
+    }
+    assert_eq!(lookups(&s), 0, "no-token requests never reach the database");
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}});
+    assert_eq!(post(&s.url, Some(&s.token), body).await.status(), 200);
 }
