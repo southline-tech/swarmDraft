@@ -1,0 +1,199 @@
+{
+  "algorithm": "64-bit FNV-1a over UTF-8, low 48 bits big-endian, 8 chars standard base64 (no padding); collisions rehash id:n in (id, position) order, max 1000 tries",
+  "hash": [
+    {
+      "input": "c1",
+      "hash": "fwe1SmhZ"
+    },
+    {
+      "input": "c1:1",
+      "hash": "2ZHUQC2Y"
+    },
+    {
+      "input": "c1:2",
+      "hash": "3JHUQDKx"
+    },
+    {
+      "input": "s1",
+      "hash": "/we1eNFJ"
+    },
+    {
+      "input": "",
+      "hash": "nOSEIiMl"
+    },
+    {
+      "input": "é✓",
+      "hash": "JxCk6o4k"
+    },
+    {
+      "input": "42",
+      "hash": "fge0sZIj"
+    }
+  ],
+  "keys": [
+    {
+      "name": "single comment",
+      "marks": [
+        {
+          "type": "comment_anchor",
+          "attrs": {
+            "id": "c1"
+          }
+        }
+      ],
+      "keys": ["comment_anchor--fwe1SmhZ"]
+    },
+    {
+      "name": "exclusive marks key by type only",
+      "marks": [
+        {
+          "type": "bold"
+        },
+        {
+          "type": "italic",
+          "attrs": {}
+        },
+        {
+          "type": "link",
+          "attrs": {
+            "href": "https://example.com",
+            "id": "l1"
+          }
+        }
+      ],
+      "keys": ["bold", "italic", "link"]
+    },
+    {
+      "name": "overlap mark without id keys by type",
+      "marks": [
+        {
+          "type": "comment_anchor",
+          "attrs": {
+            "id": ""
+          }
+        },
+        {
+          "type": "comment_anchor",
+          "attrs": {
+            "id": null
+          }
+        }
+      ],
+      "keys": ["comment_anchor", "comment_anchor"]
+    },
+    {
+      "name": "numeric id",
+      "marks": [
+        {
+          "type": "comment_anchor",
+          "attrs": {
+            "id": 42
+          }
+        }
+      ],
+      "keys": ["comment_anchor--fge0sZIj"]
+    },
+    {
+      "name": "collision: same id twice",
+      "marks": [
+        {
+          "type": "comment_anchor",
+          "attrs": {
+            "id": "c1"
+          }
+        },
+        {
+          "type": "comment_anchor",
+          "attrs": {
+            "id": "c1"
+          }
+        }
+      ],
+      "keys": ["comment_anchor--fwe1SmhZ", "comment_anchor--2ZHUQC2Y"]
+    },
+    {
+      "name": "collision: three alike",
+      "marks": [
+        {
+          "type": "comment_anchor",
+          "attrs": {
+            "id": "c1"
+          }
+        },
+        {
+          "type": "comment_anchor",
+          "attrs": {
+            "id": "c1"
+          }
+        },
+        {
+          "type": "comment_anchor",
+          "attrs": {
+            "id": "c1"
+          }
+        }
+      ],
+      "keys": ["comment_anchor--fwe1SmhZ", "comment_anchor--2ZHUQC2Y", "comment_anchor--3JHUQDKx"]
+    },
+    {
+      "name": "id order, not input order",
+      "marks": [
+        {
+          "type": "suggestion_insert",
+          "attrs": {
+            "id": "s2"
+          }
+        },
+        {
+          "type": "suggestion_insert",
+          "attrs": {
+            "id": "s1"
+          }
+        },
+        {
+          "type": "suggestion_insert",
+          "attrs": {
+            "id": "s1"
+          }
+        }
+      ],
+      "keys": [
+        "suggestion_insert--/Ae1eMww",
+        "suggestion_insert--/we1eNFJ",
+        "suggestion_insert--2hfU+GeI"
+      ]
+    },
+    {
+      "name": "mixed run",
+      "marks": [
+        {
+          "type": "bold"
+        },
+        {
+          "type": "comment_anchor",
+          "attrs": {
+            "id": "c1"
+          }
+        },
+        {
+          "type": "suggestion_delete",
+          "attrs": {
+            "id": "c1"
+          }
+        },
+        {
+          "type": "comment_anchor",
+          "attrs": {
+            "id": "c0"
+          }
+        }
+      ],
+      "keys": [
+        "bold",
+        "comment_anchor--fwe1SmhZ",
+        "suggestion_delete--fwe1SmhZ",
+        "comment_anchor--fge1Smam"
+      ]
+    }
+  ]
+}
