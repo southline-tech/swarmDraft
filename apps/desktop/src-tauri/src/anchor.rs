@@ -12,7 +12,7 @@ use yrs::types::xml::{XmlFragment, XmlOut};
 use yrs::types::Attrs;
 use yrs::{Any, Doc, Out, ReadTxn, Text, TransactionMut, XmlTextRef};
 
-use crate::content::{block_id, FRAGMENT, NON_EXCLUSIVE_MARKS};
+use crate::content::{block_id, mark_id_hash, FRAGMENT, NON_EXCLUSIVE_MARKS};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AnchorError {
@@ -44,6 +44,20 @@ pub struct Range {
     pub overlaps_suggestion: bool,
     /// Formatting (non-overlapping marks) at the end of the range, for inserted text.
     pub formatting: Attrs,
+    /// Yjs attribute keys already present anywhere in the range (to avoid key collisions).
+    pub keys: std::collections::HashSet<String>,
+}
+
+/// Key for a new overlapping mark: `type--markIdHash(id)`, or on a collision with a key already
+/// in the range, `type--markIdHash(id:n)` for the first free n (same rule as `mark_keys`).
+fn free_key(ty: &str, id: &str, taken: &std::collections::HashSet<String>) -> String {
+    let mut key = format!("{ty}--{}", mark_id_hash(id));
+    let mut n = 1;
+    while taken.contains(&key) {
+        key = format!("{ty}--{}", mark_id_hash(&format!("{id}:{n}")));
+        n += 1;
+    }
+    key
 }
 
 fn collect_texts(txn: &TransactionMut, parent: &impl XmlFragment, out: &mut Vec<XmlTextRef>) {
@@ -148,12 +162,17 @@ pub fn resolve(
                             .collect()
                     })
                     .unwrap_or_default();
+                let keys = map[i..i + q.len()]
+                    .iter()
+                    .flat_map(|m| m.2.iter().flat_map(|a| a.keys().map(|k| k.to_string())))
+                    .collect();
                 found.push(Range {
                     text: t.clone(),
                     start,
                     len: end - start,
                     overlaps_suggestion: gaps || marked,
                     formatting,
+                    keys,
                 });
                 i += q.len();
             } else {
@@ -180,7 +199,7 @@ fn attrs1(key: String, value: serde_json::Value) -> Attrs {
 /// Mark the range with a comment anchor.
 pub fn add_comment_mark(txn: &mut TransactionMut, r: &Range, comment_id: &str) {
     let a = attrs1(
-        format!("comment_anchor--{comment_id}"),
+        free_key("comment_anchor", comment_id, &r.keys),
         serde_json::json!({ "id": comment_id }),
     );
     r.text.format(txn, r.start, r.len, a);
@@ -202,12 +221,13 @@ pub fn add_suggestion_marks(
             txn,
             r.start,
             r.len,
-            attrs1(format!("suggestion_delete--{id}"), meta.clone()),
+            attrs1(free_key("suggestion_delete", id, &r.keys), meta.clone()),
         );
     }
     if !replacement.is_empty() {
         let mut a = r.formatting.clone();
-        a.extend(attrs1(format!("suggestion_insert--{id}"), meta));
+        let taken = a.keys().map(|k| k.to_string()).collect();
+        a.extend(attrs1(free_key("suggestion_insert", id, &taken), meta));
         r.text
             .insert_with_attributes(txn, r.start + r.len, replacement, a);
     }

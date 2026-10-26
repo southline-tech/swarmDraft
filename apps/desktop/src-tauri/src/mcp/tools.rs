@@ -470,6 +470,7 @@ impl CoauthorMcp {
                                 .map_err(|e| ToolErr::invalid(e.to_string()))?;
                             crate::anchor::add_comment_mark(&mut txn, &r, &id);
                         }
+                        check_schema(&doc)?;
                         self.store.save_doc_changes(&s.doc_id, &doc, &sv)?;
                         (Some(b.clone()), Some(q.clone()))
                     }
@@ -547,6 +548,7 @@ impl CoauthorMcp {
                         &a.replacement,
                     );
                 }
+                check_schema(&doc)?;
                 self.store.save_doc_changes(&s.doc_id, &doc, &sv)?;
                 let x = crate::manuscripts::Suggestion {
                     id,
@@ -640,6 +642,17 @@ impl CoauthorMcp {
             },
         )
     }
+}
+
+/// Every MCP write must leave the section with only schema-known nodes and marks; otherwise the
+/// call fails and nothing is saved (the edited doc is a per-call copy).
+fn check_schema(doc: &yrs::Doc) -> Result<(), ToolErr> {
+    let nodes: Vec<serde_json::Value> = crate::content::decode(doc)
+        .into_iter()
+        .map(|b| b.node)
+        .collect();
+    crate::content::validate_doc(&json!({ "type": "doc", "content": nodes }))
+        .map_err(|e| ToolErr::invalid(format!("write refused: {e}")))
 }
 
 #[tool_handler(router = self.tool_router)]

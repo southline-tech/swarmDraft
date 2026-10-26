@@ -967,3 +967,85 @@ async fn oversized_declared_content_length_is_refused_before_reading() {
     .unwrap();
     assert!(status.starts_with("HTTP/1.1 413"), "{status}");
 }
+
+fn raw_keys(s: &Server, sid: &str) -> Vec<String> {
+    use yrs::types::text::YChange;
+    use yrs::types::xml::{XmlFragment, XmlOut};
+    use yrs::{Text, Transact};
+    let sec = s.store.get_section(&s.manuscript_id, sid).unwrap();
+    let doc = s.store.load_doc(&sec.doc_id).unwrap();
+    let frag = doc.get_or_insert_xml_fragment(coauthor_lib::content::FRAGMENT);
+    let txn = doc.transact();
+    let mut keys = Vec::new();
+    for c in frag.children(&txn) {
+        if let XmlOut::Element(e) = c {
+            for t in e.children(&txn) {
+                if let XmlOut::Text(t) = t {
+                    for d in t.diff(&txn, YChange::identity) {
+                        for k in d.attributes.iter().flat_map(|a| a.keys()) {
+                            keys.push(k.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    keys
+}
+
+#[tokio::test]
+async fn write_tools_key_marks_with_the_shared_hash() {
+    let s = start(&["read", "comment", "suggest"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    let c = call(&s, "add_comment", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "lantern", "body": "note"})).await;
+    let cid = c["structuredContent"]["comment"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let keys = raw_keys(&s, &sid);
+    let want = format!(
+        "comment_anchor--{}",
+        coauthor_lib::content::mark_id_hash(&cid)
+    );
+    assert!(keys.contains(&want), "{keys:?}");
+    assert!(
+        keys.iter().all(|k| !k.contains(&cid)),
+        "keys never carry the raw id"
+    );
+    // Read back by attrs.id.
+    let js = read_json(&s, &sid).await;
+    assert!(js.to_string().contains(&cid));
+}
+
+#[tokio::test]
+async fn writes_that_would_leave_unknown_marks_are_refused() {
+    use yrs::{Text, Transact};
+    let s = start(&["read", "comment", "suggest"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    // Plant a mark the schema doesn't know (as a foreign client might).
+    let sec = s.store.get_section(&s.manuscript_id, &sid).unwrap();
+    let doc = s.store.load_doc(&sec.doc_id).unwrap();
+    let sv = coauthor_lib::manuscripts::state_vector(&doc);
+    {
+        use yrs::types::xml::{XmlFragment, XmlOut};
+        let frag = doc.get_or_insert_xml_fragment(coauthor_lib::content::FRAGMENT);
+        let mut txn = doc.transact_mut();
+        let XmlOut::Element(p) = frag.get(&txn, 0).unwrap() else {
+            panic!()
+        };
+        let XmlOut::Text(t) = p.get(&txn, 0).unwrap() else {
+            panic!()
+        };
+        let mut a = yrs::types::Attrs::new();
+        a.insert("highlight".into(), yrs::Any::Bool(true));
+        t.format(&mut txn, 0, 3, a);
+    }
+    s.store.save_doc_changes(&sec.doc_id, &doc, &sv).unwrap();
+    let before = raw_keys(&s, &sid);
+    let r = call(&s, "add_comment", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "lantern", "body": "note"})).await;
+    assert_eq!(r["isError"], true, "{r}");
+    assert!(text(&r).contains("unknown mark type: highlight"), "{r}");
+    let r = call(&s, "suggest_edit", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "lantern", "replacement": "lamp"})).await;
+    assert_eq!(r["isError"], true, "{r}");
+    assert_eq!(raw_keys(&s, &sid), before, "nothing was saved");
+}
