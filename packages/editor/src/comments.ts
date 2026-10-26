@@ -113,12 +113,12 @@ export function buildThreads(doc: DocNode, rows: CommentRow[]): CommentThread[] 
   return threads;
 }
 
-/**
- * Stable per-author color. Duplicates `authorColor` from the RAD-211 suggestions PR to avoid
- * stacking; merge into one shared helper once both have landed.
- */
+/** Stable per-author color, shared by the comments and suggestions panels. */
 export function commentAuthorColor(author: string): string {
   let h = 0;
   for (const ch of author) h = (h * 31 + ch.codePointAt(0)!) >>> 0;
   return `hsl(${h % 360} 70% 45%)`;
 }
+
+/** Same helper under the name the suggestions review panel uses. */
+export const authorColor = commentAuthorColor;

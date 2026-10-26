@@ -76,4 +76,5 @@ export function createManuscriptEditor(opts: Partial<EditorOptions> = {}): Edito
   return new Editor(manuscriptEditorOptions(opts));
 }
 
+export * from './decisions';
 export * from './comments';
