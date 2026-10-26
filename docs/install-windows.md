@@ -16,3 +16,18 @@ Uninstall from Settings > Apps; the data folder is kept unless deleted by hand.
 
 The local MCP server listens on `127.0.0.1` only (default port 7337); agent tokens are managed in
 the app (RAD-205/209).
+
+## Installer pages (issue #61)
+
+The NSIS installer installs **per user** (`installMode: currentUser`): no admin prompt, files go to
+`%LOCALAPPDATA%\coAuthor`. Page copy and art follow mockups ob1 to ob3 and live in
+`apps/desktop/src-tauri/windows/` (`installer-pages.nsh`, `nsis-sidebar.bmp`, `nsis-header.bmp`).
+The `.nsh` is a Tauri installer hook that sets MUI page text; the stock Tauri template is not forked.
+
+Known gaps versus the mockups (limits of classic NSIS/MUI2 dialogs):
+- Fixed Win32 dialog size and system font; no rounded buttons, accent colours or large type.
+- Button labels are the stock "Next >" / "Finish" (the mockup's "Install" would need a custom template).
+- The stock "Choose Install Location" page still shows between welcome and progress.
+- The progress bar is the native one; no "About 30 seconds left" estimate.
+- The finish page also shows the stock "Create desktop shortcut" checkbox.
+- Not yet verified on a real Windows build.

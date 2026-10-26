@@ -35,6 +35,17 @@
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "windows/installer-pages.nsh",
+        "sidebarImage": "windows/nsis-sidebar.bmp",
+        "headerImage": "windows/nsis-header.bmp",
+        "installerIcon": "icons/icon.ico",
+        "displayLanguageSelector": false,
+        "languages": [
+          "English"
+        ]
       }
     }
   }
