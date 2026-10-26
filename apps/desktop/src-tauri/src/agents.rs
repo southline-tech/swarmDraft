@@ -308,6 +308,10 @@ impl Store {
                     [&p.token_id],
                 );
             }
+            if p.is_none() {
+                // A cached hash whose row is now revoked or gone (restore, out-of-band edit).
+                self.forget_token_hashes(std::slice::from_ref(&hash));
+            }
             Ok(p)
         })
     }

@@ -553,3 +553,27 @@ async fn saturated_semaphores_time_out_with_503() {
         "a saturated gate answers 503 instead of queueing forever"
     );
 }
+
+#[tokio::test]
+async fn cached_token_revoked_out_of_band_gets_401() {
+    let s = start(&["read"], 100).await;
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}});
+    assert_eq!(
+        post(&s.url, Some(&s.token), body.clone()).await.status(),
+        200
+    );
+    let hash = coauthor_lib::agents::hash_token(&s.token);
+    assert!(s.store.is_known_token_hash(&hash));
+    // Bypass the revoke API, as a restore would.
+    let db = rusqlite::Connection::open(s.store.data_dir().join("coauthor.db")).unwrap();
+    db.execute("UPDATE agent_tokens SET revoked_at = 'x'", [])
+        .unwrap();
+    assert_eq!(post(&s.url, Some(&s.token), body).await.status(), 401);
+    assert!(
+        !s.store.is_known_token_hash(&hash),
+        "a failed lookup evicts the hash"
+    );
+    s.store.remember_token_hash(hash.clone());
+    s.store.clear_token_cache();
+    assert!(!s.store.is_known_token_hash(&hash));
+}

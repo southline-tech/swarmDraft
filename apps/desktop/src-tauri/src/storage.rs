@@ -231,6 +231,11 @@ impl Store {
         k.insert(hash);
     }
 
+    /// Drop every cached token hash (call after a restore or any out-of-band DB change).
+    pub fn clear_token_cache(&self) {
+        self.known_tokens.lock().expect("cache poisoned").clear();
+    }
+
     pub(crate) fn forget_token_hashes(&self, hashes: &[String]) {
         let mut k = self.known_tokens.lock().expect("cache poisoned");
         for h in hashes {
