@@ -15,7 +15,13 @@ import {
 import AgentsSettings from './AgentsSettings.vue';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
-import { sessionFromDocx, type ManuscriptSession } from './manuscript-session';
+import { flushOnClose } from './close-flush';
+import {
+  importAndOpen,
+  reopenLatest,
+  UnsavedEditsError,
+  type ManuscriptSession,
+} from './manuscript-session';
 
 const info = ref<AppInfo | null>(null);
 const session = shallowRef<ManuscriptSession | null>(null);
@@ -35,6 +41,16 @@ async function dismissRecovery() {
   }
 }
 const openError = ref('');
+/** Persistent: nothing can be opened safely until restart. */
+const fatalError = ref('');
+const REOPEN_BACKOFF_MS = [250, 500, 1000];
+const importing = ref(false);
+const saveError = ref('');
+/** Shown while edits are unsaved; cleared once a save succeeds. Edits are never dropped. */
+const persistHooks = {
+  onError: (err: unknown) => (saveError.value = `Not saved, retrying: ${String(err)}`),
+  onSaved: () => (saveError.value = ''),
+};
 /**
  * Bumped by the editor's Reload action to reopen the section from its Y.Doc. The editor is bound
  * to that doc, so everything typed is already in it and survives the remount (and switching
@@ -43,6 +59,7 @@ const openError = ref('');
  */
 const reloads = ref(0);
 
+let stopCloseFlush = () => {};
 onMounted(async () => {
   info.value = await getAppInfo();
   if (info.value) {
@@ -51,7 +68,14 @@ onMounted(async () => {
     } catch {
       recoveryNotices.value = [];
     }
+    try {
+      const latest = await reopenLatest(persistHooks);
+      if (latest && !session.value) open(latest);
+    } catch (err) {
+      openError.value = `Could not reopen the last manuscript: ${String(err)}`;
+    }
   }
+  stopCloseFlush = await flushOnClose(() => session.value?.flush() ?? Promise.resolve());
 });
 
 const backupStatus = ref('');
@@ -92,6 +116,14 @@ async function onRestore(): Promise<void> {
   confirmingRestore.value = false;
   if (!restorePath.value.trim()) return;
   try {
+    // Save pending edits first so the pre-restore snapshot includes them; if they can't be
+    // saved, don't restore (that would lose them).
+    try {
+      await session.value?.flush();
+    } catch (e) {
+      backupStatus.value = `Restore cancelled: ${e instanceof Error ? e.message : String(e)}. Nothing was changed.`;
+      return;
+    }
     const r = await restoreBackup(restorePath.value.trim());
     // The restore replaced storage, so the open session's in-memory docs are stale: close them
     // (stops the structure observer and unmounts the editor) so nothing can write them back.
@@ -102,30 +134,67 @@ async function onRestore(): Promise<void> {
     backupStatus.value = `Restore failed: ${String(e)}`;
   }
 }
-onBeforeUnmount(() => session.value?.close());
+onBeforeUnmount(() => {
+  stopCloseFlush();
+  closeQuietly(session.value);
+});
 
 /** Close the open manuscript, if any, and clear the selection. */
 function closeSession() {
-  session.value?.close();
+  // Storage was replaced: drop pending edits rather than write them into the restored data.
+  void session.value?.close({ discard: true });
   session.value = null;
   selectedId.value = undefined;
 }
 
 /** Open an imported manuscript (exposed for tests and the Tauri open-file flow). */
+/** A rejected close keeps that session open and retrying; just log it. */
+const closeQuietly = (s?: ManuscriptSession | null) =>
+  void s?.close().catch((err: unknown) => console.error('Edits not saved yet; retrying', err));
+
 function open(next: ManuscriptSession) {
-  session.value?.close();
+  if (session.value !== next) closeQuietly(session.value);
+  saveError.value = '';
   session.value = next;
   selectedId.value = next.outline.value.find((s) => s.kind === 'chapter')?.id;
 }
 
+/** Reopen the newest manuscript with backoff; if that keeps failing, clear the editor for good. */
+async function reopenAfterFailure(delays = REOPEN_BACKOFF_MS) {
+  for (const ms of [0, ...delays]) {
+    if (ms) await new Promise((r) => setTimeout(r, ms));
+    const back = await reopenLatest(persistHooks).catch(() => null);
+    if (back) return open(back);
+  }
+  session.value = null;
+  fatalError.value = "Couldn't reopen the manuscript. Please restart coAuthor.";
+}
+
 async function onFile(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0];
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
   if (!file) return;
   openError.value = '';
+  importing.value = true;
   try {
-    open(sessionFromDocx(new Uint8Array(await file.arrayBuffer()), crypto.randomUUID()));
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const current = session.value;
+    try {
+      open(await importAndOpen(bytes, persistHooks, current));
+    } catch (err) {
+      // The current manuscript was closed but the import failed: never leave the closed session
+      // on screen; reopen the newest stored manuscript (the import, if it was written).
+      if (current?.closed) await reopenAfterFailure();
+      throw err;
+    }
   } catch (err) {
-    openError.value = `Could not import ${file.name}: ${(err as Error).message}`;
+    openError.value =
+      err instanceof UnsavedEditsError
+        ? `Couldn't open ${file.name}: some edits in the current manuscript aren't saved yet`
+        : `Could not import ${file.name}: ${err instanceof Error ? err.message : String(err)}`;
+  } finally {
+    importing.value = false;
+    input.value = '';
   }
 }
 
@@ -220,9 +289,17 @@ defineExpose({ open });
     <AgentsSettings v-if="info" />
     <label>
       Import .docx
-      <input data-test="open-docx" type="file" accept=".docx" @change="onFile" />
+      <input
+        data-test="open-docx"
+        type="file"
+        accept=".docx"
+        :disabled="importing"
+        @change="onFile"
+      />
     </label>
+    <p v-if="fatalError" role="alert" data-test="fatal-error">{{ fatalError }}</p>
     <p v-if="openError" role="alert" data-test="open-error">{{ openError }}</p>
+    <p v-if="saveError" role="alert" data-test="save-error">{{ saveError }}</p>
     <p v-if="!session" data-test="no-manuscript">Import a manuscript to see its outline.</p>
     <div v-else class="workspace">
       <SectionNav
@@ -230,12 +307,14 @@ defineExpose({ open });
         :manuscript-id="session.id"
         :selected-id="selectedId"
         :save="session.save"
+        :locked="session.outlineLocked"
         @select="selectedId = $event"
       />
       <ManuscriptEditor
         v-if="selectedDoc"
         :key="`${selected!.docId}#${reloads}`"
         :doc="selectedDoc"
+        :readonly="session.closed"
         @reload="reloads++"
       />
     </div>

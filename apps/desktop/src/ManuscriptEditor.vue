@@ -24,6 +24,8 @@ const props = defineProps<{
   doc?: Y.Doc;
   /** An unbound snapshot, used only when `doc` is not set. */
   content?: JSONContent;
+  /** No editing (e.g. the session is closed); edits would be dropped. */
+  readonly?: boolean;
 }>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
@@ -60,6 +62,13 @@ const editor = useEditor(
 watch(editor, (e) => {
   if (e) review.value = collectReviewItems(e.state.doc);
 });
+watch(
+  [editor, () => props.readonly || !!loadError.value],
+  ([e, ro]) => {
+    if (e && e.isEditable === !!ro) e.setEditable(!ro);
+  },
+  { immediate: true },
+);
 onBeforeUnmount(() => editor.value?.destroy());
 
 const LABELS: Record<ReviewItem['type'], string> = {

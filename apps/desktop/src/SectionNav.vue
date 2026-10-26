@@ -32,6 +32,8 @@ const props = defineProps<{
   selectedId?: string;
   /** Persist a new outline; throw (or reject) to refuse it. */
   save?: (next: Section[]) => void | Promise<void>;
+  /** If set, outline edits are turned off and this explains why (shown as a notice). */
+  locked?: string;
 }>();
 const emit = defineEmits<{ 'update:sections': [Section[]]; select: [id: string] }>();
 
@@ -71,7 +73,7 @@ const busy = ref(false);
 
 /** Run one edit as a transaction: validate, save, then emit; on any failure nothing changes. */
 async function commit(edit: (s: Section[]) => Section[]): Promise<Section[] | undefined> {
-  if (busy.value) return undefined;
+  if (busy.value || props.locked) return undefined;
   const result = applyOutlineEdit(list.value, edit);
   if (!result.ok) {
     saveError.value = result.error.message;
@@ -127,6 +129,7 @@ async function add(kind: SectionKind) {
 const editingId = ref<string>();
 const draft = ref('');
 function startRename(id: string, title: string) {
+  if (props.locked) return;
   editingId.value = id;
   draft.value = title;
   void nextTick(() =>
@@ -254,8 +257,14 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
   <nav class="section-nav" aria-label="Manuscript outline">
     <p v-if="loadIssues.length" role="alert" class="warn" data-test="outline-repaired">
       The stored outline had {{ loadIssues.length }} problem(s) (for example a section inside
-      itself) and is shown repaired. Your next change saves the repaired outline.
+      itself) and is shown repaired.
+      {{
+        locked
+          ? 'The repair is not saved yet; the stored outline is unchanged.'
+          : 'Your next change saves the repaired outline.'
+      }}
     </p>
+    <p v-if="locked" class="note" data-test="outline-locked">{{ locked }}</p>
     <p v-if="saveError" role="alert" class="warn" data-test="save-error">{{ saveError }}</p>
     <div class="actions" role="toolbar" aria-label="Add section">
       <button
@@ -263,7 +272,8 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
         :key="kind"
         type="button"
         :data-test="`add-${kind}`"
-        :disabled="busy || !parentFor(kind)"
+        :title="locked"
+        :disabled="!!locked || busy || !parentFor(kind)"
         @click="add(kind)"
       >
         + {{ KIND_LABELS[kind] }}
@@ -280,7 +290,7 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
         :class="['row', row.section.kind, { selected: row.section.id === selectedId }]"
         :style="{ paddingLeft: `${row.depth * 1.25 + 0.5}rem` }"
         :data-test="`section-${row.section.id}`"
-        draggable="true"
+        :draggable="!locked"
         @dragstart="dragId = row.section.id"
         @dragover.prevent
         @drop.prevent="onDrop(row.section)"
@@ -303,12 +313,29 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
       </li>
     </ul>
     <div v-if="selected" class="actions" role="toolbar" aria-label="Selected section">
-      <button type="button" data-test="move-up" :disabled="busy" @click="move(-1)">↑</button>
-      <button type="button" data-test="move-down" :disabled="busy" @click="move(1)">↓</button>
+      <button
+        type="button"
+        data-test="move-up"
+        :title="locked"
+        :disabled="!!locked || busy"
+        @click="move(-1)"
+      >
+        ↑
+      </button>
+      <button
+        type="button"
+        data-test="move-down"
+        :title="locked"
+        :disabled="!!locked || busy"
+        @click="move(1)"
+      >
+        ↓
+      </button>
       <button
         type="button"
         data-test="rename"
-        :disabled="busy"
+        :title="locked"
+        :disabled="!!locked || busy"
         @click="startRename(selected.id, selected.title)"
       >
         Rename
@@ -317,7 +344,8 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
         Move to
         <select
           data-test="move-to"
-          :disabled="busy"
+          :title="locked"
+          :disabled="!!locked || busy"
           @change="moveTo(($event.target as HTMLSelectElement).value)"
         >
           <option value="">…</option>
@@ -329,7 +357,8 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
       <button
         type="button"
         data-test="delete"
-        :disabled="busy"
+        :title="locked"
+        :disabled="!!locked || busy"
         @click="confirmingDelete = selected.id"
       >
         Delete

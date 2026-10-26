@@ -163,27 +163,37 @@ fn restore_backup(
     .map_err(|e| e.to_string())
 }
 
-/// One section of an imported manuscript: ProseMirror JSON from the .docx importer.
-#[derive(serde::Deserialize)]
-pub struct ImportSection {
-    kind: String,
-    title: String,
-    doc: serde_json::Value,
-}
-
+/// Persist an imported manuscript (manuscript row, sections and their initial documents) in
+/// one transaction, so it is visible to the MCP server right away and survives a restart.
 #[tauri::command]
 fn manuscript_import_json(
     store: tauri::State<'_, storage::Store>,
     title: String,
-    sections: Vec<ImportSection>,
-) -> Result<manuscripts::Manuscript, String> {
-    let m = store.create_manuscript(&title).map_err(err)?;
-    for s in sections {
-        store
-            .import_section_json(&m.id, &s.kind, &s.title, &s.doc)
-            .map_err(err)?;
-    }
-    Ok(m)
+    sections: Vec<manuscripts::ImportSection>,
+) -> Result<manuscripts::StoredManuscript, String> {
+    let (m, _) = store.import_manuscript(&title, &sections).map_err(err)?;
+    store.load_manuscript(&m.id).map_err(err)
+}
+
+/// The most recent manuscript with its sections' document state, to reopen at startup.
+#[tauri::command]
+fn manuscript_open_latest(
+    store: tauri::State<'_, storage::Store>,
+) -> Result<Option<manuscripts::StoredManuscript>, String> {
+    store.latest_manuscript().map_err(err)
+}
+
+/// Save an editor's Yjs update to a stored section (validated before it is written).
+#[tauri::command]
+fn section_apply_update(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+    section_id: String,
+    update: Vec<u8>,
+) -> Result<(), String> {
+    store
+        .apply_section_update(&manuscript_id, &section_id, &update)
+        .map_err(err)
 }
 
 #[tauri::command]
@@ -252,6 +262,8 @@ pub fn run() {
             restore_backup,
             manuscript_import_json,
             manuscripts_list,
+            manuscript_open_latest,
+            section_apply_update,
             mcp_status
         ])
         .run(tauri::generate_context!())

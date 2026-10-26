@@ -68,6 +68,38 @@ pub struct Suggestion {
     pub created_at: String,
 }
 
+/// One section of an imported manuscript: ProseMirror JSON from the .docx importer.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ImportSection {
+    /// The importer's id for this section, used only to resolve `parent_id` within the import.
+    #[serde(default)]
+    pub id: Option<String>,
+    /// The importer's id of the parent section (an earlier section in the same import).
+    #[serde(default, rename = "parentId")]
+    pub parent_id: Option<String>,
+    pub kind: String,
+    pub title: String,
+    pub doc: Value,
+}
+
+/// A section with its full stored document state (a Yjs v1 update from an empty doc), for the
+/// editor to load and then send its own updates against.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredSection {
+    #[serde(flatten)]
+    pub section: Section,
+    pub state: Vec<u8>,
+}
+
+/// A manuscript as stored: its row plus every section, in order, with document state.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredManuscript {
+    pub manuscript: Manuscript,
+    pub sections: Vec<StoredSection>,
+}
+
 pub fn new_id() -> String {
     let mut b = [0u8; 12];
     getrandom::fill(&mut b).expect("OS random source unavailable");
@@ -352,6 +384,146 @@ impl Store {
             tx.commit()?;
             Ok(())
         })
+    }
+
+    /// Persist a whole imported manuscript at once: the manuscript row, every section row and
+    /// each section's initial document state, in one transaction. Every section is validated
+    /// and encoded before anything is written, so a bad section leaves nothing behind.
+    pub fn import_manuscript(
+        &self,
+        title: &str,
+        sections: &[ImportSection],
+    ) -> Result<(Manuscript, Vec<Section>), StorageError> {
+        let mut encoded = Vec::with_capacity(sections.len());
+        for (i, s) in sections.iter().enumerate() {
+            if !SECTION_KINDS.contains(&s.kind.as_str()) {
+                return Err(StorageError::Invalid(format!(
+                    "unknown section kind: {}",
+                    s.kind
+                )));
+            }
+            crate::content::validate_doc(&s.doc).map_err(StorageError::Invalid)?;
+            let doc = crate::content::new_doc();
+            crate::content::encode(&doc, &s.doc).map_err(StorageError::Invalid)?;
+            validate_saved_doc(&doc)?;
+            if let Some(p) = &s.parent_id {
+                if !sections[..i].iter().any(|x| x.id.as_deref() == Some(p)) {
+                    return Err(StorageError::Invalid(format!(
+                        "section {:?} has unknown parent {p:?}",
+                        s.title
+                    )));
+                }
+            }
+            let update = doc
+                .transact()
+                .encode_state_as_update_v1(&StateVector::default());
+            encoded.push(update);
+        }
+        let manuscript_id = new_id();
+        self.with_conn(|c| {
+            let tx = c.unchecked_transaction()?;
+            tx.execute(
+                &format!("INSERT INTO manuscripts (id, title, created_at) VALUES (?1, ?2, {NOW})"),
+                params![manuscript_id, title],
+            )?;
+            let mut out = Vec::with_capacity(sections.len());
+            // Importer ids are only unique within one import, so every section gets a new
+            // store id; parents are mapped through the ids assigned so far.
+            let mut ids = std::collections::HashMap::new();
+            for (i, (s, update)) in sections.iter().zip(&encoded).enumerate() {
+                let id = new_id();
+                let doc_id = section_doc_id(&manuscript_id, &id);
+                let parent = s.parent_id.as_ref().and_then(|p| ids.get(p).cloned());
+                tx.execute(
+                    "INSERT INTO sections (id, manuscript_id, kind, parent_id, position, title, doc_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![id, manuscript_id, s.kind, parent, i as i64, s.title, doc_id],
+                )?;
+                if let Some(src) = &s.id {
+                    ids.insert(src.clone(), id.clone());
+                }
+                if update.len() > 2 {
+                    tx.execute(
+                        "INSERT INTO doc_updates (doc_id, data) VALUES (?1, ?2)",
+                        params![doc_id, update],
+                    )?;
+                }
+                out.push(tx.query_row(
+                    &format!("SELECT {SECTION_COLS} FROM sections WHERE id = ?1"),
+                    [&id],
+                    row_section,
+                )?);
+            }
+            let m = tx.query_row(
+                "SELECT id, title, created_at FROM manuscripts WHERE id = ?1",
+                [&manuscript_id],
+                |r| {
+                    Ok(Manuscript {
+                        id: r.get(0)?,
+                        title: r.get(1)?,
+                        created_at: r.get(2)?,
+                    })
+                },
+            )?;
+            tx.commit()?;
+            Ok((m, out))
+        })
+    }
+
+    /// Load a manuscript with every section's full document state.
+    pub fn load_manuscript(&self, manuscript_id: &str) -> Result<StoredManuscript, StorageError> {
+        let manuscript = self.get_manuscript(manuscript_id)?;
+        let sections = self
+            .list_sections(manuscript_id)?
+            .into_iter()
+            .map(|section| {
+                let doc = self.load_doc(&section.doc_id)?;
+                let state = doc
+                    .transact()
+                    .encode_state_as_update_v1(&StateVector::default());
+                Ok(StoredSection { section, state })
+            })
+            .collect::<Result<_, StorageError>>()?;
+        Ok(StoredManuscript {
+            manuscript,
+            sections,
+        })
+    }
+
+    /// The most recently created manuscript, for reopening at startup.
+    pub fn latest_manuscript(&self) -> Result<Option<StoredManuscript>, StorageError> {
+        let id: Option<String> = self.with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT id FROM manuscripts ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?)
+        })?;
+        id.map(|id| self.load_manuscript(&id)).transpose()
+    }
+
+    /// Save an editor update (Yjs v1) to a section. The update is applied to the stored doc
+    /// and the result validated before it is appended, so a malformed edit is refused and
+    /// nothing is written.
+    pub fn apply_section_update(
+        &self,
+        manuscript_id: &str,
+        section_id: &str,
+        update: &[u8],
+    ) -> Result<(), StorageError> {
+        let s = self.get_section(manuscript_id, section_id)?;
+        let decoded = Update::decode_v1(update)
+            .map_err(|e| StorageError::Invalid(format!("bad update: {e}")))?;
+        let doc = self.load_doc(&s.doc_id)?;
+        doc.transact_mut()
+            .apply_update(decoded)
+            .map_err(|e| StorageError::Invalid(format!("bad update: {e}")))?;
+        validate_saved_doc(&doc)?;
+        if update.len() > 2 {
+            self.append_doc_update(&s.doc_id, update)?;
+        }
+        Ok(())
     }
 
     /// Create a section from ProseMirror JSON (e.g. the .docx importer's output).

@@ -5,6 +5,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
 import { docToYDoc, importDocx, readStructure, writeStructure, yDocToDoc } from '@coauthor/docx';
 import App from './App.vue';
+import { storedFixture } from './stored-fixture.test-helper';
 import { openSession, sessionFromDocx } from './manuscript-session';
 
 const fixture = resolve(
@@ -27,7 +28,134 @@ async function withManuscript() {
   return { w, session, titles };
 }
 
+async function chooseFile(w: ReturnType<typeof mount>) {
+  const input = w.find('[data-test="open-docx"]');
+  const file = new File([bytes()], 'synthetic.docx');
+  Object.defineProperty(file, 'arrayBuffer', { value: async () => bytes().buffer });
+  Object.defineProperty(input.element, 'files', { value: [file], configurable: true });
+  await input.trigger('change');
+  await settle();
+}
+
 describe('App', () => {
+  it('saves an imported .docx to the backend before opening it', async () => {
+    const backend = await import('./backend');
+    const persist = vi.mocked(backend.persistImport);
+    persist.mockClear();
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    expect(persist).toHaveBeenCalledTimes(1);
+    const payload = persist.mock.calls[0]![0];
+    const expected = importDocx(bytes(), { manuscriptId: 'x' });
+    expect(payload.title).toBe(expected.title);
+    expect(payload.sections.map((s) => [s.kind, s.title])).toEqual(
+      expected.sections.map((s) => [s.kind, s.title]),
+    );
+    expect(payload.sections.every((s) => (s.doc as { type: string }).type === 'doc')).toBe(true);
+    expect(w.findAll('.row').length).toBe(expected.sections.length);
+    w.unmount();
+  });
+
+  it('opens the import from the stored rows (ids, parents, doc ids), editable', async () => {
+    const stored = storedFixture();
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    expect(w.findAll('.row .title').map((r) => r.text())).toEqual(
+      stored.sections.map((s) => s.title),
+    );
+    for (const s of stored.sections) {
+      expect(w.find(`[data-test="section-${s.id}"]`).exists()).toBe(true);
+    }
+    expect(w.find('.ProseMirror').attributes('contenteditable')).toBe('true');
+    w.unmount();
+  });
+
+  it('disables the file input while an import is running', async () => {
+    const backend = await import('./backend');
+    let release!: (v: ReturnType<typeof storedFixture>) => void;
+    vi.mocked(backend.persistImport).mockImplementationOnce(
+      () => new Promise((r) => (release = r)),
+    );
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    const input = w.find('[data-test="open-docx"]');
+    const file = new File([bytes()], 'synthetic.docx');
+    Object.defineProperty(file, 'arrayBuffer', { value: async () => bytes().buffer });
+    Object.defineProperty(input.element, 'files', { value: [file], configurable: true });
+    await input.trigger('change');
+    await flushPromises();
+    expect((input.element as HTMLInputElement).disabled).toBe(true);
+    release(storedFixture());
+    await settle();
+    expect((input.element as HTMLInputElement).disabled).toBe(false);
+    w.unmount();
+  });
+
+  it('type, restart, and the typed text is still there (saved through the backend)', async () => {
+    const backend = await import('./backend');
+    // A fake backend: the stored state plus every saved update, per section.
+    const stored = storedFixture();
+    const saved = new Map<string, Uint8Array[]>();
+    vi.mocked(backend.persistImport).mockResolvedValueOnce(stored);
+    vi.mocked(backend.saveSectionUpdate).mockImplementation(async (m, sec, u) => {
+      expect(m).toBe(stored.manuscript.id);
+      saved.set(sec, [...(saved.get(sec) ?? []), u]);
+    });
+    const first = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(first);
+    const chapter = first.findAll('.row').length;
+    expect(chapter).toBeGreaterThan(0);
+    const editor = (
+      first.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+    ).editor;
+    editor.commands.insertContentAt(1, 'TYPED ');
+    await settle();
+    first.unmount(); // closing flushes pending edits
+    await settle();
+    expect([...saved.keys()].length).toBe(1);
+
+    // Restart: the backend returns the stored state with the saved updates applied.
+    const reopened = {
+      ...stored,
+      sections: stored.sections.map((s) => {
+        const d = new Y.Doc();
+        Y.applyUpdate(d, Uint8Array.from(s.state));
+        for (const u of saved.get(s.id) ?? []) Y.applyUpdate(d, u);
+        return { ...s, state: Array.from(Y.encodeStateAsUpdate(d)) };
+      }),
+    };
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(reopened);
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    expect(w.findAll('.row').length).toBe(chapter);
+    expect(w.find('.ProseMirror').text()).toContain('TYPED ');
+    w.unmount();
+    vi.mocked(backend.saveSectionUpdate).mockReset();
+  });
+
+  it("makes a closed session's editor read-only", async () => {
+    const { w, session } = await withManuscript();
+    expect(w.find('.tiptap').attributes('contenteditable')).toBe('true');
+    await session.close();
+    await settle();
+    expect(w.find('.tiptap').attributes('contenteditable')).toBe('false');
+    w.unmount();
+  });
+
+  it('shows an error and does not open the import when saving fails', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.persistImport).mockRejectedValueOnce('database is locked');
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    expect(w.text()).toContain('Could not import synthetic.docx: database is locked');
+    expect(w.findAll('.row')).toHaveLength(0);
+    w.unmount();
+  });
+
   it('renders in browser mode without the desktop backend, with no sample outline', async () => {
     const backend = await import('./backend');
     vi.mocked(backend.getAppInfo).mockResolvedValueOnce(null);
@@ -247,6 +375,9 @@ vi.mock('./backend', async (orig) => ({
   pickBackupToRestore: vi.fn(async () => 'D:\\Backups\\picked.zip'),
   pickBackupDestination: vi.fn(async () => 'D:\\Backups\\new.zip'),
   getRecoveryNotices: vi.fn(async () => []),
+  persistImport: vi.fn(async () => storedFixture()),
+  openLatestManuscript: vi.fn(async () => null),
+  saveSectionUpdate: vi.fn(async () => {}),
   dismissRecoveryNotices: vi.fn(async () => {}),
   restoreBackup: vi.fn(async () => ({
     tokensRevoked: 2,
@@ -256,6 +387,237 @@ vi.mock('./backend', async (orig) => ({
 }));
 
 describe('restore confirmation', () => {
+  it('saves pending edits before the restore snapshot, then drops the stale session', async () => {
+    const backend = await import('./backend');
+    const order: string[] = [];
+    vi.mocked(backend.saveSectionUpdate).mockImplementation(async () => void order.push('save'));
+    vi.mocked(backend.restoreBackup).mockImplementationOnce(async () => {
+      order.push('restore');
+      return { tokensRevoked: 0, manifest: {} as never, preRestoreSnapshot: '/tmp/x/p.zip' };
+    });
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    const editor = await vi.waitFor(() => {
+      const e = (
+        w.find('.tiptap').element as unknown as { editor?: import('@tiptap/core').Editor } | null
+      )?.editor;
+      if (!e) throw new Error('editor not mounted yet');
+      return e;
+    });
+    editor.commands.insertContentAt(1, 'PENDING ');
+    await w.find('[data-test="restore-path"]').setValue('C:\\b.zip');
+    await w.find('[data-test="restore-button"]').trigger('click');
+    await w.find('[data-test="restore-confirm-yes"]').trigger('click');
+    await flushPromises();
+    expect(order).toEqual(['save', 'restore']);
+    expect(w.find('.tiptap').exists()).toBe(false);
+    await new Promise((r) => setTimeout(r, 700));
+    expect(order).toEqual(['save', 'restore']);
+    w.unmount();
+    vi.mocked(backend.saveSectionUpdate).mockReset();
+    vi.mocked(backend.restoreBackup).mockClear();
+  });
+
+  it('writes the import only after the current manuscript is closed (edits saved first)', async () => {
+    const backend = await import('./backend');
+    const order: string[] = [];
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    vi.mocked(backend.saveSectionUpdate).mockImplementation(async () => void order.push('save'));
+    vi.mocked(backend.persistImport).mockImplementationOnce(async () => {
+      order.push('write');
+      return storedFixture();
+    });
+    const editor = await vi.waitFor(() => {
+      const e = (
+        w.find('.tiptap').element as unknown as { editor?: import('@tiptap/core').Editor } | null
+      )?.editor;
+      if (!e) throw new Error('editor not mounted yet');
+      return e;
+    });
+    editor.commands.insertContentAt(1, 'BEFORE ');
+    await chooseFile(w);
+    await flushPromises();
+    expect(order).toEqual(['save', 'write']);
+    w.unmount();
+    vi.mocked(backend.saveSectionUpdate).mockReset();
+  });
+
+  it('a failed close writes no import, so relaunch reopens the original manuscript', async () => {
+    const backend = await import('./backend');
+    // A fake database: rows in creation order; open_latest returns the newest.
+    const original = storedFixture();
+    const rows = [original];
+    vi.mocked(backend.openLatestManuscript).mockImplementation(async () => rows.at(-1) ?? null);
+    vi.mocked(backend.persistImport).mockClear();
+    vi.mocked(backend.persistImport).mockImplementation(async () => {
+      const m = storedFixture();
+      m.manuscript.id = 'db-new';
+      rows.push(m);
+      return m;
+    });
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    vi.mocked(backend.saveSectionUpdate).mockRejectedValue(new Error('database is locked'));
+    const editor = await vi.waitFor(() => {
+      const e = (
+        w.find('.tiptap').element as unknown as { editor?: import('@tiptap/core').Editor } | null
+      )?.editor;
+      if (!e) throw new Error('editor not mounted yet');
+      return e;
+    });
+    editor.commands.insertContentAt(1, 'UNSAVED ');
+    await chooseFile(w);
+    expect(backend.persistImport).not.toHaveBeenCalled();
+    expect(rows).toEqual([original]);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    w.unmount();
+    // Relaunch: the newest row is still the original manuscript.
+    expect((await backend.openLatestManuscript())?.manuscript.id).toBe(original.manuscript.id);
+    vi.mocked(backend.saveSectionUpdate).mockReset();
+    vi.mocked(backend.openLatestManuscript).mockReset().mockResolvedValue(null);
+    vi.mocked(backend.persistImport)
+      .mockReset()
+      .mockImplementation(async () => storedFixture());
+    vi.restoreAllMocks();
+  });
+
+  it('import and reopen both fail after the close: editor cleared, restart banner, no typing', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const backend = await import('./backend');
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(storedFixture());
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    expect(w.find('.tiptap').exists()).toBe(true);
+    vi.mocked(backend.persistImport).mockRejectedValueOnce('database is locked');
+    vi.mocked(backend.openLatestManuscript).mockReset().mockRejectedValue('database is locked');
+    const picked = chooseFile(w);
+    await vi.advanceTimersByTimeAsync(5000);
+    await picked;
+    await settle();
+    expect(backend.openLatestManuscript).toHaveBeenCalledTimes(4); // first try + 3 backoff retries
+    expect(w.find('[data-test="fatal-error"]').text()).toBe(
+      "Couldn't reopen the manuscript. Please restart coAuthor.",
+    );
+    expect(w.find('.tiptap').exists()).toBe(false);
+    expect(w.find('[contenteditable="true"]').exists()).toBe(false);
+    w.unmount();
+    vi.useRealTimers();
+    vi.mocked(backend.openLatestManuscript).mockReset().mockResolvedValue(null);
+  });
+
+  it('opens the written import when the switch fails after the write (never deletes it)', async () => {
+    const backend = await import('./backend');
+    const original = storedFixture();
+    const imported = storedFixture();
+    imported.manuscript.id = 'db-new';
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(original);
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    const bad = storedFixture();
+    bad.manuscript.id = 'db-new';
+    bad.sections[0]!.state = [255, 255, 255];
+    vi.mocked(backend.persistImport).mockResolvedValueOnce(bad);
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(imported);
+    await chooseFile(w);
+    expect(w.text()).toContain('Could not import synthetic.docx');
+    expect(w.find('[contenteditable="true"]').exists()).toBe(true); // the import, reopened
+    expect(w.find('[data-test="fatal-error"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it("won't import over a manuscript whose edits aren't saved, and keeps it open", async () => {
+    const backend = await import('./backend');
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    vi.mocked(backend.persistImport).mockClear();
+    vi.mocked(backend.saveSectionUpdate).mockRejectedValue(new Error('database is locked'));
+    const editor = await vi.waitFor(() => {
+      const e = (
+        w.find('.tiptap').element as unknown as { editor?: import('@tiptap/core').Editor } | null
+      )?.editor;
+      if (!e) throw new Error('editor not mounted yet');
+      return e;
+    });
+    editor.commands.insertContentAt(1, 'UNSAVED ');
+    await chooseFile(w);
+    await flushPromises();
+    expect(backend.persistImport).not.toHaveBeenCalled();
+    expect(w.find('[data-test="open-error"]').text()).toBe(
+      "Couldn't open synthetic.docx: some edits in the current manuscript aren't saved yet",
+    );
+    expect(w.find('.tiptap').text()).toContain('UNSAVED ');
+    // Saves recover: the retry clears the banner, and now the import goes through.
+    vi.mocked(backend.saveSectionUpdate).mockReset();
+    vi.mocked(backend.saveSectionUpdate).mockResolvedValue(undefined);
+    await new Promise((r) => setTimeout(r, 1100));
+    await flushPromises();
+    expect(w.find('[data-test="save-error"]').exists()).toBe(false);
+    await chooseFile(w);
+    expect(backend.persistImport).toHaveBeenCalledTimes(1);
+    expect(w.find('[data-test="open-error"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('unmounting with unsaved edits logs, does not reject, and keeps retrying', async () => {
+    const backend = await import('./backend');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    vi.mocked(backend.saveSectionUpdate).mockRejectedValue(new Error('database is locked'));
+    const editor = await vi.waitFor(() => {
+      const e = (
+        w.find('.tiptap').element as unknown as { editor?: import('@tiptap/core').Editor } | null
+      )?.editor;
+      if (!e) throw new Error('editor not mounted yet');
+      return e;
+    });
+    editor.commands.insertContentAt(1, 'BYE ');
+    w.unmount();
+    await flushPromises();
+    await vi.waitFor(() => expect(log).toHaveBeenCalled());
+    const n = vi.mocked(backend.saveSectionUpdate).mock.calls.length;
+    vi.mocked(backend.saveSectionUpdate).mockReset();
+    vi.mocked(backend.saveSectionUpdate).mockResolvedValue(undefined);
+    await new Promise((r) => setTimeout(r, 1100));
+    expect(n).toBeGreaterThan(0);
+    expect(backend.saveSectionUpdate).toHaveBeenCalled(); // the retry ran after unmount
+    log.mockRestore();
+  });
+
+  it('cancels the restore with a clear error if pending edits cannot be saved', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.saveSectionUpdate).mockRejectedValue(new Error('database is locked'));
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    const editor = await vi.waitFor(() => {
+      const e = (
+        w.find('.tiptap').element as unknown as { editor?: import('@tiptap/core').Editor } | null
+      )?.editor;
+      if (!e) throw new Error('editor not mounted yet');
+      return e;
+    });
+    editor.commands.insertContentAt(1, 'UNSAVED ');
+    await w.find('[data-test="restore-path"]').setValue('C:\\b.zip');
+    await w.find('[data-test="restore-button"]').trigger('click');
+    await w.find('[data-test="restore-confirm-yes"]').trigger('click');
+    await flushPromises();
+    expect(backend.restoreBackup).not.toHaveBeenCalled();
+    expect(w.text()).toContain('Restore cancelled');
+    expect(w.text()).toContain("aren't saved yet");
+    expect(w.find('[data-test="save-error"]').text()).toContain('Not saved, retrying');
+    expect(w.find('.tiptap').exists()).toBe(true); // the session (and its edits) stays open
+    vi.mocked(backend.saveSectionUpdate).mockReset();
+    vi.mocked(backend.saveSectionUpdate).mockResolvedValue(undefined);
+    w.unmount();
+    await flushPromises();
+  });
+
   it('does not restore until the user confirms', async () => {
     const backend = await import('./backend');
     const wrapper = mount(App);
