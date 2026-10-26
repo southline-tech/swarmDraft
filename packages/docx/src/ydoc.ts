@@ -1,7 +1,7 @@
 /**
  * ProseMirror JSON <-> Yjs, using the same encoding as y-prosemirror
  * (Y.XmlFragment named "prosemirror"; nodes are Y.XmlElement, marks are
- * Y.XmlText format attributes keyed by mark type, or `type--hash` for marks
+ * Y.XmlText format attributes keyed by mark type, or `type--id` for marks
  * that may overlap with another of the same type, as y-prosemirror does).
  */
 import * as Y from 'yjs';
@@ -11,17 +11,10 @@ import type { ImportedManuscript } from './import';
 
 export const FRAGMENT_NAME = 'prosemirror';
 
-/** Short stable hash of a mark's attrs (FNV-1a, base36). */
-function hashAttrs(attrs: unknown): string {
-  const s = JSON.stringify(attrs);
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
-  return h.toString(36);
-}
-
 export function markKey(m: Mark): string {
-  return NON_EXCLUSIVE_MARKS.includes(m.type) && 'attrs' in m
-    ? `${m.type}--${hashAttrs(m.attrs)}`
+  // Comment and suggestion ids are unique, so `type--id` never collides (y-prosemirror style).
+  return NON_EXCLUSIVE_MARKS.includes(m.type) && 'attrs' in m && 'id' in m.attrs
+    ? `${m.type}--${m.attrs.id}`
     : m.type;
 }
 

@@ -6,7 +6,8 @@
  * direct formatting used as headings, several scene-break conventions,
  * tracked changes, comments and footnotes.
  */
-import { unzipSync, strFromU8 } from 'fflate';
+import { strFromU8 } from 'fflate';
+import { safeUnzip } from './zip';
 import { sectionDocId, type SectionKind } from '@coauthor/schema';
 import { child, kids, onOff, parseXml, textOf, val, type XmlElement } from './xml';
 import {
@@ -137,24 +138,7 @@ function openPackage(bytes: Uint8Array): Pkg {
   const L = DOCX_LIMITS;
   if (bytes.length > L.maxInputBytes)
     throw new Error(`File too large (${bytes.length} bytes; limit ${L.maxInputBytes})`);
-  let declared = 0;
-  const files = unzipSync(bytes, {
-    filter: (f) => {
-      if (!NEEDED_PART.test(f.name)) return false;
-      if (f.originalSize > L.maxPartBytes)
-        throw new Error(`Part ${f.name} too large when inflated`);
-      declared += f.originalSize;
-      if (declared > L.maxTotalBytes) throw new Error('Document too large when inflated');
-      return true;
-    },
-  });
-  let total = 0;
-  for (const [name, data] of Object.entries(files)) {
-    // Declared sizes can lie; check the real inflated size too.
-    if (data.length > L.maxPartBytes) throw new Error(`Part ${name} too large when inflated`);
-    total += data.length;
-  }
-  if (total > L.maxTotalBytes) throw new Error('Document too large when inflated');
+  const files = safeUnzip(bytes, (name) => NEEDED_PART.test(name), L);
   return {
     files,
     read(path) {

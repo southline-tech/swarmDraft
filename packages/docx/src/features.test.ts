@@ -155,7 +155,52 @@ describe('formatting, notes and dropped features', () => {
   });
 });
 
+/** Zip with document.xml whose declared uncompressed size (local + central header) is forged. */
+function forgeDeclaredSize(zip: Uint8Array, size: number): Uint8Array {
+  const out = zip.slice();
+  const dv = new DataView(out.buffer);
+  for (let i = 0; i + 4 <= out.length; i++) {
+    const sig = dv.getUint32(i, true);
+    if (sig === 0x04034b50) dv.setUint32(i + 22, size, true);
+    if (sig === 0x02014b50) dv.setUint32(i + 24, size, true);
+  }
+  return out;
+}
+
 describe('hostile input', () => {
+  const big = () => {
+    const para = `<w:p><w:r><w:t>${'Synthetic filler text for size. '.repeat(40)}</w:t></w:r></w:p>`;
+    const xml = `<w:document ${NS}><w:body>${p(r('Chapter 1'), '<w:pStyle w:val="Heading1"/>')}${para.repeat(5200)}${p(r('THE END MARKER'))}</w:body></w:document>`;
+    return zipSync({ 'word/document.xml': strToU8(xml) });
+  };
+
+  it("fails loudly when a part's declared size is forged (6.8 MB declared as 100 B)", () => {
+    const zip = big();
+    const honest = importDocx(zip);
+    expect(JSON.stringify(honest.sections)).toContain('THE END MARKER');
+    expect(() => importDocx(forgeDeclaredSize(zip, 100))).toThrow(/size mismatch/);
+  });
+
+  it('fails on a CRC mismatch', () => {
+    const zip = zipSync({
+      'word/document.xml': strToU8(`<w:document ${NS}><w:body/></w:document>`),
+    });
+    const dv = new DataView(zip.buffer);
+    for (let i = 0; i + 4 <= zip.length; i++)
+      if (dv.getUint32(i, true) === 0x02014b50) dv.setUint32(i + 16, 0xdeadbeef, true);
+    expect(() => importDocx(zip)).toThrow(/checksum mismatch/);
+  });
+
+  it('counts real inflated bytes against the cap even when the declared size is tiny', () => {
+    const saved = { ...DOCX_LIMITS };
+    try {
+      DOCX_LIMITS.maxPartBytes = 1024 * 1024;
+      expect(() => importDocx(forgeDeclaredSize(big(), 100))).toThrow(/too large/);
+    } finally {
+      Object.assign(DOCX_LIMITS, saved);
+    }
+  });
+
   it('rejects DOCTYPE/ENTITY declarations', () => {
     const docx = zipSync({
       'word/document.xml': strToU8(
