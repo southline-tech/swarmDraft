@@ -489,3 +489,67 @@ async fn no_token_flood_cannot_lock_out_the_agent() {
     let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}});
     assert_eq!(post(&s.url, Some(&s.token), body).await.status(), 200);
 }
+
+#[tokio::test]
+async fn revoking_a_token_drops_it_from_the_known_token_cache() {
+    let s = start(&["read"], 100).await;
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}});
+    assert_eq!(
+        post(&s.url, Some(&s.token), body.clone()).await.status(),
+        200
+    );
+    let hash = coauthor_lib::agents::hash_token(&s.token);
+    assert!(s.store.is_known_token_hash(&hash));
+    let agent = &s.store.list_agents().unwrap()[0];
+    let tok = &s.store.list_tokens(&agent.id).unwrap()[0];
+    s.store.revoke_token(&tok.id).unwrap();
+    assert!(!s.store.is_known_token_hash(&hash));
+    assert_eq!(post(&s.url, Some(&s.token), body).await.status(), 401);
+}
+
+#[tokio::test]
+async fn revoking_an_agent_drops_its_tokens_from_the_cache() {
+    let s = start(&["read"], 100).await;
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}});
+    assert_eq!(post(&s.url, Some(&s.token), body).await.status(), 200);
+    let hash = coauthor_lib::agents::hash_token(&s.token);
+    let agent = &s.store.list_agents().unwrap()[0];
+    s.store.revoke_agent(&agent.id).unwrap();
+    assert!(!s.store.is_known_token_hash(&hash));
+}
+
+#[tokio::test]
+async fn saturated_semaphores_time_out_with_503() {
+    let s = start_with(&["read"], |c| {
+        c.rate_limit = 1000;
+        c.max_in_flight = 1;
+        c.max_lookups = 1;
+        c.in_flight_timeout = std::time::Duration::from_millis(1);
+        c.lookup_timeout = std::time::Duration::from_millis(1);
+    })
+    .await;
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}});
+    let reqs: Vec<_> = (0..40)
+        .map(|_| {
+            let (url, token, body) = (s.url.clone(), s.token.clone(), body.clone());
+            tokio::spawn(async move { post(&url, Some(&token), body).await })
+        })
+        .collect();
+    let (mut ok, mut busy) = (0, 0);
+    for h in reqs {
+        let r = h.await.unwrap();
+        match r.status().as_u16() {
+            200 => ok += 1,
+            503 => {
+                assert_eq!(r.headers()["retry-after"], "1");
+                busy += 1;
+            }
+            other => panic!("unexpected status {other}"),
+        }
+    }
+    assert!(ok >= 1, "some requests get through");
+    assert!(
+        busy >= 1,
+        "a saturated gate answers 503 instead of queueing forever"
+    );
+}

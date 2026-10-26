@@ -16,7 +16,7 @@
 
 mod tools;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -54,6 +54,10 @@ pub struct McpConfig {
     pub max_lookups: usize,
     /// Every auth failure takes at least this long, whatever the reason.
     pub auth_failure_floor: Duration,
+    /// How long a request waits for an in-flight slot before getting 503.
+    pub in_flight_timeout: Duration,
+    /// How long a request waits for a lookup slot before getting 503.
+    pub lookup_timeout: Duration,
 }
 
 impl McpConfig {
@@ -65,6 +69,8 @@ impl McpConfig {
             max_in_flight: 64,
             max_lookups: 4,
             auth_failure_floor: Duration::from_millis(250),
+            in_flight_timeout: Duration::from_secs(5),
+            lookup_timeout: Duration::from_secs(2),
         }
     }
 }
@@ -101,9 +107,6 @@ struct Gate {
     allowed_hosts: Arc<Vec<String>>,
     per_token: Arc<Mutex<HashMap<String, Window>>>,
     failures: Arc<Mutex<Option<Window>>>,
-    /// Hashes of tokens that authenticated before. Once the wrong-token budget is spent, only
-    /// these (plus one probe at a time for anything else) are looked up.
-    known_good: Arc<Mutex<HashSet<String>>>,
     in_flight: Arc<Semaphore>,
     lookups: Arc<Semaphore>,
     probe: Arc<Semaphore>,
@@ -159,6 +162,15 @@ fn too_many() -> Response {
         .into_response()
 }
 
+fn busy() -> Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        [(header::RETRY_AFTER, "1")],
+        "server busy",
+    )
+        .into_response()
+}
+
 /// DNS-rebinding guard; runs before auth so a rebound page never reaches the token lookup.
 async fn host_guard(State(gate): State<Gate>, req: Request, next: Next) -> Response {
     let host_ok = req
@@ -189,11 +201,9 @@ async fn auth(State(gate): State<Gate>, mut req: Request, next: Next) -> Respons
         return unauthorized();
     };
     let hash = crate::agents::hash_token(&token);
-    let known = gate
-        .known_good
-        .lock()
-        .expect("limiter poisoned")
-        .contains(&hash);
+    // Hashes of tokens that authenticated before (kept in the store so revocation clears them).
+    // Once the wrong-token budget is spent, only these (plus one probe at a time) are looked up.
+    let known = gate.store.is_known_token_hash(&hash);
     // Once the wrong-token budget is spent, unknown tokens don't reach the database except one
     // probe at a time (so a brand-new valid token still gets in). Known tokens always do.
     let _probe = if !known && gate.budget_spent() {
@@ -207,12 +217,19 @@ async fn auth(State(gate): State<Gate>, mut req: Request, next: Next) -> Respons
     } else {
         None
     };
-    let Ok(_slot) = gate.in_flight.clone().acquire_owned().await else {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    let slot = tokio::time::timeout(
+        gate.cfg.in_flight_timeout,
+        gate.in_flight.clone().acquire_owned(),
+    )
+    .await;
+    let Ok(Ok(_slot)) = slot else {
+        return busy();
     };
     let looked_up = {
-        let Ok(_l) = gate.lookups.acquire().await else {
-            return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        let Ok(Ok(_l)) =
+            tokio::time::timeout(gate.cfg.lookup_timeout, gate.lookups.acquire()).await
+        else {
+            return busy();
         };
         gate.stats.auth_lookups.fetch_add(1, Ordering::Relaxed);
         let store = gate.store.clone();
@@ -237,13 +254,7 @@ async fn auth(State(gate): State<Gate>, mut req: Request, next: Next) -> Respons
             unauthorized()
         };
     };
-    {
-        let mut k = gate.known_good.lock().expect("limiter poisoned");
-        if k.len() >= 1024 {
-            k.clear();
-        }
-        k.insert(hash);
-    }
+    gate.store.remember_token_hash(hash);
     if !gate.allow_token(&principal.token_id) {
         return too_many();
     }
@@ -277,7 +288,6 @@ pub fn router_with_stats(store: Store, cfg: McpConfig) -> (axum::Router, Arc<Gat
         cfg,
         per_token: Arc::default(),
         failures: Arc::default(),
-        known_good: Arc::default(),
         in_flight,
         lookups,
         probe: Arc::new(Semaphore::new(1)),

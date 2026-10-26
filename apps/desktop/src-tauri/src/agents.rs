@@ -177,6 +177,14 @@ impl Store {
 
     /// Revoke an agent and all of its tokens.
     pub fn revoke_agent(&self, agent_id: &str) -> Result<(), StorageError> {
+        let hashes = self.with_conn(|c| {
+            let mut st = c.prepare("SELECT token_hash FROM agent_tokens WHERE agent_id = ?1")?;
+            let rows = st
+                .query_map([agent_id], |r| r.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })?;
+        self.forget_token_hashes(&hashes);
         self.with_conn(|c| {
             let n = c.execute(
                 &format!("UPDATE agents SET revoked_at = {NOW} WHERE id = ?1 AND revoked_at IS NULL"),
@@ -245,6 +253,14 @@ impl Store {
     }
 
     pub fn revoke_token(&self, token_id: &str) -> Result<(), StorageError> {
+        let hashes = self.with_conn(|c| {
+            let mut st = c.prepare("SELECT token_hash FROM agent_tokens WHERE id = ?1")?;
+            let rows = st
+                .query_map([token_id], |r| r.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })?;
+        self.forget_token_hashes(&hashes);
         self.with_conn(|c| {
             let n = c.execute(
                 &format!("UPDATE agent_tokens SET revoked_at = {NOW} WHERE id = ?1 AND revoked_at IS NULL"),

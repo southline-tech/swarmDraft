@@ -168,7 +168,11 @@ revoked tokens all get the same 401 (`WWW-Authenticate: Bearer`) after the same 
 Wrong tokens count toward a global throttle (429); requests without a token do not. Once the
 wrong-token budget is spent, only tokens that authenticated before (plus one probe at a time for
 others) are looked up, so a valid token keeps working. Token lookups are capped at 4 at a time and
-authenticated requests at 64 in flight (extra requests wait). The `Bearer` scheme is matched
+authenticated requests at 64 in flight; extra requests wait up to 5 s for an in-flight slot and
+2 s for a lookup slot, then get 503 with `Retry-After`. Revoking a token or agent removes its
+hashes from the known-token cache. Known limitation: a flood of wrong tokens from a local
+process can delay a brand-new token's first request (it shares the single probe slot and may
+see 429 until the window resets); tokens that authenticated before are unaffected. The `Bearer` scheme is matched
 case-insensitively, and each valid token is rate limited. `list_chapters` / `read_chapter` return every section kind (front
 matter, parts, chapters, scenes, back matter), not only chapters.
 

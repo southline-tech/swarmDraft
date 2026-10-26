@@ -114,6 +114,9 @@ const MIGRATIONS: &[&str] = &[
 pub struct Store {
     dir: PathBuf,
     conn: std::sync::Arc<Mutex<Connection>>,
+    /// Hashes of tokens that authenticated recently (used by the MCP gate). Revoking a token
+    /// or agent removes its hashes here.
+    known_tokens: std::sync::Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 impl Store {
@@ -125,6 +128,7 @@ impl Store {
         Ok(Self {
             dir: dir.to_path_buf(),
             conn: std::sync::Arc::new(Mutex::new(conn)),
+            known_tokens: std::sync::Arc::default(),
         })
     }
 
@@ -208,6 +212,30 @@ impl Store {
     pub fn migrate_now(&self) -> Result<(), StorageError> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         migrate(&mut conn)
+    }
+
+    /// True if this token hash authenticated before and hasn't been revoked since.
+    pub fn is_known_token_hash(&self, hash: &str) -> bool {
+        self.known_tokens
+            .lock()
+            .expect("cache poisoned")
+            .contains(hash)
+    }
+
+    /// Remember a token hash that just authenticated (bounded; cleared when full).
+    pub fn remember_token_hash(&self, hash: String) {
+        let mut k = self.known_tokens.lock().expect("cache poisoned");
+        if k.len() >= 1024 {
+            k.clear();
+        }
+        k.insert(hash);
+    }
+
+    pub(crate) fn forget_token_hashes(&self, hashes: &[String]) {
+        let mut k = self.known_tokens.lock().expect("cache poisoned");
+        for h in hashes {
+            k.remove(h);
+        }
     }
 
     pub fn schema_version(&self) -> Result<i64, StorageError> {
