@@ -20,3 +20,13 @@ export {
   FRAGMENT_NAME,
 } from './ydoc';
 export * from './model';
+export {
+  readStructure,
+  writeStructure,
+  observeStructure,
+  importedToYDocs,
+  STRUCTURE_FIELD,
+  META_FIELD,
+  STRUCTURE_ORIGIN,
+  type ManuscriptYDocs,
+} from './structure';

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import type { Section } from '@coauthor/schema';
 import SectionNav from './SectionNav.vue';
-import { SAMPLE_MANUSCRIPT_ID, sampleOutline } from './outline-sample';
+import { SAMPLE_MANUSCRIPT_ID, sampleOutline } from './fixtures/outline-sample';
 
 function setup(
   opts: { selectedId?: string; sections?: Section[]; save?: (s: Section[]) => unknown } = {},

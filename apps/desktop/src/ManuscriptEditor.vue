@@ -2,39 +2,55 @@
 /**
  * Manuscript editor (RAD-202): Tiptap with the manuscript schema, a paragraph-style toolbar,
  * and a read-only list of the comments and tracked changes in the document.
+ *
+ * With `doc`, the editor is bound to that section Y.Doc through y-prosemirror
+ * (`collaborativeEditorOptions`): every edit is written to the doc as it is typed, and changes
+ * from other writers are content-checked before they apply. `content` opens an unbound snapshot.
  */
-import { computed, onBeforeUnmount, shallowRef, watch } from 'vue';
+import { computed, onBeforeUnmount, shallowRef, toRaw, watch } from 'vue';
 import { EditorContent, useEditor } from '@tiptap/vue-3';
-import type { JSONContent } from '@tiptap/core';
+import type { EditorOptions, JSONContent } from '@tiptap/core';
+import type * as Y from 'yjs';
 import {
   PARAGRAPH_STYLES,
   PARAGRAPH_STYLE_LABELS,
+  collaborativeEditorOptions,
   collectReviewItems,
   manuscriptEditorOptions,
   type ParagraphStyle,
   type ReviewItem,
 } from '@coauthor/editor';
 
-const props = defineProps<{ content: JSONContent }>();
+const props = defineProps<{
+  /** The section's Y.Doc to bind to. When set it wins and `content` is ignored. */
+  doc?: Y.Doc;
+  /** An unbound snapshot, used only when `doc` is not set. */
+  content?: JSONContent;
+}>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{ change: [doc: JSONContent]; reload: [] }>();
 
 const review = shallowRef<ReviewItem[]>([]);
 /** Set when the content does not fit the schema; the editor is then read-only and never emits. */
 const loadError = shallowRef<string>('');
+const options: Partial<EditorOptions> = {
+  onContentError: ({ error }) => {
+    loadError.value = String((error as Error & { cause?: unknown }).cause ?? error.message);
+  },
+  onCreate: ({ editor }) => (review.value = collectReviewItems(editor.state.doc)),
+  onUpdate: ({ editor }) => {
+    review.value = collectReviewItems(editor.state.doc);
+    if (loadError.value) return;
+    emit('change', editor.getJSON());
+  },
+};
+// Bind to the raw Y.Doc. A prop can arrive as a Vue reactive proxy (e.g. when the parent's props
+// are reactive), and y-sync then registers its observers through the proxy: Yjs reports remote
+// changes on the raw types, the identity checks miss, and the view never updates.
 const editor = useEditor(
-  manuscriptEditorOptions({
-    content: props.content,
-    onContentError: ({ error }) => {
-      loadError.value = String((error as Error & { cause?: unknown }).cause ?? error.message);
-    },
-    onCreate: ({ editor }) => (review.value = collectReviewItems(editor.state.doc)),
-    onUpdate: ({ editor }) => {
-      review.value = collectReviewItems(editor.state.doc);
-      if (loadError.value) return;
-      emit('change', editor.getJSON());
-    },
-  }),
+  props.doc
+    ? collaborativeEditorOptions(toRaw(props.doc), options)
+    : manuscriptEditorOptions({ ...options, content: props.content }),
 );
 watch(editor, (e) => {
   if (e) review.value = collectReviewItems(e.state.doc);
