@@ -5,7 +5,11 @@ import { SWATCHES, swatchVar } from './colors';
 
 const props = withDefaults(
   defineProps<{ defaultName?: string; defaultColor?: number; taken?: Record<number, string> }>(),
-  { defaultName: 'Kim', defaultColor: 3, taken: () => ({ 1: 'Grok Bot', 2: 'Brett' }) },
+  {
+    defaultName: 'Sample Author',
+    defaultColor: 3,
+    taken: () => ({ 1: 'Sample Assistant', 2: 'Sample Editor' }),
+  },
 );
 const emit = defineEmits<{ close: []; save: [{ name: string; color: number }] }>();
 const pages = ['General', 'Your name & color', 'Appearance', 'Backups'] as const;

@@ -42,7 +42,7 @@ describe('UI shells (Part of #36)', () => {
     expect(w.get('[data-test="swatch-3"]').attributes('aria-checked')).toBe('true');
     await w.get('[data-test="swatch-4"]').trigger('click');
     await w.get('[data-test="settings-save"]').trigger('click');
-    expect(w.emitted('save')?.[0]).toEqual([{ name: 'Kim', color: 4 }]);
+    expect(w.emitted('save')?.[0]).toEqual([{ name: 'Sample Author', color: 4 }]);
   });
 
   it('reason line clamps long text with More/Less', async () => {
@@ -72,10 +72,22 @@ describe('UI shells (Part of #36)', () => {
     const before = Y.encodeStateAsUpdate(doc);
     let updates = 0;
     doc.on('update', () => updates++);
-    const w = mount(ShellsPreview, { props: { initial: 'all' }, attachTo: document.body });
+    const w = mount(ShellsPreview, { props: { initial: 'all', doc }, attachTo: document.body });
+    // Save first (clicking settings nav later would unmount it), then every other button.
+    await w.find('[data-test="settings-save"]').trigger('click');
     for (const b of w.findAll('button')) if (b.element.isConnected) await b.trigger('click');
     expect(updates).toBe(0);
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    w.unmount();
+  });
+
+  it('tc3 name prompt is an inline card, not a dialog without modal behavior', () => {
+    const w = mount(ShellsPreview, { props: { initial: 'tc3' } });
+    const card = w.find('[data-test="name-prompt"]');
+    expect(card.exists()).toBe(true);
+    expect(card.attributes('role')).toBeUndefined();
+    expect(w.find('[role="dialog"]').exists()).toBe(false);
+    expect(card.attributes('aria-labelledby')).toBe('np-title');
     w.unmount();
   });
 

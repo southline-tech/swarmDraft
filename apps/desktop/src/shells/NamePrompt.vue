@@ -1,11 +1,11 @@
 <script setup lang="ts">
-/** tc3: first-time "your changes will show as …" prompt. Visual shell: emits only, stores nothing. */
+/** tc3 (inline card, not a modal): first-time "your changes will show as …" prompt. Visual shell: emits only, stores nothing. */
 defineProps<{ name: string; colorName: string; color: string }>();
 const emit = defineEmits<{ ok: []; change: []; close: [] }>();
 </script>
 
 <template>
-  <section class="np" role="dialog" aria-labelledby="np-title" data-test="name-prompt">
+  <section class="np" aria-labelledby="np-title" data-test="name-prompt">
     <span class="np__av" :style="{ background: color }" aria-hidden="true">{{
       name.charAt(0)
     }}</span>

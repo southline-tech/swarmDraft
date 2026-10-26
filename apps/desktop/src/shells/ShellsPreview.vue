@@ -15,8 +15,13 @@ import ErrorCard from './ErrorCard.vue';
 import ReasonLine from './ReasonLine.vue';
 import { swatchVar } from './colors';
 import PreviewWorkspace from './PreviewWorkspace.vue';
+import type * as Y from 'yjs';
 
-const props = defineProps<{ initial?: ScreenId | 'all' }>();
+const props = defineProps<{
+  initial?: ScreenId | 'all';
+  /** Optional live doc; shells must never write to it (tests pass one to prove that). */
+  doc?: Y.Doc;
+}>();
 const emit = defineEmits<{ close: [] }>();
 const current = ref<ScreenId | 'all'>(props.initial ?? 'all');
 const toastOpen = ref(true);
@@ -136,7 +141,7 @@ const cards = [
       <h2 class="sp__h">tc3 · First-time name &amp; color</h2>
       <NamePrompt
         v-if="promptOpen"
-        name="Kim"
+        name="Sample Author"
         color-name="green"
         :color="swatchVar(3)"
         @ok="promptOpen = false"

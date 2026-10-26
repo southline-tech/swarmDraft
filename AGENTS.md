@@ -52,4 +52,3 @@ All of these must pass before review. Report test counts per package in the PR.
 - **Tokens are secrets.** Never log, return or render agent tokens; `agents_list` returns no token.
 - **No competitor product names, parity lists or competitive analysis** in code, docs, commits, branch names, issues or PRs.
 - No personal data (real names) hard-coded.
-- 2026-10-26 · #66 · screenshots labeled with mockup ids showed the same state (wp1=wp6=tc1, ob4=ob5) · every shot named after a mockup id must reproduce that mockup's distinct state; use ?preview sample data when the app can't
