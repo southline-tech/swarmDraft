@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
-import { docToYDoc, importDocx, readStructure, writeStructure } from '@coauthor/docx';
+import { docToYDoc, importDocx, readStructure, writeStructure, yDocToDoc } from '@coauthor/docx';
 import App from './App.vue';
 import { openSession, sessionFromDocx } from './manuscript-session';
 
@@ -202,6 +202,39 @@ describe('App open-file input', () => {
     await pick(w, 'broken.docx', new TextEncoder().encode('not a zip'));
     expect(w.text()).toContain('Could not import broken.docx');
     expect(w.findAll('.row')).toHaveLength(rows);
+    w.unmount();
+  });
+});
+
+describe('App saves typing to the section Y.Doc', () => {
+  const editorOf = (w: ReturnType<typeof mount>) =>
+    (w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }).editor;
+  const chaptersOf = (session: ReturnType<typeof sessionFromDocx>) =>
+    session.outline.value.filter((s) => s.kind === 'chapter');
+
+  it('keeps typed text after Reload', async () => {
+    const { w, session } = await withManuscript();
+    editorOf(w).commands.insertContentAt(1, 'TYPEDONE ');
+    await settle();
+    const docId = chaptersOf(session)[0]!.docId;
+    expect(JSON.stringify(yDocToDoc(session.sections.get(docId)!))).toContain('TYPEDONE');
+    w.findComponent({ name: 'ManuscriptEditor' }).vm.$emit('reload');
+    await settle();
+    expect(w.find('.tiptap').text()).toContain('TYPEDONE');
+    w.unmount();
+  });
+
+  it('keeps typed text after switching to another section and back', async () => {
+    const { w, session } = await withManuscript();
+    const [first, second] = chaptersOf(session);
+    editorOf(w).commands.insertContentAt(1, 'TYPEDTWO ');
+    await settle();
+    await w.find(`[data-test="section-${second!.id}"]`).trigger('click');
+    await settle();
+    expect(w.find('.tiptap').text()).not.toContain('TYPEDTWO');
+    await w.find(`[data-test="section-${first!.id}"]`).trigger('click');
+    await settle();
+    expect(w.find('.tiptap').text()).toContain('TYPEDTWO');
     w.unmount();
   });
 });

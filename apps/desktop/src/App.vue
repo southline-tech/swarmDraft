@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
 import { DEFAULT_TRIM } from '@coauthor/schema';
-import { yDocToDoc } from '@coauthor/docx';
 import {
   createBackup,
   getAppInfo,
@@ -24,9 +23,10 @@ const selectedId = ref<string>();
 const recoveryNotice = ref<RecoveryNotice | null>(null);
 const openError = ref('');
 /**
- * Bumped by the editor's Reload action to reopen the section from its Y.Doc. The remount is a
- * fresh editor: its undo history is lost, and so is anything not yet written to the Y.Doc
- * (edits the binding refused while the editor was read-only). The Y.Doc itself is kept.
+ * Bumped by the editor's Reload action to reopen the section from its Y.Doc. The editor is bound
+ * to that doc, so everything typed is already in it and survives the remount (and switching
+ * sections). The remount is a fresh editor, so its undo history is lost; nothing typed while the
+ * editor was read-only after a content error was ever accepted, so there is nothing else to lose.
  */
 const reloads = ref(0);
 
@@ -109,10 +109,9 @@ async function onFile(e: Event) {
 const selected = computed(() =>
   session.value?.outline.value.find((s) => s.id === selectedId.value),
 );
-const selectedContent = computed(() => {
-  const doc = selected.value && session.value?.sections.get(selected.value.docId);
-  return doc ? yDocToDoc(doc) : undefined;
-});
+const selectedDoc = computed(() =>
+  selected.value ? session.value?.sections.get(selected.value.docId) : undefined,
+);
 
 defineExpose({ open });
 </script>
@@ -192,9 +191,9 @@ defineExpose({ open });
         @select="selectedId = $event"
       />
       <ManuscriptEditor
-        v-if="selectedContent"
+        v-if="selectedDoc"
         :key="`${selected!.docId}#${reloads}`"
-        :content="selectedContent"
+        :doc="selectedDoc"
         @reload="reloads++"
       />
     </div>
