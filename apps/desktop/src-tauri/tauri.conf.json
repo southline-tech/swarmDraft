@@ -43,9 +43,7 @@
         "headerImage": "windows/nsis-header.bmp",
         "installerIcon": "icons/icon.ico",
         "displayLanguageSelector": false,
-        "languages": [
-          "English"
-        ]
+        "languages": ["English"]
       }
     }
   }

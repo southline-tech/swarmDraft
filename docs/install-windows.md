@@ -25,6 +25,7 @@ The NSIS installer installs **per user** (`installMode: currentUser`): no admin 
 The `.nsh` is a Tauri installer hook that sets MUI page text; the stock Tauri template is not forked.
 
 Known gaps versus the mockups (limits of classic NSIS/MUI2 dialogs):
+
 - Fixed Win32 dialog size and system font; no rounded buttons, accent colours or large type.
 - Button labels are the stock "Next >" / "Finish" (the mockup's "Install" would need a custom template).
 - The stock "Choose Install Location" page still shows between welcome and progress.
