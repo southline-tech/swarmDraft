@@ -17,6 +17,7 @@ import { refreshAgents, reloadOnFocus } from './agent-names';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
 import HomeScreen from './HomeScreen.vue';
+import AppLogo from './AppLogo.vue';
 import { flushOnClose } from './close-flush';
 import { outlineDocs, sectionTreeDocs } from './status/wordcount';
 import {
@@ -325,7 +326,10 @@ defineExpose({ open });
 <template>
   <main class="shell">
     <header class="topbar">
-      <span class="topbar__name">coAuthor</span>
+      <span class="topbar__brand">
+        <AppLogo :size="24" />
+        <span class="topbar__name">coAuthor</span>
+      </span>
       <button
         v-if="session && !choosingBook"
         type="button"
@@ -522,6 +526,11 @@ body {
   padding: var(--ct-space-2) var(--ct-space-4);
   border-bottom: 1px solid var(--ct-border);
   background: var(--ct-surface);
+}
+.topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-space-2);
 }
 .topbar__name {
   font-weight: var(--ct-weight-semibold);

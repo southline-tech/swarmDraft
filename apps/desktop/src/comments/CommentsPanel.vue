@@ -105,7 +105,7 @@ const visible = () => props.threads.filter((t) => props.showResolved || !t.resol
   opacity: 0.6;
 }
 .warn {
-  color: #a35200;
+  color: var(--ct-warning);
   font-size: 0.85em;
 }
 blockquote {
