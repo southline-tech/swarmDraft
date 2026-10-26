@@ -237,7 +237,7 @@ function onKey(e: KeyboardEvent, row: Row) {
       const child = rows.value.find((r) => r.section.parentId === row.section.id);
       if (child) go(ids.indexOf(child.section.id));
     },
-    Enter: () => select(row.section.id),
+    Enter: () => (select(row.section.id), startRename(row.section.id, row.section.title)),
     F2: () => startRename(row.section.id, row.section.title),
     Delete: () => (confirmingDelete.value = row.section.id),
   };

@@ -187,6 +187,14 @@ describe('outline hardening', () => {
     expect(cleanTitle('a\u202Eb\u2066c\u200Bd\uFEFFe\u200Ff')).toBe('abcdef');
   });
 
+  it('treats a title of only zero-width joiners as empty', () => {
+    expect(cleanTitle('\u200D\u200C \u200D')).toBe('');
+    const renamed = renameSection(sample(), 'c1', '\u200D\u200D');
+    expect(renamed.find((x) => x.id === 'c1')!.title).toBe(
+      sample().find((x) => x.id === 'c1')!.title,
+    );
+  });
+
   it('dropSection refuses to move a section into its own subtree', () => {
     const s = [sec('p', 'part'), sec('c', 'chapter', 'p'), sec('x', 'scene', 'c')];
     expect(dropSection(s, 'p', { parentId: 'c' })).toEqual(s);
@@ -241,5 +249,36 @@ describe('outline hardening', () => {
     expect(() =>
       addSection(sample(), { manuscriptId: 'm1', id: 'c1', kind: 'chapter', title: 'x' }),
     ).toThrow();
+  });
+});
+
+describe('addSection placement', () => {
+  const base: Section[] = [
+    { id: 'fm1', kind: 'front_matter', title: 'Title page', docId: 'd-fm1' },
+    { id: 'p1', kind: 'part', title: 'Part 1', docId: 'd-p1' },
+    { id: 'bm1', kind: 'back_matter', title: 'About the author', docId: 'd-bm1' },
+  ];
+  const add = (kind: Section['kind'], id: string) =>
+    ids(addSection(base, { manuscriptId: 'm1', id, kind, title: id }));
+
+  it('puts a new part before the back matter', () => {
+    expect(add('part', 'p2')).toEqual(['fm1', 'p1', 'p2', 'bm1']);
+    expect(add('chapter', 'c9')).toEqual(['fm1', 'p1', 'c9', 'bm1']);
+  });
+  it('puts new front matter after the existing front matter', () => {
+    expect(add('front_matter', 'fm2')).toEqual(['fm1', 'fm2', 'p1', 'bm1']);
+    expect(
+      ids(
+        addSection(base.slice(1), {
+          manuscriptId: 'm1',
+          id: 'fm0',
+          kind: 'front_matter',
+          title: 'x',
+        }),
+      ),
+    ).toEqual(['fm0', 'p1', 'bm1']);
+  });
+  it('appends back matter at the end', () => {
+    expect(add('back_matter', 'bm2')).toEqual(['fm1', 'p1', 'bm1', 'bm2']);
   });
 });

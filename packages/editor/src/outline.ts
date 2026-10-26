@@ -52,6 +52,8 @@ export function cleanTitle(title: string): string {
     .replace(/[\p{Cc}\u2028\u2029]+/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+  // Joiners alone render as nothing; treat such a title as empty (rename keeps the old one).
+  if (!t.replace(/[\u200C\u200D\s]/gu, '')) return '';
   return graphemes(t).slice(0, MAX_TITLE_LENGTH).join('').trim();
 }
 
@@ -166,7 +168,26 @@ export interface NewSection {
   id?: string;
 }
 
-/** Append a section at the end of its parent (or the top level). Throws if it cannot nest there. */
+/**
+ * Where a new top-level section goes: front matter after the existing front matter, back matter
+ * at the end, anything else before the back matter. Nested sections append to their parent.
+ */
+function insertIndex(
+  siblings: readonly OutlineNode[],
+  kind: SectionKind,
+  topLevel: boolean,
+): number {
+  if (!topLevel || kind === 'back_matter') return siblings.length;
+  if (kind === 'front_matter') {
+    let i = 0;
+    siblings.forEach((s, j) => s.kind === 'front_matter' && (i = j + 1));
+    return i;
+  }
+  const back = siblings.findIndex((s) => s.kind === 'back_matter');
+  return back < 0 ? siblings.length : back;
+}
+
+/** Add a section under its parent (or at the top level, see insertIndex). Throws if it cannot nest there. */
 export function addSection(sections: readonly Section[], n: NewSection): Section[] {
   const parent = n.parentId ? sections.find((s) => s.id === n.parentId) : undefined;
   if (n.parentId && !parent) throw new Error(`unknown parent ${n.parentId}`);
@@ -181,7 +202,8 @@ export function addSection(sections: readonly Section[], n: NewSection): Section
     ...(n.parentId ? { parentId: n.parentId } : {}),
   };
   const roots = buildOutline(sections);
-  siblingsOf(roots, n.parentId)!.push({ ...section, children: [] });
+  const siblings = siblingsOf(roots, n.parentId)!;
+  siblings.splice(insertIndex(siblings, n.kind, !n.parentId), 0, { ...section, children: [] });
   return flatten(roots);
 }
 

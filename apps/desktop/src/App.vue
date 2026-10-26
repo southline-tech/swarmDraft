@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
 import { DEFAULT_TRIM } from '@coauthor/schema';
 import {
   createBackup,
@@ -13,18 +13,22 @@ import {
 } from './backend';
 import AgentsSettings from './AgentsSettings.vue';
 import ManuscriptEditor from './ManuscriptEditor.vue';
-import { SAMPLE_DOC } from './sample';
 import SectionNav from './SectionNav.vue';
-import { SAMPLE_MANUSCRIPT_ID, sampleOutline } from './outline-sample';
-import type { Section } from '@coauthor/schema';
-
-const editorKey = ref(0);
+import { sessionFromDocx, type ManuscriptSession } from './manuscript-session';
 
 const info = ref<AppInfo | null>(null);
-const sections = ref<Section[]>(sampleOutline());
+const session = shallowRef<ManuscriptSession | null>(null);
 const selectedId = ref<string>();
 /** One-time notice: startup recovery moved folders aside after an interrupted restore. */
 const recoveryNotice = ref<RecoveryNotice | null>(null);
+const openError = ref('');
+/**
+ * Bumped by the editor's Reload action to reopen the section from its Y.Doc. The editor is bound
+ * to that doc, so everything typed is already in it and survives the remount (and switching
+ * sections). The remount is a fresh editor, so its undo history is lost; nothing typed while the
+ * editor was read-only after a content error was ever accepted, so there is nothing else to lose.
+ */
+const reloads = ref(0);
 
 onMounted(async () => {
   info.value = await getAppInfo();
@@ -76,12 +80,50 @@ async function onRestore(): Promise<void> {
   if (!restorePath.value.trim()) return;
   try {
     const r = await restoreBackup(restorePath.value.trim());
+    // The restore replaced storage, so the open session's in-memory docs are stale: close them
+    // (stops the structure observer and unmounts the editor) so nothing can write them back.
+    closeSession();
     backupStatus.value = `Restored. Previous state saved: ${r.preRestoreSnapshot}`;
     tokensNotice.value = r.tokensRevoked > 0 ? r.tokensRevoked : null;
   } catch (e) {
     backupStatus.value = `Restore failed: ${String(e)}`;
   }
 }
+onBeforeUnmount(() => session.value?.close());
+
+/** Close the open manuscript, if any, and clear the selection. */
+function closeSession() {
+  session.value?.close();
+  session.value = null;
+  selectedId.value = undefined;
+}
+
+/** Open an imported manuscript (exposed for tests and the Tauri open-file flow). */
+function open(next: ManuscriptSession) {
+  session.value?.close();
+  session.value = next;
+  selectedId.value = next.outline.value.find((s) => s.kind === 'chapter')?.id;
+}
+
+async function onFile(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  if (!file) return;
+  openError.value = '';
+  try {
+    open(sessionFromDocx(new Uint8Array(await file.arrayBuffer()), crypto.randomUUID()));
+  } catch (err) {
+    openError.value = `Could not import ${file.name}: ${(err as Error).message}`;
+  }
+}
+
+const selected = computed(() =>
+  session.value?.outline.value.find((s) => s.id === selectedId.value),
+);
+const selectedDoc = computed(() =>
+  selected.value ? session.value?.sections.get(selected.value.docId) : undefined,
+);
+
+defineExpose({ open });
 </script>
 
 <template>
@@ -144,13 +186,27 @@ async function onRestore(): Promise<void> {
     </section>
     <p v-else data-test="browser-mode">Running in browser mode (no desktop backend).</p>
     <AgentsSettings v-if="info" />
-    <SectionNav
-      v-model:sections="sections"
-      :manuscript-id="SAMPLE_MANUSCRIPT_ID"
-      :selected-id="selectedId"
-      @select="selectedId = $event"
-    />
-    <ManuscriptEditor :key="editorKey" :content="SAMPLE_DOC" @reload="editorKey++" />
+    <label>
+      Import .docx
+      <input data-test="open-docx" type="file" accept=".docx" @change="onFile" />
+    </label>
+    <p v-if="openError" role="alert" data-test="open-error">{{ openError }}</p>
+    <p v-if="!session" data-test="no-manuscript">Import a manuscript to see its outline.</p>
+    <div v-else class="workspace">
+      <SectionNav
+        :sections="session.outline.value"
+        :manuscript-id="session.id"
+        :selected-id="selectedId"
+        :save="session.save"
+        @select="selectedId = $event"
+      />
+      <ManuscriptEditor
+        v-if="selectedDoc"
+        :key="`${selected!.docId}#${reloads}`"
+        :doc="selectedDoc"
+        @reload="reloads++"
+      />
+    </div>
   </main>
 </template>
 
@@ -161,5 +217,10 @@ body {
 }
 .shell {
   padding: 2rem;
+}
+.workspace {
+  display: grid;
+  grid-template-columns: 18rem 1fr;
+  gap: 1rem;
 }
 </style>
