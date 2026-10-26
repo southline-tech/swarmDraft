@@ -259,6 +259,29 @@ describe('App', () => {
     w.unmount();
   });
 
+  it('deleting the open section opens the fallback section, never the deleted doc', async () => {
+    const { w, session } = await withManuscript();
+    const chapters = readStructure(session.manuscript).filter((s) => s.kind === 'chapter');
+    const second = chapters[1]!;
+    await w.find(`[data-test="section-${second.id}"]`).trigger('click');
+    await settle();
+    await w.find('[data-test="delete"]').trigger('click');
+    await w.find('[data-test="confirm-delete-all"]').trigger('click');
+    await settle();
+    expect(readStructure(session.manuscript).some((s) => s.id === second.id)).toBe(false);
+    expect(session.sections.has(second.docId)).toBe(false);
+    const nav = w.findComponent({ name: 'SectionNav' });
+    const selected = nav.props('selectedId') as string;
+    expect(selected).not.toBe(second.id);
+    expect(readStructure(session.manuscript).some((s) => s.id === selected)).toBe(true);
+    // The editor shows the fallback section's own doc.
+    const fallback = readStructure(session.manuscript).find((s) => s.id === selected)!;
+    expect(w.findComponent({ name: 'ManuscriptEditor' }).props('doc')).toStrictEqual(
+      session.sections.get(fallback.docId),
+    );
+    w.unmount();
+  });
+
   it('reflects structure changes made by another writer', async () => {
     const { w, session, titles } = await withManuscript();
     const peer = new Y.Doc();
@@ -387,12 +410,25 @@ describe('App saves typing to the section Y.Doc', () => {
     (w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }).editor;
   const chaptersOf = (session: ReturnType<typeof sessionFromDocx>) =>
     session.outline.value.filter((s) => s.kind === 'chapter');
+  /** The section the app opened (the first chapter's first scene for this fixture). */
+  const openedOf = (w: ReturnType<typeof mount>, session: ReturnType<typeof sessionFromDocx>) => {
+    const id = w.findComponent({ name: 'SectionNav' }).props('selectedId') as string;
+    return session.outline.value.find((s) => s.id === id)!;
+  };
+
+  it("opens on the first body text: the first chapter's first scene", async () => {
+    const { w, session } = await withManuscript();
+    const opened = openedOf(w, session);
+    expect(opened.kind).toBe('scene');
+    expect(opened.parentId).toBe(chaptersOf(session)[0]!.id);
+    w.unmount();
+  });
 
   it('keeps typed text after Reload', async () => {
     const { w, session } = await withManuscript();
     editorOf(w).commands.insertContentAt(1, 'TYPEDONE ');
     await settle();
-    const docId = chaptersOf(session)[0]!.docId;
+    const docId = openedOf(w, session).docId;
     expect(JSON.stringify(yDocToDoc(session.sections.get(docId)!))).toContain('TYPEDONE');
     w.findComponent({ name: 'ManuscriptEditor' }).vm.$emit('reload');
     await settle();
@@ -402,7 +438,8 @@ describe('App saves typing to the section Y.Doc', () => {
 
   it('keeps typed text after switching to another section and back', async () => {
     const { w, session } = await withManuscript();
-    const [first, second] = chaptersOf(session);
+    const first = openedOf(w, session);
+    const second = chaptersOf(session)[1];
     editorOf(w).commands.insertContentAt(1, 'TYPEDTWO ');
     await settle();
     await w.find(`[data-test="section-${second!.id}"]`).trigger('click');
@@ -571,9 +608,71 @@ describe('restore confirmation', () => {
     vi.mocked(backend.persistImport).mockResolvedValueOnce(bad);
     vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(imported);
     await chooseFile(w);
-    expect(w.text()).toContain('Could not import synthetic.docx');
     expect(w.find('[contenteditable="true"]').exists()).toBe(true); // the import, reopened
+    // The import is open, so no stale "Could not import" error stays on screen (#25 QA).
+    expect(w.find('[data-test="open-error"]').exists()).toBe(false);
     expect(w.find('[data-test="fatal-error"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('still reports the import when the retry reopens the original manuscript', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(storedFixture());
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    const bad = storedFixture();
+    bad.sections[0]!.state = [255, 255, 255];
+    vi.mocked(backend.persistImport).mockResolvedValueOnce(bad);
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(storedFixture()); // same id
+    await chooseFile(w);
+    expect(w.find('[data-test="open-error"]').text()).toContain('Could not import synthetic.docx');
+    w.unmount();
+  });
+
+  it('clears the restart banner once a later import opens', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const backend = await import('./backend');
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(storedFixture());
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    vi.mocked(backend.persistImport).mockRejectedValueOnce('database is locked');
+    vi.mocked(backend.openLatestManuscript).mockReset().mockRejectedValue('database is locked');
+    const picked = chooseFile(w);
+    await vi.advanceTimersByTimeAsync(5000);
+    await picked;
+    await settle();
+    expect(w.find('[data-test="fatal-error"]').exists()).toBe(true);
+    vi.useRealTimers();
+    vi.mocked(backend.openLatestManuscript).mockReset().mockResolvedValue(null);
+    await chooseFile(w); // the database is back
+    expect(w.find('[contenteditable="true"]').exists()).toBe(true);
+    expect(w.find('[data-test="fatal-error"]').exists()).toBe(false);
+    expect(w.find('[data-test="open-error"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('opens a chapter with the cursor in its first body paragraph, not the heading', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(storedFixture());
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    await new Promise((r) => setTimeout(r, 0));
+    const ed = w.findComponent({ name: 'ManuscriptEditor' }).vm as unknown as {
+      $: {
+        setupState: {
+          editor: {
+            state: {
+              selection: {
+                $from: { parent: { type: { name: string }; attrs: Record<string, unknown> } };
+              };
+            };
+          };
+        };
+      };
+    };
+    const parent = ed.$.setupState.editor.state.selection.$from.parent;
+    expect(parent.type.name).toBe('paragraph');
+    expect(parent.attrs.style ?? 'body').not.toBe('heading');
     w.unmount();
   });
 

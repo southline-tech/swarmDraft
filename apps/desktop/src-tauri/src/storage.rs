@@ -110,6 +110,9 @@ const MIGRATIONS: &[&str] = &[
      );",
 ];
 
+/// How long a statement waits on a locked database before failing.
+pub const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
+
 #[derive(Clone)]
 pub struct Store {
     dir: PathBuf,
@@ -124,6 +127,9 @@ impl Store {
         std::fs::create_dir_all(dir)?;
         let mut conn = Connection::open(dir.join("coauthor.db"))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        // Fail fast when another process holds the database: a locked file used to stall each
+        // call ~5 s (rusqlite's default) and the UI's retries added up to tens of seconds.
+        conn.busy_timeout(BUSY_TIMEOUT)?;
         migrate(&mut conn)?;
         Ok(Self {
             dir: dir.to_path_buf(),
