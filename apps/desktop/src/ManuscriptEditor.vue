@@ -7,7 +7,7 @@
  * (`collaborativeEditorOptions`): every edit is written to the doc as it is typed, and changes
  * from other writers are content-checked before they apply. `content` opens an unbound snapshot.
  */
-import { computed, onBeforeUnmount, shallowRef, watch } from 'vue';
+import { computed, onBeforeUnmount, shallowRef, toRaw, watch } from 'vue';
 import { EditorContent, useEditor } from '@tiptap/vue-3';
 import type { EditorOptions, JSONContent } from '@tiptap/core';
 import type * as Y from 'yjs';
@@ -21,7 +21,12 @@ import {
   type ReviewItem,
 } from '@coauthor/editor';
 
-const props = defineProps<{ doc?: Y.Doc; content?: JSONContent }>();
+const props = defineProps<{
+  /** The section's Y.Doc to bind to. When set it wins and `content` is ignored. */
+  doc?: Y.Doc;
+  /** An unbound snapshot, used only when `doc` is not set. */
+  content?: JSONContent;
+}>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{ change: [doc: JSONContent]; reload: [] }>();
 
@@ -39,9 +44,12 @@ const options: Partial<EditorOptions> = {
     emit('change', editor.getJSON());
   },
 };
+// Bind to the raw Y.Doc. A prop can arrive as a Vue reactive proxy (e.g. when the parent's props
+// are reactive), and y-sync then registers its observers through the proxy: Yjs reports remote
+// changes on the raw types, the identity checks miss, and the view never updates.
 const editor = useEditor(
   props.doc
-    ? collaborativeEditorOptions(props.doc, options)
+    ? collaborativeEditorOptions(toRaw(props.doc), options)
     : manuscriptEditorOptions({ ...options, content: props.content }),
 );
 watch(editor, (e) => {
