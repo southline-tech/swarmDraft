@@ -17,6 +17,7 @@ import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
 import HomeScreen from './HomeScreen.vue';
 import { flushOnClose } from './close-flush';
+import { outlineDocs, sectionTreeDocs } from './status/wordcount';
 import {
   importAndOpen,
   reopenLatest,
@@ -458,6 +459,7 @@ defineExpose({ open });
       <SectionNav
         v-show="navigatorOpen"
         id="chapter-navigator"
+        class="min-h-0 overflow-auto"
         :sections="session.outline.value"
         :manuscript-id="session.id"
         :selected-id="selectedId"
@@ -470,6 +472,10 @@ defineExpose({ open });
         :doc="selectedDoc"
         :readonly="session.closed"
         :navigator-open="navigatorOpen"
+        :chapter-title="selected!.title"
+        :book-docs="outlineDocs(session.outline.value, session.sections)"
+        :chapter-docs="sectionTreeDocs(session.outline.value, selectedId, session.sections)"
+        :save-state="saveError ? 'offline' : undefined"
         @reload="reloads++"
         @toggle-navigator="navigatorOpen = !navigatorOpen"
       />
@@ -482,9 +488,18 @@ body {
   margin: 0;
 }
 .shell {
+  /* One window-height column: the content ends above the fixed status bar (h-7 = 1.75rem) and
+     the chapter list and editor scroll inside it, so the bar never covers either. */
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: auto;
+  padding-bottom: 1.75rem;
+}
+.shell > .workspace {
+  flex: 1 0 20rem;
+  min-height: 0;
 }
 .topbar {
   display: flex;
