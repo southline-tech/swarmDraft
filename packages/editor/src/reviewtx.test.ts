@@ -159,6 +159,42 @@ describe('review decision transaction', () => {
   });
 });
 
+// Matches any module specifier ending in /trusted or /reviewtx (optionally with an extension).
+const TRUSTED_SPEC = String.raw`['"\`][^'"\`]*\/(?:trusted|reviewtx)(?:\.[cm]?[jt]sx?)?['"\`]`;
+const TRUSTED_PATTERNS = [
+  new RegExp(String.raw`\bfrom\s*` + TRUSTED_SPEC), // import/export ... from
+  new RegExp(String.raw`\bimport\s*` + TRUSTED_SPEC), // bare side-effect import
+  new RegExp(String.raw`\bimport\s*\(\s*` + TRUSTED_SPEC), // dynamic import()
+  new RegExp(String.raw`\brequire\s*\(\s*` + TRUSTED_SPEC), // require()
+];
+function importsTrusted(src: string): boolean {
+  // Drop comments so prose mentioning the module path is not flagged.
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/.*$/gm, '$1');
+  return TRUSTED_PATTERNS.some((re) => re.test(code));
+}
+
+describe('trusted import scanner', () => {
+  const planted: Record<string, string> = {
+    'import from': "import { applyReviewDecision } from '@coauthor/editor/trusted';",
+    'multiline import': "import {\n  applyReviewDecision,\n} from '../editor/src/reviewtx';",
+    require: "const t = require('@coauthor/editor/trusted');",
+    'dynamic import': "const t = await import('@coauthor/editor/trusted');",
+    'bare import': "import '@coauthor/editor/trusted';",
+    'export from': "export { applyReviewDecision } from '../editor/src/trusted.ts';",
+    'export star': "export * from '../../packages/editor/src/trusted';",
+  };
+  for (const [form, src] of Object.entries(planted))
+    it(`flags ${form}`, () => expect(importsTrusted(src)).toBe(true));
+  it('ignores comments mentioning the path', () => {
+    expect(
+      importsTrusted('/** import it from `@coauthor/editor/trusted` */\n// require("x/trusted")'),
+    ).toBe(false);
+  });
+  it('ignores unrelated imports', () => {
+    expect(importsTrusted("import { x } from '@coauthor/editor';\nconst trusted = 1;")).toBe(false);
+  });
+});
+
 describe('agent path cannot reach the port', () => {
   it('is not exported from the package root', () => {
     for (const name of ['applyReviewDecision', 'buildReviewTransaction', 'allowReviewEdits'])
@@ -173,10 +209,9 @@ describe('agent path cannot reach the port', () => {
         if (['node_modules', 'dist', 'target', '.git'].includes(f)) continue;
         const p = join(dir, f);
         if (statSync(p).isDirectory()) walk(p);
-        else if (/\.(ts|vue|js|mjs)$/.test(f)) {
+        else if (/\.(ts|tsx|cts|mts|vue|js|mjs|cjs)$/.test(f)) {
           const src = readFileSync(p, 'utf8');
-          if (/^\s*(import|export)[^;]*from\s+['"][^'"]*(\/trusted|\/reviewtx)['"]/m.test(src))
-            hits.push(relative(repo, p));
+          if (importsTrusted(src)) hits.push(relative(repo, p));
         }
       }
     };
