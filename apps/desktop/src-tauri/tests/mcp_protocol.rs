@@ -352,6 +352,80 @@ async fn per_token_rate_limit() {
 }
 
 #[tokio::test]
+async fn bearer_scheme_is_case_insensitive() {
+    let s = start(&["read"], 1000).await;
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}});
+    for scheme in ["bearer", "BEARER", "Bearer"] {
+        let r = reqwest::Client::new()
+            .post(&s.url)
+            .header("authorization", format!("{scheme} {}", s.token))
+            .header("accept", "application/json, text/event-stream")
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200, "{scheme}");
+    }
+}
+
+#[tokio::test]
+async fn spent_budget_stops_wrong_token_lookups_but_not_the_agent() {
+    let s = start_with(&["read"], |c| c.auth_failures_global = 3).await;
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}});
+    // The agent has authenticated before, so its token is known.
+    assert_eq!(
+        post(&s.url, Some(&s.token), body.clone()).await.status(),
+        200
+    );
+    for _ in 0..3 {
+        assert_eq!(
+            post(&s.url, Some("cat_wrong"), body.clone()).await.status(),
+            401
+        );
+    }
+    let before = lookups(&s);
+    let flood: Vec<_> = (0..50)
+        .map(|i| {
+            let url = s.url.clone();
+            let body = body.clone();
+            tokio::spawn(async move {
+                post(&url, Some(&format!("cat_wrong{i}")), body)
+                    .await
+                    .status()
+            })
+        })
+        .collect();
+    for h in flood {
+        assert_eq!(h.await.unwrap(), 429);
+    }
+    let probed = lookups(&s) - before;
+    assert!(
+        probed < 50,
+        "only single probes reach the database, got {probed}"
+    );
+    assert_eq!(post(&s.url, Some(&s.token), body).await.status(), 200);
+}
+
+#[tokio::test]
+async fn in_flight_cap_queues_rather_than_fails() {
+    let s = start_with(&["read"], |c| {
+        c.max_in_flight = 2;
+        c.max_lookups = 1;
+    })
+    .await;
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}});
+    let reqs: Vec<_> = (0..20)
+        .map(|_| {
+            let (url, token, body) = (s.url.clone(), s.token.clone(), body.clone());
+            tokio::spawn(async move { post(&url, Some(&token), body).await.status() })
+        })
+        .collect();
+    for h in reqs {
+        assert_eq!(h.await.unwrap(), 200);
+    }
+}
+
+#[tokio::test]
 async fn auth_failures_look_identical() {
     let floor = std::time::Duration::from_millis(150);
     let s = start_with(&["read"], |c| c.auth_failure_floor = floor).await;

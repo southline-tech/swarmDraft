@@ -258,7 +258,8 @@ impl Store {
     }
 
     /// Resolve a presented bearer token to its agent. Returns `None` for unknown, revoked, or
-    /// malformed tokens, or tokens whose agent is revoked. Updates `last_used_at`.
+    /// malformed tokens, or tokens whose agent is revoked. Updates `last_used_at` when it is more
+    /// than a minute old, ignoring write errors.
     pub fn authenticate(&self, token: &str) -> Result<Option<AgentPrincipal>, StorageError> {
         if !token.starts_with(TOKEN_PREFIX) || token.len() > 128 {
             return Ok(None);
@@ -284,10 +285,15 @@ impl Store {
                 )
                 .optional()?;
             if let Some(p) = &p {
-                c.execute(
-                    &format!("UPDATE agent_tokens SET last_used_at = {NOW} WHERE id = ?1"),
+                // Best effort and at most once a minute: a failed write must not fail auth.
+                let _ = c.execute(
+                    &format!(
+                        "UPDATE agent_tokens SET last_used_at = {NOW} WHERE id = ?1
+                         AND (last_used_at IS NULL
+                              OR last_used_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-60 seconds'))"
+                    ),
                     [&p.token_id],
-                )?;
+                );
             }
             Ok(p)
         })
@@ -337,6 +343,35 @@ mod tests {
         for buf in [&bytes, &wal] {
             assert!(!buf.windows(needle.len()).any(|w| w == needle));
         }
+    }
+
+    #[test]
+    fn failed_last_used_write_does_not_fail_auth() {
+        let (_t, s) = store();
+        let a = s.create_agent("Grok Bot", "#3366ff").unwrap();
+        let t = s.create_token(&a.id, Some(&["read".into()])).unwrap();
+        s.with_conn(|c| {
+            c.execute_batch(
+                "CREATE TRIGGER no_touch BEFORE UPDATE OF last_used_at ON agent_tokens
+                 BEGIN SELECT RAISE(ABORT, 'read-only'); END;",
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        assert!(s.authenticate(&t.token).unwrap().is_some());
+        assert!(s.list_tokens(&a.id).unwrap()[0].last_used_at.is_none());
+    }
+
+    #[test]
+    fn last_used_is_written_at_most_once_a_minute() {
+        let (_t, s) = store();
+        let a = s.create_agent("Grok Bot", "#3366ff").unwrap();
+        let t = s.create_token(&a.id, Some(&["read".into()])).unwrap();
+        s.authenticate(&t.token).unwrap().unwrap();
+        let first = s.list_tokens(&a.id).unwrap()[0].last_used_at.clone();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        s.authenticate(&t.token).unwrap().unwrap();
+        assert_eq!(s.list_tokens(&a.id).unwrap()[0].last_used_at, first);
     }
 
     #[test]

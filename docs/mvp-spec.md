@@ -165,9 +165,11 @@ exactly `127.0.0.1`, `localhost` or `[::1]` plus its port (DNS-rebinding guard).
 with an `Origin` header gets 403, so browser-based clients (web pages, browser extensions using
 fetch) cannot connect; agents connect from a local process. Missing, malformed, unknown and
 revoked tokens all get the same 401 (`WWW-Authenticate: Bearer`) after the same minimum delay.
-Wrong tokens count toward a global throttle (429); requests without a token do not, and a valid
-token is checked first so it is never throttled by others' failures. Each valid token is rate
-limited. `list_chapters` / `read_chapter` return every section kind (front
+Wrong tokens count toward a global throttle (429); requests without a token do not. Once the
+wrong-token budget is spent, only tokens that authenticated before (plus one probe at a time for
+others) are looked up, so a valid token keeps working. Token lookups are capped at 4 at a time and
+authenticated requests at 64 in flight (extra requests wait). The `Bearer` scheme is matched
+case-insensitively, and each valid token is rate limited. `list_chapters` / `read_chapter` return every section kind (front
 matter, parts, chapters, scenes, back matter), not only chapters.
 
 ## 9. Export requirements (KDP)
