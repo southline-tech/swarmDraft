@@ -4,7 +4,7 @@
  * undo, redo | paragraph style | B, I, U | align | comment, overflow | Find | review toggle.
  * Formatting runs through Tiptap commands (./toolbar). Colors come only from --ct-* tokens.
  */
-import { computed, onBeforeUnmount, ref, shallowRef, toRaw, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, toRaw, watch } from 'vue';
 import type { Editor } from '@tiptap/core';
 import {
   SHORTCUTS,
@@ -21,15 +21,15 @@ import {
 const props = withDefaults(
   defineProps<{
     editor: Editor;
-    navigatorOpen?: boolean;
     reviewOpen?: boolean;
     /** Comments and Find land in later issues (RAD-257/259); until wired they show disabled. */
     commentEnabled?: boolean;
     findEnabled?: boolean;
   }>(),
-  { navigatorOpen: true, reviewOpen: true, commentEnabled: false, findEnabled: false },
+  { reviewOpen: true, commentEnabled: false, findEnabled: false },
 );
 const emit = defineEmits<{
+  /** Reserved: the Chapters toggle is a 'coming soon' no-op until App.vue wires it (after #25). */
   'toggle-navigator': [];
   'toggle-review': [];
   comment: [];
@@ -42,18 +42,46 @@ const ed = () => toRaw(props.editor);
 // Recompute on every transaction so active states follow the caret.
 const tick = ref(0);
 const bump = () => tick.value++;
+// setEditable() dispatches no transaction (and may skip 'update'), so also watch the DOM's
+// contenteditable attribute to follow read-only changes (load error, RAD-237 restore lock).
+let observer: MutationObserver | undefined;
+function observeEditable(e: Editor) {
+  observer?.disconnect();
+  let dom: HTMLElement | undefined;
+  try {
+    dom = e.view.dom;
+  } catch {
+    return; // not mounted yet; retried on 'create'
+  }
+  if (typeof MutationObserver === 'undefined') return;
+  observer = new MutationObserver(bump);
+  observer.observe(dom, { attributes: true, attributeFilter: ['contenteditable'] });
+}
+function listen(e: Editor | undefined, on: boolean) {
+  if (!e) return;
+  for (const ev of ['transaction', 'update'] as const) (on ? e.on : e.off).call(e, ev, bump);
+}
 watch(
   () => ed(),
   (e, old) => {
-    old?.off('transaction', bump);
-    e.on('transaction', bump);
+    listen(old, false);
+    listen(e, true);
+    observeEditable(e);
+    if (!e.isInitialized) e.once('create', () => observeEditable(e));
+    bump();
   },
   { immediate: true },
 );
-onBeforeUnmount(() => ed().off('transaction', bump));
+onBeforeUnmount(() => {
+  listen(ed(), false);
+  observer?.disconnect();
+});
+/** False when the editor is read-only: every formatting control is then disabled. */
+const editable = computed(() => state.value.editable);
 const state = computed(() => (tick.value, toolbarState(ed())));
 
 function run(cmd: ToolbarCommand) {
+  if (!ed().isEditable) return;
   runCommand(ed(), cmd);
   bump();
 }
@@ -67,29 +95,25 @@ function onStyle(ev: Event) {
   run(`style:${(ev.target as HTMLSelectElement).value}` as ToolbarCommand);
 }
 
-const ALIGNS: { id: Align; label: string; key: string; path: string }[] = [
+const ALIGNS: { id: Align; label: string; path: string }[] = [
   {
     id: 'left',
     label: 'Align left',
-    key: SHORTCUTS.alignLeft,
     path: 'M3 4h10M3 7h6M3 10h10M3 13h6',
   },
   {
     id: 'center',
     label: 'Center',
-    key: SHORTCUTS.alignCenter,
     path: 'M3 4h10M5 7h6M3 10h10M5 13h6',
   },
   {
     id: 'right',
     label: 'Align right',
-    key: SHORTCUTS.alignRight,
     path: 'M3 4h10M7 7h6M3 10h10M7 13h6',
   },
   {
     id: 'justify',
     label: 'Justify',
-    key: SHORTCUTS.alignJustify,
     path: 'M3 4h10M3 7h10M3 10h10M3 13h10',
   },
 ];
@@ -105,19 +129,51 @@ const OVERFLOW: { cmd: ToolbarCommand; label: string; active?: 'smallcaps' | 'st
   { cmd: 'style:verse', label: 'Verse' },
   { cmd: 'pageBreak', label: 'Insert page break' },
 ];
-function toggleMenu() {
-  menuOpen.value = !menuOpen.value;
-  if (menuOpen.value)
-    requestAnimationFrame(() => menuEl.value?.querySelector<HTMLElement>('button')?.focus());
+const moreBtn = shallowRef<HTMLButtonElement | null>(null);
+const wrapEl = shallowRef<HTMLElement | null>(null);
+const items = () => [...(menuEl.value?.querySelectorAll<HTMLElement>('[role^="menuitem"]') ?? [])];
+function focusItem(i: number) {
+  const list = items();
+  if (list.length) list[(i + list.length) % list.length]!.focus();
 }
-function pick(cmd: ToolbarCommand) {
+function onOutside(ev: PointerEvent) {
+  if (!wrapEl.value?.contains(ev.target as Node)) closeMenu(false);
+}
+function openMenu() {
+  menuOpen.value = true;
+  document.addEventListener('pointerdown', onOutside, true);
+  void nextTick(() => focusItem(0));
+}
+function closeMenu(refocus = true) {
+  if (!menuOpen.value) return;
   menuOpen.value = false;
+  document.removeEventListener('pointerdown', onOutside, true);
+  if (refocus) moreBtn.value?.focus();
+}
+function toggleMenu() {
+  if (menuOpen.value) closeMenu();
+  else openMenu();
+}
+function onMenuKey(ev: KeyboardEvent) {
+  const list = items();
+  const i = list.indexOf(document.activeElement as HTMLElement);
+  const to: Record<string, number> = { ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: -1 };
+  if (ev.key in to) {
+    ev.preventDefault();
+    focusItem(to[ev.key]!);
+  }
+}
+onBeforeUnmount(() => document.removeEventListener('pointerdown', onOutside, true));
+function pick(cmd: ToolbarCommand) {
+  closeMenu();
   run(cmd);
 }
 
 const tip = (label: string, key?: string) => (key ? `${label} (${key})` : label);
+const SOON = 'coming soon';
+const soon = (label: string, key?: string) => `${tip(label, key)} — ${SOON}`;
 const btn =
-  'inline-flex h-7.5 min-w-7.5 items-center justify-center gap-1.5 rounded-sm border-0 bg-transparent px-1.75 font-ui text-[13px] font-medium text-text cursor-pointer hover:bg-selected disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent aria-pressed:bg-selected aria-pressed:text-accent';
+  'inline-flex h-7.5 min-w-7.5 items-center justify-center gap-1.5 rounded-sm border-0 bg-transparent px-1.75 font-ui text-[13px] font-medium text-text cursor-pointer hover:bg-selected disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent aria-pressed:bg-selected aria-pressed:text-accent';
 </script>
 
 <template>
@@ -131,11 +187,10 @@ const btn =
       type="button"
       data-test="tb-navigator"
       :class="btn"
-      :aria-pressed="props.navigatorOpen"
       aria-label="Chapters"
-      :aria-keyshortcuts="'Control+\\'"
-      :title="tip('Chapters', SHORTCUTS.navigator)"
-      @click="emit('toggle-navigator')"
+      aria-disabled="true"
+      :aria-description="SOON"
+      :title="soon('Chapters')"
     >
       <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
         <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
@@ -149,9 +204,9 @@ const btn =
       data-test="tb-undo"
       :class="btn"
       aria-label="Undo"
-      aria-keyshortcuts="Control+Z"
-      :title="tip('Undo', SHORTCUTS.undo)"
-      :disabled="!state.canUndo"
+      :aria-keyshortcuts="state.hasHistory ? 'Control+Z' : undefined"
+      :title="tip('Undo', state.hasHistory ? SHORTCUTS.undo : undefined)"
+      :disabled="!editable || !state.canUndo"
       @click="run('undo')"
     >
       <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
@@ -164,9 +219,9 @@ const btn =
       data-test="tb-redo"
       :class="btn"
       aria-label="Redo"
-      aria-keyshortcuts="Control+Y"
-      :title="tip('Redo', SHORTCUTS.redo)"
-      :disabled="!state.canRedo"
+      :aria-keyshortcuts="state.hasHistory ? 'Control+Y' : undefined"
+      :title="tip('Redo', state.hasHistory ? SHORTCUTS.redo : undefined)"
+      :disabled="!editable || !state.canRedo"
       @click="run('redo')"
     >
       <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
@@ -179,7 +234,7 @@ const btn =
     <select
       data-test="paragraph-style"
       aria-label="Paragraph style"
-      :title="`Paragraph style (${SHORTCUTS.bodyText}, ${SHORTCUTS.heading}, ${SHORTCUTS.blockQuote})`"
+      title="Paragraph style"
       class="h-7.5 w-37 cursor-pointer rounded-sm border border-border bg-surface pr-2 pl-2.5 font-ui text-[13px] font-medium text-text disabled:opacity-40"
       :value="state.style"
       :disabled="!state.style || !state.editable"
@@ -192,11 +247,12 @@ const btn =
     <button
       type="button"
       data-test="tb-bold"
-      :class="[btn, 'font-manuscript font-bold']"
+      :class="[btn, 'font-manuscript! font-bold']"
       :aria-pressed="state.bold"
       aria-label="Bold"
       aria-keyshortcuts="Control+B"
       :title="tip('Bold', SHORTCUTS.bold)"
+      :disabled="!editable"
       @click="run('bold')"
     >
       B
@@ -204,11 +260,12 @@ const btn =
     <button
       type="button"
       data-test="tb-italic"
-      :class="[btn, 'font-manuscript italic']"
+      :class="[btn, 'font-manuscript! italic']"
       :aria-pressed="state.italic"
       aria-label="Italic"
       aria-keyshortcuts="Control+I"
       :title="tip('Italic', SHORTCUTS.italic)"
+      :disabled="!editable"
       @click="run('italic')"
     >
       I
@@ -221,6 +278,7 @@ const btn =
       aria-label="Underline"
       aria-keyshortcuts="Control+U"
       :title="tip('Underline', SHORTCUTS.underline)"
+      :disabled="!editable"
       @click="run('underline')"
     >
       U
@@ -235,13 +293,11 @@ const btn =
       :class="btn"
       :aria-pressed="state.align === a.id"
       :aria-label="a.label"
-      :title="
-        SUPPORTED_ALIGN.includes(a.id)
-          ? tip(a.label, a.key)
-          : `${tip(a.label, a.key)}: not available yet`
-      "
-      :disabled="!SUPPORTED_ALIGN.includes(a.id)"
-      @click="run(`align:${a.id}`)"
+      :title="SUPPORTED_ALIGN.includes(a.id) ? a.label : soon(a.label)"
+      :aria-disabled="SUPPORTED_ALIGN.includes(a.id) ? undefined : 'true'"
+      :aria-description="SUPPORTED_ALIGN.includes(a.id) ? undefined : SOON"
+      :disabled="SUPPORTED_ALIGN.includes(a.id) && !editable"
+      @click="SUPPORTED_ALIGN.includes(a.id) && run(`align:${a.id}`)"
     >
       <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true"><path :d="a.path" /></svg>
     </button>
@@ -252,10 +308,10 @@ const btn =
       data-test="tb-comment"
       :class="btn"
       aria-label="Add comment"
-      aria-keyshortcuts="Control+Alt+M"
-      :title="tip('Add comment', SHORTCUTS.comment)"
-      :disabled="!props.commentEnabled"
-      @click="emit('comment')"
+      :title="props.commentEnabled ? 'Add comment' : soon('Add comment')"
+      :aria-disabled="props.commentEnabled ? undefined : 'true'"
+      :aria-description="props.commentEnabled ? undefined : SOON"
+      @click="props.commentEnabled && emit('comment')"
     >
       <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
         <path
@@ -263,8 +319,9 @@ const btn =
         />
       </svg>
     </button>
-    <div class="relative" @keydown.esc="menuOpen = false">
+    <div ref="wrapEl" class="relative" @keydown.esc="closeMenu()">
       <button
+        ref="moreBtn"
         type="button"
         data-test="tb-overflow"
         :class="btn"
@@ -287,15 +344,18 @@ const btn =
         aria-label="More formatting"
         data-test="tb-overflow-menu"
         class="absolute top-9 left-0 z-10 w-56 rounded-md border border-border bg-surface p-1.5 shadow-3"
+        @keydown="onMenuKey"
       >
         <button
           v-for="o in OVERFLOW"
           :key="o.cmd"
           type="button"
-          role="menuitem"
+          :role="o.active ? 'menuitemcheckbox' : 'menuitem'"
+          tabindex="-1"
+          :disabled="!editable"
           :data-test="`tb-menu-${o.cmd.replace(':', '-')}`"
           :aria-checked="o.active ? state[o.active] : undefined"
-          class="flex h-7.5 w-full cursor-pointer items-center rounded-sm border-0 bg-transparent px-2.5 text-left font-ui text-[13px] text-text hover:bg-selected hover:text-accent"
+          class="flex h-7.5 w-full cursor-pointer items-center rounded-sm border-0 bg-transparent px-2.5 text-left font-ui text-[13px] text-text hover:bg-selected hover:text-accent focus:bg-selected disabled:cursor-default disabled:opacity-40"
           :class="o.active && state[o.active] ? 'bg-selected text-accent' : ''"
           @click="pick(o.cmd)"
         >
@@ -310,10 +370,10 @@ const btn =
       data-test="tb-find"
       :class="[btn, 'px-2.5']"
       aria-label="Find"
-      aria-keyshortcuts="Control+F"
-      :title="tip('Find', SHORTCUTS.find)"
-      :disabled="!props.findEnabled"
-      @click="emit('find')"
+      :title="props.findEnabled ? 'Find' : soon('Find')"
+      :aria-disabled="props.findEnabled ? undefined : 'true'"
+      :aria-description="props.findEnabled ? undefined : SOON"
+      @click="props.findEnabled && emit('find')"
     >
       <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
         <circle cx="7" cy="7" r="3.8" />
@@ -328,7 +388,7 @@ const btn =
       :class="btn"
       :aria-pressed="props.reviewOpen"
       aria-label="Review panel"
-      :title="tip('Review panel', SHORTCUTS.review)"
+      :title="'Review panel'"
       @click="emit('toggle-review')"
     >
       <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">

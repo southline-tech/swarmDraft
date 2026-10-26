@@ -105,6 +105,66 @@ describe('toolbar state', () => {
 });
 
 describe('toolbar commands', () => {
+  it('keeps suggestion marks and their attrs when formatting suggested text', () => {
+    const by = { author: 'agent:sample', ts: '2026-10-25T00:00:00Z' };
+    const ins = { type: 'suggestion_insert', attrs: { id: 's1', ...by } };
+    const del = { type: 'suggestion_delete', attrs: { id: 's1', ...by } };
+    const e = make({
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          attrs: { style: 'body' },
+          content: [
+            { type: 'text', text: 'The ' },
+            { type: 'text', marks: [del], text: 'grey' },
+            { type: 'text', marks: [ins], text: 'silver' },
+            { type: 'text', text: ' kettle.' },
+          ],
+        },
+      ],
+    });
+    const marksOf = (text: string) => {
+      const found: { type: string; attrs: Record<string, unknown> }[] = [];
+      e.state.doc.descendants((n) => {
+        if (n.isText && n.text === text)
+          for (const m of n.marks) found.push({ type: m.type.name, attrs: { ...m.attrs } });
+      });
+      return found;
+    };
+    select(e, 'greysilver'.slice(0, 4));
+    const from = e.state.selection.from;
+    e.view.dispatch(
+      e.state.tr.setSelection(TextSelection.create(e.state.doc, from, from + 'greysilver'.length)),
+    );
+    expect(runCommand(e, 'bold')).toBe(true);
+    expect(runCommand(e, 'style:block_quote')).toBe(true);
+    expect(caretStyle(e)).toBe('block_quote');
+    const g = marksOf('grey');
+    const sv = marksOf('silver');
+    expect(g).toContainEqual(del);
+    expect(sv).toContainEqual(ins);
+    expect(g.map((m) => m.type)).toContain('bold');
+    expect(sv.map((m) => m.type)).toContain('bold');
+  });
+
+  it('never edits a read-only editor', () => {
+    const e = make();
+    select(e, 'plain');
+    e.setEditable(false, false);
+    const before = JSON.stringify(e.getJSON());
+    for (const c of [
+      'bold',
+      'italic',
+      'style:heading',
+      'style:scene_break',
+      'align:center',
+      'pageBreak',
+    ] as const)
+      expect(runCommand(e, c)).toBe(false);
+    expect(JSON.stringify(e.getJSON())).toBe(before);
+  });
+
   it('toggles bold, italic and underline on the selection', () => {
     const e = make();
     select(e, 'plain');
@@ -199,8 +259,10 @@ describe('EditorToolbar', () => {
       expect(b.attributes('title')).toBeTruthy();
     }
     expect(w.find('[data-test="tb-bold"]').attributes('title')).toBe(`Bold (${SHORTCUTS.bold})`);
-    expect(w.find('[data-test="tb-undo"]').attributes('title')).toBe('Undo (Ctrl+Z)');
-    expect(w.find('[data-test="tb-find"]').attributes('title')).toBe('Find (Ctrl+F)');
+    // Unbound editor: no history, so no Ctrl+Z/Ctrl+Y hint.
+    expect(w.find('[data-test="tb-undo"]').attributes('title')).toBe('Undo');
+    expect(w.find('[data-test="tb-undo"]').attributes('aria-keyshortcuts')).toBeUndefined();
+    expect(w.find('[data-test="tb-find"]').attributes('title')).toBe('Find — coming soon');
     w.unmount();
   });
 
@@ -233,7 +295,7 @@ describe('EditorToolbar', () => {
     expect(w.find('[data-test="tb-overflow-menu"]').exists()).toBe(false);
     await w.find('[data-test="tb-overflow"]').trigger('click');
     expect(w.find('[data-test="tb-overflow"]').attributes('aria-expanded')).toBe('true');
-    const items = w.findAll('[role="menuitem"]').map((i) => i.text());
+    const items = w.findAll('[role^="menuitem"]').map((i) => i.text());
     expect(items).toEqual([
       'Small caps',
       'Strikethrough',
@@ -248,15 +310,154 @@ describe('EditorToolbar', () => {
     w.unmount();
   });
 
-  it('emits the panel toggles and keeps unwired actions disabled', async () => {
+  it('emits the panel toggles; unbuilt actions are aria-disabled no-ops', async () => {
     const { w } = mountBar({ reviewOpen: false });
-    await w.find('[data-test="tb-navigator"]').trigger('click');
     await w.find('[data-test="tb-review"]').trigger('click');
-    expect(w.emitted('toggle-navigator')).toHaveLength(1);
     expect(w.emitted('toggle-review')).toHaveLength(1);
     expect(w.find('[data-test="tb-review"]').attributes('aria-pressed')).toBe('false');
-    expect(w.find('[data-test="tb-comment"]').attributes('disabled')).toBeDefined();
-    expect(w.find('[data-test="tb-find"]').attributes('disabled')).toBeDefined();
+    const nav = w.find('[data-test="tb-navigator"]');
+    expect(nav.attributes('aria-pressed')).toBeUndefined();
+    for (const id of [
+      'tb-navigator',
+      'tb-comment',
+      'tb-find',
+      'tb-align-right',
+      'tb-align-justify',
+    ]) {
+      const b = w.find(`[data-test="${id}"]`);
+      expect(b.attributes('disabled')).toBeUndefined(); // stays in the Tab order
+      expect(b.attributes('aria-disabled')).toBe('true');
+      expect(b.attributes('aria-description')).toBe('coming soon');
+      expect(b.attributes('title')).toMatch(/ — coming soon$/);
+      await b.trigger('click');
+    }
+    expect(w.find('[data-test="tb-comment"]').attributes('title')).toBe(
+      'Add comment — coming soon',
+    );
+    expect(w.emitted('toggle-navigator')).toBeUndefined();
+    expect(w.emitted('comment')).toBeUndefined();
+    expect(w.emitted('find')).toBeUndefined();
+    w.unmount();
+  });
+
+  it('advertises only shortcuts that are really bound', () => {
+    const { w } = mountBar();
+    const titles = w.findAll('[title]').map((el) => el.attributes('title')!);
+    const keys = w.findAll('[aria-keyshortcuts]').map((el) => el.attributes('aria-keyshortcuts'));
+    expect(keys).toEqual(['Control+B', 'Control+I', 'Control+U']);
+    for (const t of titles) expect(t).not.toMatch(/Ctrl\+(?:[LERJ\\FYZ]\b|Alt)/);
+    expect(w.find('[data-test="tb-align-left"]').attributes('title')).toBe('Align left');
+    w.unmount();
+  });
+
+  it('shows Ctrl+Z/Ctrl+Y only when the editor has undo history', () => {
+    const e = new Editor(
+      collaborativeEditorOptions(docToYDoc(structuredClone(DOC) as never), {
+        element: document.createElement('div'),
+      }),
+    );
+    editors.push(e);
+    const w = mount(EditorToolbar, { props: { editor: e } });
+    expect(w.find('[data-test="tb-undo"]').attributes('title')).toBe('Undo (Ctrl+Z)');
+    expect(w.find('[data-test="tb-redo"]').attributes('aria-keyshortcuts')).toBe('Control+Y');
+    w.unmount();
+  });
+
+  it('binds the advertised B/I/U keys in the editor', () => {
+    const e = make();
+    select(e, 'plain');
+    const press = (key: string) =>
+      e.view.someProp('handleKeyDown', (f) =>
+        f(e.view, new KeyboardEvent('keydown', { key, ctrlKey: true })),
+      );
+    press('b');
+    press('i');
+    press('u');
+    const s = toolbarState(e);
+    expect([s.bold, s.italic, s.underline]).toEqual([true, true, true]);
+  });
+
+  it('enables wired comment and find', async () => {
+    const { w } = mountBar({ commentEnabled: true, findEnabled: true });
+    await w.find('[data-test="tb-comment"]').trigger('click');
+    await w.find('[data-test="tb-find"]').trigger('click');
+    expect(w.emitted('comment')).toHaveLength(1);
+    expect(w.emitted('find')).toHaveLength(1);
+    expect(w.find('[data-test="tb-find"]').attributes('aria-disabled')).toBeUndefined();
+    w.unmount();
+  });
+
+  it('disables every formatting control when read-only, and follows editable changes', async () => {
+    const { e, w } = mountBar();
+    caretIn(e, 'plain');
+    await flushPromises();
+    const ids = ['tb-bold', 'tb-italic', 'tb-underline', 'tb-align-left', 'tb-align-center'];
+    const dis = (id: string) => w.find(`[data-test="${id}"]`).attributes('disabled') !== undefined;
+    expect(ids.some(dis)).toBe(false);
+    e.setEditable(false, false); // no 'update' emitted, like the load-error path
+    await flushPromises();
+    await new Promise((r) => setTimeout(r, 0));
+    for (const id of [...ids, 'tb-undo', 'tb-redo', 'paragraph-style']) expect(dis(id)).toBe(true);
+    await w.find('[data-test="tb-overflow"]').trigger('click');
+    for (const i of w.findAll('[role^="menuitem"]')) expect(i.attributes('disabled')).toBeDefined();
+    const before = JSON.stringify(e.getJSON());
+    select(e, 'plain');
+    await w.find('[data-test="tb-bold"]').trigger('click');
+    expect(JSON.stringify(e.getJSON())).toBe(before);
+    e.setEditable(true);
+    await flushPromises();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(ids.some(dis)).toBe(false);
+    w.unmount();
+  });
+
+  it('overflow: arrow/Home/End navigation, Esc refocuses the button, outside click closes', async () => {
+    const { w } = mountBar();
+    const more = w.find('[data-test="tb-overflow"]');
+    await more.trigger('click');
+    await flushPromises();
+    const items = () => w.findAll('[role^="menuitem"]').map((i) => i.element);
+    const menu = w.find('[data-test="tb-overflow-menu"]');
+    expect(document.activeElement).toBe(items()[0]);
+    await menu.trigger('keydown', { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(items()[1]);
+    await menu.trigger('keydown', { key: 'End' });
+    expect(document.activeElement).toBe(items()[5]);
+    await menu.trigger('keydown', { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(items()[0]);
+    await menu.trigger('keydown', { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(items()[5]);
+    await menu.trigger('keydown', { key: 'Home' });
+    expect(document.activeElement).toBe(items()[0]);
+    await menu.trigger('keydown', { key: 'Escape' });
+    expect(w.find('[data-test="tb-overflow-menu"]').exists()).toBe(false);
+    expect(document.activeElement).toBe(more.element);
+    await more.trigger('click');
+    expect(w.find('[data-test="tb-overflow-menu"]').exists()).toBe(true);
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    await flushPromises();
+    expect(w.find('[data-test="tb-overflow-menu"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('uses menuitemcheckbox with aria-checked for Small caps and Strikethrough', async () => {
+    const { e, w } = mountBar();
+    select(e, 'plain');
+    await w.find('[data-test="tb-overflow"]').trigger('click');
+    const roles = w.findAll('[role^="menuitem"]').map((i) => i.attributes('role'));
+    expect(roles).toEqual([
+      'menuitemcheckbox',
+      'menuitemcheckbox',
+      'menuitem',
+      'menuitem',
+      'menuitem',
+      'menuitem',
+    ]);
+    expect(w.find('[data-test="tb-menu-smallcaps"]').attributes('aria-checked')).toBe('false');
+    expect(w.find('[data-test="tb-menu-style-first"]').attributes('aria-checked')).toBeUndefined();
+    await w.find('[data-test="tb-menu-smallcaps"]').trigger('click');
+    await w.find('[data-test="tb-overflow"]').trigger('click');
+    expect(w.find('[data-test="tb-menu-smallcaps"]').attributes('aria-checked')).toBe('true');
     w.unmount();
   });
 

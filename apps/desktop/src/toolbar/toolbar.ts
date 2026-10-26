@@ -22,24 +22,17 @@ export const STYLE_LABELS: Record<Exclude<CaretStyle, ''>, string> = {
   centered: PARAGRAPH_STYLE_LABELS.centered,
 };
 
-/** Windows shortcuts, from the WP 7 keyboard sheet. */
+/**
+ * Windows shortcuts that are actually bound (verified): B/I/U by the manuscript marks
+ * (Mod-b/i/u), undo/redo by the Yjs binding (Mod-z/Mod-y) only when bound to a Y.Doc. Other WP 7
+ * shortcuts (styles, comment, find, sidebars) land with RAD-259 and are not advertised until then.
+ */
 export const SHORTCUTS = {
-  navigator: 'Ctrl+\\',
   undo: 'Ctrl+Z',
   redo: 'Ctrl+Y',
   bold: 'Ctrl+B',
   italic: 'Ctrl+I',
   underline: 'Ctrl+U',
-  alignLeft: 'Ctrl+L',
-  alignCenter: 'Ctrl+E',
-  alignRight: 'Ctrl+R',
-  alignJustify: 'Ctrl+J',
-  comment: 'Ctrl+Alt+M',
-  find: 'Ctrl+F',
-  review: 'Ctrl+\\',
-  heading: 'Ctrl+Alt+1',
-  blockQuote: 'Ctrl+Alt+2',
-  bodyText: 'Ctrl+Alt+0',
 } as const;
 
 export type Align = 'left' | 'center' | 'right' | 'justify';
@@ -54,6 +47,8 @@ export interface ToolbarState {
   align: Align;
   canUndo: boolean;
   canRedo: boolean;
+  /** Undo history exists (Yjs-bound editor), so Ctrl+Z/Ctrl+Y really work. */
+  hasHistory: boolean;
   editable: boolean;
 }
 
@@ -83,6 +78,7 @@ export function toolbarState(editor: Editor): ToolbarState {
     align: style === 'centered' ? 'center' : 'left',
     canUndo: typeof can.undo === 'function' ? can.undo() : false,
     canRedo: typeof can.redo === 'function' ? can.redo() : false,
+    hasHistory: typeof (editor.commands as unknown as HistoryCommands).undo === 'function',
     editable: editor.isEditable,
   };
 }
@@ -104,6 +100,8 @@ export type ToolbarCommand =
 
 /** Run one toolbar command through Tiptap. Returns whether it applied. */
 export function runCommand(editor: Editor, cmd: ToolbarCommand): boolean {
+  // Read-only (load-error mode, RAD-237 restore lock): the toolbar never edits.
+  if (!editor.isEditable) return false;
   const chain = editor.chain().focus();
   switch (cmd) {
     case 'undo':
