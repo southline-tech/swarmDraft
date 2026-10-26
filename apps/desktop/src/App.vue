@@ -7,7 +7,8 @@ import {
   pickBackupDestination,
   pickBackupToRestore,
   restoreBackup,
-  takeRecoveryNotice,
+  getRecoveryNotices,
+  dismissRecoveryNotices,
   type AppInfo,
   type RecoveryNotice,
 } from './backend';
@@ -23,16 +24,27 @@ const editorKey = ref(0);
 const info = ref<AppInfo | null>(null);
 const sections = ref<Section[]>(sampleOutline());
 const selectedId = ref<string>();
-/** One-time notice: startup recovery moved folders aside after an interrupted restore. */
-const recoveryNotice = ref<RecoveryNotice | null>(null);
+/** Notices from startup recovery after an interrupted restore; kept until dismissed. */
+const recoveryNotices = ref<RecoveryNotice[]>([]);
+const recoveryDismissError = ref('');
+
+async function dismissRecovery() {
+  try {
+    await dismissRecoveryNotices();
+    recoveryNotices.value = [];
+    recoveryDismissError.value = '';
+  } catch (e) {
+    recoveryDismissError.value = `Couldn't dismiss the notice: ${String(e)}`;
+  }
+}
 
 onMounted(async () => {
   info.value = await getAppInfo();
   if (info.value) {
     try {
-      recoveryNotice.value = await takeRecoveryNotice();
+      recoveryNotices.value = await getRecoveryNotices();
     } catch {
-      recoveryNotice.value = null;
+      recoveryNotices.value = [];
     }
   }
 });
@@ -115,21 +127,35 @@ async function onRestore(): Promise<void> {
           Cancel
         </button>
       </div>
-      <div v-if="recoveryNotice" role="alert" data-test="recovery-notice">
+      <div v-if="recoveryNotices.length" role="alert" data-test="recovery-notice">
         <p>
-          A restore was interrupted and coAuthor couldn't tell how far it got ({{
-            recoveryNotice.reason
-          }}). Nothing was deleted: your attachment folders were moved to
-          <code>{{ recoveryNotice.folder }}</code
-          >.
-          <template v-if="recoveryNotice.snapshot">
-            Your state before the restore is saved in <code>{{ recoveryNotice.snapshot }}</code
-            >.
-          </template>
+          A restore was interrupted. Some attachments may be missing. coAuthor didn't delete
+          anything.
         </p>
-        <button type="button" data-test="recovery-notice-dismiss" @click="recoveryNotice = null">
+        <div v-for="(n, i) in recoveryNotices" :key="i" data-test="recovery-notice-item">
+          <p v-if="n.folder && n.moved.length">
+            Moved to <code>{{ n.folder }}</code
+            >: {{ n.moved.join(', ') }}. To get an attachment back, copy it from that folder into
+            <code>{{ n.filesDir }}</code
+            >.
+          </p>
+          <p v-if="n.snapshot">
+            Or restore the backup taken just before the restore: <code>{{ n.snapshot }}</code
+            >.
+          </p>
+          <p v-if="n.retryPending">
+            coAuthor couldn't finish and will try again the next time it starts.
+          </p>
+          <p>Details: {{ n.reason }}</p>
+          <p v-if="n.saveError" data-test="recovery-notice-save-error">
+            This notice couldn't be saved and won't show again after you close coAuthor:
+            {{ n.saveError }}
+          </p>
+        </div>
+        <button type="button" data-test="recovery-notice-dismiss" @click="dismissRecovery">
           Dismiss
         </button>
+        <p v-if="recoveryDismissError">{{ recoveryDismissError }}</p>
       </div>
       <p v-if="backupStatus" data-test="backup-status">{{ backupStatus }}</p>
       <div v-if="tokensNotice !== null" role="status" data-test="tokens-revoked-notice">
