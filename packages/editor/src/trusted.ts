@@ -16,6 +16,9 @@ export interface LiveDocStore {
   commit(next: DocNode): void;
 }
 
+// TODO(RAD-211, when #7 is wired): replace this stub with a ProseMirror transaction that finds
+// each target mark by attrs.id on the live editor state, applies the change, and is tagged with
+// `allowReviewEdits(tr)` from the editor's trusted module so the review guard lets it through.
 export function createReviewPort(store: LiveDocStore): ReviewTransactionPort {
   return {
     applyReviewDecision(op: DecisionOp) {

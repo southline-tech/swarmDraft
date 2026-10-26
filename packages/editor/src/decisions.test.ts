@@ -87,6 +87,13 @@ describe('listSuggestions / selectTargets', () => {
     expect(listSuggestions(withNote)).toMatchObject([{ id: 'n1', text: 'note' }]);
     const r = decideSuggestions(withNote, op('reject', t(I, 'n1')));
     expect(JSON.stringify(r.doc)).not.toContain('n1');
+    const note = (r.doc.content[0] as Para).content![1] as Extract<
+      NonNullable<Para['content']>[number],
+      { type: 'footnote' }
+    >;
+    expect(note.attrs.text).toBe('a');
+    const accepted = decideSuggestions(withNote, op('accept', t(I, 'n1'))).doc;
+    expect(JSON.stringify(accepted)).toContain('"text":"a note"');
     expect(r.decided).toEqual([t(I, 'n1')]);
   });
   it('selects one by (kind,id), by author, all', () => {
@@ -158,7 +165,7 @@ describe('decideSuggestions (reference model)', () => {
 
 describe('trusted port + runDecision', () => {
   it('re-finds targets on the live doc so a concurrent edit outside the suggestion survives', async () => {
-    let live: DocNode = doc;
+    let live: DocNode = structuredClone(doc);
     const port = createReviewPort({ read: () => live, commit: (n) => (live = n) });
     const items = listSuggestions(doc); // panel snapshot, now stale
     // Concurrent edit elsewhere (another client / the user typing) before the click lands.
@@ -166,6 +173,7 @@ describe('trusted port + runDecision', () => {
     (live.content[1] as Para).content![0] = { type: 'text', text: 'Cold rain ' };
     await runDecision(items, { kind: 'one', id: 's1', suggestion: I }, 'accept', {
       tx: port,
+      sink: { recordDecisions: () => {} },
       decidedBy: 'h',
     });
     expect(textOf(live)).toEqual(['The lamp flickered glowed.', 'Cold rain fell', 'A new line.']);
@@ -221,6 +229,7 @@ describe('trusted port + runDecision', () => {
     const tx = { applyReviewDecision: vi.fn() };
     await runDecision(listSuggestions(doc), { kind: 'one', id: 'zz', suggestion: I }, 'reject', {
       tx,
+      sink: { recordDecisions: vi.fn() },
       decidedBy: 'h',
     });
     expect(tx.applyReviewDecision).not.toHaveBeenCalled();

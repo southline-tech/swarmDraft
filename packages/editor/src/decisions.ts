@@ -140,7 +140,8 @@ function transformInline(
         else delete np.content;
         return np;
       });
-      out.push({ ...node, attrs: { ...node.attrs, content } });
+      // Keep the plain-text copy in sync: agents read `attrs.text` (docx readView).
+      out.push({ ...node, attrs: { ...node.attrs, content, text: noteText(content) } });
       continue;
     }
     if (node.type !== 'text') {
@@ -193,6 +194,18 @@ export function decideSuggestions(doc: DocNode, op: DecisionOp): DecisionResult 
   return { doc: next, decided, superseded };
 }
 
+/** Same formula as the .docx importer's note text (paragraph plain text joined by newlines). */
+function noteText(content: ParagraphNode[]): string {
+  return content
+    .map((p) =>
+      (p.content ?? [])
+        .map((n) => (n.type === 'text' ? n.text : n.type === 'hard_break' ? '\n' : ''))
+        .join(''),
+    )
+    .join('\n')
+    .trim();
+}
+
 function sameMarks(a: Mark[] | undefined, b: Mark[] | undefined): boolean {
   return JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
 }
@@ -214,7 +227,8 @@ export async function runDecision(
   decision: Decision,
   ctx: {
     tx: ReviewTransactionPort;
-    sink?: SuggestionDecisionSink;
+    /** Required: every decision must reach the suggestion index (or `reconcile`). */
+    sink: SuggestionDecisionSink;
     reconcile?: (records: DecisionRecord[], error: unknown) => void | Promise<void>;
     decidedBy: string;
     now?: () => Date;
@@ -231,7 +245,7 @@ export async function runDecision(
       (t) => ({ ...t, status: 'rejected', decidedAt, decidedBy: ctx.decidedBy }) as const,
     ),
   ];
-  if (!records.length || !ctx.sink) return { ...res, unrecorded: [] };
+  if (!records.length) return { ...res, unrecorded: [] };
   try {
     await ctx.sink.recordDecisions(records);
     return { ...res, unrecorded: [] };
