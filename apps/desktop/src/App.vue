@@ -13,6 +13,7 @@ import {
   type RecoveryNotice,
 } from './backend';
 import AgentsSettings from './AgentsSettings.vue';
+import { refreshAgents, reloadOnFocus } from './agent-names';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
 import HomeScreen from './HomeScreen.vue';
@@ -110,13 +111,18 @@ let stopCloseFlush = () => {};
 function blockFileNavigation(e: DragEvent) {
   e.preventDefault();
 }
+// Agent display names (RAD-263): load once, and again when the window regains focus.
+const reloadAgents = () => void reloadOnFocus();
 onMounted(() => {
   window.addEventListener('dragover', blockFileNavigation);
   window.addEventListener('drop', blockFileNavigation);
+  window.addEventListener('focus', reloadAgents);
+  void refreshAgents();
 });
 onBeforeUnmount(() => {
   window.removeEventListener('dragover', blockFileNavigation);
   window.removeEventListener('drop', blockFileNavigation);
+  window.removeEventListener('focus', reloadAgents);
 });
 onMounted(async () => {
   info.value = await getAppInfo();

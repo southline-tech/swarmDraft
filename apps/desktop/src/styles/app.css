@@ -38,3 +38,43 @@
   --text-page: 1.125rem;
   --text-page--line-height: 1.6;
 }
+
+/* RAD-263: long agent names truncate; the full name is in the title attribute. */
+.agent-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  min-width: 0;
+  max-width: 100%;
+}
+.agent-name {
+  display: inline-block;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 16em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  color: var(--ct-text);
+}
+
+/* RAD-263: "(revoked)" / "(removed)" after an agent name — muted, never an error colour. */
+.agent-note {
+  color: var(--color-muted);
+  font-weight: normal;
+}
+
+/* RAD-263: agent marker; sits outside the truncated name so the ellipsis never hides it. */
+.agent-tag {
+  flex: none;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--ct-text-muted);
+  border: 1px solid var(--ct-border);
+  background: none;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-weight: normal;
+  line-height: 1;
+}

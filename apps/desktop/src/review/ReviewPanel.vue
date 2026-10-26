@@ -11,6 +11,7 @@ import {
   type DecisionScope,
   type SuggestionItem,
 } from '@coauthor/editor';
+import { authorName } from '../agent-names';
 
 const props = defineProps<{ items: SuggestionItem[]; busy?: boolean }>();
 const emit = defineEmits<{ decide: [scope: DecisionScope, decision: Decision] }>();
@@ -42,8 +43,16 @@ const label = (i: SuggestionItem) => (i.kind === 'suggestion_insert' ? 'Insert' 
     </header>
     <p v-if="!items.length" data-test="empty">No open suggestions.</p>
     <section v-for="author in authors" :key="author" data-test="author-group">
-      <h3 :style="{ color: authorColor(author) }">
-        {{ author }}
+      <h3 class="author-head" :style="{ borderLeftColor: authorColor(author) }">
+        <span v-for="n in [authorName(author)]" :key="n.name" class="author-head-name"
+          ><bdi class="agent-name" dir="auto" data-test="agent-name" :title="n.name">{{
+            n.name
+          }}</bdi
+          ><span v-if="n.agent" class="agent-tag" data-test="agent-tag">Agent</span>
+          <template v-if="n.note"
+            >{{ ' ' }}<span class="agent-note" data-test="agent-note">{{ n.note }}</span></template
+          ></span
+        >
         <button
           data-test="accept-author"
           :disabled="busy"
@@ -89,6 +98,30 @@ const label = (i: SuggestionItem) => (i.kind === 'suggestion_insert' ? 'Insert' 
 </template>
 
 <style scoped>
+.author-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--ct-text);
+  border-left: 4px solid;
+  padding-left: 0.5rem;
+}
+.author-head-name .agent-name {
+  flex: 1 1 auto;
+  max-width: none;
+}
+.author-head-name {
+  display: flex;
+  overflow: hidden;
+  align-items: baseline;
+  gap: 0.25rem;
+  min-width: 0;
+  flex: 1;
+}
+.author-head button {
+  flex: none;
+  white-space: nowrap;
+}
 li {
   border-left: 4px solid;
   padding-left: 0.5rem;

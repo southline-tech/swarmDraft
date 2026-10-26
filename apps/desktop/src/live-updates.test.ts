@@ -137,7 +137,8 @@ describe('live agent updates (RAD-264)', () => {
     expect(page().find('.comment-anchor').text()).toBe('lantern');
     expect(page().text()).toContain('Late. ');
     const items = w.findAll('[data-test="review-item"]').map((i) => i.text());
-    expect(items.some((t) => t.includes('Insert') && t.includes('agent:'))).toBe(true);
+    expect(items.some((t) => t.includes('Insert') && t.includes('Unnamed agent'))).toBe(true);
+    expect(items.some((t) => t.includes('agent:'))).toBe(false);
     expect(items.some((t) => t.includes('Comment'))).toBe(true);
 
     // Only the author's own edit is saved; the agent's stored updates are not written back.

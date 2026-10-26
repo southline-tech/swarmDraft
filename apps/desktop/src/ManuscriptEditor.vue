@@ -15,10 +15,13 @@ import type * as Y from 'yjs';
 import EditorToolbar from './toolbar/EditorToolbar.vue';
 import StatusBar, { type SaveState } from './status/StatusBar.vue';
 import { countWords, watchBookWords } from './status/wordcount';
+import { agentDirectory, authorLabel, authorName } from './agent-names';
 import { loadZoom, saveZoom } from './desk/zoom';
 import {
   collaborativeEditorOptions,
+  AuthorLabels,
   collectReviewItems,
+  refreshAuthorLabels,
   manuscriptEditorOptions,
   type ReviewItem,
 } from '@coauthor/editor';
@@ -135,6 +138,7 @@ const loadError = shallowRef<string>('');
 /** Retry of the opening cursor placement; cleared when the editor closes. */
 let cursorTimer: ReturnType<typeof setTimeout> | undefined;
 const options: Partial<EditorOptions> = {
+  extensions: [AuthorLabels.configure({ label: authorLabel })],
   onContentError: ({ error }) => {
     loadError.value = String((error as Error & { cause?: unknown }).cause ?? error.message);
   },
@@ -174,6 +178,11 @@ watch(
   },
   { immediate: true },
 );
+// A renamed or removed agent relabels the marks' hover text without touching content.
+watch(agentDirectory, () => {
+  const e = editor.value;
+  if (e && !e.isDestroyed) refreshAuthorLabels(e.view);
+});
 onBeforeUnmount(() => {
   clearTimeout(countTimer);
   stopBook();
@@ -233,7 +242,19 @@ const LABELS: Record<ReviewItem['type'], string> = {
             data-test="review-item"
           >
             <strong>{{ LABELS[r.type] }}</strong>
-            <span v-if="r.author" class="muted"> · {{ r.author }}</span>
+            <span v-if="r.author" class="muted agent-label" data-test="review-author">
+              <template v-for="n in [authorName(r.author)]" :key="n.name"
+                >·
+                <bdi class="agent-name" dir="auto" data-test="agent-name" :title="n.name">{{
+                  n.name
+                }}</bdi
+                ><span v-if="n.agent" class="agent-tag" data-test="agent-tag">Agent</span>
+                <template v-if="n.note"
+                  >{{ ' '
+                  }}<span class="agent-note" data-test="agent-note">{{ n.note }}</span></template
+                ></template
+              ></span
+            >
             <q>{{ r.text }}</q>
           </li>
         </ul>
@@ -342,6 +363,6 @@ const LABELS: Record<ReviewItem['type'], string> = {
   padding-left: 1rem;
 }
 .manuscript-editor .muted {
-  color: #666;
+  color: var(--ct-text-muted);
 }
 </style>

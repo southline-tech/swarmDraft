@@ -12,6 +12,7 @@ use base64::Engine as _;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use unicode_normalization::UnicodeNormalization;
 
 use crate::storage::{StorageError, Store};
 
@@ -138,19 +139,53 @@ fn row_token(r: &rusqlite::Row) -> rusqlite::Result<TokenInfo> {
     })
 }
 
+/// Names an agent may not take, so it can't pass for the author or a UI fallback label (RAD-263).
+pub const RESERVED_AGENT_NAMES: &[&str] = &[
+    "You",
+    "Author",
+    "Brett",
+    "Me",
+    "Unnamed agent",
+    "Removed agent",
+];
+
+/// Comparison key for agent names: trimmed, NFC, case-insensitive.
+fn name_key(name: &str) -> String {
+    name.trim().nfc().collect::<String>().to_lowercase()
+}
+
 const TOKEN_COLS: &str = "id, agent_id, prefix, scopes, created_at, last_used_at, revoked_at";
 
 impl Store {
     pub fn create_agent(&self, name: &str, color: &str) -> Result<Agent, StorageError> {
-        let name = name.trim();
+        let name: String = name.trim().nfc().collect();
+        let name = name.as_str();
         if name.is_empty() || name.chars().count() > 64 {
             return Err(StorageError::Invalid("name must be 1-64 characters".into()));
+        }
+        let key = name_key(name);
+        if RESERVED_AGENT_NAMES.iter().any(|r| name_key(r) == key) {
+            return Err(StorageError::Invalid(format!(
+                "\"{name}\" is reserved; choose another agent name"
+            )));
         }
         if !valid_color(color) {
             return Err(StorageError::Invalid("color must look like #rrggbb".into()));
         }
         let id = new_id();
         self.with_conn(|c| {
+            let taken = {
+                let mut st = c.prepare("SELECT name FROM agents")?;
+                let names = st
+                    .query_map([], |r| r.get::<_, String>(0))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                names.iter().any(|n| name_key(n) == key)
+            };
+            if taken {
+                return Err(StorageError::Invalid(format!(
+                    "an agent named \"{name}\" already exists; choose another name"
+                )));
+            }
             c.execute(
                 &format!(
                     "INSERT INTO agents (id, name, color, created_at) VALUES (?1, ?2, ?3, {NOW})"
@@ -345,6 +380,39 @@ fn token_hashes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_names_reject_reserved_and_duplicates() {
+        let (_t, s) = store();
+        for bad in [
+            "you",
+            "  AUTHOR ",
+            "brett",
+            "Me",
+            "unnamed AGENT",
+            "Removed agent",
+        ] {
+            let e = s.create_agent(bad, "#3366ff").unwrap_err();
+            assert!(
+                matches!(e, StorageError::Invalid(ref m) if m.contains("reserved")),
+                "{bad}"
+            );
+        }
+        s.create_agent("Caf\u{e9} Helper", "#3366ff").unwrap();
+        // Same name decomposed (e + combining acute), different case and padding.
+        let e = s
+            .create_agent("  cafe\u{301} HELPER ", "#3366ff")
+            .unwrap_err();
+        assert!(matches!(e, StorageError::Invalid(ref m) if m.contains("already exists")));
+        // Revoked agents still hold their name.
+        let r = s.create_agent("Line Editor", "#3366ff").unwrap();
+        s.revoke_agent(&r.id).unwrap();
+        assert!(s.create_agent("line editor", "#3366ff").is_err());
+        assert_eq!(s.list_agents().unwrap().len(), 2);
+        // Names are stored NFC.
+        let d = s.create_agent("Nai\u{308}ve", "#3366ff").unwrap();
+        assert_eq!(d.name, "Na\u{ef}ve");
+    }
 
     fn store() -> (tempfile::TempDir, Store) {
         let tmp = tempfile::tempdir().unwrap();

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import AgentsSettings from './AgentsSettings.vue';
+import { agentDirectory, authorLabel } from './agent-names';
 import type { Agent, AgentsApi, TokenInfo } from './backend';
 
 function fakeApi() {
@@ -38,6 +39,22 @@ function fakeApi() {
 }
 
 describe('AgentsSettings', () => {
+  it('shows the backend error when a name is reserved or taken (RAD-263)', async () => {
+    const api = fakeApi();
+    api.create = vi.fn(async () => {
+      throw '"Author" is reserved; choose another agent name';
+    });
+    const w = mount(AgentsSettings, { props: { api } });
+    await flushPromises();
+    await w.find('input[aria-label="Agent name"]').setValue('Author');
+    await w.find('[data-test="create-agent"]').trigger('submit');
+    await flushPromises();
+    expect(w.find('[data-test="error"]').text()).toContain(
+      'is reserved; choose another agent name',
+    );
+    expect(w.findAll('[data-test="agent"]')).toHaveLength(0);
+  });
+
   it('creates an agent, shows a token once, lists and revokes it', async () => {
     const api = fakeApi();
     const w = mount(AgentsSettings, { props: { api } });
@@ -49,6 +66,9 @@ describe('AgentsSettings', () => {
     await flushPromises();
     expect(api.create).toHaveBeenCalledWith('Grok Bot', '#3366ff');
     expect(w.findAll('[data-test="agent"]')).toHaveLength(1);
+    // The editor and review UI pick up the new agent's name from this list (RAD-263).
+    expect(authorLabel('agent:a0')).toBe('Grok Bot (agent)');
+    agentDirectory.value = null;
 
     await w.find('[data-test="mint"]').trigger('click');
     await flushPromises();
