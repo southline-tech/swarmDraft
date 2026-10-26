@@ -40,6 +40,9 @@ const visible = () => props.threads.filter((t) => props.showResolved || !t.resol
       <p v-if="t.orphan === 'no_anchor'" data-test="orphan" class="warn">
         The text this comment pointed to was removed.
       </p>
+      <p v-if="t.orphan === 'no_comments'" data-test="no-comments" class="warn">
+        This highlight has no comments yet.
+      </p>
       <ul>
         <li v-for="c in t.comments" :key="c.id" data-test="comment">
           <strong :style="{ color: commentAuthorColor(c.authorName) }">{{ c.authorName }}</strong>

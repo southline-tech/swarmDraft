@@ -39,6 +39,26 @@ describe('CommentsPanel', () => {
     expect(w.findAll('[data-test=orphan]')).toHaveLength(1);
     expect(w.findAll('[data-test=comment]')).toHaveLength(3);
   });
+  it('flags anchors with no comments', () => {
+    const empty: CommentThread = {
+      id: 'c9',
+      anchorText: 'x',
+      order: 2,
+      comments: [],
+      resolved: false,
+      orphan: 'no_comments',
+    };
+    const w = mount(CommentsPanel, { props: { threads: [empty] } });
+    expect(w.find('[data-test=no-comments]').exists()).toBe(true);
+  });
+  it('disables inputs and actions while busy', async () => {
+    const w = mount(CommentsPanel, { props: { threads, busy: true } });
+    for (const sel of ['reply-input', 'reply', 'resolve'])
+      for (const el of w.findAll(`[data-test=${sel}]`))
+        expect(el.attributes('disabled')).toBeDefined();
+    await w.find('[data-test=resolve]').trigger('click');
+    expect(w.emitted('resolve')).toBeUndefined();
+  });
   it('emits reply, resolve, reopen and focus', async () => {
     const w = mount(CommentsPanel, { props: { threads, showResolved: true } });
     const first = w.findAll('[data-test=thread]')[0]!;

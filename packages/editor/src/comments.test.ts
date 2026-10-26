@@ -76,6 +76,51 @@ describe('comments', () => {
       orphan: 'none',
     });
   });
+  it('finds anchors inside footnote content', () => {
+    const withNote: DocNode = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          attrs: { style: 'body' },
+          content: [
+            { type: 'text', text: 'See', marks: [anchor('c1')] },
+            {
+              type: 'footnote',
+              attrs: {
+                id: 'f1',
+                kind: 'footnote',
+                text: 'a note',
+                content: [
+                  {
+                    type: 'paragraph',
+                    attrs: { style: 'body' },
+                    content: [{ type: 'text', text: 'note', marks: [anchor('n1')] }],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    expect(listCommentAnchors(withNote)).toEqual([
+      { id: 'c1', text: 'See' },
+      { id: 'n1', text: 'note' },
+    ]);
+    expect(buildThreads(withNote, [row('r1', 'n1', 't')])[1]).toMatchObject({
+      id: 'n1',
+      orphan: 'none',
+    });
+  });
+  it('replying to a resolved thread reopens it', () => {
+    const resolved = [
+      row('r1', 'c1', '2026-10-25T01:00:00Z', { resolvedAt: '2026-10-25T02:00:00Z' }),
+    ];
+    expect(buildThreads(doc, resolved)[0]!.resolved).toBe(true);
+    const replied = [...resolved, row('r2', 'c1', '2026-10-25T03:00:00Z', { authorKind: 'human' })];
+    expect(buildThreads(doc, replied)[0]!.resolved).toBe(false);
+  });
   it('color is stable', () => {
     expect(commentAuthorColor('Bot A')).toBe(commentAuthorColor('Bot A'));
   });

@@ -4,7 +4,7 @@
  * `CommentsSource` seam (backed by migration 3's `comments` table once it lands).
  * Anchor ids are always read from mark attrs, never from Yjs mark keys.
  */
-import type { DocNode } from '@coauthor/schema';
+import type { DocNode, InlineNode, TextNode } from '@coauthor/schema';
 
 export type AuthorKind = 'human' | 'agent';
 
@@ -46,20 +46,27 @@ export interface CommentsSource {
   setResolved(threadId: string, resolved: boolean): Promise<void>;
 }
 
-/** Anchor ids with covered text, in reading order. */
+function walkText(inline: InlineNode[] | undefined, visit: (t: TextNode) => void): void {
+  for (const node of inline ?? []) {
+    if (node.type === 'text') visit(node);
+    else if (node.type === 'footnote')
+      for (const p of node.attrs.content) walkText(p.content, visit);
+  }
+}
+
+/** Anchor ids with covered text, in reading order (footnote content included). */
 export function listCommentAnchors(doc: DocNode): { id: string; text: string }[] {
   const byId = new Map<string, { id: string; text: string }>();
   for (const block of doc.content) {
     if (!('content' in block)) continue;
-    for (const node of block.content ?? []) {
-      if (node.type !== 'text') continue;
+    walkText(block.content, (node) => {
       for (const m of node.marks ?? []) {
         if (m.type !== 'comment_anchor') continue;
         const a = byId.get(m.attrs.id);
         if (a) a.text += node.text;
         else byId.set(m.attrs.id, { id: m.attrs.id, text: node.text });
       }
-    }
+    });
   }
   return [...byId.values()];
 }
@@ -74,6 +81,10 @@ export function buildThreads(doc: DocNode, rows: CommentRow[]): CommentThread[] 
   }
   const sortRows = (l: CommentRow[]) =>
     [...l].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+  /**
+   * A thread is resolved only while every row in it is resolved. Replying to a resolved thread
+   * adds an unresolved row and so reopens it, on purpose: new discussion should be seen.
+   */
   const resolvedOf = (l: CommentRow[]) => l.length > 0 && l.every((r) => !!r.resolvedAt);
 
   const threads: CommentThread[] = anchors.map((a, order) => {
@@ -102,7 +113,10 @@ export function buildThreads(doc: DocNode, rows: CommentRow[]): CommentThread[] 
   return threads;
 }
 
-/** Stable per-author color (same formula as the suggestions panel). */
+/**
+ * Stable per-author color. Duplicates `authorColor` from the RAD-211 suggestions PR to avoid
+ * stacking; merge into one shared helper once both have landed.
+ */
 export function commentAuthorColor(author: string): string {
   let h = 0;
   for (const ch of author) h = (h * 31 + ch.codePointAt(0)!) >>> 0;
