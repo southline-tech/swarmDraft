@@ -56,20 +56,111 @@ pub struct ReadView {
     pub footnotes: Vec<Note>,
 }
 
-/// FNV-1a over the JSON of a mark's attrs, base36 (same as `hashAttrs` in ydoc.ts).
-/// Yjs attribute key for a mark (`markKey` in ydoc.ts).
+/// Node and mark types the schema knows (`BLOCK_NODE_TYPES`, `INLINE_NODE_TYPES`, `MARK_TYPES`
+/// in `@coauthor/schema`).
+pub const BLOCK_NODE_TYPES: &[&str] = &["paragraph", "heading", "scene_break", "page_break"];
+pub const INLINE_NODE_TYPES: &[&str] = &["text", "hard_break", "footnote", "image"];
+
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// `markIdHash` in `@coauthor/schema` marks.ts: 64-bit FNV-1a over the UTF-8 bytes, low 48
+/// bits big-endian as 8 standard base64 chars (y-prosemirror's `--[a-zA-Z0-9+/=]{8}` suffix).
+pub fn mark_id_hash(s: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in s.bytes() {
+        h = (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    (0..8)
+        .map(|i| B64[((h >> (42 - 6 * i)) & 63) as usize] as char)
+        .collect()
+}
+
+fn overlap_id(mark: &Value) -> Option<String> {
+    let ty = mark["type"].as_str().unwrap_or_default();
+    if !NON_EXCLUSIVE_MARKS.contains(&ty) {
+        return None;
+    }
+    match &mark["attrs"]["id"] {
+        Value::String(s) if !s.is_empty() => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+/// Yjs attribute key for one mark, ignoring collisions (`markKey`; use [`mark_keys`] for a
+/// run's full mark set).
 pub fn mark_key(mark: &Value) -> String {
     let ty = mark["type"].as_str().unwrap_or_default();
-    match mark.get("attrs") {
-        // Comment and suggestion ids are unique, so `type--id` never collides.
-        Some(a) if NON_EXCLUSIVE_MARKS.contains(&ty) && a.get("id").is_some() => {
-            let id = a["id"]
-                .as_str()
-                .map_or_else(|| a["id"].to_string(), str::to_string);
-            format!("{ty}--{id}")
-        }
-        _ => ty.to_string(),
+    match overlap_id(mark) {
+        Some(id) => format!("{ty}--{}", mark_id_hash(&id)),
+        None => ty.to_string(),
     }
+}
+
+/// Keys for all marks on one text run, unique within the run (`markKeys`): on a collision the
+/// later mark in id order is rehashed as `hash(id + ':' + n)` for n = 1, 2, ... until free.
+///
+/// Keys are write-side only. Readers take the mark type from the key prefix and the id from
+/// the attrs, never from the suffix: the editor binding re-keys marks with its own hash.
+pub fn mark_keys(marks: &[Value]) -> Vec<String> {
+    let mut order: Vec<(usize, String)> = marks
+        .iter()
+        .enumerate()
+        .map(|(i, m)| (i, overlap_id(m).unwrap_or_default()))
+        .collect();
+    order.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
+    let mut used = std::collections::HashSet::new();
+    let mut keys = vec![String::new(); marks.len()];
+    for (i, id) in order {
+        let ty = marks[i]["type"].as_str().unwrap_or_default();
+        let mut key = mark_key(&marks[i]);
+        let mut n = 1;
+        while !id.is_empty() && used.contains(&key) {
+            key = format!("{ty}--{}", mark_id_hash(&format!("{id}:{n}")));
+            n += 1;
+        }
+        used.insert(key.clone());
+        keys[i] = key;
+    }
+    keys
+}
+
+/// Reject any node or mark type the schema doesn't know. Every MCP write is checked with this
+/// before it touches a document, so an agent can never store content the editor would drop.
+pub fn validate_nodes(nodes: &[Value], inline: bool) -> Result<(), String> {
+    for n in nodes {
+        let ty = n["type"].as_str().ok_or("node without a type")?;
+        let ok = if inline {
+            INLINE_NODE_TYPES.contains(&ty)
+        } else {
+            BLOCK_NODE_TYPES.contains(&ty)
+        };
+        if !ok {
+            return Err(format!("unknown node type: {ty}"));
+        }
+        for m in n["marks"].as_array().into_iter().flatten() {
+            let mt = m["type"].as_str().ok_or("mark without a type")?;
+            if !MARK_ORDER.contains(&mt) {
+                return Err(format!("unknown mark type: {mt}"));
+            }
+        }
+        if let Some(c) = n["content"].as_array() {
+            // Footnotes hold blocks; every other container holds inline content.
+            validate_nodes(c, ty != "footnote")?;
+        }
+    }
+    Ok(())
+}
+
+/// [`validate_nodes`] for a whole ProseMirror `doc`.
+pub fn validate_doc(pm_doc: &Value) -> Result<(), String> {
+    if pm_doc["type"] != "doc" {
+        return Err("expected a doc node".into());
+    }
+    validate_nodes(
+        pm_doc["content"].as_array().map_or(&[][..], Vec::as_slice),
+        false,
+    )
 }
 
 fn mark_type_from_key(key: &str) -> &str {
@@ -197,9 +288,10 @@ fn fill(txn: &mut TransactionMut, parent: &impl XmlFragment, nodes: &[Value]) {
                 let n = &nodes[i];
                 let s = n["text"].as_str().unwrap_or_default();
                 let mut attrs = Attrs::new();
-                for m in n["marks"].as_array().into_iter().flatten() {
+                let marks = n["marks"].as_array().map_or(&[][..], Vec::as_slice);
+                for (m, key) in marks.iter().zip(mark_keys(marks)) {
                     let a = m.get("attrs").cloned().unwrap_or_else(|| json!({}));
-                    attrs.insert(mark_key(m).into(), json_to_any(&a));
+                    attrs.insert(key.into(), json_to_any(&a));
                 }
                 t.insert_with_attributes(txn, offset, s, attrs);
                 offset += s.encode_utf16().count() as u32;
@@ -502,6 +594,88 @@ mod tests {
         {
             assert_eq!(&Value::String(mark_key(m)), key);
         }
+    }
+
+    #[test]
+    fn mark_id_hash_matches_typescript_vectors() {
+        assert_eq!(mark_id_hash("c1"), "fwe1SmhZ");
+        let expected: Value = serde_json::from_str(
+            &std::fs::read_to_string(fixture("synthetic-section.json")).unwrap(),
+        )
+        .unwrap();
+        let v = expected["markIdHash"].as_object().unwrap();
+        assert_eq!(v["c1"], "fwe1SmhZ");
+        for (input, hash) in v {
+            assert_eq!(mark_id_hash(input), hash.as_str().unwrap(), "{input}");
+        }
+    }
+
+    #[test]
+    fn colliding_marks_get_distinct_deterministic_keys() {
+        let a = json!({"type":"comment_anchor","attrs":{"id":"c1"}});
+        let b = json!({"type":"comment_anchor","attrs":{"id":"c1"}});
+        let k1 = mark_keys(&[a.clone(), b.clone()]);
+        assert_eq!(k1[0], "comment_anchor--fwe1SmhZ");
+        assert_eq!(k1[1], format!("comment_anchor--{}", mark_id_hash("c1:1")));
+        let c = json!({"type":"comment_anchor","attrs":{"id":"c0"}});
+        // Order-independent: same keys whichever order the marks come in.
+        let x = mark_keys(&[a.clone(), c.clone()]);
+        let y = mark_keys(&[c, a]);
+        assert_eq!(
+            (x[0].as_str(), x[1].as_str()),
+            (y[1].as_str(), y[0].as_str())
+        );
+    }
+
+    #[test]
+    fn rekeyed_marks_are_read_by_attrs_id() {
+        // The editor binding re-keys marks with its own hash on edit (fwe1SmhZ -> Ql7mhpA0).
+        let doc = Doc::new();
+        {
+            let frag = doc.get_or_insert_xml_fragment(FRAGMENT);
+            let mut txn = doc.transact_mut();
+            let p = frag.push_back(&mut txn, yrs::XmlElementPrelim::empty("paragraph"));
+            let t = p.push_back(&mut txn, yrs::XmlTextPrelim::new(""));
+            let mut attrs = Attrs::new();
+            attrs.insert(
+                "comment_anchor--Ql7mhpA0".into(),
+                json_to_any(&json!({"id":"c1"})),
+            );
+            attrs.insert(
+                "suggestion_insert--zzzzzzzz".into(),
+                json_to_any(&json!({"id":"s9","author":"agent:x","ts":"t"})),
+            );
+            t.insert_with_attributes(&mut txn, 0, "lantern", attrs);
+        }
+        let blocks = decode(&doc);
+        let marks = blocks[0].node["content"][0]["marks"].as_array().unwrap();
+        assert_eq!(marks[0]["type"], "comment_anchor");
+        assert_eq!(marks[0]["attrs"]["id"], "c1");
+        assert_eq!(marks[1]["type"], "suggestion_insert");
+        assert_eq!(marks[1]["attrs"]["id"], "s9");
+        let md = markdown(&blocks);
+        assert!(md.contains("c1") && md.contains("s9"), "{md}");
+    }
+
+    #[test]
+    fn validation_rejects_unknown_nodes_and_marks() {
+        let ok = json!({"type":"doc","content":[{"type":"paragraph","content":[
+            {"type":"text","text":"a","marks":[{"type":"bold"},{"type":"comment_anchor","attrs":{"id":"c1"}}]},
+            {"type":"footnote","content":[{"type":"paragraph","content":[{"type":"text","text":"n"}]}]}
+        ]}]});
+        assert_eq!(validate_doc(&ok), Ok(()));
+        let fx: Value = serde_json::from_str(
+            &std::fs::read_to_string(fixture("synthetic-section.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(validate_doc(&fx["doc"]), Ok(()), "fixture uses only schema types");
+        let bad_mark = json!({"type":"doc","content":[{"type":"paragraph","content":[
+            {"type":"text","text":"a","marks":[{"type":"highlight"}]}]}]});
+        assert!(validate_doc(&bad_mark).unwrap_err().contains("highlight"));
+        let bad_node = json!({"type":"doc","content":[{"type":"table"}]});
+        assert!(validate_doc(&bad_node).unwrap_err().contains("table"));
+        let inline_as_block = json!({"type":"doc","content":[{"type":"text","text":"x"}]});
+        assert!(validate_doc(&inline_as_block).is_err());
     }
 
     #[test]
