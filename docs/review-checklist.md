@@ -83,3 +83,7 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #64 · finish page copy promised a desktop shortcut the user may untick · copy states only what always happens, or matches the option shown
 - 2026-10-26 · #64 · uninstall docs pointed to a Start menu uninstall entry Tauri doesn't create · document only UI paths verified in the actual build
 - 2026-10-26 · #64 · docs said app data is kept, but the uninstaller can delete it via a checkbox · docs describe the real behavior, including opt-in deletes and which folders they remove
+- 2026-10-26 · #64 · progress page was the stock MUI page (header strip, log, Next click) · every installer page matches its mockup layout and advances on its own when work ends
+- 2026-10-26 · #64 · Cancel sat right of the primary button · Cancel on the left, primary action on the right
+- 2026-10-26 · #64 · finish page had a desktop-shortcut checkbox not in the mockup · no options beyond the mockup; do the default always, in every install mode
+- 2026-10-26 · #64 · titles were sans and the accent button wasn't attempted · try each mockup style; bundle only OFL-type fonts with the license in the repo, and list what isn't feasible as a gap

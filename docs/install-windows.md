@@ -25,29 +25,37 @@ The NSIS installer installs **per user** (`installMode: currentUser`): no admin 
 `apps/desktop/src-tauri/windows/`:
 
 - `installer.nsi`: custom template (`bundle.windows.nsis.template`), a copy of Tauri's default
-  template for tauri-cli 2.12.4. Changes are marked `coAuthor:`. It has nsDialogs welcome and
-  finish pages with the light `--ct-*` colours and Segoe UI Variable (Segoe UI on Windows 10). The
-  welcome button reads **Install**. There is no install location page for per-user installs, and
-  the progress page uses the ob2 copy. The finish page has **Open coAuthor now** and **Create
-  desktop shortcut**, both ticked.
+  template for tauri-cli 2.12.4. Changes are marked `coAuthor:`. All three pages are full-window
+  with the light `--ct-*` colours. Titles use Literata (bundled, see below), falling back to
+  Segoe UI Variable / Segoe UI if the font can't be loaded; body text is Segoe UI. Cancel sits on
+  the left and the primary button (**Install**, **Finish**) on the right; Back is hidden.
+  - Welcome (ob1): Ribbon tile, title, lead line, **Install**. There is no install location page
+    for per-user installs.
+  - Progress (ob2): Ribbon tile, "Installing coAuthor…", the ob2 line and one accent progress bar.
+    Only Cancel shows. No file log or output-folder text. It moves to the finish page by itself
+    when the install ends.
+  - Finish (ob3): check tile, "coAuthor is ready", **Open coAuthor now** (ticked) and **Finish**.
+    The desktop shortcut is always created; there is no checkbox for it.
 - `installer-pages.nsh`: installer hook; only tells the template where the page art is.
 - `ob-logo.bmp`, `ob-check.bmp`, `nsis-header.bmp`, `nsis-sidebar.bmp`: Ribbon page art.
+- `fonts/Literata-Regular.ttf`: title font, loaded privately for the installer process only
+  (not installed on the system). SIL Open Font License 1.1, text in `fonts/Literata-OFL.txt`.
 
 Passive (`/P`), silent (`/S`) and update (`/UPDATE`) installs skip the welcome and finish pages as
-before; passive and silent installs still create the desktop shortcut. When the Tauri CLI is
-upgraded, diff its `installer.nsi` against ours and carry the changes over.
+before. Passive and silent installs always create the desktop shortcut too; updates and `/NS`
+leave shortcuts alone. When the Tauri CLI is upgraded, diff its `installer.nsi` against ours and
+carry the changes over.
 
 Known gaps versus the mockups (limits of Win32 dialogs):
 
-- Native buttons: not rounded, not accent-filled, and Cancel sits beside Install, not before it.
-- Title type is Segoe UI semibold, not the manuscript serif. The Windows title bar is native.
-- The progress page keeps the MUI header strip (title, subtitle and Ribbon header art) above the
-  bar, and has no big logo tile. The status line shows NSIS file progress, not "About 30 seconds
-  left".
-- After the progress bar finishes you click **Next** to reach the finish page.
-- The finish page has an extra **Create desktop shortcut** checkbox.
-- Checked only by compiling with `makensis -WX` on Linux against Tauri's real include files and
-  plugin. Not yet run on Windows.
+- Native buttons: not rounded and not accent-filled. NSIS's main window doesn't support owner-drawn
+  buttons, and bitmap buttons don't scale with DPI, so the primary button stays a standard button.
+- No "About N seconds left" on the progress page: NSIS has no reliable time estimate, so there is
+  no time text rather than a wrong one.
+- The © line is hidden on the installer pages. The exe's file properties still carry
+  "© 2026 Radiance Lux Technologies LLC". The Windows title bar is native.
+- Checked by compiling with `makensis -WX` on Linux against Tauri's real include files and plugin,
+  and by running the installer (interactive, `/P`, `/S`) under Wine. Not yet run on Windows.
 
 ## Uninstalling
 

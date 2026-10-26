@@ -452,8 +452,8 @@ Var AppStartMenuFolder
 !insertmacro MUI_PAGE_STARTMENU Application $AppStartMenuFolder
 
 ; 7. Installation page
-; coAuthor: ob2 copy in the page header; the show function hides the details list and
-; tints the progress bar.
+; coAuthor: the show function turns the stock page into the ob2 layout (full window, Ribbon
+; tile, title, line and one progress bar, only Cancel). The header text below is only a fallback.
 !define MUI_PAGE_HEADER_TEXT "Installing coAuthor…"
 !define MUI_PAGE_HEADER_SUBTEXT "Almost there. You can keep using your computer while this finishes."
 !define MUI_INSTFILESPAGE_FINISHHEADER_TEXT "coAuthor is installed"
@@ -464,10 +464,9 @@ Var AppStartMenuFolder
 !insertmacro MUI_PAGE_INSTFILES
 
 ; 8. Finish page
-; coAuthor: custom nsDialogs page (ob3) instead of MUI_PAGE_FINISH. It keeps the stock
-; behaviour: "Open coAuthor now" runs RunMainBinary and the desktop shortcut checkbox runs
-; CreateOrUpdateDesktopShortcut, both ticked by default. Skipped in passive mode, where the
-; install section already creates the shortcut.
+; coAuthor: custom nsDialogs page (ob3) instead of MUI_PAGE_FINISH. "Open coAuthor now" runs
+; RunMainBinary and is ticked by default. The desktop shortcut is always created by the install
+; section, so there is no checkbox for it. Skipped in passive mode.
 Page custom ObFinishCreate ObFinishLeave
 
 ; coAuthor: page helpers.
@@ -477,25 +476,51 @@ Var ObFontLead
 Var ObFontBody
 Var ObImage
 Var ObRunCheckbox
-Var ObShortcutCheckbox
 Var ObRunState
-Var ObShortcutState
+Var ObSwapped
 
 ; Windows 11 ships Segoe UI Variable; Windows 10 has Segoe UI.
 Function ObFonts
   ${If} $ObFontTitle != ""
     Return
   ${EndIf}
+  ; Literata (SIL OFL 1.1, see fonts/Literata-OFL.txt), loaded privately for this process only.
+  InitPluginsDir
+  File "/oname=$PLUGINSDIR\Literata-Regular.ttf" "${OB_DIR}\fonts\Literata-Regular.ttf"
+  System::Call 'gdi32::AddFontResourceEx(t "$PLUGINSDIR\Literata-Regular.ttf", i 0x10, p 0) i .r1'
   ReadRegStr $0 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion" "CurrentBuildNumber"
   ${If} $0 >= 22000
-    CreateFont $ObFontTitle "Segoe UI Variable Display" 20 600
+    CreateFont $ObFontTitle "Segoe UI Variable Display" 20 400
     CreateFont $ObFontLead "Segoe UI Variable Text" 11 400
     CreateFont $ObFontBody "Segoe UI Variable Text" 10 400
   ${Else}
-    CreateFont $ObFontTitle "Segoe UI" 20 600
+    CreateFont $ObFontTitle "Segoe UI" 20 400
     CreateFont $ObFontLead "Segoe UI" 11 400
     CreateFont $ObFontBody "Segoe UI" 10 400
   ${EndIf}
+  ${If} $1 <> 0
+    CreateFont $ObFontTitle "Literata" 20 400
+  ${EndIf}
+FunctionEnd
+
+; Mockup button order: Cancel on the left, the primary button on the right. Swaps the
+; Next and Cancel buttons once; they keep these positions on every later page.
+Function ObSwapButtons
+  ${If} $ObSwapped == 1
+    Return
+  ${EndIf}
+  StrCpy $ObSwapped 1
+  GetDlgItem $8 $HWNDPARENT 1
+  GetDlgItem $9 $HWNDPARENT 2
+  System::Call '*(i,i,i,i,i,i,i,i) p .r3'
+  System::Call 'user32::GetWindowRect(p r8, p r3)'
+  IntOp $4 $3 + 16
+  System::Call 'user32::GetWindowRect(p r9, p r4)'
+  System::Call 'user32::MapWindowPoints(p 0, p $HWNDPARENT, p r3, i 4)'
+  System::Call '*$3(i .r4, i .r5, i, i, i .r6, i .r7)'
+  System::Free $3
+  System::Call 'user32::SetWindowPos(p r8, p 0, i r6, i r7, i 0, i 0, i 0x15)'
+  System::Call 'user32::SetWindowPos(p r9, p 0, i r4, i r5, i 0, i 0, i 0x15)'
 FunctionEnd
 
 ; Full-window page: hide the MUI header and branding, colour page and footer.
@@ -562,6 +587,7 @@ Function ObWelcomeCreate
   ; Primary button reads "Install"; there is nothing to go back to.
   GetDlgItem $0 $HWNDPARENT 1
   SendMessage $0 ${WM_SETTEXT} 0 "STR:Install"
+  Call ObSwapButtons
   GetDlgItem $0 $HWNDPARENT 3
   ShowWindow $0 ${SW_HIDE}
   Call ObFullWindow
@@ -577,22 +603,102 @@ FunctionEnd
 
 !define /ifndef PBM_SETBARCOLOR 0x0409
 !define /ifndef PBM_SETBKCOLOR 0x2001
+; Dialog units to pixels for the inner dialog $R0: $R1..$R4 = x y w h in, out in pixels.
+Function ObDlgRect
+  IntOp $R3 $R1 + $R3
+  IntOp $R4 $R2 + $R4
+  System::Call '*(i R1, i R2, i R3, i R4) p .r3'
+  System::Call 'user32::MapDialogRect(p R0, p r3)'
+  System::Call '*$3(i .R1, i .R2, i .R3, i .R4)'
+  System::Free $3
+  IntOp $R3 $R3 - $R1
+  IntOp $R4 $R4 - $R2
+FunctionEnd
+
+; Static control on $R0 at $R1..$R4 (pixels). $5 = text, $6 = style. Returns hwnd in $7.
+Function ObStatic
+  System::Call 'user32::CreateWindowEx(i 0, t "STATIC", t r5, i r6, i R1, i R2, i R3, i R4, p R0, p 0, p 0, p 0) p .r7'
+FunctionEnd
+
 Function ObProgressShow
-  FindWindow $1 "#32770" "" $HWNDPARENT
-  GetDlgItem $2 $1 1016 ; details list
-  ShowWindow $2 ${SW_HIDE}
-  GetDlgItem $2 $1 1027 ; "Show details" button
-  ShowWindow $2 ${SW_HIDE}
-  SetCtlColors $1 "" "${OB_SURFACE}"
-  SetCtlColors $HWNDPARENT "" "${OB_BG}"
-  GetDlgItem $2 $1 1006 ; status line
-  SetCtlColors $2 "${OB_MUTED}" "${OB_SURFACE}"
   Call ObFonts
-  SendMessage $2 ${WM_SETFONT} $ObFontBody 1
-  GetDlgItem $2 $1 1004 ; progress bar: drop the theme so the accent colour applies
+  Call ObSwapButtons
+  InitPluginsDir
+  File "/oname=$PLUGINSDIR\ob-logo.bmp" "${OB_DIR}\ob-logo.bmp"
+  LockWindow on
+  Call ObFullWindow
+  ; Only Cancel: hide Back and Next (shown again on the finish page or if the install fails).
+  GetDlgItem $0 $HWNDPARENT 1
+  ShowWindow $0 ${SW_HIDE}
+  GetDlgItem $0 $HWNDPARENT 3
+  ShowWindow $0 ${SW_HIDE}
+  FindWindow $R0 "#32770" "" $HWNDPARENT
+  ; Grow the page over the hidden header: full client width, down to the footer line.
+  System::Call '*(i,i,i,i) p .r3'
+  System::Call 'user32::GetWindowRect(p $mui.Line.FullWindow, p r3)'
+  System::Call 'user32::MapWindowPoints(p 0, p $HWNDPARENT, p r3, i 2)'
+  System::Call '*$3(i, i .r5, i, i)'
+  System::Call 'user32::GetClientRect(p $HWNDPARENT, p r3)'
+  System::Call '*$3(i, i, i .r6, i)'
+  System::Free $3
+  System::Call 'user32::SetWindowPos(p R0, p 0, i 0, i 0, i r6, i r5, i 0x14)'
+  SetCtlColors $R0 "" "${OB_SURFACE}"
+  ; No status line, log or details button.
+  GetDlgItem $0 $R0 1006
+  ShowWindow $0 ${SW_HIDE}
+  GetDlgItem $0 $R0 1016
+  ShowWindow $0 ${SW_HIDE}
+  GetDlgItem $0 $R0 1027
+  ShowWindow $0 ${SW_HIDE}
+  ; Ribbon tile, same place as on ob1.
+  StrCpy $R1 26
+  StrCpy $R2 18
+  StrCpy $R3 40
+  StrCpy $R4 40
+  Call ObDlgRect
+  StrCpy $5 ""
+  StrCpy $6 0x5000000E ; WS_CHILD | WS_VISIBLE | SS_BITMAP
+  Call ObStatic
+  System::Call 'user32::LoadImage(p 0, t "$PLUGINSDIR\ob-logo.bmp", i 0, i R3, i R4, i 0x10) p .r0'
+  SendMessage $7 0x172 0 $0 ; STM_SETIMAGE, IMAGE_BITMAP
+  ; Title and line.
+  StrCpy $R1 26
+  StrCpy $R2 64
+  StrCpy $R3 280
+  StrCpy $R4 24
+  Call ObDlgRect
+  StrCpy $5 "Installing coAuthor…"
+  StrCpy $6 0x50000000
+  Call ObStatic
+  SetCtlColors $7 "${OB_TEXT}" "${OB_SURFACE}"
+  SendMessage $7 ${WM_SETFONT} $ObFontTitle 1
+  StrCpy $R1 26
+  StrCpy $R2 92
+  StrCpy $R3 280
+  StrCpy $R4 34
+  Call ObDlgRect
+  StrCpy $5 "Almost there. You can keep using your computer while this finishes."
+  Call ObStatic
+  SetCtlColors $7 "${OB_MUTED}" "${OB_SURFACE}"
+  SendMessage $7 ${WM_SETFONT} $ObFontLead 1
+  ; One wide progress bar in the accent colour.
+  StrCpy $R1 26
+  StrCpy $R2 132
+  StrCpy $R3 280
+  StrCpy $R4 6
+  Call ObDlgRect
+  GetDlgItem $2 $R0 1004
+  System::Call 'user32::SetWindowPos(p r2, p 0, i R1, i R2, i R3, i R4, i 0x14)'
   System::Call 'uxtheme::SetWindowTheme(p r2, w " ", w " ")'
   SendMessage $2 ${PBM_SETBARCOLOR} 0 ${OB_ACCENT_BGR}
   SendMessage $2 ${PBM_SETBKCOLOR} 0 ${OB_BORDER_BGR}
+  LockWindow off
+FunctionEnd
+
+; If the install fails the page stays; give the buttons back so the user can close it.
+Function .onInstFailed
+  GetDlgItem $0 $HWNDPARENT 1
+  ShowWindow $0 ${SW_NORMAL}
 FunctionEnd
 
 Function ObFinishCreate
@@ -616,14 +722,11 @@ Function ObFinishCreate
   SetCtlColors $ObRunCheckbox "${OB_TEXT}" "${OB_SURFACE}"
   SendMessage $ObRunCheckbox ${WM_SETFONT} $ObFontBody 1
   ${NSD_Check} $ObRunCheckbox
-  ${NSD_CreateCheckbox} 26u 152u 280u 14u "$(createDesktop)"
-  Pop $ObShortcutCheckbox
-  SetCtlColors $ObShortcutCheckbox "${OB_TEXT}" "${OB_SURFACE}"
-  SendMessage $ObShortcutCheckbox ${WM_SETFONT} $ObFontBody 1
-  ${NSD_Check} $ObShortcutCheckbox
   ; Only a Finish button: the install is done, so Back and Cancel are hidden.
   GetDlgItem $0 $HWNDPARENT 1
   SendMessage $0 ${WM_SETTEXT} 0 "STR:Finish"
+  ShowWindow $0 ${SW_NORMAL}
+  Call ObSwapButtons
   GetDlgItem $0 $HWNDPARENT 2
   ShowWindow $0 ${SW_HIDE}
   GetDlgItem $0 $HWNDPARENT 3
@@ -635,11 +738,7 @@ Function ObFinishCreate
 FunctionEnd
 
 Function ObFinishLeave
-  ${NSD_GetState} $ObShortcutCheckbox $ObShortcutState
   ${NSD_GetState} $ObRunCheckbox $ObRunState
-  ${If} $ObShortcutState = ${BST_CHECKED}
-    Call CreateOrUpdateDesktopShortcut
-  ${EndIf}
   ${If} $ObRunState = ${BST_CHECKED}
     Call RunMainBinary
   ${EndIf}
@@ -971,21 +1070,16 @@ Section Install
     Call CreateOrUpdateStartMenuShortcut
   !insertmacro MUI_STARTMENU_WRITE_END
 
-  ; Create desktop shortcut for silent and passive installers
-  ; because finish page will be skipped
-  ${If} $PassiveMode = 1
-  ${OrIf} ${Silent}
-    Call CreateOrUpdateDesktopShortcut
-  ${EndIf}
+  ; coAuthor: always create the desktop shortcut (interactive, passive and silent installs).
+  ; CreateOrUpdateDesktopShortcut still leaves shortcuts alone for /UPDATE and /NS.
+  Call CreateOrUpdateDesktopShortcut
 
   !ifmacrodef NSIS_HOOK_POSTINSTALL
     !insertmacro NSIS_HOOK_POSTINSTALL
   !endif
 
-  ; Auto close this page for passive mode
-  ${If} $PassiveMode = 1
-    SetAutoClose true
-  ${EndIf}
+  ; coAuthor: move on to the finish page as soon as the install succeeds (ob2 has no Next).
+  SetAutoClose true
 SectionEnd
 
 Function .onInstSuccess
