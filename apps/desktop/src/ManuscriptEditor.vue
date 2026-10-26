@@ -1,23 +1,21 @@
 <script setup lang="ts">
 /**
- * Manuscript editor (RAD-202): Tiptap with the manuscript schema, a paragraph-style toolbar,
+ * Manuscript editor (RAD-202): Tiptap with the manuscript schema, the formatting toolbar (RAD-254),
  * and a read-only list of the comments and tracked changes in the document.
  *
  * With `doc`, the editor is bound to that section Y.Doc through y-prosemirror
  * (`collaborativeEditorOptions`): every edit is written to the doc as it is typed, and changes
  * from other writers are content-checked before they apply. `content` opens an unbound snapshot.
  */
-import { computed, onBeforeUnmount, shallowRef, toRaw, watch } from 'vue';
+import { onBeforeUnmount, shallowRef, toRaw, watch } from 'vue';
 import { EditorContent, useEditor } from '@tiptap/vue-3';
 import type { EditorOptions, JSONContent } from '@tiptap/core';
 import type * as Y from 'yjs';
+import EditorToolbar from './toolbar/EditorToolbar.vue';
 import {
-  PARAGRAPH_STYLES,
-  PARAGRAPH_STYLE_LABELS,
   collaborativeEditorOptions,
   collectReviewItems,
   manuscriptEditorOptions,
-  type ParagraphStyle,
   type ReviewItem,
 } from '@coauthor/editor';
 
@@ -28,7 +26,14 @@ const props = defineProps<{
   content?: JSONContent;
 }>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
-const emit = defineEmits<{ change: [doc: JSONContent]; reload: [] }>();
+const emit = defineEmits<{
+  change: [doc: JSONContent];
+  reload: [];
+  /** The toolbar's chapters toggle; the parent owns the navigator. */
+  'toggle-navigator': [];
+}>();
+/** Review list visibility, driven by the toolbar's review toggle. */
+const reviewOpen = shallowRef(true);
 
 const review = shallowRef<ReviewItem[]>([]);
 /** Set when the content does not fit the schema; the editor is then read-only and never emits. */
@@ -57,20 +62,6 @@ watch(editor, (e) => {
 });
 onBeforeUnmount(() => editor.value?.destroy());
 
-const currentStyle = computed<ParagraphStyle | ''>(() => {
-  const e = editor.value;
-  if (!e || !e.isActive('paragraph')) return '';
-  return (e.getAttributes('paragraph').style as ParagraphStyle) ?? 'body';
-});
-
-function setStyle(ev: Event) {
-  editor.value
-    ?.chain()
-    .focus()
-    .setParagraphStyle((ev.target as HTMLSelectElement).value as ParagraphStyle)
-    .run();
-}
-
 const LABELS: Record<ReviewItem['type'], string> = {
   comment_anchor: 'Comment',
   suggestion_insert: 'Insert',
@@ -85,61 +76,21 @@ const LABELS: Record<ReviewItem['type'], string> = {
       will be saved. {{ loadError }}
       <button type="button" data-test="reload" @click="emit('reload')">Reload section</button>
     </p>
-    <div v-if="editor" class="toolbar" role="toolbar" aria-label="Formatting">
-      <select
-        data-test="paragraph-style"
-        aria-label="Paragraph style"
-        :value="currentStyle"
-        :disabled="!currentStyle"
-        @change="setStyle"
-      >
-        <option v-for="s in PARAGRAPH_STYLES" :key="s" :value="s">
-          {{ PARAGRAPH_STYLE_LABELS[s] }}
-        </option>
-      </select>
-      <button
-        type="button"
-        title="Bold (Ctrl+B)"
-        :aria-pressed="editor.isActive('bold')"
-        @click="editor.chain().focus().toggleBold().run()"
-      >
-        <strong>B</strong>
-      </button>
-      <button
-        type="button"
-        title="Italic (Ctrl+I)"
-        :aria-pressed="editor.isActive('italic')"
-        @click="editor.chain().focus().toggleItalic().run()"
-      >
-        <em>I</em>
-      </button>
-      <button
-        type="button"
-        title="Small caps"
-        :aria-pressed="editor.isActive('smallcaps')"
-        @click="editor.chain().focus().toggleSmallcaps().run()"
-      >
-        <span class="smallcaps">Sc</span>
-      </button>
-      <button
-        type="button"
-        data-test="scene-break"
-        title="Scene break (type *** on its own line)"
-        @click="editor.chain().focus().insertSceneBreak().run()"
-      >
-        ***
-      </button>
-      <button
-        type="button"
-        title="Page break"
-        @click="editor.chain().focus().insertPageBreak().run()"
-      >
-        Page break
-      </button>
-    </div>
-    <div class="body">
+    <EditorToolbar
+      v-if="editor"
+      :editor="editor"
+      :review-open="reviewOpen"
+      @toggle-navigator="emit('toggle-navigator')"
+      @toggle-review="reviewOpen = !reviewOpen"
+    />
+    <div class="body" :class="{ 'no-review': !reviewOpen }">
       <EditorContent :editor="editor" class="page" />
-      <aside class="review" aria-label="Comments and suggestions" data-test="review">
+      <aside
+        v-if="reviewOpen"
+        class="review"
+        aria-label="Comments and suggestions"
+        data-test="review"
+      >
         <h3>Review</h3>
         <p v-if="!review.length" class="muted">No comments or suggestions.</p>
         <ul>
@@ -166,19 +117,13 @@ const LABELS: Record<ReviewItem['type'], string> = {
   color: #b00020;
   padding: 0.5rem 0.75rem;
 }
-.manuscript-editor .toolbar {
-  display: flex;
-  gap: 0.25rem;
-  padding: 0.25rem 0;
-  border-bottom: 1px solid #ddd;
-}
-.manuscript-editor button[aria-pressed='true'] {
-  background: #dde6ff;
-}
 .manuscript-editor .body {
   display: grid;
   grid-template-columns: 1fr 16rem;
   gap: 1rem;
+}
+.manuscript-editor .body.no-review {
+  grid-template-columns: 1fr;
 }
 .manuscript-editor .page .tiptap {
   font-family: Georgia, serif;
