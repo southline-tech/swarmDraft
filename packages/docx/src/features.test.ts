@@ -457,3 +457,99 @@ describe('comment ranges never lose a body or leak', () => {
     expect(item?.samples).toEqual(['3: lonely note']);
   });
 });
+
+describe('orphan comment anchors', () => {
+  it('drops an anchor whose id has no comments.xml entry and reports orphan_anchor', () => {
+    const body = p(
+      r('Before ') +
+        '<w:commentRangeStart w:id="7"/>' +
+        r('kept range') +
+        '<w:commentRangeEnd w:id="7"/>' +
+        '<w:commentRangeStart w:id="42"/>' +
+        r(' stray words') +
+        '<w:commentRangeEnd w:id="42"/>',
+    );
+    const zip = zipSync({
+      'word/document.xml': strToU8(`<w:document ${NS}><w:body>${body}</w:body></w:document>`),
+      'word/comments.xml': strToU8(
+        `<w:comments ${NS}><w:comment w:id="7" w:author="Ann">${p(r('real'))}</w:comment></w:comments>`,
+      ),
+    });
+    const manuscript = importDocx(zip, { manuscriptId: 'm1' });
+    const report = manuscript.report;
+    const json = JSON.stringify(manuscript.sections);
+    expect(json).toContain('"comment_anchor","attrs":{"id":"7"}');
+    expect(json).not.toContain('"id":"42"');
+    expect(manuscript.comments.map((c) => c.id)).toEqual(['7']);
+    const item = report.items.find((i) => i.code === 'orphan_anchor');
+    expect(item?.level).toBe('warning');
+    expect(item?.samples).toEqual(['42: stray words']);
+    expect(json).toContain('stray words');
+  });
+
+  it('reports a point (zero-width) orphan anchor without text', () => {
+    const body = p('<w:commentRangeStart w:id="9"/><w:commentRangeEnd w:id="9"/>' + r('after'));
+    const zip = zipSync({
+      'word/document.xml': strToU8(`<w:document ${NS}><w:body>${body}</w:body></w:document>`),
+    });
+    const manuscript = importDocx(zip, { manuscriptId: 'm1' });
+    const report = manuscript.report;
+    expect(JSON.stringify(manuscript.sections)).not.toContain('comment_anchor');
+    expect(report.items.find((i) => i.code === 'orphan_anchor')?.samples).toEqual(['9: (no text)']);
+    expect(JSON.stringify(manuscript.sections)).toContain('after');
+  });
+
+  it('reports a point orphan in the middle of a word without the next text', () => {
+    const body = p(
+      r('a') + '<w:commentRangeStart w:id="88"/><w:commentRangeEnd w:id="88"/>' + r('b'),
+    );
+    const zip = zipSync({
+      'word/document.xml': strToU8(`<w:document ${NS}><w:body>${body}</w:body></w:document>`),
+    });
+    const samples =
+      importDocx(zip, { manuscriptId: 'm1' }).report.items.find((i) => i.code === 'orphan_anchor')
+        ?.samples ?? [];
+    expect(samples).toEqual(['88: (no text)']);
+  });
+
+  it('drops orphan anchors inside footnotes and endnotes too', () => {
+    const ref = (kind: string) => `<w:r><w:${kind}Reference w:id="1"/></w:r>`;
+    const note = (kind: string, id: string, text: string) =>
+      `<w:${kind}s ${NS}><w:${kind} w:id="1">${p(
+        `<w:commentRangeStart w:id="${id}"/>${r(text)}<w:commentRangeEnd w:id="${id}"/>`,
+      )}</w:${kind}></w:${kind}s>`;
+    const zip = zipSync({
+      'word/document.xml': strToU8(
+        `<w:document ${NS}><w:body>${p(r('Body') + ref('footnote') + ref('endnote'))}</w:body></w:document>`,
+      ),
+      'word/footnotes.xml': strToU8(note('footnote', '51', 'foot words')),
+      'word/endnotes.xml': strToU8(note('endnote', '52', 'end words')),
+    });
+    const manuscript = importDocx(zip, { manuscriptId: 'm1' });
+    const json = JSON.stringify(manuscript.sections);
+    expect(json).toContain('foot words');
+    expect(json).toContain('end words');
+    expect(json).not.toContain('comment_anchor');
+    const item = manuscript.report.items.find((i) => i.code === 'orphan_anchor');
+    expect(item?.samples).toEqual(expect.arrayContaining(['51: foot words', '52: end words']));
+  });
+
+  it('reports the original docx id, not a reassigned one', () => {
+    // Overlapping ranges reuse id 5 with no comments.xml: the inner one gets a fresh id.
+    const body = p(
+      '<w:commentRangeStart w:id="5"/>' +
+        r('one') +
+        '<w:commentRangeStart w:id="5"/>' +
+        r('two') +
+        '<w:commentRangeEnd w:id="5"/><w:commentRangeEnd w:id="5"/>',
+    );
+    const zip = zipSync({
+      'word/document.xml': strToU8(`<w:document ${NS}><w:body>${body}</w:body></w:document>`),
+    });
+    const manuscript = importDocx(zip, { manuscriptId: 'm1' });
+    const samples = manuscript.report.items.find((i) => i.code === 'orphan_anchor')?.samples ?? [];
+    expect(samples.length).toBeGreaterThan(0);
+    for (const s of samples) expect(s).toMatch(/^5: /);
+    expect(samples.join()).not.toMatch(/100000\d/);
+  });
+});
