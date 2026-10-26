@@ -68,6 +68,14 @@ pub struct Suggestion {
     pub created_at: String,
 }
 
+/// One section of an imported manuscript: ProseMirror JSON from the .docx importer.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ImportSection {
+    pub kind: String,
+    pub title: String,
+    pub doc: Value,
+}
+
 pub fn new_id() -> String {
     let mut b = [0u8; 12];
     getrandom::fill(&mut b).expect("OS random source unavailable");
@@ -351,6 +359,75 @@ impl Store {
             }
             tx.commit()?;
             Ok(())
+        })
+    }
+
+    /// Persist a whole imported manuscript at once: the manuscript row, every section row and
+    /// each section's initial document state, in one transaction. Every section is validated
+    /// and encoded before anything is written, so a bad section leaves nothing behind.
+    pub fn import_manuscript(
+        &self,
+        title: &str,
+        sections: &[ImportSection],
+    ) -> Result<(Manuscript, Vec<Section>), StorageError> {
+        let mut encoded = Vec::with_capacity(sections.len());
+        for s in sections {
+            if !SECTION_KINDS.contains(&s.kind.as_str()) {
+                return Err(StorageError::Invalid(format!(
+                    "unknown section kind: {}",
+                    s.kind
+                )));
+            }
+            crate::content::validate_doc(&s.doc).map_err(StorageError::Invalid)?;
+            let doc = crate::content::new_doc();
+            crate::content::encode(&doc, &s.doc).map_err(StorageError::Invalid)?;
+            validate_saved_doc(&doc)?;
+            let update = doc
+                .transact()
+                .encode_state_as_update_v1(&StateVector::default());
+            encoded.push(update);
+        }
+        let manuscript_id = new_id();
+        self.with_conn(|c| {
+            let tx = c.unchecked_transaction()?;
+            tx.execute(
+                &format!("INSERT INTO manuscripts (id, title, created_at) VALUES (?1, ?2, {NOW})"),
+                params![manuscript_id, title],
+            )?;
+            let mut out = Vec::with_capacity(sections.len());
+            for (i, (s, update)) in sections.iter().zip(&encoded).enumerate() {
+                let id = new_id();
+                let doc_id = section_doc_id(&manuscript_id, &id);
+                tx.execute(
+                    "INSERT INTO sections (id, manuscript_id, kind, parent_id, position, title, doc_id)
+                     VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6)",
+                    params![id, manuscript_id, s.kind, i as i64, s.title, doc_id],
+                )?;
+                if update.len() > 2 {
+                    tx.execute(
+                        "INSERT INTO doc_updates (doc_id, data) VALUES (?1, ?2)",
+                        params![doc_id, update],
+                    )?;
+                }
+                out.push(tx.query_row(
+                    &format!("SELECT {SECTION_COLS} FROM sections WHERE id = ?1"),
+                    [&id],
+                    row_section,
+                )?);
+            }
+            let m = tx.query_row(
+                "SELECT id, title, created_at FROM manuscripts WHERE id = ?1",
+                [&manuscript_id],
+                |r| {
+                    Ok(Manuscript {
+                        id: r.get(0)?,
+                        title: r.get(1)?,
+                        created_at: r.get(2)?,
+                    })
+                },
+            )?;
+            tx.commit()?;
+            Ok((m, out))
         })
     }
 

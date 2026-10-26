@@ -163,27 +163,18 @@ fn restore_backup(
     .map_err(|e| e.to_string())
 }
 
-/// One section of an imported manuscript: ProseMirror JSON from the .docx importer.
-#[derive(serde::Deserialize)]
-pub struct ImportSection {
-    kind: String,
-    title: String,
-    doc: serde_json::Value,
-}
-
+/// Persist an imported manuscript (manuscript row, sections and their initial documents) in
+/// one transaction, so it is visible to the MCP server right away and survives a restart.
 #[tauri::command]
 fn manuscript_import_json(
     store: tauri::State<'_, storage::Store>,
     title: String,
-    sections: Vec<ImportSection>,
+    sections: Vec<manuscripts::ImportSection>,
 ) -> Result<manuscripts::Manuscript, String> {
-    let m = store.create_manuscript(&title).map_err(err)?;
-    for s in sections {
-        store
-            .import_section_json(&m.id, &s.kind, &s.title, &s.doc)
-            .map_err(err)?;
-    }
-    Ok(m)
+    store
+        .import_manuscript(&title, &sections)
+        .map(|(m, _)| m)
+        .map_err(err)
 }
 
 #[tauri::command]

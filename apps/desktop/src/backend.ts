@@ -129,3 +129,28 @@ export async function dismissRecoveryNotices(ids: string[]): Promise<void> {
   if (!isTauri()) return;
   await invoke('dismiss_recovery_notices', { ids });
 }
+
+export interface StoredManuscript {
+  id: string;
+  title: string;
+  createdAt: string;
+}
+
+/** The import payload the backend persists: one entry per section, in outline order. */
+export interface ImportPayload {
+  title: string;
+  sections: { kind: string; title: string; doc: unknown }[];
+}
+
+/**
+ * Persist an imported manuscript (manuscript row, sections and their initial documents) in one
+ * backend transaction, so agents can see it over MCP and it survives a restart. Returns null
+ * in a plain browser (pnpm dev:web), where there is no database.
+ */
+export async function persistImport(payload: ImportPayload): Promise<StoredManuscript | null> {
+  if (!isTauri()) return null;
+  return invoke<StoredManuscript>('manuscript_import_json', {
+    title: payload.title,
+    sections: payload.sections,
+  });
+}

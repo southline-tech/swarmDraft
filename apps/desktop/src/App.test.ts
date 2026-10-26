@@ -27,7 +27,46 @@ async function withManuscript() {
   return { w, session, titles };
 }
 
+async function chooseFile(w: ReturnType<typeof mount>) {
+  const input = w.find('[data-test="open-docx"]');
+  const file = new File([bytes()], 'synthetic.docx');
+  Object.defineProperty(file, 'arrayBuffer', { value: async () => bytes().buffer });
+  Object.defineProperty(input.element, 'files', { value: [file], configurable: true });
+  await input.trigger('change');
+  await settle();
+}
+
 describe('App', () => {
+  it('saves an imported .docx to the backend before opening it', async () => {
+    const backend = await import('./backend');
+    const persist = vi.mocked(backend.persistImport);
+    persist.mockClear();
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    expect(persist).toHaveBeenCalledTimes(1);
+    const payload = persist.mock.calls[0]![0];
+    const expected = importDocx(bytes(), { manuscriptId: 'x' });
+    expect(payload.title).toBe(expected.title);
+    expect(payload.sections.map((s) => [s.kind, s.title])).toEqual(
+      expected.sections.map((s) => [s.kind, s.title]),
+    );
+    expect(payload.sections.every((s) => (s.doc as { type: string }).type === 'doc')).toBe(true);
+    expect(w.findAll('.row').length).toBe(expected.sections.length);
+    w.unmount();
+  });
+
+  it('shows an error and does not open the import when saving fails', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.persistImport).mockRejectedValueOnce('database is locked');
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    expect(w.text()).toContain('Could not import synthetic.docx: database is locked');
+    expect(w.findAll('.row')).toHaveLength(0);
+    w.unmount();
+  });
+
   it('renders in browser mode without the desktop backend, with no sample outline', async () => {
     const backend = await import('./backend');
     vi.mocked(backend.getAppInfo).mockResolvedValueOnce(null);
@@ -247,6 +286,7 @@ vi.mock('./backend', async (orig) => ({
   pickBackupToRestore: vi.fn(async () => 'D:\\Backups\\picked.zip'),
   pickBackupDestination: vi.fn(async () => 'D:\\Backups\\new.zip'),
   getRecoveryNotices: vi.fn(async () => []),
+  persistImport: vi.fn(async () => ({ id: 'db1', title: 't', createdAt: '' })),
   dismissRecoveryNotices: vi.fn(async () => {}),
   restoreBackup: vi.fn(async () => ({
     tokensRevoked: 2,

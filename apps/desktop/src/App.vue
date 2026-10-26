@@ -11,11 +11,13 @@ import {
   dismissRecoveryNotices,
   type AppInfo,
   type RecoveryNotice,
+  persistImport,
 } from './backend';
 import AgentsSettings from './AgentsSettings.vue';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
-import { sessionFromDocx, type ManuscriptSession } from './manuscript-session';
+import { importDocx } from '@coauthor/docx';
+import { importPayload, sessionFromImported, type ManuscriptSession } from './manuscript-session';
 
 const info = ref<AppInfo | null>(null);
 const session = shallowRef<ManuscriptSession | null>(null);
@@ -123,9 +125,14 @@ async function onFile(e: Event) {
   if (!file) return;
   openError.value = '';
   try {
-    open(sessionFromDocx(new Uint8Array(await file.arrayBuffer()), crypto.randomUUID()));
+    const id = crypto.randomUUID();
+    const imported = importDocx(new Uint8Array(await file.arrayBuffer()), { manuscriptId: id });
+    // Save it before showing it: an import that only lives in memory is invisible to agents
+    // (MCP) and lost on restart.
+    const saved = await persistImport(importPayload(imported));
+    open(sessionFromImported(imported, saved?.id ?? id));
   } catch (err) {
-    openError.value = `Could not import ${file.name}: ${(err as Error).message}`;
+    openError.value = `Could not import ${file.name}: ${err instanceof Error ? err.message : String(err)}`;
   }
 }
 

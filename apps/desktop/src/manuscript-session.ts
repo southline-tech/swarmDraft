@@ -14,7 +14,9 @@ import {
   readStructure,
   writeStructure,
   type ImportReport,
+  type ImportedManuscript,
 } from '@coauthor/docx';
+import type { ImportPayload } from './backend';
 
 export interface ManuscriptSession {
   id: string;
@@ -66,7 +68,22 @@ export function openSession(
 
 /** Import a .docx into a new session. */
 export function sessionFromDocx(bytes: Uint8Array, manuscriptId: string): ManuscriptSession {
-  const imported = importDocx(bytes, { manuscriptId });
+  return sessionFromImported(importDocx(bytes, { manuscriptId }), manuscriptId);
+}
+
+/** Open a session over an already-parsed import. */
+export function sessionFromImported(
+  imported: ImportedManuscript,
+  manuscriptId: string,
+): ManuscriptSession {
   const docs = importedToYDocs(imported);
   return openSession(manuscriptId, imported.title, docs.manuscript, docs.sections, imported.report);
+}
+
+/** What the backend persists for an import: title plus each section's kind, title and content. */
+export function importPayload(imported: ImportedManuscript): ImportPayload {
+  return {
+    title: imported.title,
+    sections: imported.sections.map((s) => ({ kind: s.kind, title: s.title, doc: s.content })),
+  };
 }
