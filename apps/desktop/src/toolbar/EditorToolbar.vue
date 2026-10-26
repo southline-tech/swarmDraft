@@ -22,16 +22,24 @@ const props = withDefaults(
   defineProps<{
     editor: Editor;
     reviewOpen?: boolean;
+    /** Whether the chapter navigator is showing (owned by App.vue). */
+    navigatorOpen?: boolean;
     /** Comments and Find land in later issues (RAD-257/259); until wired they show disabled. */
     commentEnabled?: boolean;
     /** Why the editor is read-only (e.g. 'document failed to load', 'restore in progress'). */
     readOnlyReason?: string;
     findEnabled?: boolean;
   }>(),
-  { reviewOpen: true, readOnlyReason: '', commentEnabled: false, findEnabled: false },
+  {
+    reviewOpen: true,
+    navigatorOpen: true,
+    readOnlyReason: '',
+    commentEnabled: false,
+    findEnabled: false,
+  },
 );
 const emit = defineEmits<{
-  /** Reserved: the Chapters toggle is a 'coming soon' no-op until App.vue wires it (after #25). */
+  /** The Chapters toggle; App.vue shows or hides the chapter navigator. */
   'toggle-navigator': [];
   'toggle-review': [];
   comment: [];
@@ -207,9 +215,10 @@ const btn =
       data-test="tb-navigator"
       :class="btn"
       aria-label="Chapters"
-      aria-disabled="true"
-      :aria-description="SOON"
-      :title="soon('Chapters')"
+      title="Chapters"
+      :aria-pressed="props.navigatorOpen"
+      aria-controls="chapter-navigator"
+      @click="emit('toggle-navigator')"
     >
       <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
         <rect x="2.5" y="3" width="11" height="10" rx="1.5" />

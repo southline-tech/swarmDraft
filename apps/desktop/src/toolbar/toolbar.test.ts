@@ -316,14 +316,11 @@ describe('EditorToolbar', () => {
     expect(w.emitted('toggle-review')).toHaveLength(1);
     expect(w.find('[data-test="tb-review"]').attributes('aria-pressed')).toBe('false');
     const nav = w.find('[data-test="tb-navigator"]');
-    expect(nav.attributes('aria-pressed')).toBeUndefined();
-    for (const id of [
-      'tb-navigator',
-      'tb-comment',
-      'tb-find',
-      'tb-align-right',
-      'tb-align-justify',
-    ]) {
+    expect(nav.attributes('aria-pressed')).toBe('true');
+    expect(nav.attributes('aria-disabled')).toBeUndefined();
+    await nav.trigger('click');
+    expect(w.emitted('toggle-navigator')).toHaveLength(1);
+    for (const id of ['tb-comment', 'tb-find', 'tb-align-right', 'tb-align-justify']) {
       const b = w.find(`[data-test="${id}"]`);
       expect(b.attributes('disabled')).toBeUndefined(); // stays in the Tab order
       expect(b.attributes('aria-disabled')).toBe('true');
@@ -334,7 +331,6 @@ describe('EditorToolbar', () => {
     expect(w.find('[data-test="tb-comment"]').attributes('title')).toBe(
       'Add comment — coming soon',
     );
-    expect(w.emitted('toggle-navigator')).toBeUndefined();
     expect(w.emitted('comment')).toBeUndefined();
     expect(w.emitted('find')).toBeUndefined();
     w.unmount();

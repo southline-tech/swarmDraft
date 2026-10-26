@@ -28,6 +28,8 @@ const props = defineProps<{
   content?: JSONContent;
   /** No editing (e.g. the session is closed); edits would be dropped. */
   readonly?: boolean;
+  /** Whether the parent's chapter navigator is showing; reflected on the toolbar's Chapters button. */
+  navigatorOpen?: boolean;
 }>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
@@ -95,6 +97,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
       v-if="editor"
       :editor="editor"
       :review-open="reviewOpen"
+      :navigator-open="props.navigatorOpen"
       :read-only-reason="loadError ? 'document failed to load' : undefined"
       @toggle-navigator="emit('toggle-navigator')"
       @toggle-review="reviewOpen = !reviewOpen"
