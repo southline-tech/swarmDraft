@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 
 use crate::agents::AgentPrincipal;
 use crate::content;
+use crate::manuscripts::AgentWrite;
 use crate::storage::{StorageError, Store};
 
 /// A tool failure the agent should see (`isError: true`), with its audit outcome.
@@ -450,6 +451,7 @@ impl CoauthorMcp {
                 }
                 let s = self.store.get_section(&a.manuscript_id, &a.section_id)?;
                 let id = format!("c{}", crate::manuscripts::new_id());
+                let mut edited: Option<(yrs::Doc, yrs::StateVector)> = None;
                 let (block_id, quote) = match (&a.thread_id, &a.block_id, &a.quote) {
                     (Some(t), _, _) => {
                         let parent = self
@@ -476,7 +478,7 @@ impl CoauthorMcp {
                             let (b, a) = review_marks_pair(&review_before, &blocks_of(&doc));
                             check_review_marks(&b, &a)?;
                         }
-                        self.store.save_doc_changes(&s.doc_id, &doc, &sv)?;
+                        edited = Some((doc, sv));
                         (Some(b.clone()), Some(q.clone()))
                     }
                     _ => {
@@ -495,7 +497,15 @@ impl CoauthorMcp {
                     author: author(p),
                     created_at: self.store.now()?,
                 };
-                self.store.insert_comment(&a.manuscript_id, &c)?;
+                self.store.agent_write(
+                    &p.token_id,
+                    AgentWrite {
+                        manuscript_id: &a.manuscript_id,
+                        doc: edited.as_ref().map(|(d, sv)| (s.doc_id.as_str(), d, sv)),
+                        comment: Some(&c),
+                        suggestion: None,
+                    },
+                )?;
                 Ok(Output::Json(json!({ "comment": c })))
             },
         )
@@ -559,7 +569,6 @@ impl CoauthorMcp {
                     let (b, a) = review_marks_pair(&review_before, &blocks_of(&doc));
                     check_review_marks(&b, &a)?;
                 }
-                self.store.save_doc_changes(&s.doc_id, &doc, &sv)?;
                 let x = crate::manuscripts::Suggestion {
                     id,
                     section_id: s.id.clone(),
@@ -577,7 +586,15 @@ impl CoauthorMcp {
                     status: "open".into(),
                     created_at: ts,
                 };
-                self.store.insert_suggestion(&a.manuscript_id, &x)?;
+                self.store.agent_write(
+                    &p.token_id,
+                    AgentWrite {
+                        manuscript_id: &a.manuscript_id,
+                        doc: Some((s.doc_id.as_str(), &doc, &sv)),
+                        comment: None,
+                        suggestion: Some(&x),
+                    },
+                )?;
                 Ok(Output::Json(json!({ "suggestion": x })))
             },
         )
@@ -647,7 +664,15 @@ impl CoauthorMcp {
                     status: "open".into(),
                     created_at: self.store.now()?,
                 };
-                self.store.insert_suggestion(&a.manuscript_id, &x)?;
+                self.store.agent_write(
+                    &p.token_id,
+                    AgentWrite {
+                        manuscript_id: &a.manuscript_id,
+                        doc: None,
+                        comment: None,
+                        suggestion: Some(&x),
+                    },
+                )?;
                 Ok(Output::Json(json!({ "suggestion": x })))
             },
         )
@@ -1062,5 +1087,99 @@ mod tests {
             b[&("comment_anchor".to_string(), "c2".to_string())][0].block,
             "b1#fn0"
         );
+    }
+
+    fn counts(store: &Store) -> (i64, i64, i64) {
+        store
+            .with_sql(|c| {
+                let n = |q: &str| c.query_row(q, [], |r| r.get::<_, i64>(0));
+                Ok((
+                    n("SELECT COUNT(*) FROM doc_updates")?,
+                    n("SELECT COUNT(*) FROM comments")?,
+                    n("SELECT COUNT(*) FROM suggestions")?,
+                ))
+            })
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_token_revoked_between_auth_and_write_writes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(tmp.path()).unwrap();
+        let m = store.create_manuscript("Synthetic").unwrap();
+        let s = store
+            .import_section_json(
+                &m.id,
+                "chapter",
+                "One",
+                &json!({"type":"doc","content":[
+                    {"type":"paragraph","content":[{"type":"text","text":"The lantern was lit."}]}
+                ]}),
+            )
+            .unwrap();
+        let b1 = crate::content::decode(&store.load_doc(&s.doc_id).unwrap())[0]
+            .id
+            .clone();
+        let agent = store.create_agent("Synthetic agent", "#123456").unwrap();
+        let scopes: Vec<String> = ["read", "comment", "suggest"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let tok = store.create_token(&agent.id, Some(&scopes)).unwrap();
+        // Authenticated (the request passed auth), then revoked before the tool writes.
+        let principal = store.authenticate(&tok.token).unwrap().unwrap();
+        store.revoke_token(&principal.token_id).unwrap();
+        let mcp = CoauthorMcp::new(store.clone());
+        let parts = || {
+            let (mut parts, ()) = axum::http::Request::new(()).into_parts();
+            parts.extensions.insert(principal.clone());
+            Extension(parts)
+        };
+        let before = counts(&store);
+        let results = [
+            mcp.add_comment(
+                parts(),
+                Parameters(AddCommentArgs {
+                    manuscript_id: m.id.clone(),
+                    section_id: s.id.clone(),
+                    block_id: Some(b1.clone()),
+                    quote: Some("lantern".into()),
+                    body: "Synthetic note.".into(),
+                    thread_id: None,
+                }),
+            )
+            .await
+            .unwrap(),
+            mcp.suggest_edit(
+                parts(),
+                Parameters(SuggestEditArgs {
+                    manuscript_id: m.id.clone(),
+                    section_id: s.id.clone(),
+                    block_id: b1.clone(),
+                    quote: "lantern".into(),
+                    replacement: "lamp".into(),
+                    rationale: None,
+                }),
+            )
+            .await
+            .unwrap(),
+            mcp.suggest_style(
+                parts(),
+                Parameters(SuggestStyleArgs {
+                    manuscript_id: m.id.clone(),
+                    section_id: s.id.clone(),
+                    block_id: b1.clone(),
+                    style: "verse".into(),
+                    rationale: None,
+                }),
+            )
+            .await
+            .unwrap(),
+        ];
+        for r in results {
+            assert_eq!(r.is_error, Some(true), "{r:?}");
+            assert!(format!("{r:?}").contains("revoked"), "{r:?}");
+        }
+        assert_eq!(counts(&store), before, "nothing was written");
     }
 }

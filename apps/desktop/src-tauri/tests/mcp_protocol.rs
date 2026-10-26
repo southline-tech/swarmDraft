@@ -1141,3 +1141,53 @@ async fn writes_never_touch_existing_review_marks() {
     assert_eq!(raw_keys(&s, &sid), before, "nothing was saved");
     assert_eq!(s.store.open_suggestions(&sid).unwrap().len(), n);
 }
+
+#[tokio::test]
+async fn suggest_only_no_tool_can_accept_or_reject() {
+    let s = start(&["read", "comment", "suggest"], 1000).await;
+    let list = rpc(&s, "tools/list", json!({})).await;
+    let mut names: Vec<String> = list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect();
+    names.sort();
+    // The exact tool surface: reading, commenting and suggesting. Nothing decides.
+    assert_eq!(
+        names,
+        [
+            "add_comment",
+            "list_chapters",
+            "list_documents",
+            "read_chapter",
+            "search_text",
+            "suggest_edit",
+            "suggest_style"
+        ]
+    );
+    for name in [
+        "accept_suggestion",
+        "reject_suggestion",
+        "resolve_suggestion",
+    ] {
+        let r = rpc(
+            &s,
+            "tools/call",
+            json!({"name": name, "arguments": {"suggestion_id": "s1"}}),
+        )
+        .await;
+        assert!(
+            r.get("error").is_some() || r["result"]["isError"] == true,
+            "{name} must not exist: {r}"
+        );
+    }
+    // No MCP source can change a suggestion's status.
+    let src = concat!(
+        include_str!("../src/mcp/mod.rs"),
+        include_str!("../src/mcp/tools.rs")
+    )
+    .to_lowercase();
+    assert!(!src.contains("update suggestions"));
+    assert!(!src.contains("'accepted'") && !src.contains("'rejected'"));
+}
