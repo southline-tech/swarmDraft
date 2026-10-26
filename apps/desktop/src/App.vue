@@ -1,12 +1,33 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { DEFAULT_TRIM } from '@coauthor/schema';
-import { getAppInfo, type AppInfo } from './backend';
+import { createBackup, getAppInfo, restoreBackup, type AppInfo } from './backend';
 
 const info = ref<AppInfo | null>(null);
 onMounted(async () => {
   info.value = await getAppInfo();
 });
+
+const backupStatus = ref('');
+const restorePath = ref('');
+
+async function onBackup(): Promise<void> {
+  try {
+    backupStatus.value = `Backup saved: ${await createBackup()}`;
+  } catch (e) {
+    backupStatus.value = `Backup failed: ${String(e)}`;
+  }
+}
+
+async function onRestore(): Promise<void> {
+  if (!restorePath.value.trim()) return;
+  try {
+    const r = await restoreBackup(restorePath.value.trim());
+    backupStatus.value = `Restored. Previous state saved: ${r.preRestoreSnapshot}`;
+  } catch (e) {
+    backupStatus.value = `Restore failed: ${String(e)}`;
+  }
+}
 </script>
 
 <template>
@@ -16,6 +37,12 @@ onMounted(async () => {
     <p v-if="info" data-test="app-info">
       v{{ info.version }} · data: {{ info.dataDir }} · db schema {{ info.schemaVersion }}
     </p>
+    <section v-if="info" data-test="backup">
+      <button type="button" data-test="backup-button" @click="onBackup">Download backup</button>
+      <input v-model="restorePath" data-test="restore-path" placeholder="Path to backup .zip" />
+      <button type="button" data-test="restore-button" @click="onRestore">Restore</button>
+      <p v-if="backupStatus" data-test="backup-status">{{ backupStatus }}</p>
+    </section>
     <p v-else data-test="browser-mode">Running in browser mode (no desktop backend).</p>
   </main>
 </template>

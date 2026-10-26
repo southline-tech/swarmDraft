@@ -38,6 +38,30 @@ impl Store {
         &self.dir
     }
 
+    /// Run `f` with the shared connection.
+    pub fn with_conn<T>(
+        &self,
+        f: impl FnOnce(&Connection) -> rusqlite::Result<T>,
+    ) -> Result<T, StorageError> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(f(&conn)?)
+    }
+
+    /// Run `f` with mutable access to the shared connection.
+    pub fn with_conn_mut<T>(
+        &self,
+        f: impl FnOnce(&mut Connection) -> rusqlite::Result<T>,
+    ) -> Result<T, StorageError> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(f(&mut conn)?)
+    }
+
+    /// Apply any pending migrations (e.g. after restoring an older backup).
+    pub fn migrate_now(&self) -> Result<(), StorageError> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        migrate(&mut conn)
+    }
+
     pub fn schema_version(&self) -> Result<i64, StorageError> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.pragma_query_value(None, "user_version", |r| r.get(0))?)
