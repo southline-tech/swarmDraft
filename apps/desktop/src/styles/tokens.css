@@ -1,0 +1,190 @@
+/* coAuthor design tokens. Fonts are bundled locally (OFL, see ./fonts/). */
+@font-face {
+  font-family: 'Literata';
+  src: url('./fonts/literata/literata-latin-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Literata';
+  src: url('./fonts/literata/literata-latin-400-italic.woff2') format('woff2');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Literata';
+  src: url('./fonts/literata/literata-latin-700.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Inter';
+  src: url('./fonts/inter/inter-latin-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Inter';
+  src: url('./fonts/inter/inter-latin-500.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Inter';
+  src: url('./fonts/inter/inter-latin-600.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* Type */
+  --ct-font-manuscript: 'Literata', Georgia, serif;
+  --ct-font-ui: 'Inter', system-ui, 'Segoe UI', sans-serif;
+  --ct-font-mono: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  --ct-weight-regular: 400;
+  --ct-weight-medium: 500;
+  --ct-weight-semibold: 600;
+  --ct-weight-bold: 700;
+  /* Modular scale, ratio 1.2, base 1rem (16px) */
+  --ct-text-xs: 0.694rem;
+  --ct-text-sm: 0.833rem;
+  --ct-text-md: 1rem;
+  --ct-text-lg: 1.2rem;
+  --ct-text-xl: 1.44rem;
+  --ct-text-2xl: 1.728rem;
+  --ct-text-3xl: 2.074rem;
+  --ct-text-page: 1.125rem; /* manuscript body */
+  --ct-leading-tight: 1.25;
+  --ct-leading-ui: 1.45;
+  --ct-leading-body: 1.6;
+  --ct-measure-page: 66ch;
+
+  /* Spacing (4px base) */
+  --ct-space-0: 0;
+  --ct-space-1: 4px;
+  --ct-space-2: 8px;
+  --ct-space-3: 12px;
+  --ct-space-4: 16px;
+  --ct-space-5: 20px;
+  --ct-space-6: 24px;
+  --ct-space-8: 32px;
+  --ct-space-10: 40px;
+  --ct-space-12: 48px;
+  --ct-space-16: 64px;
+
+  /* Radius */
+  --ct-radius-sm: 4px;
+  --ct-radius-md: 8px;
+  --ct-radius-lg: 12px;
+  --ct-radius-full: 999px;
+
+  /* Color: warm paper (light) */
+  --ct-bg: #f3efe8; /* app chrome */
+  --ct-surface: #ffffff;
+  --ct-surface-raised: #ffffff;
+  --ct-paper: #fbf8f3; /* manuscript page */
+  --ct-border: #ddd5c9;
+  --ct-border-strong: #b9ae9f;
+  --ct-text: #2b2620; /* 14.1:1 on paper */
+  --ct-text-muted: #6b6157; /* 5.7:1 on paper */
+  --ct-accent: #2f5da8;
+  --ct-accent-contrast: #ffffff;
+  --ct-selected-bg: #e4ecf8;
+  --ct-danger: #b3261e;
+  --ct-danger-bg: #fbe9e7;
+  --ct-warning: #8a5300;
+  --ct-warning-bg: #fff3dc;
+  --ct-success: #2e6b3f;
+  --ct-success-bg: #e6f2e8;
+  --ct-comment-bg: #fff1b8;
+  --ct-scrim: rgb(30 25 20 / 0.4);
+
+  /* Elevation */
+  --ct-elevation-1: 0 1px 2px rgb(43 38 32 / 0.08), 0 1px 1px rgb(43 38 32 / 0.04);
+  --ct-elevation-2: 0 4px 12px rgb(43 38 32 / 0.1), 0 1px 3px rgb(43 38 32 / 0.06);
+  --ct-elevation-3: 0 16px 40px rgb(43 38 32 / 0.18), 0 4px 12px rgb(43 38 32 / 0.08);
+
+  /* Focus: 2px ring, >=3:1 vs adjacent colors (6.1:1 on paper) */
+  --ct-focus-ring-color: #2f5da8;
+  --ct-focus-ring: 0 0 0 2px var(--ct-surface), 0 0 0 4px var(--ct-focus-ring-color);
+  --ct-focus-outline: 2px solid var(--ct-focus-ring-color);
+  --ct-focus-offset: 2px;
+
+  /* Collaborators: all >=4.5:1 on paper in their theme */
+  --ct-collab-1: #2f5da8; /* author */
+  --ct-collab-2: #a1452a;
+  --ct-collab-3: #2e7d4f;
+  --ct-collab-4: #7a4bb0;
+  --ct-collab-5: #a8336b;
+  --ct-collab-6: #8a6200;
+  --ct-collab-7: #1f7a85;
+  --ct-collab-8: #5c6670;
+
+  /* Suggestions. Set --ct-suggester on the mark to a --collab-* value. */
+  --ct-suggester: var(--ct-collab-1);
+  --ct-suggest-insert-bg: color-mix(in srgb, var(--ct-suggester) 14%, transparent);
+  --ct-suggest-insert-underline: var(--ct-suggester);
+  --ct-suggest-delete-bg: color-mix(in srgb, var(--ct-text-muted) 12%, transparent);
+  --ct-suggest-delete-text: var(--ct-text-muted);
+  --ct-suggest-delete-strike: var(--ct-suggester);
+}
+
+[data-theme='dark'] {
+  --ct-bg: #141210;
+  --ct-surface: #1f1c19;
+  --ct-surface-raised: #26221e;
+  --ct-paper: #1c1a17;
+  --ct-border: #3a342d;
+  --ct-border-strong: #5a5147;
+  --ct-text: #e8e2d8;
+  --ct-text-muted: #a69c90;
+  --ct-accent: #8db2f2;
+  --ct-accent-contrast: #141210;
+  --ct-selected-bg: #25324a;
+  --ct-danger: #f2a39c;
+  --ct-danger-bg: #3a1f1c;
+  --ct-warning: #e8c06a;
+  --ct-warning-bg: #3a2e15;
+  --ct-success: #8fd0a0;
+  --ct-success-bg: #1c3324;
+  --ct-comment-bg: #4a3f14;
+  --ct-scrim: rgb(0 0 0 / 0.6);
+  --ct-elevation-1: 0 1px 2px rgb(0 0 0 / 0.5);
+  --ct-elevation-2: 0 4px 12px rgb(0 0 0 / 0.5);
+  --ct-elevation-3: 0 16px 40px rgb(0 0 0 / 0.6);
+  --ct-focus-ring-color: #8db2f2;
+  --ct-collab-1: #8db2f2;
+  --ct-collab-2: #f0a07f;
+  --ct-collab-3: #7fd1a0;
+  --ct-collab-4: #c7a6f2;
+  --ct-collab-5: #f29bc4;
+  --ct-collab-6: #e3c066;
+  --ct-collab-7: #7fd3dc;
+  --ct-collab-8: #b4bdc6;
+  --ct-suggest-insert-bg: color-mix(in srgb, var(--ct-suggester) 22%, transparent);
+}
+
+/* Base hooks (global only; no component selectors) */
+:root {
+  color-scheme: light;
+}
+[data-theme='dark'] {
+  color-scheme: dark;
+}
+body {
+  font-family: var(--ct-font-ui);
+  font-size: var(--ct-text-md);
+  line-height: var(--ct-leading-ui);
+  color: var(--ct-text);
+  background: var(--ct-bg);
+}
+:focus-visible {
+  outline: var(--ct-focus-outline);
+  outline-offset: var(--ct-focus-offset);
+}
