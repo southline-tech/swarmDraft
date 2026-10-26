@@ -233,3 +233,19 @@ describe('SectionNav locked (RAD-263)', () => {
     w.unmount();
   });
 });
+
+describe('repair notice', () => {
+  it("doesn't promise the next change saves the repair when the outline is locked", async () => {
+    const outline = sampleOutline();
+    // A section inside itself: needs repair on load.
+    const broken = outline.map((s, i) => (i === 1 ? { ...s, parentId: s.id } : s));
+    const open = setup({ sections: broken });
+    expect(open.find('[data-test="outline-repaired"]').text()).toContain('Your next change saves');
+    open.unmount();
+    const locked = setup({ sections: broken, locked: 'Locked (RAD-263).' });
+    const text = locked.find('[data-test="outline-repaired"]').text();
+    expect(text).not.toContain('next change');
+    expect(text).toContain('not saved yet');
+    locked.unmount();
+  });
+});

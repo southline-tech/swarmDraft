@@ -38,10 +38,11 @@ async function dismissRecovery() {
 const openError = ref('');
 const importing = ref(false);
 const saveError = ref('');
-const onSaveError = (err: unknown, { dropped }: { dropped: boolean }) =>
-  (saveError.value = dropped
-    ? `Some edits could not be saved and were dropped: ${String(err)}`
-    : `Could not save your latest edits (will retry): ${String(err)}`);
+/** Shown while edits are unsaved; cleared once a save succeeds. Edits are never dropped. */
+const persistHooks = {
+  onError: (err: unknown) => (saveError.value = `Not saved, retrying: ${String(err)}`),
+  onSaved: () => (saveError.value = ''),
+};
 /**
  * Bumped by the editor's Reload action to reopen the section from its Y.Doc. The editor is bound
  * to that doc, so everything typed is already in it and survives the remount (and switching
@@ -60,7 +61,7 @@ onMounted(async () => {
       recoveryNotices.value = [];
     }
     try {
-      const latest = await reopenLatest(onSaveError);
+      const latest = await reopenLatest(persistHooks);
       if (latest && !session.value) open(latest);
     } catch (err) {
       openError.value = `Could not reopen the last manuscript: ${String(err)}`;
@@ -107,8 +108,14 @@ async function onRestore(): Promise<void> {
   confirmingRestore.value = false;
   if (!restorePath.value.trim()) return;
   try {
-    // Save pending edits first so the pre-restore snapshot includes them.
-    await session.value?.flush();
+    // Save pending edits first so the pre-restore snapshot includes them; if they can't be
+    // saved, don't restore (that would lose them).
+    try {
+      await session.value?.flush();
+    } catch (e) {
+      backupStatus.value = `Restore cancelled: ${e instanceof Error ? e.message : String(e)}. Nothing was changed.`;
+      return;
+    }
     const r = await restoreBackup(restorePath.value.trim());
     // The restore replaced storage, so the open session's in-memory docs are stale: close them
     // (stops the structure observer and unmounts the editor) so nothing can write them back.
@@ -146,7 +153,7 @@ async function onFile(e: Event) {
   openError.value = '';
   importing.value = true;
   try {
-    open(await importAndOpen(new Uint8Array(await file.arrayBuffer()), onSaveError));
+    open(await importAndOpen(new Uint8Array(await file.arrayBuffer()), persistHooks));
   } catch (err) {
     openError.value = `Could not import ${file.name}: ${err instanceof Error ? err.message : String(err)}`;
   } finally {

@@ -5,6 +5,7 @@ const win = vi.hoisted(() => ({
   handler: undefined as undefined | ((e: { preventDefault: () => void }) => Promise<void>),
   destroy: vi.fn(async () => {}),
   unlisten: vi.fn(),
+  ask: vi.fn<(message: string, opts?: unknown) => Promise<boolean>>(async () => false),
 }));
 vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => true }));
 vi.mock('@tauri-apps/api/window', () => ({
@@ -16,12 +17,17 @@ vi.mock('@tauri-apps/api/window', () => ({
     destroy: win.destroy,
   }),
 }));
+vi.mock('@tauri-apps/plugin-dialog', () => ({ ask: win.ask }));
 
-import { flushOnClose } from './close-flush';
+import { flushOnClose, UNSAVED_QUIT_PROMPT } from './close-flush';
+
+const requestClose = () => win.handler!({ preventDefault: () => {} });
 
 afterEach(() => {
   vi.useRealTimers();
-  win.destroy.mockClear();
+  vi.restoreAllMocks();
+  win.destroy.mockReset();
+  win.ask.mockReset();
   win.handler = undefined;
 });
 
@@ -49,22 +55,53 @@ describe('flushOnClose', () => {
     finish();
     await closing;
     expect(order).toEqual(['flushed', 'destroyed']);
+    expect(win.ask).not.toHaveBeenCalled();
     stop();
     expect(win.unlisten).toHaveBeenCalled();
   });
 
-  it('closes anyway after the timeout if the flush hangs or fails', async () => {
+  it('asks before quitting with unsaved edits; No keeps the window open, Yes quits', async () => {
+    await flushOnClose(() => Promise.reject(new Error('locked')));
+    win.ask.mockResolvedValueOnce(false);
+    await requestClose();
+    expect(win.ask).toHaveBeenCalledWith(UNSAVED_QUIT_PROMPT, expect.anything());
+    expect(win.destroy).not.toHaveBeenCalled();
+    // The flag was reset: a second close request asks again.
+    win.ask.mockResolvedValueOnce(true);
+    await requestClose();
+    expect(win.ask).toHaveBeenCalledTimes(2);
+    expect(win.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a flush that times out as unsaved and asks', async () => {
     vi.useFakeTimers();
     await flushOnClose(() => new Promise<void>(() => {}), 1000);
-    const closing = win.handler!({ preventDefault: () => {} });
+    win.ask.mockResolvedValueOnce(true);
+    const closing = requestClose();
     await vi.advanceTimersByTimeAsync(999);
-    expect(win.destroy).not.toHaveBeenCalled();
+    expect(win.ask).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     await closing;
+    expect(win.ask).toHaveBeenCalledTimes(1);
     expect(win.destroy).toHaveBeenCalledTimes(1);
+  });
 
-    await flushOnClose(() => Promise.reject(new Error('locked')), 1000);
-    await win.handler!({ preventDefault: () => {} });
+  it('falls back to window.confirm when the native dialog is unavailable', async () => {
+    await flushOnClose(() => Promise.reject(new Error('locked')));
+    win.ask.mockRejectedValueOnce(new Error('dialog plugin missing'));
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false);
+    await requestClose();
+    expect(confirm).toHaveBeenCalledWith(UNSAVED_QUIT_PROMPT);
+    expect(win.destroy).not.toHaveBeenCalled();
+  });
+
+  it('if destroy fails, falls back to window.close and allows another close request', async () => {
+    await flushOnClose(async () => {});
+    const close = vi.spyOn(window, 'close').mockImplementation(() => {});
+    win.destroy.mockRejectedValueOnce(new Error('not allowed'));
+    await requestClose();
+    expect(close).toHaveBeenCalledTimes(1);
+    await requestClose();
     expect(win.destroy).toHaveBeenCalledTimes(2);
   });
 

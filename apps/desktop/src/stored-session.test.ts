@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { yDocToDoc } from '@coauthor/docx';
-import { sessionFromStored } from './manuscript-session';
+import { sessionFromStored, UnsavedEditsError } from './manuscript-session';
 import { storedFixture } from './stored-fixture.test-helper';
 
 const firstText = (doc: Y.Doc) => {
@@ -66,60 +66,61 @@ describe('sessionFromStored', () => {
     expect(save2).not.toHaveBeenCalled();
   });
 
-  it('keeps a failed save pending and retries it on the next flush', async () => {
+  it('never drops edits: after failures it resends the full state, and both edits survive a reload', async () => {
+    vi.useFakeTimers();
     const stored = storedFixture();
-    const save = vi.fn().mockRejectedValueOnce(new Error('locked')).mockResolvedValue(undefined);
+    const sec = stored.sections[1]!;
+    // A fake backend: accepted updates per section; fails while `down`.
+    const accepted: Uint8Array[] = [];
+    let down = true;
+    const save = vi.fn(async (_id: string, u: Uint8Array) => {
+      if (down) throw new Error('database is locked');
+      accepted.push(u);
+    });
     const onError = vi.fn();
-    const s = sessionFromStored(stored, null, { save, onError, debounceMs: 60_000 });
-    const doc = s.sections.get(stored.sections[1]!.docId)!;
-    firstText(doc).insert(0, 'Y');
-    await s.flush();
-    expect(onError).toHaveBeenCalledTimes(1);
-    await s.flush();
-    expect(save).toHaveBeenCalledTimes(2);
-    expect(save.mock.calls[1]![1]).toEqual(save.mock.calls[0]![1]);
-    await s.close();
-  });
-
-  it('retries a failing batch on its own, then drops it after maxAttempts', async () => {
-    const stored = storedFixture();
-    const save = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('locked'))
-      .mockRejectedValueOnce(new Error('locked'))
-      .mockRejectedValueOnce(new Error('locked'))
-      .mockResolvedValue(undefined);
-    const onError = vi.fn();
+    const onSaved = vi.fn();
     const s = sessionFromStored(stored, null, {
       save,
       onError,
+      onSaved,
       debounceMs: 60_000,
-      maxAttempts: 3,
+      retryMs: 1000,
     });
-    const doc = s.sections.get(stored.sections[1]!.docId)!;
-    firstText(doc).insert(0, 'A');
-    await s.flush(); // attempt 1 fails
-    const bad = save.mock.calls[0]![1];
-    firstText(doc).insert(0, 'B');
-    await s.flush(); // attempt 2 of the failed batch alone; B waits, unmerged
-    expect(save).toHaveBeenCalledTimes(2);
-    expect(save.mock.calls[1]![1]).toEqual(bad);
-    await s.flush(); // attempt 3 fails: dropped; B is saved on its own
-    expect(onError.mock.calls.map((c) => c[1])).toEqual([
-      { dropped: false },
-      { dropped: false },
-      { dropped: true },
-    ]);
-    expect(save).toHaveBeenCalledTimes(4);
-    const later = save.mock.calls[3]![1] as Uint8Array;
-    expect(later).not.toEqual(bad);
-    const d = new Y.Doc();
-    Y.applyUpdate(d, Uint8Array.from(stored.sections[1]!.state));
-    Y.applyUpdate(d, bad);
-    Y.applyUpdate(d, later);
-    expect(firstText(d).toString().startsWith('BA')).toBe(true);
+    const doc = s.sections.get(sec.docId)!;
+    firstText(doc).insert(0, 'LOST ');
+    await expect(s.flush()).rejects.toBeInstanceOf(UnsavedEditsError); // failure 1
+    await vi.advanceTimersByTimeAsync(1000); // backoff retry: failure 2
+    await vi.advanceTimersByTimeAsync(2000); // failure 3
+    expect(save).toHaveBeenCalledTimes(3);
+    expect(onError).toHaveBeenCalledTimes(3);
+    expect(onSaved).not.toHaveBeenCalled();
+    firstText(doc).insert(0, 'LATER ');
+    down = false;
     await s.flush();
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    // The successful save is the full state, not just LATER's delta.
+    const reload = new Y.Doc();
+    Y.applyUpdate(reload, Uint8Array.from(sec.state));
+    for (const u of accepted) Y.applyUpdate(reload, u);
+    expect(firstText(reload).toString()).toContain('LATER LOST ');
+    // Sending a full state the backend already has is a no-op (idempotent).
+    Y.applyUpdate(reload, accepted[0]!);
+    expect(firstText(reload).toString().match(/LOST/g)).toHaveLength(1);
+    // Nothing left unsaved: later edits go back to deltas, no more retries.
+    await vi.advanceTimersByTimeAsync(60_000);
     expect(save).toHaveBeenCalledTimes(4);
     await s.close();
+  });
+
+  it('flush rejects with the unsaved sections while a save keeps failing', async () => {
+    const stored = storedFixture();
+    const save = vi.fn().mockRejectedValue(new Error('disk full'));
+    const s = sessionFromStored(stored, null, { save, debounceMs: 60_000, retryMs: 60_000 });
+    firstText(s.sections.get(stored.sections[2]!.docId)!).insert(0, 'Z');
+    const err = await s.flush().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UnsavedEditsError);
+    expect((err as UnsavedEditsError).sectionIds).toEqual([stored.sections[2]!.id]);
+    expect((err as Error).message).toContain('disk full');
+    await s.close({ discard: true });
   });
 });

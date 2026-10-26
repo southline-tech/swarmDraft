@@ -257,7 +257,12 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
   <nav class="section-nav" aria-label="Manuscript outline">
     <p v-if="loadIssues.length" role="alert" class="warn" data-test="outline-repaired">
       The stored outline had {{ loadIssues.length }} problem(s) (for example a section inside
-      itself) and is shown repaired. Your next change saves the repaired outline.
+      itself) and is shown repaired.
+      {{
+        locked
+          ? 'The repair is not saved yet; the stored outline is unchanged.'
+          : 'Your next change saves the repaired outline.'
+      }}
     </p>
     <p v-if="locked" class="note" data-test="outline-locked">{{ locked }}</p>
     <p v-if="saveError" role="alert" class="warn" data-test="save-error">{{ saveError }}</p>

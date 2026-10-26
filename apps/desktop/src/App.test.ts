@@ -410,6 +410,35 @@ describe('restore confirmation', () => {
     vi.mocked(backend.restoreBackup).mockClear();
   });
 
+  it('cancels the restore with a clear error if pending edits cannot be saved', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.saveSectionUpdate).mockRejectedValue(new Error('database is locked'));
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    const editor = await vi.waitFor(() => {
+      const e = (
+        w.find('.tiptap').element as unknown as { editor?: import('@tiptap/core').Editor } | null
+      )?.editor;
+      if (!e) throw new Error('editor not mounted yet');
+      return e;
+    });
+    editor.commands.insertContentAt(1, 'UNSAVED ');
+    await w.find('[data-test="restore-path"]').setValue('C:\\b.zip');
+    await w.find('[data-test="restore-button"]').trigger('click');
+    await w.find('[data-test="restore-confirm-yes"]').trigger('click');
+    await flushPromises();
+    expect(backend.restoreBackup).not.toHaveBeenCalled();
+    expect(w.text()).toContain('Restore cancelled');
+    expect(w.text()).toContain("aren't saved yet");
+    expect(w.find('[data-test="save-error"]').text()).toContain('Not saved, retrying');
+    expect(w.find('.tiptap').exists()).toBe(true); // the session (and its edits) stays open
+    vi.mocked(backend.saveSectionUpdate).mockReset();
+    vi.mocked(backend.saveSectionUpdate).mockResolvedValue(undefined);
+    w.unmount();
+    await flushPromises();
+  });
+
   it('does not restore until the user confirms', async () => {
     const backend = await import('./backend');
     const wrapper = mount(App);

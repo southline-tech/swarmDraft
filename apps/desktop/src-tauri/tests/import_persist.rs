@@ -280,3 +280,58 @@ fn malformed_or_foreign_updates_are_refused() {
     let fresh = Store::open(tempfile::tempdir().unwrap().path()).unwrap();
     assert!(fresh.latest_manuscript().unwrap().is_none());
 }
+
+/// After failed saves the editor resends its full state; the store merges it idempotently, so
+/// an edit whose delta never arrived (LOST) and a later one (LATER) both survive a restart, and
+/// a repeated full state doesn't duplicate anything.
+#[test]
+fn a_resent_full_state_recovers_lost_edits_idempotently() {
+    use yrs::updates::decoder::Decode;
+    use yrs::{GetString, ReadTxn, StateVector, Text, Transact, Update, XmlFragment, XmlOut};
+    let tmp = tempfile::tempdir().unwrap();
+    let (mid, sid, doc_id) = {
+        let store = Store::open(tmp.path()).unwrap();
+        let (m, _) = store
+            .import_manuscript("Synthetic Harbor", &synthetic_import())
+            .unwrap();
+        let loaded = store.load_manuscript(&m.id).unwrap();
+        let s = &loaded.sections[1];
+        // The editor's copy: LOST is typed (its save fails, never stored), then LATER.
+        let client = coauthor_lib::content::new_doc();
+        client
+            .transact_mut()
+            .apply_update(Update::decode_v1(&s.state).unwrap())
+            .unwrap();
+        let frag = client.get_or_insert_xml_fragment(coauthor_lib::content::FRAGMENT);
+        for word in ["LOST ", "LATER "] {
+            let mut txn = client.transact_mut();
+            let Some(XmlOut::Element(p)) = frag.get(&txn, 0) else {
+                panic!("no paragraph")
+            };
+            let Some(XmlOut::Text(t)) = p.get(&txn, 0) else {
+                panic!("no text")
+            };
+            t.insert(&mut txn, 0, word);
+            assert!(t.get_string(&txn).starts_with(word));
+        }
+        let full = client
+            .transact()
+            .encode_state_as_update_v1(&StateVector::default());
+        store
+            .apply_section_update(&m.id, &s.section.id, &full)
+            .unwrap();
+        // A retry that sends the same full state again changes nothing.
+        store
+            .apply_section_update(&m.id, &s.section.id, &full)
+            .unwrap();
+        (m.id, s.section.id.clone(), s.section.doc_id.clone())
+    };
+    let store = Store::open(tmp.path()).unwrap();
+    let blocks = coauthor_lib::content::decode(&store.load_doc(&doc_id).unwrap());
+    let text = serde_json::to_string(&blocks.iter().map(|b| &b.node).collect::<Vec<_>>()).unwrap();
+    assert!(text.contains("LATER LOST Rain tapped"), "{text}");
+    assert_eq!(text.matches("LOST").count(), 1, "{text}");
+    let latest = store.latest_manuscript().unwrap().unwrap();
+    assert_eq!(latest.manuscript.id, mid);
+    assert!(latest.sections.iter().any(|s| s.section.id == sid));
+}
