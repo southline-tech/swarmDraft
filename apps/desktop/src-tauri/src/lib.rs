@@ -2,8 +2,10 @@
 //!
 //! Module ownership:
 //! - `storage`: local data directory and SQLite (manuscript metadata, Yjs updates, backups).
+//! - `agents`: agent principals and hashed per-agent bearer tokens (RAD-205).
 //! - `mcp`: in-app MCP server bound to 127.0.0.1 with per-agent bearer tokens (RAD-205/209/210).
 
+pub mod agents;
 pub mod mcp;
 pub mod storage;
 
@@ -30,6 +32,56 @@ fn app_info(
     })
 }
 
+fn err(e: storage::StorageError) -> String {
+    e.to_string()
+}
+
+#[tauri::command]
+fn agents_list(store: tauri::State<'_, storage::Store>) -> Result<Vec<agents::Agent>, String> {
+    store.list_agents().map_err(err)
+}
+
+#[tauri::command]
+fn agent_create(
+    store: tauri::State<'_, storage::Store>,
+    name: String,
+    color: String,
+) -> Result<agents::Agent, String> {
+    store.create_agent(&name, &color).map_err(err)
+}
+
+#[tauri::command]
+fn agent_revoke(store: tauri::State<'_, storage::Store>, agent_id: String) -> Result<(), String> {
+    store.revoke_agent(&agent_id).map_err(err)
+}
+
+#[tauri::command]
+fn agent_tokens_list(
+    store: tauri::State<'_, storage::Store>,
+    agent_id: String,
+) -> Result<Vec<agents::TokenInfo>, String> {
+    store.list_tokens(&agent_id).map_err(err)
+}
+
+#[tauri::command]
+fn agent_token_create(
+    store: tauri::State<'_, storage::Store>,
+    agent_id: String,
+    scopes: Option<Vec<String>>,
+) -> Result<agents::NewToken, String> {
+    store
+        .create_token(&agent_id, scopes.as_deref())
+        .map_err(err)
+}
+
+#[tauri::command]
+fn agent_token_revoke(
+    store: tauri::State<'_, storage::Store>,
+    token_id: String,
+) -> Result<(), String> {
+    store.revoke_token(&token_id).map_err(err)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -39,7 +91,15 @@ pub fn run() {
             app.manage(store);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![app_info])
+        .invoke_handler(tauri::generate_handler![
+            app_info,
+            agents_list,
+            agent_create,
+            agent_revoke,
+            agent_tokens_list,
+            agent_token_create,
+            agent_token_revoke
+        ])
         .run(tauri::generate_context!())
         .expect("error while running coAuthor");
 }
