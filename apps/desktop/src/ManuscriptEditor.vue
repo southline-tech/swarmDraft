@@ -51,6 +51,7 @@ import {
 } from '@coauthor/editor';
 import { applyReviewDecision } from './review/apply';
 import type { DocNode } from '@coauthor/schema';
+import { useDeferredValue } from './a11y/deferred';
 
 const props = defineProps<{
   /** The section's Y.Doc to bind to. When set it wins and `content` is ignored. */
@@ -360,6 +361,8 @@ defineExpose({ focusBody });
 
 /** Set when the content does not fit the schema; the editor is then read-only and never emits. */
 const loadError = shallowRef<string>('');
+// Shown in an always-mounted assertive region one frame after it is set (#79).
+const shownLoadError = useDeferredValue(loadError);
 /** Retry of the opening cursor placement; cleared when the editor closes. */
 let cursorTimer: ReturnType<typeof setTimeout> | undefined;
 const options: Partial<EditorOptions> = {
@@ -434,11 +437,13 @@ const LABELS: Record<ReviewItem['type'], string> = {
     :data-focus-mode="focusMode || undefined"
     @keydown="onShellKey"
   >
-    <p v-if="loadError" class="load-error" role="alert" data-test="load-error">
-      This section has content the editor does not support, so it was opened read-only and nothing
-      will be saved. {{ loadError }}
-      <button type="button" data-test="reload" @click="emit('reload')">Reload section</button>
-    </p>
+    <div role="alert" aria-live="assertive" data-test="load-error-region">
+      <p v-if="shownLoadError" class="load-error" data-test="load-error">
+        This section has content the editor does not support, so it was opened read-only and nothing
+        will be saved. {{ shownLoadError }}
+        <button type="button" data-test="reload" @click="emit('reload')">Reload section</button>
+      </p>
+    </div>
     <EditorToolbar
       v-if="editor && !focusMode"
       :editor="editor"

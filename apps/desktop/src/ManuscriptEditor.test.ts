@@ -105,6 +105,9 @@ describe('ManuscriptEditor', () => {
     };
     const w = mount(ManuscriptEditor, { props: { content: bad }, attachTo: document.body });
     await flushPromises();
+    // The error fills its assertive region one frame after it is set (#79).
+    await new Promise((r) => requestAnimationFrame(() => r(undefined)));
+    await w.vm.$nextTick();
     expect(w.find('[data-test="load-error"]').exists()).toBe(true);
     expect(w.emitted('change')).toBeUndefined();
     expect(w.find('.tiptap').attributes('contenteditable')).toBe('false');

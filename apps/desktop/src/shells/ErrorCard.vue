@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /** ob9: plain-language error card, and (variant="banner") the save-failure banner. Visual only. */
 import ShellIcon from './ShellIcon.vue';
+import { useDeferredValue } from '../a11y/deferred';
 defineProps<{
   icon: 'alert' | 'lock' | 'disk' | 'save';
   tone: 'danger' | 'warning';
@@ -10,24 +11,28 @@ defineProps<{
   variant?: 'card' | 'banner';
 }>();
 const emit = defineEmits<{ action: [] }>();
+// The assertive region mounts empty; the card goes into it one frame later (#79).
+const ready = useDeferredValue(() => true);
 </script>
 
 <template>
-  <section
-    class="ec"
-    :class="[`ec--${tone}`, variant === 'banner' ? 'ec--banner' : '']"
-    role="alert"
-    :data-test="variant === 'banner' ? 'save-failure-banner' : 'error-card'"
-  >
-    <span class="ec__icon"><ShellIcon :name="icon" /></span>
-    <div class="ec__body">
-      <h3 class="ec__title">{{ title }}</h3>
-      <p class="ec__text">{{ text }}</p>
-    </div>
-    <button type="button" class="sh-btn sh-btn--primary" @click="emit('action')">
-      {{ action }}
-    </button>
-  </section>
+  <div role="alert" aria-live="assertive" data-test="error-region">
+    <section
+      v-if="ready"
+      class="ec"
+      :class="[`ec--${tone}`, variant === 'banner' ? 'ec--banner' : '']"
+      :data-test="variant === 'banner' ? 'save-failure-banner' : 'error-card'"
+    >
+      <span class="ec__icon"><ShellIcon :name="icon" /></span>
+      <div class="ec__body">
+        <h3 class="ec__title">{{ title }}</h3>
+        <p class="ec__text">{{ text }}</p>
+      </div>
+      <button type="button" class="sh-btn sh-btn--primary" @click="emit('action')">
+        {{ action }}
+      </button>
+    </section>
+  </div>
 </template>
 
 <style scoped>
