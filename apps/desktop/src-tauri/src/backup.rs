@@ -1103,6 +1103,49 @@ pub struct RestoreReport {
     pub pre_restore_snapshot: String,
 }
 
+/// Label of the restore dialog's file filter (#83).
+pub const RESTORE_FILTER_NAME: &str = "swarmDraft backup";
+/// UI error code: the chosen file is not a backup (nothing was changed).
+pub const NOT_A_BACKUP: &str = "not-a-backup";
+/// UI error code: the restore did not finish.
+pub const RESTORE_FAILED: &str = "restore-failed";
+
+/// What the window learns about a restore: no paths, no raw errors (#83).
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreOutcome {
+    pub tokens_revoked: u64,
+}
+
+/// Restore from a file the user picked in the native dialog. The file is validated by its
+/// manifest format id and contents (see `stage`), never by its name or extension. Details
+/// and paths are logged; the caller gets only a UI code.
+pub fn restore_picked(
+    store: &Store,
+    app_version: &str,
+    src: &Path,
+) -> Result<RestoreOutcome, &'static str> {
+    match restore_backup(store, app_version, src) {
+        Ok(r) => {
+            eprintln!(
+                "restore: restored {} (pre-restore snapshot {})",
+                src.display(),
+                r.pre_restore_snapshot
+            );
+            Ok(RestoreOutcome {
+                tokens_revoked: r.tokens_revoked,
+            })
+        }
+        Err(e) => {
+            eprintln!("restore: {} failed: {e}", src.display());
+            Err(match e {
+                BackupError::Invalid(_) => NOT_A_BACKUP,
+                _ => RESTORE_FAILED,
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 thread_local! {
     /// Test hook: renames whose source path contains any of these fail.
@@ -2648,5 +2691,133 @@ mod tests {
         assert!(!body.contains("create_backup_to("));
         assert_eq!(body.matches("backup::create_backup").count(), 1);
         assert!(body.contains("backup::create_backup_checked("));
+    }
+
+    /// Pre-rename fixture (#83): a backup written by the coAuthor-era format (manifest format
+    /// `coauthor-backup`, file named `coauthor-backup-*.zip`). Regenerate only with
+    /// `cargo test write_coauthor_era_fixture -- --ignored`; it must stay as committed.
+    const COAUTHOR_ERA_FIXTURE: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../fixtures/backups/coauthor-backup-1761500000.zip"
+    );
+
+    #[test]
+    #[ignore]
+    fn write_coauthor_era_fixture() {
+        let (_tmp, store) = seeded();
+        store
+            .with_sql(|c| c.execute_batch("UPDATE t SET body = 'Sample chapter — naïve café 😀.'"))
+            .unwrap();
+        create_backup(&store, "0.1.0", Path::new(COAUTHOR_ERA_FIXTURE)).unwrap();
+    }
+
+    #[test]
+    fn coauthor_era_backup_restores_intact() {
+        let fixture = Path::new(COAUTHOR_ERA_FIXTURE);
+        // It really is a coAuthor-era backup.
+        let mut za = zip::ZipArchive::new(File::open(fixture).unwrap()).unwrap();
+        let mut buf = String::new();
+        za.by_name(MANIFEST_ENTRY)
+            .unwrap()
+            .read_to_string(&mut buf)
+            .unwrap();
+        let m: Manifest = serde_json::from_str(&buf).unwrap();
+        assert_eq!(m.format, "coauthor-backup");
+
+        let (tmp, store) = seeded();
+        store
+            .with_sql(|c| c.execute_batch("UPDATE app_meta SET value='v2'; DELETE FROM t;"))
+            .unwrap();
+        std::fs::remove_dir_all(tmp.path().join("files")).unwrap();
+        // Restore from a copy so a failing restore can never touch the committed fixture.
+        let copy = tmp.path().join("picked.zip");
+        std::fs::copy(fixture, &copy).unwrap();
+        let out = restore_picked(&store, "0.2.0", &copy).unwrap();
+        assert_eq!(out, RestoreOutcome { tokens_revoked: 0 });
+        assert_eq!(meta(&store), "v1");
+        let (body, blob): (String, Vec<u8>) = store
+            .with_sql(|c| {
+                c.query_row("SELECT body, blob FROM t", [], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })
+            })
+            .unwrap();
+        assert_eq!(body, "Sample chapter — naïve café 😀.");
+        assert_eq!(blob, vec![1, 2, 255]);
+        assert_eq!(
+            std::fs::read(tmp.path().join("files/images/cover.png")).unwrap(),
+            b"\x89PNGfake"
+        );
+    }
+
+    /// #83: validation is by manifest format id and contents, not the file name.
+    #[test]
+    fn restore_validates_contents_not_file_name() {
+        let (tmp, store) = seeded();
+        // A real backup under an unrelated name and extension restores.
+        let odd = tmp.path().join("notes.txt");
+        create_backup(&store, "0.1.0", &odd).unwrap();
+        store
+            .with_sql(|c| c.execute_batch("UPDATE app_meta SET value='v2'"))
+            .unwrap();
+        restore_picked(&store, "0", &odd).unwrap();
+        assert_eq!(meta(&store), "v1");
+
+        // A backup-looking name with the wrong format id is refused, state untouched.
+        store
+            .with_sql(|c| c.execute_batch("UPDATE app_meta SET value='v3'"))
+            .unwrap();
+        let fake = tmp.path().join("swarmdraft-backup-1.zip");
+        {
+            let mut src = zip::ZipArchive::new(File::open(&odd).unwrap()).unwrap();
+            let mut w = zip::ZipWriter::new(File::create(&fake).unwrap());
+            for i in 0..src.len() {
+                let mut e = src.by_index(i).unwrap();
+                let name = e.name().to_string();
+                let mut bytes = Vec::new();
+                e.read_to_end(&mut bytes).unwrap();
+                if name == MANIFEST_ENTRY {
+                    let mut m: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                    m["format"] = "other-backup".into();
+                    bytes = serde_json::to_vec(&m).unwrap();
+                }
+                w.start_file(name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                std::io::Write::write_all(&mut w, &bytes).unwrap();
+            }
+            w.finish().unwrap();
+        }
+        assert_eq!(restore_picked(&store, "0", &fake), Err(NOT_A_BACKUP));
+        assert_eq!(meta(&store), "v3");
+    }
+
+    /// #83: the restore command takes no path from the webview (Tauri ignores unknown args,
+    /// so this reads the source): only app/store, the native open dialog, and the label.
+    #[test]
+    fn restore_backup_command_takes_no_path() {
+        let src = include_str!("lib.rs");
+        let start = src
+            .find("async fn restore_backup(")
+            .expect("command exists");
+        let body = &src[start..];
+        let sig_end = body
+            .find(") -> Result<Option<backup::RestoreOutcome>, String>")
+            .unwrap();
+        let params: Vec<&str> = body[..sig_end]
+            .lines()
+            .skip(1)
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        assert_eq!(params.len(), 2, "unexpected webview args: {params:?}");
+        assert!(params[0].starts_with("app: tauri::AppHandle"));
+        assert!(params[1].starts_with("store: tauri::State"));
+        let end = body.find("\nfn ").unwrap_or(body.len());
+        let body = &body[..end];
+        assert!(body.contains("blocking_pick_file()"));
+        assert!(body.contains("backup::RESTORE_FILTER_NAME"));
+        assert_eq!(body.matches("backup::restore_").count(), 1);
+        assert!(body.contains("backup::restore_picked(&store, &version, &src)"));
+        assert_eq!(RESTORE_FILTER_NAME, "swarmDraft backup");
     }
 }

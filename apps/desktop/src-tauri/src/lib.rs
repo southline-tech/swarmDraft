@@ -216,19 +216,41 @@ fn dismiss_recovery_notices(
     backup::dismiss_recovery_notices(store.data_dir(), &ids).map_err(|e| e.to_string())
 }
 
-/// Validate and restore a backup .zip; the replaced state is kept as a pre-restore snapshot.
+/// Restore a backup. The file is chosen here in a native open dialog, never taken from the
+/// webview (#83), and validated by the archive's manifest format id and contents, not its name.
+/// Returns `Ok(None)` if the user cancelled. Errors are short codes for the UI
+/// (`not-a-backup`, `restore-failed`); paths and details go to the log only.
 #[tauri::command]
-fn restore_backup(
+async fn restore_backup(
     app: tauri::AppHandle,
     store: tauri::State<'_, storage::Store>,
-    path: String,
-) -> Result<backup::RestoreReport, String> {
-    backup::restore_backup(
-        &store,
-        &app.package_info().version.to_string(),
-        std::path::Path::new(&path),
-    )
-    .map_err(|e| e.to_string())
+) -> Result<Option<backup::RestoreOutcome>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let store = store.inner().clone();
+    let version = app.package_info().version.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        let picked = app
+            .dialog()
+            .file()
+            .set_title("Restore from backup")
+            .add_filter(backup::RESTORE_FILTER_NAME, &["zip"])
+            .blocking_pick_file();
+        let Some(picked) = picked else {
+            return Ok(None);
+        };
+        let src = picked.into_path().map_err(|e| {
+            eprintln!("restore: bad dialog path: {e}");
+            backup::RESTORE_FAILED.to_string()
+        })?;
+        backup::restore_picked(&store, &version, &src)
+            .map(Some)
+            .map_err(str::to_string)
+    })
+    .await
+    .map_err(|e| {
+        eprintln!("restore: task failed: {e}");
+        backup::RESTORE_FAILED.to_string()
+    })?
 }
 
 /// Run a store call off the main thread. Sync commands run on the main thread, so a locked

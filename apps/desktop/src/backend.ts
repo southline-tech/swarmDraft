@@ -60,13 +60,6 @@ export interface BackupManifest {
   files: string[];
 }
 
-export interface RestoreReport {
-  /** All agent tokens are revoked on restore; agents are kept and need new tokens. */
-  tokensRevoked: number;
-  manifest: BackupManifest;
-  preRestoreSnapshot: string;
-}
-
 /**
  * Write a full-project backup. The backend opens the native save dialog itself and builds the
  * archive, so the webview never chooses the path or supplies the bytes (#73). Resolves to true
@@ -76,18 +69,20 @@ export async function createBackup(): Promise<boolean> {
   return invoke<boolean>('create_backup', {});
 }
 
-const ZIP_FILTER = [{ name: 'coAuthor backup', extensions: ['zip'] }];
-
-/** Native open dialog for a backup .zip; null if cancelled. */
-export async function pickBackupToRestore(): Promise<string | null> {
-  const { open } = await import('@tauri-apps/plugin-dialog');
-  const p = await open({ multiple: false, directory: false, filters: ZIP_FILTER });
-  return typeof p === 'string' ? p : null;
+/** What the window learns about a restore: no paths or raw errors (#83). */
+export interface RestoreOutcome {
+  /** All agent tokens are revoked on restore; agents are kept and need new tokens. */
+  tokensRevoked: number;
 }
 
-/** Validate and restore a backup .zip. The replaced state is saved as a pre-restore snapshot. */
-export async function restoreBackup(path: string): Promise<RestoreReport> {
-  return invoke<RestoreReport>('restore_backup', { path });
+/**
+ * Restore a backup. The backend opens the native open dialog itself (filtered to
+ * 'swarmDraft backup' .zip files), validates the archive by its contents and restores it, so
+ * the webview never supplies a path (#83). Resolves to null if the user cancelled. Rejects
+ * with 'not-a-backup' or 'restore-failed'; details go to the log.
+ */
+export async function restoreBackup(): Promise<RestoreOutcome | null> {
+  return invoke<RestoreOutcome | null>('restore_backup', {});
 }
 
 /** Left by startup recovery when an interrupted restore's state could not be proven. */

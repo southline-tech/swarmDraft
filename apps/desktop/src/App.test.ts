@@ -788,7 +788,6 @@ vi.mock('./backend', async (orig) => ({
   agentsApi: { list: vi.fn(async () => []), tokens: vi.fn(async () => []) },
   getAppInfo: vi.fn(async () => ({ version: '0.1.0', dataDir: '/tmp/x', schemaVersion: 1 })),
   createBackup: vi.fn(async () => true),
-  pickBackupToRestore: vi.fn(async () => 'D:\\Backups\\picked.zip'),
   getRecoveryNotices: vi.fn(async () => []),
   persistImport: vi.fn(async () => storedFixture()),
   openLatestManuscript: vi.fn(async () => null),
@@ -796,11 +795,7 @@ vi.mock('./backend', async (orig) => ({
   saveOutline: vi.fn(async () => {}),
   dismissRecoveryNotices: vi.fn(async () => {}),
   saveManuscriptCopy: vi.fn(async () => 'D:\\Copies\\book.docx'),
-  restoreBackup: vi.fn(async () => ({
-    tokensRevoked: 2,
-    manifest: {},
-    preRestoreSnapshot: '/tmp/x/backups/p.zip',
-  })),
+  restoreBackup: vi.fn(async () => ({ tokensRevoked: 2 })),
 }));
 
 describe('save-failure banner', () => {
@@ -839,7 +834,7 @@ describe('restore confirmation', () => {
     vi.mocked(backend.saveSectionUpdate).mockImplementation(async () => void order.push('save'));
     vi.mocked(backend.restoreBackup).mockImplementationOnce(async () => {
       order.push('restore');
-      return { tokensRevoked: 0, manifest: {} as never, preRestoreSnapshot: '/tmp/x/p.zip' };
+      return { tokensRevoked: 0 };
     });
     const w = mount(App, { attachTo: document.body });
     await flushPromises();
@@ -853,8 +848,7 @@ describe('restore confirmation', () => {
     });
     editor.commands.insertContentAt(1, 'PENDING ');
     await openSettings(w);
-    await w.find('[data-test="restore-path"]').setValue('C:\\b.zip');
-    await w.find('[data-test="restore-button"]').trigger('click');
+    await w.find('[data-test="restore-pick"]').trigger('click');
     await w.find('[data-test="restore-confirm-yes"]').trigger('click');
     await flushPromises();
     expect(order).toEqual(['save', 'restore']);
@@ -1113,8 +1107,7 @@ describe('restore confirmation', () => {
     });
     editor.commands.insertContentAt(1, 'UNSAVED ');
     await openSettings(w);
-    await w.find('[data-test="restore-path"]').setValue('C:\\b.zip');
-    await w.find('[data-test="restore-button"]').trigger('click');
+    await w.find('[data-test="restore-pick"]').trigger('click');
     await w.find('[data-test="restore-confirm-yes"]').trigger('click');
     await flushPromises();
     expect(backend.restoreBackup).not.toHaveBeenCalled();
@@ -1134,17 +1127,18 @@ describe('restore confirmation', () => {
     const wrapper = mount(App);
     await flushPromises();
     await openSettings(wrapper);
-    await wrapper.find('[data-test="restore-path"]').setValue('C:\\Users\\a\\b.zip');
-    await wrapper.find('[data-test="restore-button"]').trigger('click');
+    await wrapper.find('[data-test="restore-pick"]').trigger('click');
     expect(backend.restoreBackup).not.toHaveBeenCalled();
     expect(wrapper.find('[data-test="restore-confirm"]').exists()).toBe(true);
     await wrapper.find('[data-test="restore-confirm-no"]').trigger('click');
     expect(wrapper.find('[data-test="restore-confirm"]').exists()).toBe(false);
-    await wrapper.find('[data-test="restore-button"]').trigger('click');
+    await wrapper.find('[data-test="restore-pick"]').trigger('click');
     await wrapper.find('[data-test="restore-confirm-yes"]').trigger('click');
     await flushPromises();
-    expect(backend.restoreBackup).toHaveBeenCalledWith('C:\\Users\\a\\b.zip');
-    expect(wrapper.find('[data-test="backup-status"]').text()).toContain('p.zip');
+    expect(backend.restoreBackup).toHaveBeenCalledWith();
+    expect(wrapper.find('[data-test="backup-status"]').text()).toBe(
+      'Restored. Your previous state was saved in the backups folder.',
+    );
     const notice = wrapper.find('[data-test="tokens-revoked-notice"]');
     expect(notice.text()).toContain('revoked all 2 agent token');
     await wrapper.find('[data-test="tokens-notice-dismiss"]').trigger('click');
@@ -1155,8 +1149,7 @@ describe('restore confirmation', () => {
 describe('tokens-revoked notice', () => {
   async function restoreOnce(wrapper: ReturnType<typeof mount>): Promise<void> {
     await openSettings(wrapper);
-    await wrapper.find('[data-test="restore-path"]').setValue('C:\\b.zip');
-    await wrapper.find('[data-test="restore-button"]').trigger('click');
+    await wrapper.find('[data-test="restore-pick"]').trigger('click');
     await wrapper.find('[data-test="restore-confirm-yes"]').trigger('click');
     await flushPromises();
   }
@@ -1179,11 +1172,7 @@ describe('tokens-revoked notice', () => {
 
   it('is not shown when no tokens were revoked', async () => {
     const backend = await import('./backend');
-    vi.mocked(backend.restoreBackup).mockResolvedValueOnce({
-      tokensRevoked: 0,
-      manifest: {} as never,
-      preRestoreSnapshot: '/tmp/x/backups/p.zip',
-    });
+    vi.mocked(backend.restoreBackup).mockResolvedValueOnce({ tokensRevoked: 0 });
     const wrapper = mount(App);
     await flushPromises();
     await restoreOnce(wrapper);
@@ -1193,19 +1182,51 @@ describe('tokens-revoked notice', () => {
 });
 
 describe('backup dialogs', () => {
-  it('picker selects a file and still requires confirmation', async () => {
+  it('restore asks first, then lets the backend pick the file; no path in the UI', async () => {
     const backend = await import('./backend');
     vi.mocked(backend.restoreBackup).mockClear();
     const wrapper = mount(App);
     await flushPromises();
     await openSettings(wrapper);
+    expect(wrapper.find('[data-test="restore-path"]').exists()).toBe(false);
     await wrapper.find('[data-test="restore-pick"]').trigger('click');
     await flushPromises();
     expect(backend.restoreBackup).not.toHaveBeenCalled();
-    expect(wrapper.find('[data-test="restore-target"]').text()).toBe('D:\\Backups\\picked.zip');
+    expect(wrapper.find('[data-test="restore-confirm"]').text()).not.toMatch(/[\\/]|\.zip/);
     await wrapper.find('[data-test="restore-confirm-yes"]').trigger('click');
     await flushPromises();
-    expect(backend.restoreBackup).toHaveBeenCalledWith('D:\\Backups\\picked.zip');
+    expect(backend.restoreBackup).toHaveBeenCalledWith();
+  });
+
+  it('a cancelled pick changes nothing and shows nothing', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.restoreBackup).mockResolvedValueOnce(null);
+    const wrapper = mount(App);
+    await flushPromises();
+    await openSettings(wrapper);
+    await wrapper.find('[data-test="restore-pick"]').trigger('click');
+    await wrapper.find('[data-test="restore-confirm-yes"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-test="backup-status"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="tokens-revoked-notice"]').exists()).toBe(false);
+  });
+
+  it.each([
+    ['not-a-backup', "That file isn't a backup. Nothing was changed."],
+    ['restore-failed', "The restore didn't finish. Please try again."],
+    [new Error('io: C:\\secret\\b.zip denied'), "The restore didn't finish. Please try again."],
+  ])('restore failure %s shows a plain notice only', async (err, text) => {
+    const backend = await import('./backend');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(backend.restoreBackup).mockRejectedValueOnce(err);
+    const wrapper = mount(App);
+    await flushPromises();
+    await openSettings(wrapper);
+    await wrapper.find('[data-test="restore-pick"]').trigger('click');
+    await wrapper.find('[data-test="restore-confirm-yes"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-test="backup-status"]').text()).toBe(text);
+    log.mockRestore();
   });
 
   it('backup lets the backend choose the destination and shows no path', async () => {
@@ -1299,8 +1320,7 @@ describe('recovery notice', () => {
 describe('restore closes the open manuscript', () => {
   async function restore(w: ReturnType<typeof mount>) {
     await openSettings(w);
-    await w.find('[data-test="restore-path"]').setValue('C:\\b.zip');
-    await w.find('[data-test="restore-button"]').trigger('click');
+    await w.find('[data-test="restore-pick"]').trigger('click');
     await w.find('[data-test="restore-confirm-yes"]').trigger('click');
     await settle();
   }
@@ -1332,7 +1352,9 @@ describe('restore closes the open manuscript', () => {
     vi.mocked(backend.restoreBackup).mockRejectedValueOnce(new Error('bad zip'));
     const { w } = await withManuscript();
     await restore(w);
-    expect(w.find('[data-test="backup-status"]').text()).toContain('Restore failed');
+    expect(w.find('[data-test="backup-status"]').text()).toBe(
+      "The restore didn't finish. Please try again.",
+    );
     expect(w.find('[data-test="no-manuscript"]').exists()).toBe(false);
     expect(w.find('.tiptap').exists()).toBe(true);
     w.unmount();
