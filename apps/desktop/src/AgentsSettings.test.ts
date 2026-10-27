@@ -67,7 +67,7 @@ describe('AgentsSettings', () => {
     expect(api.create).toHaveBeenCalledWith('Grok Bot', '#3366ff');
     expect(w.findAll('[data-test="agent"]')).toHaveLength(1);
     // The editor and review UI pick up the new agent's name from this list (RAD-263).
-    expect(authorLabel('agent:a0')).toBe('Grok Bot (agent)');
+    expect(authorLabel('agent:a0')).toBe('Grok Bot (bot)');
     agentDirectory.value = null;
 
     await w.find('[data-test="mint"]').trigger('click');

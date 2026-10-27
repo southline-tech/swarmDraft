@@ -114,3 +114,8 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #65 · data-folder guard passed `C:\x\nope\..\..\<data>\coauthor.db` · path guards reject `.`/`..`, canonicalize the existing parent, and check every app data folder (roaming and local), case-insensitively on Windows
 - 2026-10-26 · #65 · Save a copy kept comment markers but exported no comments, losing comment text and risking a Word repair · exporters must not drop data silently: export it, or strip it and tell the user, with a test
 - 2026-10-26 · #65 · SectionNav and AgentsSettings still showed raw error text · grep every catch in the app for String(e)/e.message reaching the UI; only show backend text that is written for users and allowlisted
+- 2026-10-26 · #44 · comment tag and tooltips said "Agent" while the pill says "Bot" · use one word for bots everywhere a person sees it
+- 2026-10-26 · #44 · built from ticket text without opening the mockups · find and compare the Designer's mockup files before review
+- 2026-10-26 · #44 · Brett asked for a dropdown defaulting to All; mockup showed a list · Brett's stated UI wording wins over mockup variants
+- 2026-10-26 · #44 · hashed hsl author colors could collide and ignored themes · assign authors --ct-collab-N tokens, Grok Bot = collab-1
+- 2026-10-26 · #44 · accept/reject shortcuts fired while focus mode hid the review panel · every shortcut that acts on panel content must check the same visibility conditions as the panel
