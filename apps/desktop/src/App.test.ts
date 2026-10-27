@@ -1565,3 +1565,18 @@ describe('product name in App.vue', () => {
     w.unmount();
   });
 });
+
+describe('author color slots per manuscript (#72)', () => {
+  it('opening a different manuscript restarts collab slot numbering', async () => {
+    const { collabSlotOf } = await import('./author-colors');
+    const { w } = await withManuscript();
+    expect(collabSlotOf('person:Alice')).toBe(1);
+    expect(collabSlotOf('person:Bob')).toBe(2);
+    const other = sessionFromDocx(bytes(), 'm2');
+    (w.vm as unknown as { open: (s: typeof other) => void }).open(other);
+    await settle();
+    // Bob is the first author seen in the new book, so he starts at collab-1.
+    expect(collabSlotOf('person:Bob')).toBe(1);
+    w.unmount();
+  });
+});

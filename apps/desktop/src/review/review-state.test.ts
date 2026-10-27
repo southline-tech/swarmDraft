@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DecisionRecord, SuggestionItem } from '@coauthor/editor';
 import {
-  collabSlots,
   DecisionLog,
   filterSummary,
   resolveCurrent,
@@ -71,19 +70,5 @@ describe('review state (RAD-258)', () => {
     expect(k('j', { ctrlKey: true })).toBeNull();
     expect(k('ArrowRight', { shiftKey: true })).toBeNull();
     expect(Object.values(REVIEW_SHORTCUTS).join(' ')).not.toMatch(/Ctrl\+[RJ]\b/);
-  });
-});
-
-describe('collabSlots', () => {
-  it('gives Grok Bot slot 1 and others distinct slots 2..8, wrapping only past the palette', () => {
-    const isGrok = (a: string) => a === 'g';
-    expect([...collabSlots(['a', 'g', 'b'], isGrok)]).toEqual([
-      ['a', 2],
-      ['g', 1],
-      ['b', 3],
-    ]);
-    const eight = collabSlots(['1', '2', '3', '4', '5', '6', '7', '8'], isGrok);
-    expect(new Set([...eight.values()].slice(0, 7)).size).toBe(7);
-    expect(eight.get('8')).toBe(2);
   });
 });

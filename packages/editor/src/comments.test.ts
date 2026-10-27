@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DocNode } from '@coauthor/schema';
-import { buildThreads, commentAuthorColor, listCommentAnchors, type CommentRow } from './comments';
+import { buildThreads, listCommentAnchors, type CommentRow } from './comments';
 
 const anchor = (id: string) => ({ type: 'comment_anchor' as const, attrs: { id } });
 // Synthetic text only.
@@ -120,8 +120,5 @@ describe('comments', () => {
     expect(buildThreads(doc, resolved)[0]!.resolved).toBe(true);
     const replied = [...resolved, row('r2', 'c1', '2026-10-25T03:00:00Z', { authorKind: 'human' })];
     expect(buildThreads(doc, replied)[0]!.resolved).toBe(false);
-  });
-  it('color is stable', () => {
-    expect(commentAuthorColor('Bot A')).toBe(commentAuthorColor('Bot A'));
   });
 });
