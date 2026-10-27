@@ -52,6 +52,7 @@ import {
   type SuggestionTarget,
 } from '@coauthor/editor';
 import { applyReviewDecision } from './review/apply';
+import { SECTION_LOAD_ERROR_COPY } from './errors/map-error';
 import type { DocNode } from '@coauthor/schema';
 import { useDeferredValue } from './a11y/deferred';
 
@@ -404,7 +405,10 @@ let cursorTimer: ReturnType<typeof setTimeout> | undefined;
 const options: Partial<EditorOptions> = {
   extensions: [AuthorLabels.configure({ label: authorLabel })],
   onContentError: ({ error }) => {
-    loadError.value = String((error as Error & { cause?: unknown }).cause ?? error.message);
+    const raw = String((error as Error & { cause?: unknown }).cause ?? error.message);
+    // Technical detail is for logs only; the banner shows SECTION_LOAD_ERROR_COPY (#89).
+    console.warn('section content failed to load:', raw);
+    loadError.value = raw;
   },
   onCreate: ({ editor }) => {
     refreshReview(editor);
@@ -475,9 +479,10 @@ const LABELS: Record<ReviewItem['type'], string> = {
   >
     <div v-if="!externalLoadError" role="alert" aria-live="assertive" data-test="load-error-region">
       <p v-if="shownLoadError" class="load-error" data-test="load-error">
-        This section has content the editor does not support, so it was opened read-only and nothing
-        will be saved. {{ shownLoadError }}
-        <button type="button" data-test="reload" @click="emit('reload')">Reload section</button>
+        {{ SECTION_LOAD_ERROR_COPY }}
+        <button type="button" class="sh-btn" data-test="reload" @click="emit('reload')">
+          Reload section
+        </button>
       </p>
     </div>
     <EditorToolbar

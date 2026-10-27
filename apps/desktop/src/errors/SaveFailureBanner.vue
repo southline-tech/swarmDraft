@@ -126,7 +126,7 @@ async function onSaveCopy() {
   opacity: 0.7;
 }
 .action:focus-visible {
-  outline: 2px solid var(--ct-focus-ring);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--ct-focus-ring);
 }
 </style>

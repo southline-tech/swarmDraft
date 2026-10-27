@@ -5,6 +5,7 @@ Built from review, design and QA findings on PRs #1–#46. Most common first. Ti
 ## 1. Persistence and data safety (≈20 PRs)
 
 - [ ] Typed text survives **save → reload → app restart** and a section switch away and back. Test through the real stored path, not just the in-memory Y.Doc. _Why: QA's most frequent fail; text has been silently lost before._
+- [ ] Error banners show writer copy from `errors/map-error.ts` (with `PRODUCT_NAME`), never parser/developer text; raw detail goes to the console only, and a test asserts the raw text is absent. Banner buttons use `.sh-btn`. _Why: #89 showed `Unknown node type: ...` to writers._
 - [ ] Saves and errors surface to the user ("Not saved, retrying"); no `catch` that swallows a failure. _Why: silent failures hid data loss (≈15 PRs)._
 - [ ] Backend reads used for validation happen inside the same transaction as the write. _Why: race between check and write._
 - [ ] Editor/session wiring changes: tests type, then reload via a real remount from saved state, assert the text persists, and switch sections. Cover every section kind (front matter, chapter, part, back matter).
@@ -43,6 +44,7 @@ Built from review, design and QA findings on PRs #1–#46. Most common first. Ti
 - [ ] Global shortcuts do nothing while focus is in an input/textarea/select/other contenteditable or when the panel is hidden.
 - [ ] Every enabled control works; tooltips/`aria-keyshortcuts` list only shortcuts that are actually bound; disabled controls are `aria-disabled`.
 - [ ] Interactive regions have roles and labels.
+- [ ] `--ct-focus-ring` is a box-shadow value: use it only in `box-shadow` (`:focus-visible`); for outline/border/color use `--ct-focus-ring-color` or `--ct-focus-outline`. _Why: #85 had no visible focus ring; `focus-ring-usage.test.ts` enforces it._
 
 ## 6. MCP server and agent tokens (≈18 PRs)
 
@@ -144,4 +146,6 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #82 · branch conflicted with main when review was requested · merge main and re-run all checks right before each review request
 - 2026-10-26 · #82 · re-importing while the book-open toast was up cleared and set its text in one tick, so the region never changed and nothing was re-announced · to re-announce the same message, clear the region, set the text on nextTick, and test the remove-then-add DOM mutations on the same node
 - 2026-10-26 · #82 · after merging #77, its load-error test failed because #82 defers error text one frame · after merging main, re-run the full suite and fix semantic conflicts in the tests, not only text conflicts
+- 2026-10-26 · #85 · SaveFailureBanner used `outline: 2px solid var(--ct-focus-ring)`, a box-shadow value, so no focus ring showed · use --ct-focus-ring only in box-shadow; a test scans every .vue/.css file
+- 2026-10-26 · #89 · load-error banner showed raw parser text (`Unknown node type: ...`) and a browser-default Reload button · banner copy comes from map-error with PRODUCT_NAME, raw text to console only; banner buttons use .sh-btn
 - 2026-10-26 · #92 · the page kept a fixed 576px width and the review column sized to its content (471–675px), so 1024–1280px windows clipped the page and scrolled sideways · size the page with clamp-style min/max from tokens, pin side panels to token widths, and measure scrollWidth vs clientWidth for every scroller at each target width in light and dark
