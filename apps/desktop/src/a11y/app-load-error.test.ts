@@ -44,7 +44,7 @@ describe('App load-error region with the real editor (#82)', () => {
     expect(header.contains(node)).toBe(false);
     const alertsWithError = () =>
       Array.from(document.querySelectorAll('[role="alert"]')).filter((el) =>
-        el.textContent?.includes('opened read-only'),
+        el.textContent?.includes('open read-only'),
       );
 
     await w.get(`[data-test="section-${bad!.id}"]`).trigger('click');
@@ -54,7 +54,7 @@ describe('App load-error region with the real editor (#82)', () => {
     expect(
       region()
         .text()
-        .match(/opened read-only/g),
+        .match(/open read-only/g),
     ).toHaveLength(1);
 
     await w.get(`[data-test="section-${good!.id}"]`).trigger('click');

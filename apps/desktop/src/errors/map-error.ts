@@ -224,3 +224,9 @@ export function errorLine(err: unknown, context: ErrorContext = 'other'): string
   const m = mapError(err, context);
   return `${m.title}. ${m.message}`;
 }
+
+/**
+ * Writer copy for a section whose content the editor can't load (#89). The parser's own
+ * message (e.g. `Unknown node type: ...`) goes to the console only, never into this line.
+ */
+export const SECTION_LOAD_ERROR_COPY = `Part of this section uses formatting ${PRODUCT_NAME} can't edit yet, so it's open read-only and changes won't be saved.`;
