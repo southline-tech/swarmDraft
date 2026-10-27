@@ -87,28 +87,67 @@ fn agent_token_revoke(
     store.revoke_token(&token_id).map_err(err)
 }
 
-/// Write a full backup to `dest` (from the save dialog; `replace` = user confirmed Replace,
-/// which atomically replaces an existing file) or, if omitted,
-/// to `<data dir>/backups/`, and return its path.
+/// Write a full backup. The destination is chosen here, never taken from the webview (#73):
+/// a native save dialog opened from Rust, or with `to_backups_folder` the app's own
+/// `backups` folder. The archive is built from the store in Rust and written atomically.
+/// Returns `Ok(true)` when written, `Ok(false)` if the user cancelled; details go to the log.
 #[tauri::command]
-fn create_backup(
+async fn create_backup(
     app: tauri::AppHandle,
     store: tauri::State<'_, storage::Store>,
-    dest: Option<String>,
-    replace: Option<bool>,
-) -> Result<String, String> {
-    let replace = replace.unwrap_or(false) && dest.is_some();
-    let dest = dest
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| backup::default_backup_path(&store));
-    backup::create_backup_to(
-        &store,
-        &app.package_info().version.to_string(),
-        &dest,
-        replace,
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(dest.display().to_string())
+    to_backups_folder: Option<bool>,
+) -> Result<bool, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let store = store.inner().clone();
+    let version = app.package_info().version.to_string();
+    let mut data_dirs = vec![store.data_dir().to_path_buf()];
+    data_dirs.extend(app.path().app_data_dir().ok());
+    data_dirs.extend(app.path().app_local_data_dir().ok());
+    tauri::async_runtime::spawn_blocking(move || {
+        let res = if to_backups_folder.unwrap_or(false) {
+            let dest = backup::default_backup_path(&store);
+            backup::create_backup_to(&store, &version, &dest, false).map(|_| dest)
+        } else {
+            let stamp = time_stamp();
+            let picked = app
+                .dialog()
+                .file()
+                .set_title("Save backup")
+                .set_file_name(format!("swarmdraft-backup-{stamp}.zip"))
+                .add_filter("Backup", &["zip"])
+                .blocking_save_file();
+            let Some(picked) = picked else {
+                return Ok(false);
+            };
+            let dest = picked.into_path().map_err(|e| {
+                eprintln!("backup: bad dialog path: {e}");
+                "backup failed".to_string()
+            })?;
+            backup::create_backup_checked(&store, &version, &data_dirs, &dest)
+        };
+        match res {
+            Ok(p) => {
+                eprintln!("backup: wrote {}", p.display());
+                Ok(true)
+            }
+            Err(e) => {
+                eprintln!("backup: failed: {e}");
+                Err("backup failed".to_string())
+            }
+        }
+    })
+    .await
+    .map_err(|e| {
+        eprintln!("backup: task failed: {e}");
+        "backup failed".to_string()
+    })?
+}
+
+fn time_stamp() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_default()
 }
 
 /// Recovery notices that could not be saved to disk; shown from memory until dismissed.
