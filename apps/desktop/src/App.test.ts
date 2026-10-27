@@ -1513,3 +1513,18 @@ describe('App UI shells (Part of #36)', () => {
     w.unmount();
   });
 });
+
+describe('author color slots per manuscript (#72)', () => {
+  it('opening a different manuscript restarts collab slot numbering', async () => {
+    const { collabSlotOf } = await import('./author-colors');
+    const { w } = await withManuscript();
+    expect(collabSlotOf('person:Alice', 'Alice')).toBe(2);
+    expect(collabSlotOf('person:Bob', 'Bob')).toBe(3);
+    const other = sessionFromDocx(bytes(), 'm2');
+    (w.vm as unknown as { open: (s: typeof other) => void }).open(other);
+    await settle();
+    // Bob is the first non-Grok author seen in the new book, so he starts at collab-2.
+    expect(collabSlotOf('person:Bob', 'Bob')).toBe(2);
+    w.unmount();
+  });
+});
