@@ -105,3 +105,6 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #66 · settings defaults hard-coded real-looking names · use neutral sample names in defaults and fixtures
 - 2026-10-26 · #66 · inline card marked role=dialog without modal behavior · use role=dialog only with aria-modal, focus in, Tab trap, Esc and focus return; otherwise an inline card
 - 2026-10-26 · #69 · in-app logo used the superseded plain-c masters, not the c-with-caret pack · take logo assets from the Designer's latest pack and test the exact asset per size
+- 2026-10-26 · #65 · PM QA: App.vue still rendered raw error text (String(err), err.message) in open, import, save, backup and restore alerts · every UI catch goes through mapError/errorLine; raw text goes to console only, and tests assert the raw text is absent
+- 2026-10-26 · #65 · PM QA: save-failure banner and a working 'Save a copy' were missing, so only 1 of 5 acceptance boxes was met · self-check every acceptance box against the running UI before handoff, not just the helper module
+- 2026-10-26 · #65 · PM QA: user-facing copy hard-coded the product name · use PRODUCT_NAME from lib/brand.ts for every user-facing mention of the app

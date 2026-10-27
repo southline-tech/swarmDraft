@@ -18,6 +18,10 @@ import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
 import HomeScreen from './HomeScreen.vue';
 import AppLogo from './AppLogo.vue';
+import SaveFailureBanner from './errors/SaveFailureBanner.vue';
+import { errorLine, saveFailed, saveSucceeded, SAVE_OK } from './errors/map-error';
+import { saveCopy } from './errors/save-copy';
+import { PRODUCT_NAME } from './lib/brand';
 import ShellsPreview from './shells/ShellsPreview.vue';
 import { applyThemeParam, readPreview } from './shells/preview';
 import { flushOnClose } from './close-flush';
@@ -49,7 +53,8 @@ async function dismissRecovery() {
     recoveryNotices.value = recoveryNotices.value.filter((n) => !ids.includes(n.id));
     recoveryDismissError.value = '';
   } catch (e) {
-    recoveryDismissError.value = `Couldn't dismiss the notice: ${String(e)}`;
+    console.error('Dismiss recovery notice failed', e);
+    recoveryDismissError.value = `Couldn't dismiss the notice. ${errorLine(e)}`;
   }
 }
 const openError = ref('');
@@ -57,12 +62,19 @@ const openError = ref('');
 const fatalError = ref('');
 const REOPEN_BACKOFF_MS = [250, 500, 1000];
 const importing = ref(false);
-const saveError = ref('');
-/** Shown while edits are unsaved; cleared once a save succeeds. Edits are never dropped. */
+/** Save-failure banner state (#62, ob9): shown while edits are unsaved; cleared once a save
+ * succeeds. Edits are never dropped. Raw error text only goes to the console. */
+const saveFailure = ref({ ...SAVE_OK });
+const saveError = computed(() => saveFailure.value.failing);
 const persistHooks = {
-  onError: (err: unknown) => (saveError.value = `Not saved, retrying: ${String(err)}`),
-  onSaved: () => (saveError.value = ''),
+  onError: (err: unknown) => {
+    console.error('Save failed; retrying', err);
+    saveFailure.value = saveFailed(saveFailure.value, err);
+  },
+  onSaved: () => (saveFailure.value = saveSucceeded()),
 };
+const saveCopyOfOpen = () =>
+  session.value ? saveCopy(session.value) : Promise.resolve({ status: 'cancelled' as const });
 /**
  * Bumped by the editor's Reload action to reopen the section from its Y.Doc. The editor is bound
  * to that doc, so everything typed is already in it and survives the remount (and switching
@@ -145,6 +157,9 @@ onMounted(async () => {
   if (info.value) {
     try {
       recoveryNotices.value = await getRecoveryNotices();
+      // Raw reasons stay in the log; the notice shows only plain copy.
+      for (const n of recoveryNotices.value)
+        console.warn('Recovery notice', n.reason, n.saveError ?? '');
     } catch {
       recoveryNotices.value = [];
     }
@@ -152,7 +167,8 @@ onMounted(async () => {
       const latest = await reopenLatest(persistHooks);
       if (latest && !session.value) open(latest);
     } catch (err) {
-      openError.value = `Could not reopen the last manuscript: ${String(err)}`;
+      console.error('Reopen failed', err);
+      openError.value = `Couldn't reopen the last manuscript. ${errorLine(err, 'open')}`;
     }
   }
   stopCloseFlush = await flushOnClose(() => session.value?.flush() ?? Promise.resolve());
@@ -172,7 +188,8 @@ async function chooseRestoreFile(): Promise<void> {
       confirmingRestore.value = true;
     }
   } catch (e) {
-    backupStatus.value = `Could not open file picker: ${String(e)}`;
+    console.error('File picker failed', e);
+    backupStatus.value = `Couldn't open the file picker. ${errorLine(e)}`;
   }
 }
 
@@ -188,7 +205,8 @@ async function onBackup(): Promise<void> {
     // so the backend may atomically replace it.
     backupStatus.value = `Backup saved: ${await createBackup(dest, true)}`;
   } catch (e) {
-    backupStatus.value = `Backup failed: ${String(e)}`;
+    console.error('Backup failed', e);
+    backupStatus.value = `Backup failed. ${errorLine(e)}`;
   }
 }
 
@@ -201,7 +219,8 @@ async function onRestore(): Promise<void> {
     try {
       await session.value?.flush();
     } catch (e) {
-      backupStatus.value = `Restore cancelled: ${e instanceof Error ? e.message : String(e)}. Nothing was changed.`;
+      console.error('Restore flush failed', e);
+      backupStatus.value = `Restore cancelled: ${errorLine(e, 'save')} Nothing was changed.`;
       return;
     }
     const r = await restoreBackup(restorePath.value.trim());
@@ -211,7 +230,8 @@ async function onRestore(): Promise<void> {
     backupStatus.value = `Restored. Previous state saved: ${r.preRestoreSnapshot}`;
     tokensNotice.value = r.tokensRevoked > 0 ? r.tokensRevoked : null;
   } catch (e) {
-    backupStatus.value = `Restore failed: ${String(e)}`;
+    console.error('Restore failed', e);
+    backupStatus.value = `Restore failed. ${errorLine(e, 'open')}`;
   }
 }
 onBeforeUnmount(() => {
@@ -235,7 +255,7 @@ const closeQuietly = (s?: ManuscriptSession | null) =>
 
 function open(next: ManuscriptSession) {
   if (session.value !== next) closeQuietly(session.value);
-  saveError.value = '';
+  saveFailure.value = saveSucceeded();
   // A manuscript is open again, so an earlier "please restart" or open failure no longer holds.
   fatalError.value = '';
   openError.value = '';
@@ -267,7 +287,7 @@ async function reopenAfterFailure(delays = REOPEN_BACKOFF_MS): Promise<Manuscrip
     }
   }
   session.value = null;
-  fatalError.value = "Couldn't reopen the manuscript. Please restart coAuthor.";
+  fatalError.value = `Couldn't reopen the manuscript. Please restart ${PRODUCT_NAME}.`;
   return null;
 }
 
@@ -313,10 +333,11 @@ async function importFile(file: File) {
       throw err;
     }
   } catch (err) {
+    console.error('Import failed', err);
     openError.value =
       err instanceof UnsavedEditsError
         ? `Couldn't open ${file.name}: some edits in the current manuscript aren't saved yet`
-        : `Could not import ${file.name}: ${err instanceof Error ? err.message : String(err)}`;
+        : `Couldn't open ${file.name}. ${errorLine(err, 'import')}`;
   } finally {
     importing.value = false;
   }
@@ -537,15 +558,14 @@ defineExpose({ open });
         <p v-if="n.retryPending">
           coAuthor couldn't finish and will try again the next time it starts.
         </p>
-        <p>Details: {{ n.reason }}</p>
         <p v-if="n.corruptFile" data-test="recovery-notice-corrupt">
           An earlier notice couldn't be read. It was kept, not deleted, at
           <code>{{ n.corruptFile }}</code
           >.
         </p>
         <p v-if="n.saveError" data-test="recovery-notice-save-error">
-          This notice couldn't be saved and won't show again after you close coAuthor:
-          {{ n.saveError }}
+          This notice couldn't be saved and won't show again after you close coAuthor.
+          {{ errorLine(n.saveError, 'save') }}
         </p>
       </div>
       <button type="button" data-test="recovery-notice-dismiss" @click="dismissRecovery">
@@ -566,7 +586,12 @@ defineExpose({ open });
     />
     <p v-if="fatalError" role="alert" data-test="fatal-error">{{ fatalError }}</p>
     <p v-if="openError" role="alert" data-test="open-error">{{ openError }}</p>
-    <p v-if="saveError" role="alert" data-test="save-error">{{ saveError }}</p>
+    <SaveFailureBanner
+      v-if="saveFailure.failing"
+      data-test="save-error"
+      :state="saveFailure"
+      :save-copy="saveCopyOfOpen"
+    />
     <HomeScreen
       v-if="!session || choosingBook"
       ref="home"

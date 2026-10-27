@@ -7,6 +7,8 @@
  * is never part of the result; keep it for logs via `rawErrorText`.
  */
 
+import { PRODUCT_NAME } from '../lib/brand';
+
 export type ErrorCode =
   | 'not-word-file'
   | 'file-damaged'
@@ -39,7 +41,7 @@ export type ErrorContext = 'open' | 'import' | 'save' | 'export' | 'other';
 const COPY: Record<ErrorCode, Omit<MappedError, 'code'>> = {
   'not-word-file': {
     title: "This isn't a Word manuscript",
-    message: 'coAuthor can open books saved from Word. Try choosing a different file.',
+    message: `${PRODUCT_NAME} can open books saved from Word. Try choosing a different file.`,
     action: 'choose-another-file',
     actionLabel: 'Choose another file',
     tone: 'danger',
@@ -73,7 +75,7 @@ const COPY: Record<ErrorCode, Omit<MappedError, 'code'>> = {
     tone: 'warning',
   },
   'no-permission': {
-    title: "coAuthor isn't allowed to use this file",
+    title: `${PRODUCT_NAME} isn't allowed to use this file`,
     message: 'Try a file in your Documents folder, or save a copy somewhere else.',
     action: 'choose-another-file',
     actionLabel: 'Choose another file',
@@ -88,7 +90,7 @@ const COPY: Record<ErrorCode, Omit<MappedError, 'code'>> = {
   },
   'save-failed': {
     title: "Your latest changes aren't saved yet",
-    message: "Don't close coAuthor. We'll keep trying, or save a copy somewhere else now.",
+    message: `Don't close ${PRODUCT_NAME}. We'll keep trying, or save a copy somewhere else now.`,
     action: 'save-a-copy',
     actionLabel: 'Save a copy',
     tone: 'danger',
@@ -173,7 +175,7 @@ export function mapError(err: unknown, context: ErrorContext = 'other'): MappedE
   return { code, ...COPY[code] };
 }
 
-/** State for the save-failure banner (Implementor 1 renders it). */
+/** State for the save-failure banner (`SaveFailureBanner.vue`). */
 export interface SaveFailureState {
   /** True while the latest edits are not on disk. */
   failing: boolean;
@@ -215,4 +217,10 @@ export function saveFailed(
 /** A save went through: clear the banner. */
 export function saveSucceeded(): SaveFailureState {
   return { ...SAVE_OK };
+}
+
+/** One line of safe copy for an inline alert: the mapped title and message, never raw text. */
+export function errorLine(err: unknown, context: ErrorContext = 'other'): string {
+  const m = mapError(err, context);
+  return `${m.title}. ${m.message}`;
 }

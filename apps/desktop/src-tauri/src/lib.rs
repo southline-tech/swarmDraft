@@ -12,6 +12,7 @@ pub mod backup;
 pub mod content;
 pub mod manuscripts;
 pub mod mcp;
+pub mod save_copy;
 pub mod storage;
 
 use serde::Serialize;
@@ -109,6 +110,18 @@ fn create_backup(
     )
     .map_err(|e| e.to_string())?;
     Ok(dest.display().to_string())
+}
+
+/// "Save a copy" from the save-failure banner: atomically write the .docx bytes the frontend
+/// built from the in-memory manuscript to `dest` (picked in the native save dialog).
+#[tauri::command]
+fn save_manuscript_copy(
+    store: tauri::State<'_, storage::Store>,
+    dest: String,
+    bytes: Vec<u8>,
+) -> Result<(), String> {
+    save_copy::write_copy(store.data_dir(), std::path::Path::new(&dest), &bytes)
+        .map_err(|e| format!("io: {e}"))
 }
 
 /// Recovery notices that could not be saved to disk; shown from memory until dismissed.
@@ -304,7 +317,8 @@ pub fn run() {
             section_apply_update,
             manuscript_save_outline,
             manuscript_updates_since,
-            mcp_status
+            mcp_status,
+            save_manuscript_copy
         ])
         .run(tauri::generate_context!())
         .expect("error while running coAuthor");
