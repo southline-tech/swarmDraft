@@ -103,3 +103,5 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #66 · settings defaults hard-coded real-looking names · use neutral sample names in defaults and fixtures
 - 2026-10-26 · #66 · inline card marked role=dialog without modal behavior · use role=dialog only with aria-modal, focus in, Tab trap, Esc and focus return; otherwise an inline card
 - 2026-10-26 · #69 · in-app logo used the superseded plain-c masters, not the c-with-caret pack · take logo assets from the Designer's latest pack and test the exact asset per size
+- 2026-10-26 · #43 · `makensis -WX` failed on main (unused choowHowToInstall label) · run `makensis -WX` on the generated script for every installer change, not only a plain compile
+- 2026-10-26 · #43 · uninstaller could delete the old identifier's data after a rename · uninstall delete paths must only name the current identifier; guard old ids at compile time
