@@ -23,7 +23,13 @@ import HomeScreen from './HomeScreen.vue';
 import AppLogo from './AppLogo.vue';
 import SaveFailureBanner from './errors/SaveFailureBanner.vue';
 import MigrationNoticeBanner from './migration/MigrationNoticeBanner.vue';
-import { errorLine, saveFailed, saveSucceeded, SAVE_OK } from './errors/map-error';
+import {
+  errorLine,
+  saveFailed,
+  saveSucceeded,
+  SAVE_OK,
+  SECTION_LOAD_ERROR_COPY,
+} from './errors/map-error';
 import { saveCopy } from './errors/save-copy';
 import { PRODUCT_NAME } from './lib/brand';
 import ShellsPreview from './shells/ShellsPreview.vue';
@@ -659,9 +665,10 @@ defineExpose({ open });
         class="load-error"
         data-test="load-error"
       >
-        This section has content the editor does not support, so it was opened read-only and nothing
-        will be saved. {{ editorLoadError }}
-        <button type="button" data-test="reload" @click="reloadSection">Reload section</button>
+        {{ SECTION_LOAD_ERROR_COPY }}
+        <button type="button" class="sh-btn" data-test="reload" @click="reloadSection">
+          Reload section
+        </button>
       </p>
     </div>
     <input

@@ -56,8 +56,8 @@ describe('assertive error live regions at the parent level (#79)', () => {
     report('Unknown node type: table');
     await settle();
     expect(region().element).toBe(node);
-    expect(region().text()).toContain('opened read-only');
-    expect(region().text()).toContain('Unknown node type: table');
+    expect(region().text()).toContain('open read-only');
+    expect(region().text()).not.toContain('Unknown node type');
 
     // Reload clears the error and remounts the editor; the region node survives.
     await w.get('[data-test="reload"]').trigger('click');
@@ -107,7 +107,7 @@ describe('assertive error live regions at the parent level (#79)', () => {
     await frame();
     await w.vm.$nextTick();
     expect(w.get('[data-test="load-error-region"]').element).toBe(node);
-    expect(w.get('[data-test="load-error-region"]').text()).toContain('opened read-only');
+    expect(w.get('[data-test="load-error-region"]').text()).toContain('open read-only');
     w.unmount();
   });
 });
