@@ -1,8 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "coAuthor",
+  "productName": "swarmDraft",
+  "mainBinaryName": "swarmdraft",
   "version": "0.1.0",
-  "identifier": "com.radiancelux.coauthor",
+  "identifier": "com.radiancelux.swarmdraft",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +13,7 @@
   "app": {
     "windows": [
       {
-        "title": "coAuthor",
+        "title": "swarmDraft",
         "width": 1200,
         "height": 800,
         "dragDropEnabled": false
@@ -48,6 +49,7 @@
         "uninstallerIcon": "icons/icon.ico"
       }
     },
+    "publisher": "Radiance Lux Technologies LLC",
     "copyright": "© 2026 Radiance Lux Technologies LLC"
   }
 }

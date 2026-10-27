@@ -1,4 +1,4 @@
-# coAuthor design system
+# swarmDraft design system
 
 Tokens live as CSS custom properties in `apps/desktop/src/styles/tokens.css` and are exposed as a Tailwind v4 theme with `@theme inline` in `apps/desktop/src/styles/app.css` (imported once in `main.ts`). Tailwind is added with `@tailwindcss/vite`, using only its theme and utilities layers. Preflight is skipped so existing component CSS keeps working. All raw tokens use the `--ct-` prefix; the Tailwind theme maps them to utility names. Utilities: `bg-paper`, `text-muted`, `font-manuscript`, `shadow-2`, `rounded-md`, `p-4` (4px grid), and `dark:` for `[data-theme=dark]`. Because the utilities read the variables, switching themes needs no rebuild.
 
