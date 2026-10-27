@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { nextTick } from 'vue';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
 import { docToYDoc, importDocx, readStructure, writeStructure, yDocToDoc } from '@coauthor/docx';
@@ -2161,6 +2162,172 @@ describe('App outline auto-collapse on a narrow desk (#92)', () => {
     ed().vm.$emit('layout', layout(false, 900));
     await settle();
     expect(sidebar().isVisible()).toBe(false);
+    w.unmount();
+  });
+});
+
+describe('App outline vs margin notes (#98)', () => {
+  const L = (deskWidth: number, marginNotes: boolean) => ({
+    reviewShown: true,
+    deskWidth,
+    marginNotes,
+    deskLeft: 16,
+  });
+  const noRoomCopy = 'Not enough room for the outline while notes are showing.';
+
+  it('reopens the auto-closed outline when the notes hide, not when the writer closed it', async () => {
+    const { w } = await withManuscript();
+    const sidebar = () => w.findComponent({ name: 'SectionNav' });
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    ed().vm.$emit('layout', L(496, false));
+    ed().vm.$emit('layout', L(496, true));
+    await settle();
+    expect(sidebar().isVisible()).toBe(false);
+    ed().vm.$emit('layout', L(800, false));
+    await settle();
+    expect(sidebar().isVisible()).toBe(true);
+    // The writer closes it by hand: hiding the notes again must not reopen it.
+    ed().vm.$emit('layout', L(496, false));
+    await w.find('[data-test="tb-navigator"]').trigger('click');
+    await settle();
+    ed().vm.$emit('layout', L(800, true));
+    ed().vm.$emit('layout', L(800, false));
+    await settle();
+    expect(sidebar().isVisible()).toBe(false);
+    w.unmount();
+  });
+
+  it('Chapters with no room shows the polite cue in the toast region; Hide notes opens the outline', async () => {
+    const { w } = await withManuscript();
+    const sidebar = () => w.findComponent({ name: 'SectionNav' });
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    const chapters = () => w.find('[data-test="tb-navigator"]');
+    ed().vm.$emit('layout', L(368, false));
+    ed().vm.$emit('layout', L(368, true)); // 1024px: notes appear, outline auto-closes
+    ed().vm.$emit('layout', L(672, true));
+    await settle();
+    expect(sidebar().isVisible()).toBe(false);
+    await chapters().trigger('click');
+    await settle();
+    const regions = w.findAll('[data-test="toast-region"]');
+    expect(regions).toHaveLength(1); // the existing region, not a second one
+    expect(regions[0]!.attributes('role')).toBe('status');
+    expect(regions[0]!.attributes('aria-live')).toBe('polite');
+    expect(regions[0]!.text()).toContain(noRoomCopy);
+    expect(sidebar().isVisible()).toBe(false);
+    expect(chapters().attributes('aria-expanded')).toBe('false');
+    expect(w.find('[data-test="open-toast"]').attributes('style')).toContain('left: 352px');
+    const action = w.get('[data-test="toast-dismiss"]');
+    expect(action.text()).toBe('Hide notes');
+    await action.trigger('click');
+    await settle();
+    expect(ed().props('notesHidden')).toBe(true);
+    expect(sidebar().isVisible()).toBe(true);
+    expect(chapters().attributes('aria-expanded')).toBe('true');
+    expect(w.find('[data-test="toast"]').exists()).toBe(false);
+    // The editor reports the new layout (no notes, outline open): it holds.
+    ed().vm.$emit('layout', L(368, false));
+    await settle();
+    expect(sidebar().isVisible()).toBe(true);
+    // Closing the review panel brings the notes back for next time.
+    ed().vm.$emit('layout', { ...L(990, false), reviewShown: false });
+    await settle();
+    expect(ed().props('notesHidden')).toBe(false);
+    w.unmount();
+  });
+
+  it('a layout change closes the cue', async () => {
+    const { w } = await withManuscript();
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    ed().vm.$emit('layout', L(368, true));
+    ed().vm.$emit('layout', L(672, true));
+    await settle();
+    await w.find('[data-test="tb-navigator"]').trigger('click');
+    await settle();
+    expect(w.find('[data-test="toast"]').exists()).toBe(true);
+    ed().vm.$emit('layout', L(800, true));
+    await settle();
+    expect(w.find('[data-test="toast"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('the cue closes after the usual timeout, and a second click while it shows does not restart it', async () => {
+    const { w } = await withManuscript();
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    ed().vm.$emit('layout', L(368, true));
+    ed().vm.$emit('layout', L(672, true));
+    await settle();
+    vi.useFakeTimers();
+    try {
+      await w.find('[data-test="tb-navigator"]').trigger('click');
+      await nextTick();
+      vi.advanceTimersByTime(5000);
+      await w.find('[data-test="tb-navigator"]').trigger('click');
+      await nextTick();
+      // A restart would push the dismissal to 13s: it must still close at the original 8s.
+      vi.advanceTimersByTime(2999);
+      await nextTick();
+      expect(w.find('[data-test="toast"]').text()).toContain(noRoomCopy);
+      vi.advanceTimersByTime(1);
+      await nextTick();
+      expect(w.find('[data-test="toast"]').exists()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+    w.unmount();
+  });
+
+  it('unmounting while the cue shows clears its timer', async () => {
+    const { w } = await withManuscript();
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    ed().vm.$emit('layout', L(368, true));
+    ed().vm.$emit('layout', L(672, true));
+    await settle();
+    const set = vi.spyOn(globalThis, 'setTimeout');
+    const clear = vi.spyOn(globalThis, 'clearTimeout');
+    try {
+      await w.find('[data-test="tb-navigator"]').trigger('click');
+      await nextTick();
+      const call = set.mock.calls.findIndex((c) => c[1] === 8000);
+      expect(call).toBeGreaterThanOrEqual(0);
+      const id = set.mock.results[call]!.value;
+      w.unmount();
+      expect(clear.mock.calls.some((c) => c[0] === id)).toBe(true);
+    } finally {
+      set.mockRestore();
+      clear.mockRestore();
+    }
+  });
+
+  it('Hide notes removes the margin notes and reports marginNotes:false; they return after the panel closes', async () => {
+    const { w } = await withManuscript();
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    const st = (ed().vm as unknown as { $: { setupState: { review: unknown[] } } }).$.setupState;
+    st.review = [
+      { id: 'q1', type: 'insertion', author: 'Bot', text: 'x', from: 1, to: 3, quote: 'ab' },
+    ];
+    await settle();
+    expect(w.find('[data-test="margin-notes"]').exists()).toBe(true);
+    expect(ed().emitted('layout')!.at(-1)![0]).toMatchObject({
+      reviewShown: true,
+      marginNotes: true,
+    });
+    ed().vm.$emit('layout', L(368, false));
+    ed().vm.$emit('layout', L(368, true)); // 1024px: notes appear, outline auto-closes
+    ed().vm.$emit('layout', L(672, true));
+    await settle();
+    await w.find('[data-test="tb-navigator"]').trigger('click');
+    await settle();
+    await w.get('[data-test="toast-dismiss"]').trigger('click');
+    await settle();
+    expect(w.find('[data-test="margin-notes"]').exists()).toBe(false);
+    const layouts = ed().emitted('layout')!;
+    expect((layouts[layouts.length - 1]![0] as { marginNotes: boolean }).marginNotes).toBe(false);
+    await w.find('[data-test="tb-review"]').trigger('click'); // close the panel
+    await settle();
+    await w.find('[data-test="tb-review"]').trigger('click'); // and open it again
+    await settle();
+    expect(w.find('[data-test="margin-notes"]').exists()).toBe(true);
     w.unmount();
   });
 });
