@@ -30,6 +30,9 @@ describe('UI shells (Part of #36)', () => {
 
   it('toast dismisses and can be shown again', async () => {
     const w = mount(ShellsPreview, { props: { initial: 'ob7' } });
+    // AppToast fills its live region one frame after mount (#79).
+    await new Promise((r) => requestAnimationFrame(() => r(undefined)));
+    await w.vm.$nextTick();
     await w.get('[data-test="toast-dismiss"]').trigger('click');
     expect(w.find('[data-test="toast"]').exists()).toBe(false);
     await w.get('[data-test="toast-show"]').trigger('click');

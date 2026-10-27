@@ -108,3 +108,4 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #44 · Brett asked for a dropdown defaulting to All; mockup showed a list · Brett's stated UI wording wins over mockup variants
 - 2026-10-26 · #44 · hashed hsl author colors could collide and ignored themes · assign authors --ct-collab-N tokens, Grok Bot = collab-1
 - 2026-10-26 · #44 · accept/reject shortcuts fired while focus mode hid the review panel · every shortcut that acts on panel content must check the same visibility conditions as the panel
+- 2026-10-26 · #79 · toast live region created with its text, so screen readers may skip it · mount aria-live regions before content changes
