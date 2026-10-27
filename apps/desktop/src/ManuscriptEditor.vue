@@ -225,7 +225,8 @@ function onKeydown(ev: KeyboardEvent) {
   if (!action) return;
   if (action !== 'toggle') {
     // Only while the panel is open and focus is not in some other text field.
-    if (!reviewOpen.value || collapsed.value) return;
+    // Same visibility conditions as the panel itself: hidden in focus mode too.
+    if (!reviewOpen.value || collapsed.value || focusMode.value) return;
     if (inForeignInput(ev.target, editor.value?.view.dom ?? null)) return;
   }
   ev.preventDefault();

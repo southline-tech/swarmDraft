@@ -5,6 +5,34 @@ import ManuscriptEditor from './ManuscriptEditor.vue';
 import { SAMPLE_DOC } from './fixtures/sample';
 
 describe('ManuscriptEditor', () => {
+  it('accept/reject shortcuts do nothing while focus mode hides the review panel (#44)', async () => {
+    const w = mount(ManuscriptEditor, { props: { content: SAMPLE_DOC }, attachTo: document.body });
+    await flushPromises();
+    const html = () => w.find('.tiptap').html();
+    const fire = (key: string) =>
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key, ctrlKey: true, shiftKey: true, bubbles: true }),
+      );
+    await w.find('[data-test="focus-mode"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test="review"]').exists()).toBe(false);
+    const before = html();
+    for (const key of ['Enter', 'Backspace']) {
+      fire(key);
+      await flushPromises();
+      expect(html()).toBe(before);
+      expect(w.find('.tiptap ins.suggestion-insert').exists()).toBe(true);
+      expect(w.find('.tiptap del.suggestion-delete').exists()).toBe(true);
+    }
+    // Control: once focus mode is off the same shortcut does act.
+    await w.find('[data-test="focus-exit"]').trigger('click');
+    await flushPromises();
+    fire('Enter');
+    await flushPromises();
+    expect(w.find('.tiptap ins.suggestion-insert').exists()).toBe(false);
+    w.unmount();
+  });
+
   it('renders the document with tracked changes in the review panel and comments below it', async () => {
     const w = mount(ManuscriptEditor, { props: { content: SAMPLE_DOC }, attachTo: document.body });
     await flushPromises();
