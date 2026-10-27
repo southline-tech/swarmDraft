@@ -2264,12 +2264,70 @@ describe('App outline vs margin notes (#98)', () => {
       vi.advanceTimersByTime(5000);
       await w.find('[data-test="tb-navigator"]').trigger('click');
       await nextTick();
-      vi.advanceTimersByTime(3100);
+      // A restart would push the dismissal to 13s: it must still close at the original 8s.
+      vi.advanceTimersByTime(2999);
+      await nextTick();
+      expect(w.find('[data-test="toast"]').text()).toContain(noRoomCopy);
+      vi.advanceTimersByTime(1);
       await nextTick();
       expect(w.find('[data-test="toast"]').exists()).toBe(false);
     } finally {
       vi.useRealTimers();
     }
+    w.unmount();
+  });
+
+  it('unmounting while the cue shows clears its timer', async () => {
+    const { w } = await withManuscript();
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    ed().vm.$emit('layout', L(368, true));
+    ed().vm.$emit('layout', L(672, true));
+    await settle();
+    const set = vi.spyOn(globalThis, 'setTimeout');
+    const clear = vi.spyOn(globalThis, 'clearTimeout');
+    try {
+      await w.find('[data-test="tb-navigator"]').trigger('click');
+      await nextTick();
+      const call = set.mock.calls.findIndex((c) => c[1] === 8000);
+      expect(call).toBeGreaterThanOrEqual(0);
+      const id = set.mock.results[call]!.value;
+      w.unmount();
+      expect(clear.mock.calls.some((c) => c[0] === id)).toBe(true);
+    } finally {
+      set.mockRestore();
+      clear.mockRestore();
+    }
+  });
+
+  it('Hide notes removes the margin notes and reports marginNotes:false; they return after the panel closes', async () => {
+    const { w } = await withManuscript();
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    const st = (ed().vm as unknown as { $: { setupState: { review: unknown[] } } }).$.setupState;
+    st.review = [
+      { id: 'q1', type: 'insertion', author: 'Bot', text: 'x', from: 1, to: 3, quote: 'ab' },
+    ];
+    await settle();
+    expect(w.find('[data-test="margin-notes"]').exists()).toBe(true);
+    expect(ed().emitted('layout')!.at(-1)![0]).toMatchObject({
+      reviewShown: true,
+      marginNotes: true,
+    });
+    ed().vm.$emit('layout', L(368, false));
+    ed().vm.$emit('layout', L(368, true)); // 1024px: notes appear, outline auto-closes
+    ed().vm.$emit('layout', L(672, true));
+    await settle();
+    await w.find('[data-test="tb-navigator"]').trigger('click');
+    await settle();
+    await w.get('[data-test="toast-dismiss"]').trigger('click');
+    await settle();
+    expect(w.find('[data-test="margin-notes"]').exists()).toBe(false);
+    const layouts = ed().emitted('layout')!;
+    expect((layouts[layouts.length - 1]![0] as { marginNotes: boolean }).marginNotes).toBe(false);
+    await w.find('[data-test="tb-review"]').trigger('click'); // close the panel
+    await settle();
+    await w.find('[data-test="tb-review"]').trigger('click'); // and open it again
+    await settle();
+    expect(w.find('[data-test="margin-notes"]').exists()).toBe(true);
     w.unmount();
   });
 });
