@@ -5,6 +5,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
 import { docToYDoc, importDocx, readStructure, writeStructure, yDocToDoc } from '@coauthor/docx';
 import App from './App.vue';
+import { PRODUCT_NAME } from './lib/brand';
 import { storedFixture } from './stored-fixture.test-helper';
 import { openSession, sessionFromDocx } from './manuscript-session';
 import { docWordCount, sectionTreeDocs } from './status/wordcount';
@@ -158,7 +159,10 @@ describe('App', () => {
     const w = mount(App, { attachTo: document.body });
     await flushPromises();
     await chooseFile(w);
-    expect(w.text()).toContain('Could not import synthetic.docx: database is locked');
+    expect(w.text()).toContain(
+      "Couldn't open synthetic.docx. This book is open in another program.",
+    );
+    expect(w.text()).not.toContain('database is locked');
     expect(w.findAll('.row')).toHaveLength(0);
     w.unmount();
   });
@@ -168,7 +172,7 @@ describe('App', () => {
     vi.mocked(backend.getAppInfo).mockResolvedValueOnce(null);
     const w = mount(App);
     await flushPromises();
-    expect(w.text()).toContain('coAuthor');
+    expect(w.text()).toContain(PRODUCT_NAME);
     await openSettings(w);
     expect(w.find('[data-test="browser-mode"]').exists()).toBe(true);
     expect(w.find('[data-test="no-manuscript"]').exists()).toBe(true);
@@ -598,7 +602,8 @@ describe('App open-file input', () => {
     expect(w.text()).not.toContain('Could not import');
 
     await pick(w, 'broken.docx', new TextEncoder().encode('not a zip'));
-    expect(w.text()).toContain('Could not import broken.docx');
+    expect(w.text()).toContain("Couldn't open broken.docx. This isn't a Word manuscript.");
+    expect(w.text()).not.toContain('zip directory');
     expect(w.findAll('.row')).toHaveLength(rows);
     w.unmount();
   });
@@ -722,7 +727,10 @@ describe('App status bar on an imported manuscript', () => {
     await vi.waitFor(() =>
       expect(w.find('[data-test="status-save"]').text()).toBe('Not saved, retrying'),
     );
-    expect(w.find('[data-test="save-error"]').text()).toContain('Not saved, retrying');
+    expect(w.find('[data-test="save-error"]').text()).toContain(
+      "Your latest changes aren't saved yet",
+    );
+    expect(w.find('[data-test="save-error"]').text()).not.toContain('disk full');
     vi.mocked(backend.saveSectionUpdate).mockReset().mockResolvedValue(undefined);
     w.unmount();
   });
@@ -787,12 +795,42 @@ vi.mock('./backend', async (orig) => ({
   saveSectionUpdate: vi.fn(async () => {}),
   saveOutline: vi.fn(async () => {}),
   dismissRecoveryNotices: vi.fn(async () => {}),
+  saveManuscriptCopy: vi.fn(async () => 'D:\\Copies\\book.docx'),
   restoreBackup: vi.fn(async () => ({
     tokensRevoked: 2,
     manifest: {},
     preRestoreSnapshot: '/tmp/x/backups/p.zip',
   })),
 }));
+
+describe('save-failure banner', () => {
+  it('Save a copy writes a .docx with the unsaved edits while saves keep failing', async () => {
+    const backend = await import('./backend');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    vi.mocked(backend.saveSectionUpdate).mockRejectedValue('io: database is locked');
+    await vi.waitFor(() => expect(w.find('.tiptap').exists()).toBe(true));
+    const editor = (
+      w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+    ).editor;
+    editor.commands.insertContentAt(1, 'ONLYINMEMORY ');
+    await vi.waitFor(() => expect(w.find('[data-test="save-copy"]').exists()).toBe(true));
+    expect(w.find('[data-test="save-error"]').text()).not.toContain('database is locked');
+    const write = vi.mocked(backend.saveManuscriptCopy);
+    write.mockClear();
+    await w.find('[data-test="save-copy"]').trigger('click');
+    await settle();
+    expect(write).toHaveBeenCalledTimes(1);
+    const [, bytes] = write.mock.calls[0]!;
+    expect(JSON.stringify(importDocx(bytes).sections)).toContain('ONLYINMEMORY');
+    expect(w.find('[data-test="save-copy-result"]').text()).toContain('Copy saved to');
+    vi.mocked(backend.saveSectionUpdate).mockReset().mockResolvedValue(undefined);
+    w.unmount();
+    log.mockRestore();
+  });
+});
 
 describe('restore confirmation', () => {
   it('saves pending edits before the restore snapshot, then drops the stale session', async () => {
@@ -908,7 +946,7 @@ describe('restore confirmation', () => {
     await settle();
     expect(backend.openLatestManuscript).toHaveBeenCalledTimes(4); // first try + 3 backoff retries
     expect(w.find('[data-test="fatal-error"]').text()).toBe(
-      "Couldn't reopen the manuscript. Please restart coAuthor.",
+      `Couldn't reopen the manuscript. Please restart ${PRODUCT_NAME}.`,
     );
     expect(w.find('.tiptap').exists()).toBe(false);
     expect(w.find('[contenteditable="true"]').exists()).toBe(false);
@@ -948,7 +986,7 @@ describe('restore confirmation', () => {
     vi.mocked(backend.persistImport).mockResolvedValueOnce(bad);
     vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(storedFixture()); // same id
     await chooseFile(w);
-    expect(w.find('[data-test="open-error"]').text()).toContain('Could not import synthetic.docx');
+    expect(w.find('[data-test="open-error"]').text()).toContain("Couldn't open synthetic.docx");
     w.unmount();
   });
 
@@ -1082,7 +1120,8 @@ describe('restore confirmation', () => {
     expect(backend.restoreBackup).not.toHaveBeenCalled();
     expect(w.text()).toContain('Restore cancelled');
     expect(w.text()).toContain("aren't saved yet");
-    expect(w.find('[data-test="save-error"]').text()).toContain('Not saved, retrying');
+    expect(w.find('[data-test="save-error"]').text()).toContain("aren't saved yet");
+    expect(w.text()).not.toContain('database is locked');
     expect(w.find('.tiptap').exists()).toBe(true); // the session (and its edits) stays open
     vi.mocked(backend.saveSectionUpdate).mockReset();
     vi.mocked(backend.saveSectionUpdate).mockResolvedValue(undefined);
@@ -1222,7 +1261,9 @@ describe('recovery notice', () => {
     const n = wrapper.find('[data-test="recovery-notice"]');
     expect(n.text()).not.toContain('Moved to');
     expect(n.text()).toContain('try again');
-    expect(wrapper.find('[data-test="recovery-notice-save-error"]').text()).toContain('disk full');
+    expect(wrapper.find('[data-test="recovery-notice-save-error"]').text()).toContain(
+      'Your computer is almost full',
+    );
   });
 
   it('shows where a corrupt notice file was kept', async () => {
@@ -1510,6 +1551,139 @@ describe('App UI shells (Part of #36)', () => {
     await w.find('[data-test="focus-exit"]').trigger('click');
     await settle();
     expect(w.find('#chapter-navigator').isVisible()).toBe(true);
+    w.unmount();
+  });
+});
+
+describe('book-open toast (ob7)', () => {
+  it('keeps one persistent polite live region: same node before open, after open, after dismiss (#79)', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(null);
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    const region = w.get('[data-test="toast-region"]');
+    expect(region.attributes('role')).toBe('status');
+    expect(region.attributes('aria-live')).toBe('polite');
+    expect(region.text()).toBe('');
+    const node = region.element;
+    await chooseFile(w);
+    expect(w.get('[data-test="toast-region"]').element).toBe(node);
+    expect(node.textContent).toContain('Your book is open.');
+    await w.get('[data-test="toast-dismiss"]').trigger('click');
+    expect(w.get('[data-test="toast-region"]').element).toBe(node);
+    expect(node.isConnected).toBe(true);
+    expect(node.textContent?.trim()).toBe('');
+    w.unmount();
+  });
+
+  it('shows after a successful import and says the original is untouched', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(null);
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    expect(w.find('[data-test="toast"]').exists()).toBe(false);
+    await chooseFile(w);
+    const toast = w.find('[data-test="open-toast"] [data-test="toast"]');
+    expect(toast.exists()).toBe(true);
+    expect(w.get('[data-test="toast-region"]').attributes('aria-live')).toBe('polite');
+    expect(toast.text()).toContain('Your book is open.');
+    expect(toast.text()).toContain('original file is untouched');
+    w.unmount();
+  });
+
+  it('does not show when the import fails', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(storedFixture());
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    vi.mocked(backend.persistImport).mockRejectedValueOnce('disk full');
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(storedFixture());
+    await chooseFile(w);
+    expect(w.find('[data-test="open-error"]').exists()).toBe(true);
+    expect(w.find('[data-test="toast"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('does not show when the last book reopens at startup', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(storedFixture());
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    expect(w.find('[contenteditable="true"]').exists()).toBe(true);
+    expect(w.find('[data-test="toast"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('a failed import within the 8 s clears the earlier success toast (fake timers)', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(null);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const w = mount(App, { attachTo: document.body });
+      await settle();
+      await chooseFile(w);
+      expect(w.find('[data-test="toast"]').exists()).toBe(true);
+      await vi.advanceTimersByTimeAsync(2000);
+      // A read failure: nothing is closed or reopened, so only the failure path's clear runs.
+      const input = w.find('[data-test="open-docx"]');
+      const file = new File([bytes()], 'broken.docx');
+      Object.defineProperty(file, 'arrayBuffer', { value: async () => Promise.reject('io') });
+      Object.defineProperty(input.element, 'files', { value: [file], configurable: true });
+      await input.trigger('change');
+      await settle();
+      expect(w.find('[data-test="open-error"]').exists()).toBe(true);
+      // Still well inside the 8 s auto-close: only the failure path can have cleared it.
+      expect(w.find('[data-test="toast"]').exists()).toBe(false);
+      w.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('opening another book clears the previous book-open toast', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(null);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const w = mount(App, { attachTo: document.body });
+      await settle();
+      await chooseFile(w);
+      expect(w.find('[data-test="toast"]').exists()).toBe(true);
+      const other = sessionFromDocx(bytes(), 'm2');
+      (w.vm as unknown as { open: (s: typeof other) => void }).open(other);
+      await settle();
+      expect(w.find('[data-test="toast"]').exists()).toBe(false);
+      w.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('closes with Got it, and on its own after a few seconds', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(null);
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    await chooseFile(w);
+    await w.find('[data-test="toast-dismiss"]').trigger('click');
+    expect(w.find('[data-test="toast"]').exists()).toBe(false);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await chooseFile(w);
+    expect(w.find('[data-test="toast"]').exists()).toBe(true);
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(w.find('[data-test="toast"]').exists()).toBe(false);
+    vi.useRealTimers();
+    w.unmount();
+  });
+});
+
+describe('product name in App.vue', () => {
+  it('never hardcodes the old product name and shows the brand constant in the topbar', async () => {
+    const src = readFileSync(resolve(__dirname, 'App.vue'), 'utf8');
+    expect(src).not.toMatch(/coAuthor/);
+    const w = mount(App);
+    await flushPromises();
+    expect(w.find('.topbar__name').text()).toBe(PRODUCT_NAME);
     w.unmount();
   });
 });

@@ -889,101 +889,25 @@ fn sync_parent_dir(path: &Path) {
     let _ = path;
 }
 
-/// True when `path` is `root` or inside it. On Windows paths compare case-insensitively.
-fn is_within(path: &Path, root: &Path, case_insensitive: bool) -> bool {
-    let norm = |p: &Path| -> Vec<String> {
-        p.components()
-            .map(|c| {
-                let s = c.as_os_str().to_string_lossy().into_owned();
-                if case_insensitive {
-                    s.to_lowercase()
-                } else {
-                    s
-                }
-            })
-            .collect()
-    };
-    let (p, r) = (norm(path), norm(root));
-    p.len() >= r.len() && p[..r.len()] == r[..]
-}
-
-/// True for UNC and admin-share forms (`\\server\share`, `\\localhost\C$`,
-/// `\\?\UNC\...`, and the same with forward slashes). Their canonical form never
-/// prefix-matches the drive-letter data folder, so they are refused outright.
-fn is_unc_like(s: &str) -> bool {
-    let s = s.replace('/', "\\");
-    if s.get(..8)
-        .is_some_and(|h| h.eq_ignore_ascii_case("\\\\?\\UNC\\"))
-    {
-        return true;
-    }
-    if s.starts_with("\\\\?\\") || s.starts_with("\\\\.\\") {
-        // Verbatim/device drive paths (`\\?\C:\...`) are local; anything else is not.
-        let rest = s.get(4..).unwrap_or("");
-        let b = rest.as_bytes();
-        return !(b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':');
-    }
-    s.starts_with("\\\\")
-}
-
-fn denied(msg: &str) -> BackupError {
-    BackupError::Io(std::io::Error::new(
-        std::io::ErrorKind::PermissionDenied,
-        msg.to_string(),
-    ))
-}
+#[cfg(test)]
+use crate::save_copy::is_unc_like;
 
 /// Check a backup destination picked in the native save dialog (opened by Rust, #73) and
 /// return the real path to write. Refuses relative paths, `.`/`..` components, non-`.zip`
 /// names, a missing folder, and anything that resolves (after canonicalizing the parent, so
 /// symlinks and junctions are followed) into one of `data_dirs` (the `backups` folder
-/// included), and UNC / admin-share paths. Same rules as `save_manuscript_copy` (#65).
+/// included), a destination that is itself a link, and UNC / admin-share paths. Uses the
+/// same shared check as `save_manuscript_copy` (#65): [`crate::save_copy::check_write_dest`].
 pub fn check_backup_dest(
     store: &Store,
     data_dirs: &[PathBuf],
     dest: &Path,
 ) -> Result<PathBuf, BackupError> {
-    if !dest.is_absolute() {
-        return Err(denied("backup path must be absolute"));
-    }
-    if is_unc_like(&dest.to_string_lossy()) {
-        return Err(denied("backup path is a network share"));
-    }
-    if dest
-        .components()
-        .any(|c| matches!(c, Component::CurDir | Component::ParentDir))
-    {
-        return Err(denied("backup path must not contain . or .."));
-    }
-    let name = dest
-        .file_name()
-        .ok_or_else(|| denied("backup path has no file name"))?;
-    if !Path::new(name)
-        .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("zip"))
-    {
-        return Err(denied("backup must be a .zip file"));
-    }
-    let parent = dest
-        .parent()
-        .ok_or_else(|| denied("backup path has no folder"))?;
-    let real = parent.canonicalize()?.join(name);
-    if std::fs::symlink_metadata(&real).is_ok_and(|m| m.file_type().is_symlink()) {
-        return Err(denied("backup path is a link"));
-    }
-    if is_unc_like(&real.to_string_lossy()) {
-        return Err(denied("backup path is a network share"));
-    }
-    let ci = cfg!(windows);
     let mut roots = vec![store.data_dir().to_path_buf()];
     roots.extend(data_dirs.iter().cloned());
-    for dir in roots {
-        let dir = dir.canonicalize().unwrap_or(dir);
-        if is_within(&real, &dir, ci) {
-            return Err(denied("backup path is inside the app data folder"));
-        }
-    }
-    Ok(real)
+    Ok(crate::save_copy::check_write_dest(
+        &roots, dest, "zip", "backup",
+    )?)
 }
 
 /// Write a backup to a destination the user picked in the save dialog (which already

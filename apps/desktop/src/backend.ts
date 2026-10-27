@@ -220,3 +220,13 @@ export async function saveOutline(
     })),
   });
 }
+
+/**
+ * "Save a copy": send only the .docx bytes (and the title for the default file name). The
+ * backend opens the native save dialog itself, so the webview never chooses the path, then
+ * writes a temp file beside it and renames it into place, refusing the app's data folders.
+ * Returns the path written, or null if the user cancelled.
+ */
+export async function saveManuscriptCopy(title: string, bytes: Uint8Array): Promise<string | null> {
+  return invoke<string | null>('save_manuscript_copy', { title, bytes: Array.from(bytes) });
+}

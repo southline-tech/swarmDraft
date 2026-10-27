@@ -12,6 +12,7 @@ pub mod backup;
 pub mod content;
 pub mod manuscripts;
 pub mod mcp;
+pub mod save_copy;
 pub mod storage;
 
 use serde::Serialize;
@@ -141,6 +142,41 @@ fn time_stamp() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs().to_string())
         .unwrap_or_default()
+}
+
+/// "Save a copy" from the save-failure banner: the frontend sends only the .docx bytes it
+/// built from the in-memory manuscript (and the title for the default file name). The
+/// destination is picked here in the native save dialog, never taken from the webview, and
+/// written atomically. Returns the path written, or `None` if the user cancelled.
+#[tauri::command]
+async fn save_manuscript_copy(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, storage::Store>,
+    title: String,
+    bytes: Vec<u8>,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut data_dirs = vec![store.data_dir().to_path_buf()];
+    data_dirs.extend(app.path().app_data_dir().ok());
+    data_dirs.extend(app.path().app_local_data_dir().ok());
+    tauri::async_runtime::spawn_blocking(move || {
+        let picked = app
+            .dialog()
+            .file()
+            .set_title("Save a copy")
+            .set_file_name(save_copy::default_file_name(&title))
+            .add_filter("Word document", &["docx"])
+            .blocking_save_file();
+        let Some(picked) = picked else {
+            return Ok(None);
+        };
+        let dest = picked.into_path().map_err(|e| format!("io: {e}"))?;
+        save_copy::write_copy(&data_dirs, &dest, &bytes)
+            .map(|p| Some(p.display().to_string()))
+            .map_err(|e| format!("io: {e}"))
+    })
+    .await
+    .map_err(|e| format!("io: {e}"))?
 }
 
 /// Recovery notices that could not be saved to disk; shown from memory until dismissed.
@@ -336,7 +372,8 @@ pub fn run() {
             section_apply_update,
             manuscript_save_outline,
             manuscript_updates_since,
-            mcp_status
+            mcp_status,
+            save_manuscript_copy
         ])
         .run(tauri::generate_context!())
         .expect("error while running coAuthor");
