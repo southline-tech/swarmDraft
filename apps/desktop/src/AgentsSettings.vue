@@ -148,10 +148,10 @@ onBeforeUnmount(() => {
     <div v-if="shownToken" class="token-once" data-test="token-once">
       <strong>Copy this token now. It won't be shown again.</strong>
       <input
+        ref="tokenInput"
         class="token-value"
         data-test="token-value"
         aria-label="New agent token"
-        ref="tokenInput"
         readonly
         autocomplete="off"
         autocapitalize="off"

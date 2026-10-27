@@ -98,6 +98,8 @@ const props = defineProps<{
   /** #96: the writer forced the outline open while the review panel shows; the page may then go
    *  down to --ct-page-forced-min-w instead of overflowing the desk. */
   outlineForced?: boolean;
+  /** #98: the writer chose "Hide notes" to make room for the outline. */
+  notesHidden?: boolean;
 }>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
@@ -316,7 +318,8 @@ const deskEl = shallowRef<HTMLElement | null>(null);
 const deskWidth = shallowRef(0);
 const deskLeft = shallowRef(0);
 const marginNotesShown = computed(
-  () => !focusMode.value && review.value.some((r) => r.type !== 'comment_anchor'),
+  () =>
+    !focusMode.value && !props.notesHidden && review.value.some((r) => r.type !== 'comment_anchor'),
 );
 /** #96: page under 440px in the forced state, so it gets the narrower inner padding. */
 const pageNarrow = computed(() =>
@@ -646,7 +649,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
         </div>
         <!-- Margin notes (wp1): suggestion callouts beside the page, read-only. -->
         <div
-          v-if="!focusMode && review.some((r) => r.type !== 'comment_anchor')"
+          v-if="marginNotesShown"
           class="sh-margin"
           data-test="margin-notes"
           aria-label="Suggestion notes"

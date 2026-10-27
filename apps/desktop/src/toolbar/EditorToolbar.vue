@@ -217,6 +217,7 @@ const btn =
       aria-label="Chapters"
       title="Chapters"
       :aria-pressed="props.navigatorOpen"
+      :aria-expanded="props.navigatorOpen"
       aria-controls="chapter-navigator"
       @click="emit('toggle-navigator')"
     >
