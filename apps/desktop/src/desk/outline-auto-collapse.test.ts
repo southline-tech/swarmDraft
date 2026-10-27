@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { nextTick, ref } from 'vue';
+import { nextTick, ref, watch } from 'vue';
 import {
   deskNeeded,
   MARGIN_NOTES_W,
@@ -11,6 +11,7 @@ import {
 } from './outline-auto-collapse';
 import {
   forcedDeskNeeded,
+  OUTLINE_ROOM,
   forcedPageNarrow,
   PAGE_FORCED_MIN_W,
   toastPlacement,
@@ -204,5 +205,100 @@ describe('notes keep a gap to the review panel (#97)', () => {
     );
     const tokens = readFileSync(resolve(__dirname, '../styles/tokens.css'), 'utf8');
     expect(tokens).toContain('--ct-space-4: 16px;');
+  });
+});
+
+describe('auto-closed outline and margin notes (#98)', () => {
+  // 1152px window: desk 496px with the outline open, 800px with it closed (OUTLINE_ROOM 304).
+  const L = (deskWidth: number, marginNotes: boolean) => ({
+    reviewShown: true,
+    deskWidth,
+    marginNotes,
+  });
+
+  it('reopens an auto-closed outline when the notes hide and the page fits again', () => {
+    const a = setup();
+    a.update(L(496, false));
+    a.update(L(496, true));
+    expect(a.nav.value).toBe(false);
+    a.update(L(800, true)); // still no room with notes: stays closed
+    expect(a.nav.value).toBe(false);
+    a.update(L(800, false));
+    expect(a.nav.value).toBe(true);
+    expect(a.autoClosed.value).toBe(false);
+  });
+
+  it('stays closed when the writer closed it by hand', () => {
+    const a = setup();
+    a.update(L(496, false));
+    a.toggleByHand(); // writer closes it
+    a.update(L(800, true));
+    a.update(L(800, false));
+    expect(a.nav.value).toBe(false);
+  });
+
+  it('does not open an outline the writer closed while the panel was hidden', () => {
+    const a = setup();
+    a.update({ reviewShown: false, deskWidth: 990, marginNotes: false });
+    a.toggleByHand(); // closed by hand, panel hidden: not "manual", not auto-closed
+    a.update(L(800, true));
+    a.update(L(800, false));
+    expect(a.nav.value).toBe(false);
+  });
+
+  it('no flicker or loop as the notes toggle: one change per toggle', () => {
+    const a = setup();
+    const changes: boolean[] = [];
+    watch(a.nav, (v) => changes.push(v), { flush: 'sync' });
+    a.update(L(496, false));
+    for (let i = 0; i < 3; i++) {
+      a.update(L(496, true)); // notes show: closes
+      a.update(L(800, true)); // the editor re-reports the wider desk: no change
+      a.update(L(800, false)); // notes hide: reopens
+      a.update(L(496, false)); // the editor re-reports the narrower desk: no change
+    }
+    expect(changes).toEqual([false, true, false, true, false, true]);
+  });
+});
+
+describe('no room for the outline while notes show (#98)', () => {
+  // 1024px window, review panel + notes: desk 672px with the outline closed, 368px open.
+  const at1024 = { reviewShown: true, deskWidth: 672, marginNotes: true };
+
+  it('Chapters signals no room instead of opening and closing again', () => {
+    const a = setup();
+    a.nav.value = false;
+    a.update(at1024);
+    a.toggleByHand();
+    expect(a.nav.value).toBe(false);
+    expect(a.noRoom.value).toBe(1);
+    expect(a.manual.value).toBe(false);
+  });
+
+  it('opens normally when the notes are hidden or there is room', () => {
+    const a = setup();
+    a.nav.value = false;
+    a.update({ ...at1024, marginNotes: false });
+    a.toggleByHand();
+    expect(a.nav.value).toBe(true);
+    expect(a.noRoom.value).toBe(0);
+  });
+
+  it('openByHand ("Hide notes") opens as the writer\'s choice and holds without notes', () => {
+    const a = setup();
+    a.nav.value = false;
+    a.update(at1024);
+    a.openByHand();
+    expect(a.nav.value).toBe(true);
+    expect(a.manual.value).toBe(true);
+    a.update({ reviewShown: true, deskWidth: 368, marginNotes: false });
+    expect(a.nav.value).toBe(true);
+  });
+
+  it('OUTLINE_ROOM matches the 18rem outline column plus the gap-4 workspace gap', () => {
+    const app = readFileSync(resolve(__dirname, '../App.vue'), 'utf8');
+    expect(app).toContain("'grid-cols-[18rem_1fr]'");
+    expect(app).toMatch(/class="workspace grid gap-4/);
+    expect(OUTLINE_ROOM).toBe(18 * 16 + 16);
   });
 });
