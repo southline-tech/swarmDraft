@@ -121,6 +121,8 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #44 · accept/reject shortcuts fired while focus mode hid the review panel · every shortcut that acts on panel content must check the same visibility conditions as the panel
 - 2026-10-26 · #73 · create_backup took a destination path from the webview (same arbitrary-write class as #65) · every write command picks its path in Rust and builds its bytes in Rust when it can; grep all commands for path params when one is found
 - 2026-10-26 · #78 · unused unattended write path callable from window · remove write paths nothing uses; every webview-triggered write needs a user gesture/dialog
+- 2026-10-26 · #79 · error banners created their role=alert region together with the text · keep an assertive region mounted and insert error text a frame later
+- 2026-10-26 · #79 · live-region tests passed on the component while parents v-if'd it, so the region still mounted with its text · test live regions at the parent level: region exists before the content, same node after it appears and after it clears
 - 2026-10-26 · #81/#77 · live region wrapped in parent v-if so it mounted with its text · test live regions at the parent level: same node before open, after open, after dismiss
 - 2026-10-26 · #77 · "Nothing to review"/"No comments yet" showed while the section failed to load · empty states must not show while a load error is set (looks like data loss)
 - 2026-10-26 · #77 · toast clear on a later failure and on open() was untested · test every toast clear path with fake timers, inside the auto-close window
@@ -130,3 +132,8 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #86 · moving a sync command to async + spawn_blocking with an unparented dialog let two restores/backups run at once over one journal · take a process-wide op lock before the dialog and hold it to the end; parent dialogs to the calling window
 - 2026-10-26 · #86 · a failed rollback was reported like a clean failure ("try again") and the stale editor stayed open · give "storage may be mid-swap" its own code; the window closes the session on it, and only claim "nothing changed" for codes that guarantee it
 - 2026-10-26 · #86 · newer-version backups and corrupt zip entries surfaced as "not a backup" / "try again" · map each error variant to its own UI code, with a test per variant
+- 2026-10-26 · #82 · removing external-load-error from App.vue still passed every test, and the error was then announced twice · test parent-hosted live regions with the real child component and assert exactly one role=alert holds the text
+- 2026-10-26 · #82 · useDeferredValue had no tests for a value cleared before its frame or an unmount mid-frame · cover every deferred/timer helper with fake-timer tests for cancel and unmount
+- 2026-10-26 · #82 · branch conflicted with main when review was requested · merge main and re-run all checks right before each review request
+- 2026-10-26 · #82 · re-importing while the book-open toast was up cleared and set its text in one tick, so the region never changed and nothing was re-announced · to re-announce the same message, clear the region, set the text on nextTick, and test the remove-then-add DOM mutations on the same node
+- 2026-10-26 · #82 · after merging #77, its load-error test failed because #82 defers error text one frame · after merging main, re-run the full suite and fix semantic conflicts in the tests, not only text conflicts
