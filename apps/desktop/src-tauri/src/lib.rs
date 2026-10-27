@@ -14,6 +14,7 @@ pub mod content;
 pub mod manuscripts;
 pub mod mcp;
 pub mod migrate;
+pub mod save_copy;
 pub mod storage;
 
 use serde::Serialize;
@@ -113,6 +114,41 @@ fn create_backup(
     Ok(dest.display().to_string())
 }
 
+/// "Save a copy" from the save-failure banner: the frontend sends only the .docx bytes it
+/// built from the in-memory manuscript (and the title for the default file name). The
+/// destination is picked here in the native save dialog, never taken from the webview, and
+/// written atomically. Returns the path written, or `None` if the user cancelled.
+#[tauri::command]
+async fn save_manuscript_copy(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, storage::Store>,
+    title: String,
+    bytes: Vec<u8>,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut data_dirs = vec![store.data_dir().to_path_buf()];
+    data_dirs.extend(app.path().app_data_dir().ok());
+    data_dirs.extend(app.path().app_local_data_dir().ok());
+    tauri::async_runtime::spawn_blocking(move || {
+        let picked = app
+            .dialog()
+            .file()
+            .set_title("Save a copy")
+            .set_file_name(save_copy::default_file_name(&title))
+            .add_filter("Word document", &["docx"])
+            .blocking_save_file();
+        let Some(picked) = picked else {
+            return Ok(None);
+        };
+        let dest = picked.into_path().map_err(|e| format!("io: {e}"))?;
+        save_copy::write_copy(&data_dirs, &dest, &bytes)
+            .map(|p| Some(p.display().to_string()))
+            .map_err(|e| format!("io: {e}"))
+    })
+    .await
+    .map_err(|e| format!("io: {e}"))?
+}
+
 /// Recovery notices that could not be saved to disk; shown from memory until dismissed.
 #[derive(Default)]
 struct UnsavedNotices(std::sync::Mutex<Vec<backup::RecoveryNotice>>);
@@ -148,6 +184,27 @@ fn dismiss_recovery_notices(
         .unwrap_or_else(|e| e.into_inner())
         .retain(|n| !ids.contains(&n.id));
     backup::dismiss_recovery_notices(store.data_dir(), &ids).map_err(|e| e.to_string())
+}
+
+/// Migration notices from this launch (#43), kept apart from restore recovery.
+#[derive(Default)]
+struct MigrationNotices(std::sync::Mutex<Vec<migrate::MigrationNotice>>);
+
+/// `migration_notices` → `[{ id, kind: "info" | "warn", text }]`: plain-text notices from the
+/// rename migration this launch. Separate from `recovery_notices`. Reading does not clear.
+#[tauri::command]
+fn migration_notices(notices: tauri::State<'_, MigrationNotices>) -> Vec<migrate::MigrationNotice> {
+    notices.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// `dismiss_migration_notices({ ids })`: hide the shown migration notices for this launch.
+#[tauri::command]
+fn dismiss_migration_notices(notices: tauri::State<'_, MigrationNotices>, ids: Vec<String>) {
+    notices
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|n| !ids.contains(&n.id));
 }
 
 /// Validate and restore a backup .zip; the replaced state is kept as a pre-restore snapshot.
@@ -261,42 +318,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
-            // #43: copy (never move) the pre-rename data folders before anything opens them.
-            let mut migration_notices = Vec::new();
-            for new_dir in [Some(dir.clone()), app.path().app_local_data_dir().ok()]
-                .into_iter()
-                .flatten()
-            {
-                let Some(old_dir) = migrate::old_dir_for(&new_dir) else {
-                    continue;
-                };
-                match migrate::migrate(&old_dir, &new_dir) {
-                    Ok(migrate::Outcome::KeptExisting) => {
-                        eprintln!(
-                            "swarmDraft: kept existing documents in {}; {} not copied",
-                            new_dir.display(),
-                            old_dir.display()
-                        );
-                        migration_notices.push(backup::startup_notice(
-                            &dir,
-                            migrate::KEPT_MESSAGE.to_string(),
-                        ));
-                    }
-                    Ok(_) => {}
-                    Err(e) => {
-                        // Raw error and paths go to the log; the notice stays plain.
-                        eprintln!("swarmDraft: could not copy {}: {e}", old_dir.display());
-                        let text = if e.kind() == std::io::ErrorKind::WouldBlock {
-                            migrate::LOCKED_MESSAGE
-                        } else {
-                            migrate::COPY_FAILED_MESSAGE
-                        };
-                        migration_notices.push(backup::startup_notice(&dir, text.to_string()));
-                    }
-                }
-            }
-            let mut report = backup::cleanup_temp(&dir);
-            report.unsaved_notices.extend(migration_notices);
+            // #43: copy (never move) the pre-rename data folder before anything opens it.
+            // Only the roaming folder: the local one holds just the WebView2 cache.
+            let mut migration_notices = migrate::startup_migration(&dir);
+            let report = backup::cleanup_temp(&dir);
             // #43: both apps default to the same MCP port; if an old coAuthor holds it, say so
             // at startup instead of letting agents keep writing into the old data.
             let listener = match mcp::bind(mcp::DEFAULT_PORT) {
@@ -304,13 +329,15 @@ pub fn run() {
                 Err(e) => {
                     eprintln!("MCP server not started: {e}");
                     if e.kind() == std::io::ErrorKind::AddrInUse {
-                        report
-                            .unsaved_notices
-                            .push(backup::startup_notice(&dir, e.to_string()));
+                        migration_notices.push(migrate::MigrationNotice::new(
+                            migrate::NoticeKind::Warn,
+                            mcp::PORT_IN_USE_MESSAGE,
+                        ));
                     }
                     Err(e.to_string())
                 }
             };
+            app.manage(MigrationNotices(std::sync::Mutex::new(migration_notices)));
             app.manage(UnsavedNotices(std::sync::Mutex::new(
                 report.unsaved_notices,
             )));
@@ -351,6 +378,8 @@ pub fn run() {
             create_backup,
             recovery_notices,
             dismiss_recovery_notices,
+            migration_notices,
+            dismiss_migration_notices,
             restore_backup,
             manuscript_import_json,
             manuscripts_list,
@@ -358,7 +387,8 @@ pub fn run() {
             section_apply_update,
             manuscript_save_outline,
             manuscript_updates_since,
-            mcp_status
+            mcp_status,
+            save_manuscript_copy
         ])
         .run(tauri::generate_context!())
         .expect("error while running swarmDraft");

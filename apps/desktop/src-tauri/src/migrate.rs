@@ -14,7 +14,14 @@
 //!   for byte into staging, that copy is opened and checked, and `VACUUM INTO` writes the new
 //!   db. SQLite never opens anything in the old folder. If the old database keeps changing or is
 //!   locked, the copy fails with a message to close coAuthor and is retried on the next launch.
-//! - Nothing happens when there is no old folder (fresh install).
+//! - Nothing happens when there is no old folder (fresh install), or when the old folder holds
+//!   no database: a folder without `coauthor.db` has no user data (for example the old
+//!   `%LOCALAPPDATA%` folder, which only holds the WebView2 `EBWebView` cache), so it is never
+//!   copied. Caches the runtime recreates are not migrated.
+//! - Only the roaming data folder is migrated ([`startup_migration`]); the local folder is
+//!   left to WebView2.
+//! - Migration reports to the user through its own [`MigrationNotice`] channel, never through
+//!   restore recovery.
 //! - The copy goes into a hidden temp folder next to the target and is renamed into place only
 //!   once it is complete, so an interrupted copy never leaves a half-filled data folder. Stale
 //!   temp folders from an interrupted run are removed and the copy starts over.
@@ -73,7 +80,8 @@ pub fn migrate(old: &Path, new: &Path) -> io::Result<Outcome> {
     if new.exists() && !old.is_dir() {
         return Ok(Outcome::AlreadyPresent);
     }
-    if !old.is_dir() {
+    if !old.is_dir() || !old.join(DB_FILE).is_file() {
+        // No database means no user data (e.g. only a WebView2 cache): nothing to copy.
         return Ok(Outcome::NothingToMigrate);
     }
     if new.exists() && has_documents(new) {
@@ -190,6 +198,72 @@ pub const COPY_FAILED_MESSAGE: &str =
 /// Shown when the new folder already holds documents, so the old ones were not copied in.
 pub const KEPT_MESSAGE: &str =
     "swarmDraft already has documents, so your earlier coAuthor documents weren't copied over. They're still safe in the old coAuthor folder.";
+
+/// How serious a [`MigrationNotice`] is. Serialized as `"info"` or `"warn"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NoticeKind {
+    Info,
+    Warn,
+}
+
+/// A plain-text notice about the rename migration (or the old app still running). It has its
+/// own channel (`migration_notices` / `dismiss_migration_notices`), separate from restore
+/// recovery, and lives in memory only: a failed copy is retried and re-reported each launch,
+/// and a completed copy is marked, so later launches produce no notice.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct MigrationNotice {
+    /// Stable per text, so Dismiss removes only what was shown.
+    pub id: String,
+    pub kind: NoticeKind,
+    /// Plain, user-facing text; technical details go to the log only.
+    pub text: String,
+}
+
+impl MigrationNotice {
+    pub fn new(kind: NoticeKind, text: &str) -> Self {
+        let id = match text {
+            KEPT_MESSAGE => "migration-kept",
+            LOCKED_MESSAGE => "migration-locked",
+            COPY_FAILED_MESSAGE => "migration-copy-failed",
+            _ => "migration-other",
+        };
+        Self {
+            id: id.to_string(),
+            kind,
+            text: text.to_string(),
+        }
+    }
+}
+
+/// Run the rename migration for the roaming data folder `new_dir` and return the notices to
+/// show. Only the data folder is migrated; `%LOCALAPPDATA%` only holds the WebView2 cache.
+pub fn startup_migration(new_dir: &Path) -> Vec<MigrationNotice> {
+    let Some(old_dir) = old_dir_for(new_dir) else {
+        return Vec::new();
+    };
+    match migrate(&old_dir, new_dir) {
+        Ok(Outcome::KeptExisting) => {
+            eprintln!(
+                "swarmDraft: kept existing documents in {}; {} not copied",
+                new_dir.display(),
+                old_dir.display()
+            );
+            vec![MigrationNotice::new(NoticeKind::Info, KEPT_MESSAGE)]
+        }
+        Ok(_) => Vec::new(),
+        Err(e) => {
+            // Raw error and paths go to the log; the notice stays plain.
+            eprintln!("swarmDraft: could not copy {}: {e}", old_dir.display());
+            let text = if e.kind() == io::ErrorKind::WouldBlock {
+                LOCKED_MESSAGE
+            } else {
+                COPY_FAILED_MESSAGE
+            };
+            vec![MigrationNotice::new(NoticeKind::Warn, text)]
+        }
+    }
+}
 
 /// How many times a changing or locked source is re-copied before giving up.
 const SNAPSHOT_ATTEMPTS: u32 = 3;
@@ -391,22 +465,6 @@ mod tests {
         assert_eq!(aside.len(), 1, "empty folder is kept aside, not deleted");
         // Launch 3: no-op.
         assert_eq!(migrate(&old, &new).unwrap(), Outcome::AlreadyPresent);
-    }
-
-    #[test]
-    fn webview_folder_without_marker_is_retried() {
-        let t = tempfile::tempdir().unwrap();
-        let old = t.path().join(OLD_IDENTIFIER);
-        let new = t.path().join("com.radiancelux.swarmdraft");
-        fs::create_dir_all(old.join("EBWebView/Default")).unwrap();
-        fs::write(old.join("EBWebView/Default/state"), b"old").unwrap();
-        fs::create_dir_all(new.join("EBWebView/Default")).unwrap();
-        fs::write(new.join("EBWebView/Default/state"), b"fresh").unwrap();
-        assert_eq!(migrate(&old, &new).unwrap(), Outcome::Copied);
-        assert_eq!(
-            fs::read(new.join("EBWebView/Default/state")).unwrap(),
-            b"old"
-        );
     }
 
     #[test]
@@ -615,5 +673,70 @@ mod tests {
             Path::new("/x/Roaming/com.radiancelux.coauthor")
         );
         assert_eq!(old_dir_for(Path::new("/x/com.radiancelux.coauthor")), None);
+    }
+
+    /// Old Local folder holding only the WebView2 cache, new Local folder already created by
+    /// WebView2 without the marker: no copy, no error, no notice, on every run.
+    #[test]
+    fn local_webview_cache_only_is_never_migrated() {
+        let t = tempfile::tempdir().unwrap();
+        let old = t.path().join(OLD_IDENTIFIER);
+        let new = t.path().join("com.radiancelux.swarmdraft");
+        fs::create_dir_all(old.join("EBWebView/Default/Cache")).unwrap();
+        fs::write(old.join("EBWebView/Default/Cache/data_0"), b"old cache").unwrap();
+        fs::create_dir_all(new.join("EBWebView/Default")).unwrap();
+        fs::write(new.join("EBWebView/Default/lockfile"), b"in use").unwrap();
+        for _ in 0..3 {
+            assert_eq!(migrate(&old, &new).unwrap(), Outcome::NothingToMigrate);
+            assert!(startup_migration(&new).is_empty());
+            assert!(!new.join("EBWebView/Default/Cache").exists());
+            assert_eq!(
+                fs::read(new.join("EBWebView/Default/lockfile")).unwrap(),
+                b"in use"
+            );
+            let names: Vec<_> = fs::read_dir(t.path())
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            assert_eq!(names.len(), 2, "no aside or temp folders: {names:?}");
+        }
+    }
+
+    /// After a full success, launches 2 and 3 produce no notices, and migration never trips
+    /// restore recovery (no recovery notices, journal untouched).
+    #[test]
+    fn later_launches_after_success_are_silent_and_not_restore_recovery() {
+        let t = tempfile::tempdir().unwrap();
+        let old = t.path().join(OLD_IDENTIFIER);
+        let new = t.path().join("com.radiancelux.swarmdraft");
+        seed(&old);
+        assert!(startup_migration(&new).is_empty(), "launch 1");
+        assert!(new.join(MARKER).exists());
+        for launch in 2..=3 {
+            assert!(startup_migration(&new).is_empty(), "launch {launch}");
+            let report = crate::backup::cleanup_temp(&new);
+            assert!(report.unsaved_notices.is_empty(), "launch {launch}");
+            assert!(
+                crate::backup::read_recovery_notices(&new).is_empty(),
+                "launch {launch}"
+            );
+        }
+    }
+
+    /// A failed copy reports through the migration channel only, never as restore recovery.
+    #[test]
+    fn failed_copy_notice_is_a_migration_notice_not_recovery() {
+        let t = tempfile::tempdir().unwrap();
+        let old = t.path().join(OLD_IDENTIFIER);
+        let new = t.path().join("com.radiancelux.swarmdraft");
+        seed(&old);
+        fs::write(old.join(DB_FILE), b"not a sqlite database at all").unwrap();
+        let notices = startup_migration(&new);
+        assert_eq!(notices.len(), 1);
+        assert_eq!(notices[0].kind, NoticeKind::Warn);
+        assert!(!new.exists() || crate::backup::read_recovery_notices(&new).is_empty());
+        let json = serde_json::to_value(&notices[0]).unwrap();
+        assert_eq!(json["kind"], "warn");
+        assert!(json.get("reason").is_none() && json.get("retryPending").is_none());
     }
 }

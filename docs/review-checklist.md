@@ -79,6 +79,8 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #44 · review shortcuts fired while typing in settings · scope global shortcuts to the panel and editor focus
 - 2026-10-26 · #46 · outline click inserted a paragraph (doc edit + undo step) · navigation never changes the document
 - 2026-10-26 · #63 · checklist had wrong typecheck tool and bulk-lock timing · verify every doc claim against the code before review
+- 2026-10-26 · #65 · mapError threw on odd error shapes (null-prototype message, throwing toString) · error handlers never throw; guard every coercion and test hostile shapes
+- 2026-10-26 · #65 · PR said "Closes" while 3 of 5 issue boxes were open · use "Part of #N" unless every acceptance box is done
 - 2026-10-26 · #64 · installer art mixed the v5 "oA" logo BMPs with the Ribbon art the installer currently uses (putting the v5 logo back is a tracked follow-up) · take logo assets from the logo-final set and check which mark each page shows
 - 2026-10-26 · #64 · finish page copy promised a desktop shortcut the user may untick · copy states only what always happens, or matches the option shown
 - 2026-10-26 · #64 · uninstall docs pointed to a Start menu uninstall entry Tauri doesn't create · document only UI paths verified in the actual build
@@ -111,8 +113,22 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #71 · user-facing notices said 'database' and 'port 7337' · user-visible text stays plain for writers; technical details go to logs
 - 2026-10-26 · #71 · a read-only SQLite open of the old db after a crash created -shm in the old folder · never open the source db with SQLite in a folder you must not touch; copy db + -wal byte for byte to staging and snapshot from the copy; prove it with tests that hash names, bytes and mtimes before and after
 - 2026-10-26 · #71 · the snapshot test still passed with the fix replaced by a raw copy · before handoff, revert each fix, confirm its test fails, then restore
+- 2026-10-26 · #71 · PM QA: migration also copied the LOCALAPPDATA folder (only the WebView2 EBWebView cache); WebView2 recreated it unmarked and in use, so the copy failed and warned on every launch · don't migrate caches the runtime recreates; treat a source with no database as nothing to copy, and test repeated launches after success are silent
+- 2026-10-26 · #71 · PM QA: migration notices went through the restore-recovery channel, so they showed under "A restore was interrupted" · keep notice channels separate per feature (own command, payload and UI block); test one feature's notice never renders in another's
+- 2026-10-26 · #65 · PM QA: App.vue still rendered raw error text (String(err), err.message) in open, import, save, backup and restore alerts · every UI catch goes through mapError/errorLine; raw text goes to console only, and tests assert the raw text is absent
+- 2026-10-26 · #65 · PM QA: save-failure banner and a working 'Save a copy' were missing, so only 1 of 5 acceptance boxes was met · self-check every acceptance box against the running UI before handoff, not just the helper module
+- 2026-10-26 · #65 · PM QA: user-facing copy hard-coded the product name · use PRODUCT_NAME from lib/brand.ts for every user-facing mention of the app
+- 2026-10-26 · #65 · hardcoded product name left in recovery notice · grep for the old product name in every touched file before handoff
+- 2026-10-26 · #65 · save_manuscript_copy took both path and bytes from JS, so any webview script could write any file · a path plus bytes from JS to a write command is an arbitrary write; pick paths in Rust (dialog opened in the command)
+- 2026-10-26 · #65 · replacing the atomic write with a direct write left every test passing · revert-proof atomic writes with a test that fails the write halfway and checks the original is unchanged and no temp file is left
+- 2026-10-26 · #65 · data-folder guard passed `C:\x\nope\..\..\<data>\coauthor.db` · path guards reject `.`/`..`, canonicalize the existing parent, and check every app data folder (roaming and local), case-insensitively on Windows
+- 2026-10-26 · #65 · Save a copy kept comment markers but exported no comments, losing comment text and risking a Word repair · exporters must not drop data silently: export it, or strip it and tell the user, with a test
+- 2026-10-26 · #65 · SectionNav and AgentsSettings still showed raw error text · grep every catch in the app for String(e)/e.message reaching the UI; only show backend text that is written for users and allowlisted
 - 2026-10-26 · #44 · comment tag and tooltips said "Agent" while the pill says "Bot" · use one word for bots everywhere a person sees it
 - 2026-10-26 · #44 · built from ticket text without opening the mockups · find and compare the Designer's mockup files before review
 - 2026-10-26 · #44 · Brett asked for a dropdown defaulting to All; mockup showed a list · Brett's stated UI wording wins over mockup variants
 - 2026-10-26 · #44 · hashed hsl author colors could collide and ignored themes · assign authors --ct-collab-N tokens, Grok Bot = collab-1
 - 2026-10-26 · #44 · accept/reject shortcuts fired while focus mode hid the review panel · every shortcut that acts on panel content must check the same visibility conditions as the panel
+- 2026-10-26 · #72 · comments panel used its own hashed hsl author colors, separate from the review panel · author color comes from one shared author-to-slot map (`author-colors.ts`) used by every panel
+- 2026-10-26 · #72 · module-level author slot map carried numbering over from the last manuscript opened · reset per-document caches when a manuscript opens, with an App-level test that opens a second book
+- 2026-10-26 · #75 · Grok Bot color keyed by display name allowed impostors and broke on rename · never key identity by display name; use stable ids

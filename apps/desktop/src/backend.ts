@@ -131,6 +131,29 @@ export async function dismissRecoveryNotices(ids: string[]): Promise<void> {
   await invoke('dismiss_recovery_notices', { ids });
 }
 
+/**
+ * A notice from the rename migration (#43), separate from restore recovery.
+ * Command `migration_notices` returns `MigrationNotice[]`; `dismiss_migration_notices({ ids })`
+ * hides them for this launch. `text` is plain user-facing copy.
+ */
+export interface MigrationNotice {
+  id: string;
+  kind: 'info' | 'warn';
+  text: string;
+}
+
+/** Migration notices for this launch (empty in a plain browser). */
+export async function getMigrationNotices(): Promise<MigrationNotice[]> {
+  if (!isTauri()) return [];
+  return invoke<MigrationNotice[]>('migration_notices');
+}
+
+/** Hide the shown migration notices by id. */
+export async function dismissMigrationNotices(ids: string[]): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('dismiss_migration_notices', { ids });
+}
+
 export interface StoredManuscriptRow {
   id: string;
   title: string;
@@ -228,4 +251,14 @@ export async function saveOutline(
       docId: s.docId,
     })),
   });
+}
+
+/**
+ * "Save a copy": send only the .docx bytes (and the title for the default file name). The
+ * backend opens the native save dialog itself, so the webview never chooses the path, then
+ * writes a temp file beside it and renames it into place, refusing the app's data folders.
+ * Returns the path written, or null if the user cancelled.
+ */
+export async function saveManuscriptCopy(title: string, bytes: Uint8Array): Promise<string | null> {
+  return invoke<string | null>('save_manuscript_copy', { title, bytes: Array.from(bytes) });
 }
