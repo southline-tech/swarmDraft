@@ -192,7 +192,7 @@ const RESTORE_NOTICES: Record<string, string> = {
   // 'restore-incomplete'), so "wasn't changed" is true.
   'restore-failed': "The restore didn't finish, and your book wasn't changed. Please try again.",
   'restore-incomplete':
-    "The restore didn't finish cleanly. Your previous work is saved in the backups folder.",
+    "The restore didn't finish, so swarmDraft closed your book to keep it safe. A copy from just before the restore is in the backups folder.",
 };
 const confirmingRestore = ref(false);
 /** One-time notice after a restore revoked agent tokens; cleared when dismissed. */

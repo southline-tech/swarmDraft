@@ -1224,7 +1224,7 @@ describe('backup dialogs', () => {
     ['busy', 'A backup or restore is already running. Wait for it to finish, then try again.'],
     [
       'restore-incomplete',
-      "The restore didn't finish cleanly. Your previous work is saved in the backups folder.",
+      "The restore didn't finish, so swarmDraft closed your book to keep it safe. A copy from just before the restore is in the backups folder.",
     ],
     [new Error('io: C:\\secret\\b.zip denied'), "The restore didn't finish. Please try again."],
   ])('restore failure %s shows a plain notice only', async (err, text) => {
@@ -1394,7 +1394,7 @@ describe('restore closes the open manuscript', () => {
     const { w } = await withManuscript();
     await restore(w);
     expect(w.find('[data-test="backup-status"]').text()).toBe(
-      "The restore didn't finish cleanly. Your previous work is saved in the backups folder.",
+      "The restore didn't finish, so swarmDraft closed your book to keep it safe. A copy from just before the restore is in the backups folder.",
     );
     expect(w.find('.tiptap').exists()).toBe(false);
     log.mockRestore();
