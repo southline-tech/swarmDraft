@@ -82,7 +82,7 @@ describe('UI shells (Part of #36)', () => {
     w.unmount();
   });
 
-  it('track changes toggle and review tabs are visual state only', async () => {
+  it('track changes toggle is visual state only', async () => {
     const { w, unchanged } = await mounted();
     const t = w.find('[data-test="track-changes"]');
     expect(t.attributes('aria-pressed')).toBe('false');
@@ -90,11 +90,7 @@ describe('UI shells (Part of #36)', () => {
     expect(t.attributes('aria-pressed')).toBe('true');
     expect(t.text()).toContain('On');
     expect(w.find('[data-test="status-tracking"]').exists()).toBe(true);
-    await w.find('[data-test="review-tab-resolved"]').trigger('click');
-    expect(w.find('[data-test="review-resolved-empty"]').exists()).toBe(true);
-    expect(w.findAll('[data-test="review-item"]')).toHaveLength(0);
-    await w.find('[data-test="review-tab-open"]').trigger('click');
-    expect(w.findAll('[data-test="review-item"]').length).toBeGreaterThan(0);
+    // The read-only Open/Resolved tabs were superseded by the real review panel (#44).
     expect(w.findAll('[data-test="margin-note"]').length).toBeGreaterThan(0);
     unchanged();
     w.unmount();

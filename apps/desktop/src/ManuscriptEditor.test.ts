@@ -5,7 +5,35 @@ import ManuscriptEditor from './ManuscriptEditor.vue';
 import { SAMPLE_DOC } from './fixtures/sample';
 
 describe('ManuscriptEditor', () => {
-  it('renders the document with tracked changes and comments, read-only in the review list', async () => {
+  it('accept/reject shortcuts do nothing while focus mode hides the review panel (#44)', async () => {
+    const w = mount(ManuscriptEditor, { props: { content: SAMPLE_DOC }, attachTo: document.body });
+    await flushPromises();
+    const html = () => w.find('.tiptap').html();
+    const fire = (key: string) =>
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key, ctrlKey: true, shiftKey: true, bubbles: true }),
+      );
+    await w.find('[data-test="focus-mode"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test="review"]').exists()).toBe(false);
+    const before = html();
+    for (const key of ['Enter', 'Backspace']) {
+      fire(key);
+      await flushPromises();
+      expect(html()).toBe(before);
+      expect(w.find('.tiptap ins.suggestion-insert').exists()).toBe(true);
+      expect(w.find('.tiptap del.suggestion-delete').exists()).toBe(true);
+    }
+    // Control: once focus mode is off the same shortcut does act.
+    await w.find('[data-test="focus-exit"]').trigger('click');
+    await flushPromises();
+    fire('Enter');
+    await flushPromises();
+    expect(w.find('.tiptap ins.suggestion-insert').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('renders the document with tracked changes in the review panel and comments below it', async () => {
     const w = mount(ManuscriptEditor, { props: { content: SAMPLE_DOC }, attachTo: document.body });
     await flushPromises();
     const page = w.find('.tiptap');
@@ -13,12 +41,17 @@ describe('ManuscriptEditor', () => {
     expect(page.find('del.suggestion-delete').text()).toBe('flickered');
     expect(page.find('.comment-anchor').text()).toBe('rain');
     expect(page.find('.scene-break').exists()).toBe(true);
+    // The replacement is one card with an inline diff.
+    const cards = w.findAll('[data-test="item"]');
+    expect(cards).toHaveLength(1);
+    expect(cards[0]!.find('[data-test=del]').text()).toBe('flickered');
+    expect(cards[0]!.find('[data-test=ins]').text()).toBe('guttered');
+    expect(w.find('[data-test="counter"]').text()).toBe('1 of 1');
     const items = w.findAll('[data-test="review-item"]').map((i) => i.text());
-    expect(items).toHaveLength(3);
-    expect(items[0]).toContain('Delete');
-    expect(items[1]).toContain('Insert');
-    expect(items[2]).toContain('Comment');
-    expect(w.find('[data-test="review"] button:not([role="tab"])').exists()).toBe(false);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toContain('Comment');
+    // Comments stay read-only; only suggestions get Accept/Reject.
+    expect(w.find('.comments button').exists()).toBe(false);
     w.unmount();
   });
 

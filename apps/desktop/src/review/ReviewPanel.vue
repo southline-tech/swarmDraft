@@ -1,140 +1,608 @@
 <script setup lang="ts">
 /**
- * Review queue for tracked changes (RAD-211). Human-only: accept/reject is a desktop command,
- * never an agent tool. The panel is presentational; the host applies the decision through
- * `runDecision` from @coauthor/editor.
+ * Review panel (RAD-211, RAD-258, board WP 8): "Show changes from" author list, Previous/Next
+ * step-through, Accept/Reject per change, and Accept all / Reject all for the visible changes
+ * behind a confirmation. Human-only: accept/reject is a desktop command, never an agent tool.
+ * Presentational: the host owns the filter and current change and applies decisions.
+ * Authors are raw ids; `labels` only changes what is shown. A replacement (delete + insert with
+ * one id) is one change.
  */
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import type { Decision, SuggestionItem } from '@coauthor/editor';
 import {
-  authorColor,
-  type Decision,
-  type DecisionScope,
-  type SuggestionItem,
-} from '@coauthor/editor';
-import { authorName } from '../agent-names';
+  authorKind,
+  authorsOf,
+  collabSlots,
+  GROK_BOT,
+  groupChanges,
+  REVIEW_SHORTCUTS,
+  visibleItems,
+  type AuthorFilter,
+} from './review-state';
+import { authorName, type AgentName } from '../agent-names';
 
-const props = defineProps<{ items: SuggestionItem[]; busy?: boolean }>();
-const emit = defineEmits<{ decide: [scope: DecisionScope, decision: Decision] }>();
+const props = withDefaults(
+  defineProps<{
+    items: SuggestionItem[];
+    filter?: AuthorFilter;
+    currentKey?: string | null;
+    collapsed?: boolean;
+    busy?: boolean;
+    /** Display name for a raw author id (decisions and the filter still key on the id). */
+    labels?: (author: string) => AgentName;
+  }>(),
+  { filter: null, currentKey: null, collapsed: false, busy: false, labels: authorName },
+);
+const emit = defineEmits<{
+  /** Show only this author's changes (raw id). */
+  'show-only': [author: string];
+  'show-all': [];
+  select: [key: string];
+  prev: [];
+  next: [];
+  'decide-one': [key: string, decision: Decision];
+  /** Keys are locked when the confirmation opens, so later arrivals are not included. */
+  'decide-visible': [decision: Decision, keys: string[]];
+  'toggle-collapsed': [];
+}>();
 
-const authors = computed(() => [...new Set(props.items.map((i) => i.author))]);
-const label = (i: SuggestionItem) => (i.kind === 'suggestion_insert' ? 'Insert' : 'Delete');
+const changes = computed(() => groupChanges(props.items));
+const authors = computed(() => authorsOf(changes.value));
+const visible = computed(() => visibleItems(changes.value, props.filter));
+const countOf = (a: string) => changes.value.filter((c) => c.author === a).length;
+const index = computed(() => visible.value.findIndex((v) => v.key === props.currentKey));
+const parts = (a: string) => props.labels(a);
+const name = (a: string) => {
+  const n = parts(a);
+  return n.note ? `${n.name} ${n.note}` : n.name;
+};
+const initial = (a: string) => (parts(a).name[0] ?? '?').toUpperCase();
+const only = (a: string) => !!props.filter && props.filter.size === 1 && props.filter.has(a);
+/** The one author shown, or null for All (or a multi-author filter set elsewhere). */
+const selected = computed(() => authors.value.find(only) ?? null);
+
+/** "Show changes from" dropdown (single choice: All or one author). */
+const menuOpen = ref(false);
+const root = ref<HTMLElement | null>(null);
+function choose(a: string | null) {
+  menuOpen.value = false;
+  if (a === null) emit('show-all');
+  else emit('show-only', a);
+}
+function onDocDown(e: MouseEvent) {
+  if (root.value && !root.value.contains(e.target as Node)) menuOpen.value = false;
+}
+watch(menuOpen, (open) =>
+  open
+    ? document.addEventListener('mousedown', onDocDown)
+    : document.removeEventListener('mousedown', onDocDown),
+);
+onBeforeUnmount(() => document.removeEventListener('mousedown', onDocDown));
+/** Theme-aware author color: a --ct-collab-N token, distinct per author, Grok Bot = collab-1. */
+const slots = computed(() => collabSlots(authors.value, (a) => parts(a).name === GROK_BOT));
+const hue = (a: string) => ({ '--ct-suggester': `var(--ct-collab-${slots.value.get(a) ?? 1})` });
+
+/** Pending bulk decision awaiting confirmation, with the change keys it will act on. */
+const confirming = ref<{ decision: Decision; keys: string[]; authors: string[] } | null>(null);
+function openConfirm(decision: Decision) {
+  confirming.value = {
+    decision,
+    keys: visible.value.map((v) => v.key),
+    authors: [...new Set(visible.value.map((v) => name(v.author)))],
+  };
+}
+const confirmText = computed(() => {
+  const c = confirming.value;
+  if (!c) return '';
+  const who = c.authors;
+  const list = who.length > 1 ? `${who.slice(0, -1).join(', ')} and ${who.at(-1)}` : who[0];
+  const n = c.keys.length;
+  return `${c.decision === 'accept' ? 'Accept' : 'Reject'} ${n} change${n === 1 ? '' : 's'} from ${list}?`;
+});
+function confirm() {
+  const c = confirming.value;
+  if (c) emit('decide-visible', c.decision, c.keys);
+  confirming.value = null;
+}
+const tip = (text: string, keys: string) => `${text} (${keys})`;
 </script>
 
 <template>
-  <aside class="review" aria-label="Suggestions">
-    <header>
-      <h2>Suggestions ({{ items.length }})</h2>
-      <div v-if="items.length" class="bulk">
-        <button
-          data-test="accept-all"
-          :disabled="busy"
-          @click="emit('decide', { kind: 'all' }, 'accept')"
-        >
-          Accept all
-        </button>
-        <button
-          data-test="reject-all"
-          :disabled="busy"
-          @click="emit('decide', { kind: 'all' }, 'reject')"
-        >
-          Reject all
-        </button>
-      </div>
+  <aside
+    v-if="collapsed"
+    class="review-rail"
+    aria-label="Review changes (collapsed)"
+    data-test="review-rail"
+  >
+    <button
+      type="button"
+      class="icon"
+      data-test="expand"
+      :title="tip('Show review panel', REVIEW_SHORTCUTS.toggle)"
+      aria-label="Show review panel"
+      @click="emit('toggle-collapsed')"
+    >
+      ‹
+    </button>
+    <span class="badge" data-test="badge" :aria-label="`${visible.length} open changes`">{{
+      visible.length
+    }}</span>
+  </aside>
+  <aside v-else class="review-panel" aria-label="Review changes" data-test="review-panel">
+    <header class="head">
+      <h2>Review changes</h2>
+      <button
+        type="button"
+        class="icon"
+        data-test="prev"
+        aria-label="Previous change"
+        :disabled="!visible.length"
+        :title="tip('Previous change', REVIEW_SHORTCUTS.prev)"
+        @click="emit('prev')"
+      >
+        ‹
+      </button>
+      <span class="counter" data-test="counter" aria-live="polite">{{
+        visible.length ? `${index >= 0 ? index + 1 : 0} of ${visible.length}` : '0 of 0'
+      }}</span>
+      <button
+        type="button"
+        class="icon"
+        data-test="next"
+        aria-label="Next change"
+        :disabled="!visible.length"
+        :title="tip('Next change', REVIEW_SHORTCUTS.next)"
+        @click="emit('next')"
+      >
+        ›
+      </button>
+      <button
+        type="button"
+        class="icon"
+        data-test="collapse"
+        :title="tip('Hide review panel', REVIEW_SHORTCUTS.toggle)"
+        aria-label="Hide review panel"
+        @click="emit('toggle-collapsed')"
+      >
+        ⇥
+      </button>
     </header>
-    <p v-if="!items.length" data-test="empty">No open suggestions.</p>
-    <section v-for="author in authors" :key="author" data-test="author-group">
-      <h3 class="author-head" :style="{ borderLeftColor: authorColor(author) }">
-        <span v-for="n in [authorName(author)]" :key="n.name" class="author-head-name"
-          ><bdi class="agent-name" dir="auto" data-test="agent-name" :title="n.name">{{
-            n.name
-          }}</bdi
-          ><span v-if="n.agent" class="agent-tag" data-test="agent-tag">Agent</span>
-          <template v-if="n.note"
-            >{{ ' ' }}<span class="agent-note" data-test="agent-note">{{ n.note }}</span></template
-          ></span
-        >
-        <button
-          data-test="accept-author"
-          :disabled="busy"
-          @click="emit('decide', { kind: 'author', author }, 'accept')"
-        >
-          Accept all
-        </button>
-        <button
-          data-test="reject-author"
-          :disabled="busy"
-          @click="emit('decide', { kind: 'author', author }, 'reject')"
-        >
-          Reject all
-        </button>
-      </h3>
-      <ul>
+
+    <div ref="root" class="filter" @keydown.escape.stop="menuOpen = false">
+      <div id="show-from" class="lbl">Show changes from</div>
+      <button
+        type="button"
+        class="dd"
+        data-test="filter-toggle"
+        aria-haspopup="listbox"
+        aria-labelledby="show-from filter-current"
+        :aria-expanded="menuOpen"
+        @click="menuOpen = !menuOpen"
+      >
+        <span id="filter-current" class="cur" data-test="filter-current">
+          <template v-if="selected">
+            <span class="av sm" :style="hue(selected)" aria-hidden="true">{{
+              initial(selected)
+            }}</span>
+            <bdi class="name" dir="auto" :title="name(selected)">{{ name(selected) }}</bdi>
+            <span class="pill">{{ authorKind(selected) }}</span>
+          </template>
+          <span v-else class="name">{{ filter ? 'Some authors' : 'All' }}</span>
+        </span>
+        <span class="cnt">{{ visible.length }}</span>
+        <span class="caret" aria-hidden="true">▾</span>
+      </button>
+      <ul
+        v-if="menuOpen"
+        class="menu"
+        role="listbox"
+        aria-labelledby="show-from"
+        data-test="filter-menu"
+      >
         <li
-          v-for="item in items.filter((i) => i.author === author)"
-          :key="item.kind + item.id"
-          data-test="item"
-          :style="{ borderLeftColor: authorColor(author) }"
+          role="option"
+          class="fo"
+          :class="{ sel: !filter }"
+          data-test="filter-all"
+          :aria-selected="!filter"
+          tabindex="0"
+          @click="choose(null)"
+          @keydown.enter.prevent="choose(null)"
         >
-          <span class="kind">{{ label(item) }}</span>
-          <span :class="item.kind === 'suggestion_delete' ? 'del' : 'ins'">{{ item.text }}</span>
+          <span class="check" aria-hidden="true">{{ !filter ? '✓' : '' }}</span>
+          <span class="name">All</span>
+          <span class="cnt">{{ changes.length }}</span>
+        </li>
+        <li
+          v-for="a in authors"
+          :key="a"
+          role="option"
+          class="fo"
+          :class="{ sel: only(a) }"
+          data-test="filter-option"
+          :aria-selected="only(a)"
+          tabindex="0"
+          @click="choose(a)"
+          @keydown.enter.prevent="choose(a)"
+        >
+          <span class="check" aria-hidden="true">{{ only(a) ? '✓' : '' }}</span>
+          <span class="av sm" :style="hue(a)" aria-hidden="true">{{ initial(a) }}</span>
+          <bdi class="name" dir="auto" data-test="agent-name" :title="name(a)">{{
+            parts(a).name
+          }}</bdi>
+          <span v-if="parts(a).note" class="note" data-test="agent-note">{{ parts(a).note }}</span>
+          <span class="pill">{{ authorKind(a) }}</span>
+          <span class="cnt">{{ countOf(a) }}</span>
+        </li>
+      </ul>
+    </div>
+
+    <p v-if="!visible.length" class="muted" data-test="empty">No open suggestions.</p>
+    <ul v-else class="cards">
+      <li
+        v-for="c in visible"
+        :key="c.key"
+        class="card"
+        :class="{ current: c.key === currentKey }"
+        :style="hue(c.author)"
+        data-suggester
+        data-test="item"
+        :aria-current="c.key === currentKey ? 'true' : undefined"
+        @click="emit('select', c.key)"
+      >
+        <div class="who">
+          <span class="av" aria-hidden="true">{{ initial(c.author) }}</span>
+          <bdi class="name" dir="auto" data-test="agent-name" :title="name(c.author)">{{
+            parts(c.author).name
+          }}</bdi>
+          <span v-if="parts(c.author).note" class="note" data-test="agent-note">{{
+            parts(c.author).note
+          }}</span>
+          <span class="pill">{{ authorKind(c.author) }}</span>
+        </div>
+        <p class="q">
+          <span v-if="c.del" class="del" data-test="del">{{ c.del }}</span
+          ><template v-if="c.del && c.ins">{{ ' ' }}</template
+          ><span v-if="c.ins" class="ins" data-test="ins">{{ c.ins }}</span>
+        </p>
+        <div class="actions">
           <button
+            type="button"
+            class="primary"
             data-test="accept"
             :disabled="busy"
-            @click="emit('decide', { kind: 'one', id: item.id, suggestion: item.kind }, 'accept')"
+            :title="tip('Accept change', REVIEW_SHORTCUTS.accept)"
+            @click.stop="emit('decide-one', c.key, 'accept')"
           >
             Accept
           </button>
           <button
+            type="button"
+            class="secondary"
             data-test="reject"
             :disabled="busy"
-            @click="emit('decide', { kind: 'one', id: item.id, suggestion: item.kind }, 'reject')"
+            :title="tip('Reject change', REVIEW_SHORTCUTS.reject)"
+            @click.stop="emit('decide-one', c.key, 'reject')"
           >
             Reject
           </button>
-        </li>
-      </ul>
-    </section>
+        </div>
+      </li>
+    </ul>
+
+    <footer v-if="visible.length" class="bulk">
+      <button type="button" data-test="accept-all" :disabled="busy" @click="openConfirm('accept')">
+        Accept all
+      </button>
+      <button type="button" data-test="reject-all" :disabled="busy" @click="openConfirm('reject')">
+        Reject all
+      </button>
+    </footer>
+    <div
+      v-if="confirming"
+      class="confirm"
+      role="alertdialog"
+      aria-modal="false"
+      data-test="confirm"
+    >
+      <p>{{ confirmText }}</p>
+      <button type="button" class="primary" data-test="confirm-yes" @click="confirm">
+        {{ confirming.decision === 'accept' ? 'Accept all' : 'Reject all' }}
+      </button>
+      <button type="button" data-test="confirm-no" @click="confirming = null">Cancel</button>
+    </div>
   </aside>
 </template>
 
 <style scoped>
-.author-head {
+.review-panel,
+.review-rail {
+  background: var(--ct-surface);
+  border-left: 1px solid var(--ct-border);
+  color: var(--ct-text);
+  font-family: var(--ct-font-ui);
+  font-size: var(--ct-text-sm);
+  min-height: 0;
+  overflow: auto;
+}
+.review-panel {
+  width: 400px;
+  box-sizing: border-box;
+  padding: var(--ct-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-space-3);
+  position: relative;
+}
+.review-rail {
+  width: 40px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ct-space-2);
+  padding-top: var(--ct-space-2);
+}
+.head {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--ct-space-1);
+}
+h2 {
+  font-size: var(--ct-text-lg);
+  font-weight: var(--ct-weight-semibold);
+  margin: 0 auto 0 0;
+}
+button {
+  font: inherit;
   color: var(--ct-text);
-  border-left: 4px solid;
-  padding-left: 0.5rem;
+  background: var(--ct-surface-raised);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-sm);
+  padding: var(--ct-space-1) var(--ct-space-2);
+  cursor: pointer;
 }
-.author-head-name .agent-name {
-  flex: 1 1 auto;
-  max-width: none;
+button:disabled {
+  color: var(--ct-text-muted);
+  cursor: default;
 }
-.author-head-name {
+button:focus-visible {
+  outline: var(--ct-focus-outline);
+  outline-offset: var(--ct-focus-offset);
+}
+button.primary {
+  background: var(--ct-accent);
+  color: var(--ct-accent-contrast);
+  border-color: var(--ct-accent);
+}
+button.primary:disabled {
+  background: var(--ct-surface-raised);
+  color: var(--ct-text-muted);
+  border-color: var(--ct-border);
+}
+button.secondary {
+  background: var(--ct-surface);
+  border-color: var(--ct-border-strong);
+}
+.icon {
+  border: none;
+  background: none;
+  font-size: var(--ct-text-lg);
+  line-height: 1;
+}
+.counter {
+  color: var(--ct-text-muted);
+  font-size: var(--ct-text-sm);
+}
+.badge {
+  min-width: 1.25rem;
+  text-align: center;
+  border-radius: var(--ct-radius-full);
+  background: var(--ct-accent);
+  color: var(--ct-accent-contrast);
+  font-size: var(--ct-text-xs);
+  padding: 0 var(--ct-space-1);
+}
+.lbl {
+  font-size: var(--ct-text-xs);
+  font-weight: var(--ct-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ct-text-muted);
+  margin-bottom: var(--ct-space-1);
+}
+.filter {
+  position: relative;
+}
+.dd {
   display: flex;
-  overflow: hidden;
-  align-items: baseline;
-  gap: 0.25rem;
+  align-items: center;
+  gap: var(--ct-space-2);
+  width: 100%;
+  min-height: var(--ct-space-12);
+  padding: 0 var(--ct-space-2);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-md);
+  background: var(--ct-surface);
+  color: var(--ct-text);
+  font-size: var(--ct-text-md);
+  text-align: left;
+}
+.dd .cur {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-space-2);
   min-width: 0;
   flex: 1;
 }
-.author-head button {
-  flex: none;
-  white-space: nowrap;
+.dd .cnt {
+  margin-left: 0;
 }
-li {
-  border-left: 4px solid;
-  padding-left: 0.5rem;
+.caret {
+  color: var(--ct-text-muted);
+}
+.menu {
+  position: absolute;
+  z-index: 10;
+  left: 0;
+  right: 0;
+  margin: 2px 0 0;
+  padding: var(--ct-space-1);
   list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--ct-surface-raised);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-md);
+  box-shadow: var(--ct-elevation-2);
+  max-height: 320px;
+  overflow-y: auto;
 }
-.del {
-  text-decoration: line-through;
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
-.ins {
-  text-decoration: underline;
+.note {
+  color: var(--ct-text-muted);
+  font-size: var(--ct-text-sm);
 }
-.kind {
-  font-size: 0.8em;
-  margin-right: 0.5rem;
+.fo {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-space-2);
+  min-height: var(--ct-space-12);
+  padding: 0 var(--ct-space-2);
+  border: none;
+  border-radius: var(--ct-radius-md);
+  background: none;
+  font-size: var(--ct-text-md);
+  text-align: left;
+  cursor: pointer;
+}
+.fo:hover,
+.fo:focus-visible {
+  background: var(--ct-selected-bg);
+}
+.fo.sel {
+  background: var(--ct-selected-bg);
+  font-weight: var(--ct-weight-semibold);
+}
+.check {
+  width: 24px;
+  text-align: center;
+}
+.cnt {
+  margin-left: auto;
+  font-size: var(--ct-text-sm);
+  color: var(--ct-text-muted);
+  background: var(--ct-bg);
+  border-radius: var(--ct-radius-full);
+  padding: 2px var(--ct-space-2);
+}
+.av {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--ct-radius-full);
+  background: var(--ct-suggester);
+  color: var(--ct-accent-contrast);
+  font-size: var(--ct-text-sm);
+  font-weight: var(--ct-weight-semibold);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.av.sm {
+  width: 24px;
+  height: 24px;
+}
+.pill {
+  font-size: var(--ct-text-xs);
+  font-weight: var(--ct-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px var(--ct-space-2);
+  border-radius: var(--ct-radius-full);
+  border: 1px solid var(--ct-border-strong);
+  color: var(--ct-text-muted);
+}
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-space-2);
+}
+.card {
+  border: 1px solid var(--ct-border);
+  border-left: 3px solid var(--ct-suggester);
+  border-radius: var(--ct-radius-md);
+  background: var(--ct-surface-raised);
+  padding: var(--ct-space-3) var(--ct-space-4);
+  cursor: pointer;
+}
+.card.current {
+  border-color: var(--ct-accent);
+  border-left-color: var(--ct-suggester);
+  background: var(--ct-selected-bg);
+}
+.who {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-space-2);
+  font-weight: var(--ct-weight-semibold);
+}
+.card .q {
+  margin: var(--ct-space-2) 0 var(--ct-space-3);
+  font-family: var(--ct-font-manuscript);
+  font-size: var(--ct-text-md);
+  line-height: 1.5;
+}
+/* Card diff marks win over .card p and any global ins/del rules. */
+.card .q .ins {
+  color: var(--ct-text);
+  background: var(--ct-suggest-insert-bg);
+  text-decoration: underline 2px var(--ct-suggest-insert-underline) !important;
+  text-underline-offset: 3px;
+}
+.card .q .del {
+  color: var(--ct-suggest-delete-text);
+  background: var(--ct-suggest-delete-bg);
+  text-decoration: line-through 2px var(--ct-suggest-delete-strike) !important;
+}
+.actions .primary,
+.actions .secondary {
+  min-height: var(--ct-space-12);
+  padding: 0 var(--ct-space-5);
+  font-size: var(--ct-text-md);
+  font-weight: var(--ct-weight-semibold);
+  border-radius: var(--ct-radius-md);
+}
+.actions,
+.bulk {
+  display: flex;
+  gap: var(--ct-space-2);
+}
+.muted {
+  color: var(--ct-text-muted);
+}
+.confirm {
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-md);
+  background: var(--ct-surface-raised);
+  box-shadow: var(--ct-elevation-3);
+  padding: var(--ct-space-3);
+}
+.confirm p {
+  margin: 0 0 var(--ct-space-2);
 }
 </style>

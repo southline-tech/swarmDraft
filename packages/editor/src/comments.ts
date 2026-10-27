@@ -119,6 +119,3 @@ export function commentAuthorColor(author: string): string {
   for (const ch of author) h = (h * 31 + ch.codePointAt(0)!) >>> 0;
   return `hsl(${h % 360} 70% 45%)`;
 }
-
-/** Same helper under the name the suggestions review panel uses. */
-export const authorColor = commentAuthorColor;
