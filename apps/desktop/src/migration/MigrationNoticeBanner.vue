@@ -48,7 +48,12 @@ const warn = computed(() => props.notices.filter((n) => n.kind === 'warn'));
           class="action"
           data-test="migration-notice-dismiss"
           :aria-label="`Dismiss ${PRODUCT_NAME} update warning${warn.length > 1 ? 's' : ''}`"
-          @click="emit('dismiss', warn.map((n) => n.id))"
+          @click="
+            emit(
+              'dismiss',
+              warn.map((n) => n.id),
+            )
+          "
         >
           Dismiss
         </button>
@@ -78,7 +83,12 @@ const warn = computed(() => props.notices.filter((n) => n.kind === 'warn'));
           class="action"
           data-test="migration-notice-dismiss"
           :aria-label="`Dismiss ${PRODUCT_NAME} update notice${info.length > 1 ? 's' : ''}`"
-          @click="emit('dismiss', info.map((n) => n.id))"
+          @click="
+            emit(
+              'dismiss',
+              info.map((n) => n.id),
+            )
+          "
         >
           Dismiss
         </button>

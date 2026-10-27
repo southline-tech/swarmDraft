@@ -5,8 +5,16 @@ import type { MigrationNotice } from '../backend';
 import { PRODUCT_NAME } from '../lib/brand';
 
 const kept: MigrationNotice = { id: 'migration-kept', kind: 'info', text: 'Old files kept.' };
-const locked: MigrationNotice = { id: 'migration-locked', kind: 'warn', text: 'Close the old app.' };
-const other: MigrationNotice = { id: 'migration-other', kind: 'warn', text: 'Another app is open.' };
+const locked: MigrationNotice = {
+  id: 'migration-locked',
+  kind: 'warn',
+  text: 'Close the old app.',
+};
+const other: MigrationNotice = {
+  id: 'migration-other',
+  kind: 'warn',
+  text: 'Another app is open.',
+};
 
 describe('MigrationNoticeBanner', () => {
   it('renders warn notices in role=alert and info notices in role=status, each with its variant', () => {
