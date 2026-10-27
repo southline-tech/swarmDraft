@@ -11,6 +11,11 @@ export const MARGIN_NOTES_W = 104;
 export const MARGIN_NOTES_GAP = 16;
 /** Desk room the notes take beside the page: column plus its gap (--ct-page-notes-room). */
 export const NOTES_ROOM = MARGIN_NOTES_W + MARGIN_NOTES_GAP;
+/**
+ * #98: desk room the open outline takes: its 18rem grid column plus the workspace gap-4 (1rem).
+ * The desk is this much wider while the outline is closed, so we can tell whether reopening fits.
+ */
+export const OUTLINE_ROOM = 18 * 16 + 16;
 /** Page floor while the writer forces the outline open (#96); mirrors `--ct-page-forced-min-w`. */
 export const PAGE_FORCED_MIN_W = 320;
 
@@ -75,6 +80,11 @@ export function useOutlineAutoCollapse(navigatorOpen: Ref<boolean>) {
   const forcedClosed = ref(false);
   /** Desk width (outline open) when `forcedClosed` was set; reopen once that would fit. */
   let forcedClosedDesk = 0;
+  /**
+   * #98: bumps each time the writer asks for the outline but page + notes leave no room for it,
+   * so the App can show the "Hide notes" cue.
+   */
+  const noRoom = ref(0);
 
   function update(next: EditorLayout) {
     // #97: focus mode hides the panels; keep every flag so the writer's outline comes back as it was.
@@ -109,7 +119,18 @@ export function useOutlineAutoCollapse(navigatorOpen: Ref<boolean>) {
       }
       return;
     }
-    if (!navigatorOpen.value) return;
+    if (!navigatorOpen.value) {
+      // #98: the notes hid (or the desk grew): reopen an auto-closed outline once the page fits.
+      if (
+        autoClosed.value &&
+        next.deskWidth > 0 &&
+        next.deskWidth - OUTLINE_ROOM >= deskNeeded(next.marginNotes)
+      ) {
+        autoClosed.value = false;
+        navigatorOpen.value = true;
+      }
+      return;
+    }
     // deskWidth 0 means "not laid out yet" (hidden, or no layout engine): never act on it.
     if (next.deskWidth > 0 && next.deskWidth < deskNeeded(next.marginNotes)) {
       navigatorOpen.value = false;
@@ -119,10 +140,30 @@ export function useOutlineAutoCollapse(navigatorOpen: Ref<boolean>) {
 
   /** The writer's own toggle (toolbar Chapters button). */
   function toggleByHand() {
+    const l = layout.value;
+    if (
+      !navigatorOpen.value &&
+      l?.reviewShown &&
+      l.marginNotes &&
+      l.deskWidth > 0 &&
+      l.deskWidth - OUTLINE_ROOM < forcedDeskNeeded(true)
+    ) {
+      // #98: even forced open it would close again at once; say why instead of doing nothing.
+      noRoom.value++;
+      return;
+    }
     navigatorOpen.value = !navigatorOpen.value;
     autoClosed.value = false;
     forcedClosed.value = false;
     // Only a choice made while the review panel shows overrides auto-collapse (#93 review).
+    if (layout.value?.reviewShown) manual.value = true;
+  }
+
+  /** #98 "Hide notes": the writer asked for the outline, so it opens as their own choice. */
+  function openByHand() {
+    navigatorOpen.value = true;
+    autoClosed.value = false;
+    forcedClosed.value = false;
     if (layout.value?.reviewShown) manual.value = true;
   }
 
@@ -131,5 +172,5 @@ export function useOutlineAutoCollapse(navigatorOpen: Ref<boolean>) {
     if (!layout.value?.reviewShown) autoClosed.value = false;
   });
 
-  return { update, toggleByHand, autoClosed, manual, forcedClosed };
+  return { update, toggleByHand, openByHand, autoClosed, manual, forcedClosed, noRoom };
 }

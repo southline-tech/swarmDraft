@@ -119,10 +119,49 @@ function reloadSection() {
 const navigatorOpen = ref(true);
 /** #92: closes the outline while the review panel would squeeze the page below its minimum. */
 const outlineAuto = useOutlineAutoCollapse(navigatorOpen);
+/** Toasts hide themselves after this long (ob7, #98). */
+const TOAST_MS = 8000;
+/** #98: the writer hid the margin notes to make room for the outline (until the panel closes). */
+const notesHidden = ref(false);
+/** #98: "Not enough room" cue after Chapters is clicked with page + notes filling the desk. */
+const NO_ROOM_COPY = 'Not enough room for the outline while notes are showing.';
+const noRoomToast = ref(false);
+let noRoomTimer: ReturnType<typeof setTimeout> | undefined;
+function dismissNoRoom() {
+  clearTimeout(noRoomTimer);
+  noRoomToast.value = false;
+}
+watch(
+  () => outlineAuto.noRoom.value,
+  () => {
+    if (noRoomToast.value) return; // already showing: don't announce it again
+    dismissToast();
+    noRoomToast.value = true;
+    noRoomTimer = setTimeout(dismissNoRoom, TOAST_MS);
+  },
+);
+onBeforeUnmount(() => clearTimeout(noRoomTimer));
+function hideNotesForOutline() {
+  dismissNoRoom();
+  notesHidden.value = true;
+  outlineAuto.openByHand();
+}
 /** Last desk layout from the editor; the open-book toast stays on the desk (#93). */
 const editorLayout = shallowRef<EditorLayout | null>(null);
 const toastStyle = computed(() => (session.value ? toastPlacement(editorLayout.value) : null));
 function onEditorLayout(l: EditorLayout) {
+  const prev = editorLayout.value;
+  // #98: the no-room cue is about the layout it was shown in; any change closes it.
+  if (
+    noRoomToast.value &&
+    (!prev ||
+      prev.reviewShown !== l.reviewShown ||
+      prev.marginNotes !== l.marginNotes ||
+      prev.deskWidth !== l.deskWidth ||
+      !!prev.focusMode !== !!l.focusMode)
+  )
+    dismissNoRoom();
+  if (!l.reviewShown && !l.focusMode) notesHidden.value = false;
   editorLayout.value = l;
   outlineAuto.update(l);
 }
@@ -340,7 +379,6 @@ async function reopenAfterFailure(delays = REOPEN_BACKOFF_MS): Promise<Manuscrip
 }
 
 /** ob7: "Your book is open" toast after a successful open/import; hides itself after a while. */
-const TOAST_MS = 8000;
 const openToast = ref('');
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 let toastToken = 0;
@@ -350,6 +388,7 @@ function dismissToast() {
   openToast.value = '';
 }
 function showOpenToast(next: ManuscriptSession) {
+  dismissNoRoom();
   const n = next.outline.value.filter((s) => s.kind === 'chapter').length;
   const here =
     n > 1
@@ -696,11 +735,14 @@ defineExpose({ open });
     />
     <!-- Always mounted so the live region exists before its text (#79). -->
     <div class="open-toast" data-test="open-toast" :style="toastStyle ?? undefined">
+      <!-- #98: the no-room cue shares this one polite region with the open-book toast. -->
       <AppToast
-        :open="!!openToast && !!session"
-        lead="Your book is open."
-        :message="openToast"
-        @dismiss="dismissToast"
+        :open="(!!openToast || noRoomToast) && !!session"
+        :lead="noRoomToast ? undefined : 'Your book is open.'"
+        :message="noRoomToast ? NO_ROOM_COPY : openToast"
+        :action="noRoomToast ? 'Hide notes' : undefined"
+        :icon="noRoomToast ? 'alert' : 'check'"
+        @dismiss="noRoomToast ? hideNotesForOutline() : dismissToast()"
       />
     </div>
     <HomeScreen
@@ -756,6 +798,7 @@ defineExpose({ open });
         toolbar-target="#toolbar-row"
         external-load-error
         :outline-forced="outlineForced"
+        :notes-hidden="notesHidden"
         @load-error="editorLoadError = $event"
         @reload="reloadSection"
         @toggle-navigator="outlineAuto.toggleByHand()"

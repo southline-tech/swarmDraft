@@ -11,7 +11,14 @@
  */
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import ShellIcon from './ShellIcon.vue';
-defineProps<{ open: boolean; lead: string; message: string; action?: string }>();
+defineProps<{
+  open: boolean;
+  lead?: string;
+  message: string;
+  action?: string;
+  /** #98: 'alert' for a cue that explains why something didn't happen. */
+  icon?: 'check' | 'alert';
+}>();
 const emit = defineEmits<{ dismiss: [] }>();
 
 const ready = ref(false);
@@ -27,9 +34,13 @@ onBeforeUnmount(() => cancelAnimationFrame(frame));
 <template>
   <div role="status" aria-live="polite" data-test="toast-region">
     <div v-if="open && ready" class="toast" data-test="toast">
-      <span class="toast__icon"><ShellIcon name="check" /></span>
+      <span class="toast__icon" :class="{ 'toast__icon--alert': icon === 'alert' }"
+        ><ShellIcon :name="icon ?? 'check'"
+      /></span>
       <p class="toast__msg">
-        <b>{{ lead }}</b> {{ message }}
+        <template v-if="lead"
+          ><b>{{ lead }}</b> </template
+        >{{ message }}
       </p>
       <button type="button" class="sh-btn" data-test="toast-dismiss" @click="emit('dismiss')">
         {{ action ?? 'Got it' }}
@@ -60,6 +71,10 @@ onBeforeUnmount(() => cancelAnimationFrame(frame));
   border-radius: var(--ct-radius-md);
   background: var(--ct-success-bg);
   color: var(--ct-success);
+}
+.toast__icon--alert {
+  background: var(--ct-warning-bg);
+  color: var(--ct-warning);
 }
 .toast__msg {
   flex: 1;
