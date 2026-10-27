@@ -189,7 +189,7 @@ pub const COPY_FAILED_MESSAGE: &str =
 
 /// Shown when the new folder already holds documents, so the old ones were not copied in.
 pub const KEPT_MESSAGE: &str =
-    "swarmDraft kept the documents you already made in it, so your earlier coAuthor documents were not brought over. They are still safe in the old coAuthor folder.";
+    "swarmDraft already has documents, so your earlier coAuthor documents weren't copied over. They're still safe in the old coAuthor folder.";
 
 /// How many times a changing or locked source is re-copied before giving up.
 const SNAPSHOT_ATTEMPTS: u32 = 3;
