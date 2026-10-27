@@ -522,7 +522,8 @@ defineExpose({ open });
     </section>
     <div v-if="recoveryNotices.length" role="alert" data-test="recovery-notice">
       <p>
-        A restore was interrupted. Some attachments may be missing. {{ PRODUCT_NAME }} didn't delete anything.
+        A restore was interrupted. Some attachments may be missing. {{ PRODUCT_NAME }} didn't delete
+        anything.
       </p>
       <div v-for="(n, i) in recoveryNotices" :key="n.id || i" data-test="recovery-notice-item">
         <p v-if="n.folder && n.moved.length">
