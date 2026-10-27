@@ -31,8 +31,17 @@ const props = withDefaults(
     busy?: boolean;
     /** Display name for a raw author id (decisions and the filter still key on the id). */
     labels?: (author: string) => AgentName;
+    /** The section failed to load: never claim it is empty (that would look like data loss). */
+    loadFailed?: boolean;
   }>(),
-  { filter: null, currentKey: null, collapsed: false, busy: false, labels: authorName },
+  {
+    filter: null,
+    currentKey: null,
+    collapsed: false,
+    busy: false,
+    labels: authorName,
+    loadFailed: false,
+  },
 );
 const emit = defineEmits<{
   /** Show only this author's changes (raw id). */
@@ -238,8 +247,11 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
       </ul>
     </div>
 
+    <p v-if="!changes.length && loadFailed" class="muted" data-test="empty-load-failed">
+      Suggestions couldn't be loaded for this section.
+    </p>
     <EmptyState
-      v-if="!changes.length"
+      v-else-if="!changes.length"
       data-test="empty"
       icon="sparkle"
       tone="success"

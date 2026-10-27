@@ -19,7 +19,13 @@ const nameOf = (c: CommentRow) =>
     ? agentName(agentIdOf(c.authorId) ?? c.authorId, c.authorName)
     : { name: c.authorName, note: undefined, agent: false };
 
-const props = defineProps<{ threads: CommentThread[]; showResolved?: boolean; busy?: boolean }>();
+const props = defineProps<{
+  threads: CommentThread[];
+  showResolved?: boolean;
+  busy?: boolean;
+  /** Threads failed to load: never claim there are none (that would look like data loss). */
+  loadFailed?: boolean;
+}>();
 const emit = defineEmits<{
   reply: [threadId: string, body: string];
   resolve: [threadId: string, resolved: boolean];
@@ -39,8 +45,11 @@ const visible = () => props.threads.filter((t) => props.showResolved || !t.resol
 <template>
   <aside class="comments" aria-label="Comments">
     <h2>Comments ({{ visible().length }})</h2>
+    <p v-if="!visible().length && loadFailed" class="muted" data-test="empty-load-failed">
+      Comments couldn't be loaded.
+    </p>
     <EmptyState
-      v-if="!visible().length"
+      v-else-if="!visible().length"
       data-test="empty"
       icon="comment"
       title="No comments yet"

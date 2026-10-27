@@ -33,6 +33,26 @@ describe('ManuscriptEditor', () => {
     w.unmount();
   });
 
+  it('hides the empty-state cards while the section failed to load (looks like data loss)', async () => {
+    const bad = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: 'keep', marks: [{ type: 'mystery_mark' }] }],
+        },
+      ],
+    };
+    const w = mount(ManuscriptEditor, { props: { content: bad }, attachTo: document.body });
+    await flushPromises();
+    expect(w.find('[data-test="load-error"]').exists()).toBe(true);
+    expect(w.text()).not.toContain('Nothing to review');
+    expect(w.text()).not.toContain('No comments yet');
+    expect(w.findAll('[data-test="review"] .es')).toHaveLength(0);
+    expect(w.find('[data-test="empty-load-failed"]').exists()).toBe(true);
+    w.unmount();
+  });
+
   it('shows icon-card empty states when there is nothing to review and no comments (ob8)', async () => {
     const plain = {
       type: 'doc',

@@ -533,6 +533,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
       <div v-if="reviewOpen && !focusMode" class="review" data-test="review">
         <ReviewPanel
           :items="suggestions"
+          :load-failed="!!loadError"
           :filter="filter"
           :current-key="currentKey"
           :collapsed="collapsed"
@@ -548,14 +549,14 @@ const LABELS: Record<ReviewItem['type'], string> = {
           @toggle-collapsed="collapsed = !collapsed"
         />
         <EmptyState
-          v-if="!collapsed && !comments.length"
+          v-if="!collapsed && !comments.length && !loadError"
           class="comments-empty"
           data-test="comments-empty"
           icon="comment"
           title="No comments yet"
           text="Select some text and choose Comment to leave yourself a note."
         />
-        <section v-else-if="!collapsed" class="comments" aria-label="Comments">
+        <section v-else-if="!collapsed && comments.length" class="comments" aria-label="Comments">
           <h3>Comments</h3>
           <ul>
             <li v-for="r in comments" :key="r.id" data-test="review-item">

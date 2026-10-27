@@ -85,3 +85,11 @@ describe('CommentsPanel', () => {
     expect(w.emitted('focus')).toEqual([['c1']]);
   });
 });
+
+describe('CommentsPanel load failure', () => {
+  it('never says "No comments yet" while threads failed to load', () => {
+    const w = mount(CommentsPanel, { props: { threads: [], loadFailed: true } });
+    expect(w.text()).not.toContain('No comments yet');
+    expect(w.find('[data-test="empty-load-failed"]').exists()).toBe(true);
+  });
+});

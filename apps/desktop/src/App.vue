@@ -236,6 +236,8 @@ const closeQuietly = (s?: ManuscriptSession | null) =>
 
 function open(next: ManuscriptSession) {
   if (session.value !== next) closeQuietly(session.value);
+  // A toast from an earlier book must never describe this one; callers re-show it on success.
+  dismissToast();
   saveError.value = '';
   // A manuscript is open again, so an earlier "please restart" or open failure no longer holds.
   fatalError.value = '';
@@ -596,8 +598,14 @@ defineExpose({ open });
     <p v-if="fatalError" role="alert" data-test="fatal-error">{{ fatalError }}</p>
     <p v-if="openError" role="alert" data-test="open-error">{{ openError }}</p>
     <p v-if="saveError" role="alert" data-test="save-error">{{ saveError }}</p>
-    <div v-if="openToast && session" class="open-toast" data-test="open-toast">
-      <AppToast lead="Your book is open." :message="openToast" @dismiss="dismissToast" />
+    <!-- Always mounted so the live region exists before its text (#79). -->
+    <div class="open-toast" data-test="open-toast">
+      <AppToast
+        :open="!!openToast && !!session"
+        lead="Your book is open."
+        :message="openToast"
+        @dismiss="dismissToast"
+      />
     </div>
     <HomeScreen
       v-if="!session || choosingBook"

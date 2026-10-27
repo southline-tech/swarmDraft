@@ -6,6 +6,8 @@ import SettingsScreen from './SettingsScreen.vue';
 import ReasonLine from './ReasonLine.vue';
 import { SCREENS, readPreview, applyThemeParam } from './preview';
 
+const frame = () => new Promise((r) => requestAnimationFrame(() => r(undefined)));
+
 describe('UI shells (Part of #36)', () => {
   it.each(SCREENS.map((s) => s.id))('renders %s on its own', (id) => {
     const w = mount(ShellsPreview, { props: { initial: id } });
@@ -19,7 +21,7 @@ describe('UI shells (Part of #36)', () => {
       'name-prompt',
       'settings-screen',
       'opening-progress',
-      'toast',
+      'toast-region',
       'save-failure-banner',
       'reason-line',
     ])
@@ -28,8 +30,28 @@ describe('UI shells (Part of #36)', () => {
     expect(w.findAll('[data-test="error-card"]')).toHaveLength(5);
   });
 
+  it('toast keeps one persistent polite live region across open and dismiss (#79)', async () => {
+    const w = mount(ShellsPreview, { props: { initial: 'ob7' } });
+    const node = w.get('[data-test="toast-region"]').element;
+    expect(node.getAttribute('aria-live')).toBe('polite');
+    expect(node.getAttribute('role')).toBe('status');
+    expect(node.textContent?.trim()).toBe('');
+    await frame();
+    await w.vm.$nextTick();
+    expect(w.get('[data-test="toast-region"]').element).toBe(node);
+    expect(node.textContent).toContain('Your book is open.');
+    await w.get('[data-test="toast-dismiss"]').trigger('click');
+    expect(w.get('[data-test="toast-region"]').element).toBe(node);
+    expect(node.textContent?.trim()).toBe('');
+    await w.get('[data-test="toast-show"]').trigger('click');
+    expect(w.get('[data-test="toast-region"]').element).toBe(node);
+    expect(node.textContent).toContain('Your book is open.');
+  });
+
   it('toast dismisses and can be shown again', async () => {
     const w = mount(ShellsPreview, { props: { initial: 'ob7' } });
+    await frame();
+    await w.vm.$nextTick();
     await w.get('[data-test="toast-dismiss"]').trigger('click');
     expect(w.find('[data-test="toast"]').exists()).toBe(false);
     await w.get('[data-test="toast-show"]').trigger('click');
