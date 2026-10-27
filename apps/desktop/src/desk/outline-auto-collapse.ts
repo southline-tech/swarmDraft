@@ -18,6 +18,20 @@ export interface EditorLayout {
   reviewShown: boolean;
   deskWidth: number;
   marginNotes: boolean;
+  /** Desk's left edge in the window (px); used to keep overlays like the toast on the desk. */
+  deskLeft?: number;
+}
+
+/**
+ * Where the open-book toast sits (#93): centred on the desk and no wider than it, so it never
+ * covers the review panel or outline. Null until the desk has been measured (falls back to CSS).
+ */
+export function toastPlacement(l: EditorLayout | null): { left: string; maxWidth: string } | null {
+  if (!l || l.deskWidth <= 0 || l.deskLeft === undefined) return null;
+  return {
+    left: `${l.deskLeft + l.deskWidth / 2}px`,
+    maxWidth: `${Math.max(0, l.deskWidth - 2 * PAGE_GUTTER)}px`,
+  };
 }
 
 /**

@@ -9,6 +9,7 @@ import {
   PAGE_MIN_W,
   useOutlineAutoCollapse,
 } from './outline-auto-collapse';
+import { toastPlacement } from './outline-auto-collapse';
 
 const narrow = { reviewShown: true, deskWidth: deskNeeded(false) - 1, marginNotes: false };
 const wide = { reviewShown: true, deskWidth: 900, marginNotes: false };
@@ -98,5 +99,18 @@ describe('outline auto-collapse (#92)', () => {
     expect(css).toContain(`--ct-margin-notes-w: ${MARGIN_NOTES_W}px;`);
     expect(css).toContain('--ct-page-w: 576px;');
     expect(css).toContain('--ct-panel-w-narrow: 320px;');
+  });
+});
+
+describe('toastPlacement (#93)', () => {
+  it('centres on the desk and caps the width inside its gutters', () => {
+    const l = { reviewShown: true, deskWidth: 672, marginNotes: false, deskLeft: 16 };
+    expect(toastPlacement(l)).toEqual({ left: '352px', maxWidth: '624px' });
+    // Right edge of a max-width toast stays left of the review panel at 688px.
+    expect(352 + 624 / 2).toBeLessThanOrEqual(16 + 672);
+  });
+  it('falls back to CSS until the desk is measured', () => {
+    expect(toastPlacement(null)).toBeNull();
+    expect(toastPlacement({ reviewShown: false, deskWidth: 0, marginNotes: false })).toBeNull();
   });
 });

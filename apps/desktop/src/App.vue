@@ -19,7 +19,11 @@ import AgentsSettings from './AgentsSettings.vue';
 import { authorName, refreshAgents, reloadOnFocus } from './agent-names';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
-import { useOutlineAutoCollapse } from './desk/outline-auto-collapse';
+import {
+  toastPlacement,
+  useOutlineAutoCollapse,
+  type EditorLayout,
+} from './desk/outline-auto-collapse';
 import HomeScreen from './HomeScreen.vue';
 import AppLogo from './AppLogo.vue';
 import SaveFailureBanner from './errors/SaveFailureBanner.vue';
@@ -116,6 +120,13 @@ function reloadSection() {
 const navigatorOpen = ref(true);
 /** #92: closes the outline while the review panel would squeeze the page below its minimum. */
 const outlineAuto = useOutlineAutoCollapse(navigatorOpen);
+/** Last desk layout from the editor; the open-book toast stays on the desk (#93). */
+const editorLayout = shallowRef<EditorLayout | null>(null);
+const toastStyle = computed(() => (session.value ? toastPlacement(editorLayout.value) : null));
+function onEditorLayout(l: EditorLayout) {
+  editorLayout.value = l;
+  outlineAuto.update(l);
+}
 
 /** First-run welcome (ob4) shows once; the flag survives restarts and updates. */
 const WELCOMED_KEY = 'coauthor.welcomed';
@@ -694,7 +705,7 @@ defineExpose({ open });
       :save-copy="saveCopyOfOpen"
     />
     <!-- Always mounted so the live region exists before its text (#79). -->
-    <div class="open-toast" data-test="open-toast">
+    <div class="open-toast" data-test="open-toast" :style="toastStyle ?? undefined">
       <AppToast
         :open="!!openToast && !!session"
         lead="Your book is open."
@@ -749,7 +760,7 @@ defineExpose({ open });
         @load-error="editorLoadError = $event"
         @reload="reloadSection"
         @toggle-navigator="outlineAuto.toggleByHand()"
-        @layout="outlineAuto.update($event)"
+        @layout="onEditorLayout"
         @focus-mode="focusMode = $event"
       />
     </div>

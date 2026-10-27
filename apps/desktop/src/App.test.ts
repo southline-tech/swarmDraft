@@ -1824,6 +1824,18 @@ describe('App outline auto-collapse on a narrow desk (#92)', () => {
     w.unmount();
   });
 
+  it('keeps the open-book toast centred on the desk, clear of the review panel (#93)', async () => {
+    const { w } = await withManuscript();
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    // 1024px window, outline auto-closed: desk 16..688, review panel from 688.
+    ed().vm.$emit('layout', { ...layout(true, 672), deskLeft: 16 });
+    await settle();
+    const style = w.find('[data-test="open-toast"]').attributes('style') ?? '';
+    expect(style).toContain('left: 352px');
+    expect(style).toContain('max-width: 624px');
+    w.unmount();
+  });
+
   it("the writer's own Chapters toggle wins over the auto reopen", async () => {
     const { w } = await withManuscript();
     const sidebar = () => w.findComponent({ name: 'SectionNav' });

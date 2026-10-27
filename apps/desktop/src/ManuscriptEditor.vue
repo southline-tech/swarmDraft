@@ -255,6 +255,7 @@ onMounted(() => window.addEventListener('keydown', onKeydown, true));
    outline while the page would drop below its minimum width. */
 const deskEl = shallowRef<HTMLElement | null>(null);
 const deskWidth = shallowRef(0);
+const deskLeft = shallowRef(0);
 const marginNotesShown = computed(
   () => !focusMode.value && review.value.some((r) => r.type !== 'comment_anchor'),
 );
@@ -262,6 +263,7 @@ const layout = computed<EditorLayout>(() => ({
   reviewShown: reviewOpen.value && !collapsed.value && !focusMode.value,
   deskWidth: deskWidth.value,
   marginNotes: marginNotesShown.value,
+  deskLeft: deskLeft.value,
 }));
 watch(layout, (l) => emit('layout', l), { immediate: true });
 let deskObserver: ResizeObserver | null = null;
@@ -269,6 +271,7 @@ onMounted(() => {
   if (!deskEl.value || typeof ResizeObserver === 'undefined') return;
   deskObserver = new ResizeObserver(() => {
     deskWidth.value = deskEl.value?.clientWidth ?? 0;
+    deskLeft.value = deskEl.value?.getBoundingClientRect().left ?? 0;
   });
   deskObserver.observe(deskEl.value);
 });
