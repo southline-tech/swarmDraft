@@ -25,7 +25,7 @@ describe('fluid page column (#92)', () => {
 
   it('leaves room for the margin notes when they show', () => {
     expect(rule('.manuscript-editor .desk:has(> .sh-margin)')).toContain(
-      '--ct-page-notes-room: var(--ct-margin-notes-w);',
+      '--ct-page-notes-room: calc(var(--ct-margin-notes-w) + var(--ct-space-4));',
     );
   });
 
@@ -52,4 +52,21 @@ it('the open review panel has a fixed --ct-panel-w width at 1200px and up (#92)'
   expect(rule('.manuscript-editor .review:not(.review--collapsed)')).toContain(
     'width: var(--ct-panel-w);',
   );
+});
+
+describe('forced outline page (#96)', () => {
+  it('clamps the page to 320..576px inside the 24px gutters while the outline is forced', () => {
+    expect(rule('.manuscript-editor .desk--outline-forced .page-sheet')).toContain(
+      'width: clamp( var(--ct-page-forced-min-w), 100% - 2 * var(--ct-page-gutter) - var(--ct-page-notes-room), var(--ct-page-w) );',
+    );
+  });
+  it('uses --ct-space-8 inner side padding when the page is under 440px', () => {
+    const r = rule('.manuscript-editor .page-sheet.page-sheet--narrow');
+    expect(r).toContain('padding-left: var(--ct-space-8);');
+    expect(r).toContain('padding-right: var(--ct-space-8);');
+  });
+  it('binds both classes in the template', () => {
+    expect(sfc).toContain(':class="{ \'desk--outline-forced\': outlineForced }"');
+    expect(sfc).toContain(':class="{ \'page-sheet--narrow\': pageNarrow }"');
+  });
 });
