@@ -97,6 +97,7 @@ fn agent_token_revoke(
 #[tauri::command]
 async fn create_backup(
     app: tauri::AppHandle,
+    window: tauri::Window,
     store: tauri::State<'_, storage::Store>,
 ) -> Result<bool, String> {
     use tauri_plugin_dialog::DialogExt;
@@ -106,9 +107,13 @@ async fn create_backup(
     data_dirs.extend(app.path().app_data_dir().ok());
     data_dirs.extend(app.path().app_local_data_dir().ok());
     tauri::async_runtime::spawn_blocking(move || {
+        // One backup or restore at a time, held from before the dialog to the end (#86).
+        let lock = app.state::<backup::OpLock>();
+        let held = lock.try_acquire().map_err(str::to_string)?;
         let picked = app
             .dialog()
             .file()
+            .set_parent(&window)
             .set_title("Save backup")
             .set_file_name(backup::backup_file_name(&time_stamp()))
             .add_filter("Backup", &["zip"])
@@ -120,7 +125,7 @@ async fn create_backup(
             eprintln!("backup: bad dialog path: {e}");
             "backup failed".to_string()
         })?;
-        let res = backup::create_backup_checked(&store, &version, &data_dirs, &dest);
+        let res = backup::create_backup_checked(&held, &store, &version, &data_dirs, &dest);
         match res {
             Ok(p) => {
                 eprintln!("backup: wrote {}", p.display());
@@ -239,19 +244,47 @@ fn dismiss_migration_notices(notices: tauri::State<'_, MigrationNotices>, ids: V
         .retain(|n| !ids.contains(&n.id));
 }
 
-/// Validate and restore a backup .zip; the replaced state is kept as a pre-restore snapshot.
+/// Restore a backup. The file is chosen here in a native open dialog, never taken from the
+/// webview (#83), and validated by the archive's manifest format id and contents, not its name.
+/// Returns `Ok(None)` if the user cancelled. Errors are short codes for the UI
+/// (`not-a-backup`, `too-new`, `busy`, `restore-failed`, `restore-incomplete`); paths and details go to the log only.
 #[tauri::command]
-fn restore_backup(
+async fn restore_backup(
     app: tauri::AppHandle,
+    window: tauri::Window,
     store: tauri::State<'_, storage::Store>,
-    path: String,
-) -> Result<backup::RestoreReport, String> {
-    backup::restore_backup(
-        &store,
-        &app.package_info().version.to_string(),
-        std::path::Path::new(&path),
-    )
-    .map_err(|e| e.to_string())
+) -> Result<Option<backup::RestoreOutcome>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let store = store.inner().clone();
+    let version = app.package_info().version.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        // One backup or restore at a time, held from before the dialog to the end (#86).
+        let lock = app.state::<backup::OpLock>();
+        let held = lock.try_acquire().map_err(str::to_string)?;
+        let picked = app
+            .dialog()
+            .file()
+            .set_parent(&window)
+            .set_title("Restore from backup")
+            .add_filter(backup::RESTORE_FILTER_NAME, &["zip"])
+            .blocking_pick_file();
+        let Some(picked) = picked else {
+            return Ok(None);
+        };
+        let src = picked.into_path().map_err(|e| {
+            eprintln!("restore: bad dialog path: {e}");
+            backup::RESTORE_FAILED.to_string()
+        })?;
+        backup::restore_picked(&held, &store, &version, &src)
+            .map(Some)
+            .map_err(str::to_string)
+    })
+    .await
+    .map_err(|e| {
+        // A panicked task may have stopped mid-swap, so don't claim the book is unchanged.
+        eprintln!("restore: task failed: {e}");
+        backup::RESTORE_INCOMPLETE.to_string()
+    })?
 }
 
 /// Run a store call off the main thread. Sync commands run on the main thread, so a locked
@@ -375,6 +408,7 @@ pub fn run() {
             )));
             let store = storage::Store::open(&dir)?;
             app.manage(store.clone());
+            app.manage(backup::OpLock::default());
             app.manage(std::sync::Mutex::new(McpStatus {
                 url: None,
                 error: listener.as_ref().err().cloned(),
