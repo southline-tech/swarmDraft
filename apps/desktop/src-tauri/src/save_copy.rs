@@ -105,8 +105,12 @@ pub fn check_write_dest(
         )));
     }
     let ci = cfg!(windows);
-    for dir in data_dirs {
-        let dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+    // The pre-rename (com.radiancelux.coauthor) folders count as data folders too.
+    let legacy = data_dirs
+        .iter()
+        .filter_map(|d| crate::migrate::old_dir_for(d));
+    for dir in data_dirs.iter().cloned().chain(legacy) {
+        let dir = dir.canonicalize().unwrap_or(dir);
         if is_within(&real, &dir, ci) {
             return Err(denied(format!(
                 "permission denied: {what} path is inside the app data folder"
@@ -168,6 +172,17 @@ mod tests {
 
     fn dirs(d: &tempfile::TempDir) -> Vec<PathBuf> {
         vec![d.path().to_path_buf()]
+    }
+
+    #[test]
+    fn refuses_a_destination_inside_the_old_app_id_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().join("com.radiancelux.swarmdraft");
+        let legacy = root.path().join(crate::migrate::OLD_IDENTIFIER);
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&legacy).unwrap();
+        let err = check_write_dest(&[data], &legacy.join("b.docx"), "docx", "copy").unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::PermissionDenied);
     }
 
     #[test]
