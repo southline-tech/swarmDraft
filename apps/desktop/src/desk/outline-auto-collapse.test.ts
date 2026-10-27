@@ -190,3 +190,19 @@ describe('forced outline vs margin notes and focus mode (#97)', () => {
     expect(a.manual.value).toBe(true);
   });
 });
+
+describe('notes keep a gap to the review panel (#97)', () => {
+  it('the thresholds count the 16px notes gap', () => {
+    expect(forcedDeskNeeded(true)).toBe(320 + 48 + 104 + 16);
+    expect(forcedDeskNeeded(false)).toBe(368);
+  });
+  it('the CSS keeps --ct-space-4 between the notes column and the panel', () => {
+    const vue = readFileSync(resolve(__dirname, '../ManuscriptEditor.vue'), 'utf8');
+    expect(vue).toMatch(/\.desk > \.sh-margin \{\s*margin-right: var\(--ct-space-4\);/);
+    expect(vue).toContain(
+      '--ct-page-notes-room: calc(var(--ct-margin-notes-w) + var(--ct-space-4));',
+    );
+    const tokens = readFileSync(resolve(__dirname, '../styles/tokens.css'), 'utf8');
+    expect(tokens).toContain('--ct-space-4: 16px;');
+  });
+});

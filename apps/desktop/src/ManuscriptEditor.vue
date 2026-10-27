@@ -889,7 +889,11 @@ const LABELS: Record<ReviewItem['type'], string> = {
   color: inherit;
 }
 .manuscript-editor .desk:has(> .sh-margin) {
-  --ct-page-notes-room: var(--ct-margin-notes-w);
+  --ct-page-notes-room: calc(var(--ct-margin-notes-w) + var(--ct-space-4));
+}
+/* #97: like the page, a note card never touches the review panel. */
+.manuscript-editor .desk > .sh-margin {
+  margin-right: var(--ct-space-4);
 }
 .manuscript-editor .review {
   display: flex;

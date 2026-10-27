@@ -7,6 +7,10 @@ import { ref, watch, type Ref } from 'vue';
 export const PAGE_MIN_W = 440;
 export const PAGE_GUTTER = 24;
 export const MARGIN_NOTES_W = 104;
+/** #97: gap kept between the notes column and the review panel (--ct-space-4). */
+export const MARGIN_NOTES_GAP = 16;
+/** Desk room the notes take beside the page: column plus its gap (--ct-page-notes-room). */
+export const NOTES_ROOM = MARGIN_NOTES_W + MARGIN_NOTES_GAP;
 /** Page floor while the writer forces the outline open (#96); mirrors `--ct-page-forced-min-w`. */
 export const PAGE_FORCED_MIN_W = 320;
 
@@ -24,7 +28,7 @@ export function forcedPageNarrow(
 
 /** Desk width the page needs to stay at or above its 440px minimum, gutters (and notes) included. */
 export function deskNeeded(marginNotes: boolean): number {
-  return PAGE_MIN_W + 2 * PAGE_GUTTER + (marginNotes ? MARGIN_NOTES_W : 0);
+  return PAGE_MIN_W + 2 * PAGE_GUTTER + (marginNotes ? NOTES_ROOM : 0);
 }
 
 /** What the editor reports about its layout: whether the review panel shows, and the desk's room. */
@@ -40,7 +44,7 @@ export interface EditorLayout {
 
 /** #97: desk width a forced-open outline still leaves room for (320px page, gutters, notes). */
 export function forcedDeskNeeded(marginNotes: boolean): number {
-  return PAGE_FORCED_MIN_W + 2 * PAGE_GUTTER + (marginNotes ? MARGIN_NOTES_W : 0);
+  return PAGE_FORCED_MIN_W + 2 * PAGE_GUTTER + (marginNotes ? NOTES_ROOM : 0);
 }
 
 /**

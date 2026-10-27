@@ -25,7 +25,7 @@ describe('fluid page column (#92)', () => {
 
   it('leaves room for the margin notes when they show', () => {
     expect(rule('.manuscript-editor .desk:has(> .sh-margin)')).toContain(
-      '--ct-page-notes-room: var(--ct-margin-notes-w);',
+      '--ct-page-notes-room: calc(var(--ct-margin-notes-w) + var(--ct-space-4));',
     );
   });
 
