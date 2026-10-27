@@ -19,6 +19,7 @@ import { countWords, watchBookWords } from './status/wordcount';
 import { agentDirectory, authorLabel, authorName, type AgentName } from './agent-names';
 import { loadZoom, saveZoom } from './desk/zoom';
 import ReviewPanel from './review/ReviewPanel.vue';
+import EmptyState from './shells/EmptyState.vue';
 import {
   DecisionLog,
   keyOf,
@@ -532,6 +533,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
       <div v-if="reviewOpen && !focusMode" class="review" data-test="review">
         <ReviewPanel
           :items="suggestions"
+          :load-failed="!!loadError"
           :filter="filter"
           :current-key="currentKey"
           :collapsed="collapsed"
@@ -546,7 +548,15 @@ const LABELS: Record<ReviewItem['type'], string> = {
           @decide-visible="decideVisible"
           @toggle-collapsed="collapsed = !collapsed"
         />
-        <section v-if="!collapsed && comments.length" class="comments" aria-label="Comments">
+        <EmptyState
+          v-if="!collapsed && !comments.length && !loadError"
+          class="comments-empty"
+          data-test="comments-empty"
+          icon="comment"
+          title="No comments yet"
+          text="Select some text and choose Comment to leave yourself a note."
+        />
+        <section v-else-if="!collapsed && comments.length" class="comments" aria-label="Comments">
           <h3>Comments</h3>
           <ul>
             <li v-for="r in comments" :key="r.id" data-test="review-item">
@@ -727,6 +737,9 @@ const LABELS: Record<ReviewItem['type'], string> = {
 }
 .manuscript-editor .review > :first-child {
   flex: 1;
+}
+.manuscript-editor .comments-empty {
+  margin-top: var(--ct-space-4);
 }
 .manuscript-editor .comments {
   width: 300px;

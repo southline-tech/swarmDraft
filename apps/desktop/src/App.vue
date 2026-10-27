@@ -23,6 +23,7 @@ import { errorLine, saveFailed, saveSucceeded, SAVE_OK } from './errors/map-erro
 import { saveCopy } from './errors/save-copy';
 import { PRODUCT_NAME } from './lib/brand';
 import ShellsPreview from './shells/ShellsPreview.vue';
+import AppToast from './shells/AppToast.vue';
 import { applyThemeParam, readPreview } from './shells/preview';
 import { flushOnClose } from './close-flush';
 import { resetCollabSlots } from './author-colors';
@@ -260,6 +261,8 @@ function open(next: ManuscriptSession) {
     // Author color slots are per manuscript: numbering restarts for each book opened (#72).
     resetCollabSlots();
   }
+  // A toast from an earlier book must never describe this one; callers re-show it on success.
+  dismissToast();
   saveFailure.value = saveSucceeded();
   // A manuscript is open again, so an earlier "please restart" or open failure no longer holds.
   fatalError.value = '';
@@ -296,6 +299,28 @@ async function reopenAfterFailure(delays = REOPEN_BACKOFF_MS): Promise<Manuscrip
   return null;
 }
 
+/** ob7: "Your book is open" toast after a successful open/import; hides itself after a while. */
+const TOAST_MS = 8000;
+const openToast = ref('');
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
+function dismissToast() {
+  clearTimeout(toastTimer);
+  openToast.value = '';
+}
+function showOpenToast(next: ManuscriptSession) {
+  const n = next.outline.value.filter((s) => s.kind === 'chapter').length;
+  const here =
+    n > 1
+      ? `All ${n} chapters are here, and your`
+      : n === 1
+        ? 'Your chapter is here, and your'
+        : 'Your';
+  openToast.value = `${here} original file is untouched.`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(dismissToast, TOAST_MS);
+}
+onBeforeUnmount(() => clearTimeout(toastTimer));
+
 async function onFile(e: Event) {
   const input = e.target as HTMLInputElement;
   const file = input.files?.[0];
@@ -323,7 +348,9 @@ async function importFile(file: File) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const current = session.value;
     try {
-      open(await importAndOpen(bytes, persistHooks, current));
+      const next = await importAndOpen(bytes, persistHooks, current);
+      open(next);
+      showOpenToast(next);
     } catch (err) {
       // The current manuscript was closed but the import failed: never leave the closed session
       // on screen; reopen the newest stored manuscript (the import, if it was written).
@@ -333,12 +360,16 @@ async function importFile(file: File) {
         const back = await reopenAfterFailure();
         // The newest manuscript is not the one we closed, so the import was saved and is now
         // open: the import worked and there is nothing to report.
-        if (back && back.id !== current.id) return;
+        if (back && back.id !== current.id) {
+          showOpenToast(back);
+          return;
+        }
       }
       throw err;
     }
   } catch (err) {
     console.error('Import failed', err);
+    dismissToast();
     openError.value =
       err instanceof UnsavedEditsError
         ? `Couldn't open ${file.name}: some edits in the current manuscript aren't saved yet`
@@ -598,6 +629,15 @@ defineExpose({ open });
       :state="saveFailure"
       :save-copy="saveCopyOfOpen"
     />
+    <!-- Always mounted so the live region exists before its text (#79). -->
+    <div class="open-toast" data-test="open-toast">
+      <AppToast
+        :open="!!openToast && !!session"
+        lead="Your book is open."
+        :message="openToast"
+        @dismiss="dismissToast"
+      />
+    </div>
     <HomeScreen
       v-if="!session || choosingBook"
       ref="home"
@@ -650,6 +690,13 @@ defineExpose({ open });
 </template>
 
 <style>
+.open-toast {
+  position: fixed;
+  bottom: var(--ct-space-12);
+  left: 50%;
+  z-index: 40;
+  transform: translateX(-50%);
+}
 body {
   margin: 0;
 }
