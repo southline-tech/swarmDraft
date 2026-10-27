@@ -172,7 +172,7 @@ describe('App', () => {
     vi.mocked(backend.getAppInfo).mockResolvedValueOnce(null);
     const w = mount(App);
     await flushPromises();
-    expect(w.text()).toContain('coAuthor');
+    expect(w.text()).toContain(PRODUCT_NAME);
     await openSettings(w);
     expect(w.find('[data-test="browser-mode"]').exists()).toBe(true);
     expect(w.find('[data-test="no-manuscript"]').exists()).toBe(true);
@@ -1553,6 +1553,17 @@ describe('App UI shells (Part of #36)', () => {
     await w.find('[data-test="focus-exit"]').trigger('click');
     await settle();
     expect(w.find('#chapter-navigator').isVisible()).toBe(true);
+    w.unmount();
+  });
+});
+
+describe('product name in App.vue', () => {
+  it('never hardcodes the old product name and shows the brand constant in the topbar', async () => {
+    const src = readFileSync(resolve(__dirname, 'App.vue'), 'utf8');
+    expect(src).not.toMatch(/coAuthor/);
+    const w = mount(App);
+    await flushPromises();
+    expect(w.find('.topbar__name').text()).toBe(PRODUCT_NAME);
     w.unmount();
   });
 });
