@@ -882,7 +882,7 @@ fn check_schema(doc: &yrs::Doc) -> Result<(), ToolErr> {
 impl ServerHandler for CoauthorMcp {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "coAuthor manuscript tools. Read with list_documents, list_chapters, read_chapter and \
+            "swarmDraft manuscript tools. Read with list_documents, list_chapters, read_chapter and \
              search_text; comment with add_comment and propose changes with suggest_edit and \
              suggest_style. Anchor comments and suggestions with a block id plus an exact quote. \
              Accepting or rejecting suggestions is reserved for the human author.",
