@@ -168,7 +168,7 @@ describe('App', () => {
     vi.mocked(backend.getAppInfo).mockResolvedValueOnce(null);
     const w = mount(App);
     await flushPromises();
-    expect(w.text()).toContain('coAuthor');
+    expect(w.text()).toContain('swarmDraft');
     await openSettings(w);
     expect(w.find('[data-test="browser-mode"]').exists()).toBe(true);
     expect(w.find('[data-test="no-manuscript"]').exists()).toBe(true);
@@ -909,7 +909,7 @@ describe('restore confirmation', () => {
     await settle();
     expect(backend.openLatestManuscript).toHaveBeenCalledTimes(4); // first try + 3 backoff retries
     expect(w.find('[data-test="fatal-error"]').text()).toBe(
-      "Couldn't reopen the manuscript. Please restart coAuthor.",
+      "Couldn't reopen the manuscript. Please restart swarmDraft.",
     );
     expect(w.find('.tiptap').exists()).toBe(false);
     expect(w.find('[contenteditable="true"]').exists()).toBe(false);
@@ -1303,7 +1303,7 @@ describe('home screen', () => {
     localStorage.removeItem('coauthor.welcomed');
     const w = mount(App);
     await flushPromises();
-    expect(w.find('[data-test="home-welcome"]').text()).toContain('Welcome to coAuthor');
+    expect(w.find('[data-test="home-welcome"]').text()).toContain('Welcome to swarmDraft');
     expect(w.find('[data-test="open-manuscript"]').exists()).toBe(false);
     await w.find('[data-test="get-started"]').trigger('click');
     expect(w.find('[data-test="home-open"]').text()).toContain("Let's open your book");

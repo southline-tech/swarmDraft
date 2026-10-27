@@ -1,4 +1,4 @@
-# Installing the coAuthor dev build on Windows
+# Installing the swarmDraft dev build on Windows
 
 The P1 builds are **unsigned**. Code signing is deferred until a certificate is approved.
 
@@ -31,10 +31,10 @@ The NSIS installer installs **per user** (`installMode: currentUser`): no admin 
   the left and the primary button (**Install**, **Finish**) on the right; Back is hidden.
   - Welcome (ob1): Ribbon tile, title, lead line, **Install**. There is no install location page
     for per-user installs.
-  - Progress (ob2): Ribbon tile, "Installing coAuthor…", the ob2 line and one accent progress bar.
+  - Progress (ob2): Ribbon tile, "Installing swarmDraft…", the ob2 line and one accent progress bar.
     Only Cancel shows. No file log or output-folder text. It moves to the finish page by itself
     when the install ends.
-  - Finish (ob3): check tile, "coAuthor is ready", **Open coAuthor now** (ticked) and **Finish**.
+  - Finish (ob3): check tile, "swarmDraft is ready", **Open swarmDraft now** (ticked) and **Finish**.
     The desktop shortcut is always created; there is no checkbox for it.
 - `installer-pages.nsh`: installer hook; only tells the template where the page art is.
 - `ob-logo.bmp`, `ob-check.bmp`, `nsis-header.bmp`, `nsis-sidebar.bmp`: Ribbon page art.
@@ -59,11 +59,11 @@ Known gaps versus the mockups (limits of Win32 dialogs):
 
 ## Uninstalling
 
-Uninstall coAuthor from **Settings > Apps > Installed apps > coAuthor > Uninstall**.
+Uninstall swarmDraft from **Settings > Apps > Installed apps > swarmDraft > Uninstall**.
 
 The uninstaller shows a **Delete the application data** checkbox, unchecked by default.
 
-- Unticked: everything coAuthor stored stays on your computer (manuscripts, settings, agent tokens).
+- Unticked: everything swarmDraft stored stays on your computer (manuscripts, settings, agent tokens).
 - Ticked: it also deletes both `com.radiancelux.coauthor` folders,
   `%APPDATA%\com.radiancelux.coauthor\` (roaming, including `coauthor.db`) and
   `%LOCALAPPDATA%\com.radiancelux.coauthor\` (local). This cannot be undone.
