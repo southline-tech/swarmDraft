@@ -5,6 +5,7 @@
  * resolving and reopening here are human desktop actions.
  */
 import { ref } from 'vue';
+import EmptyState from '../shells/EmptyState.vue';
 import { type CommentRow, type CommentThread } from '@coauthor/editor';
 import { agentIdOf, agentName } from '../agent-names';
 import { collabColor } from '../author-colors';
@@ -19,7 +20,13 @@ const nameOf = (c: CommentRow) =>
     ? agentName(agentIdOf(c.authorId) ?? c.authorId, c.authorName)
     : { name: c.authorName, note: undefined, agent: false };
 
-const props = defineProps<{ threads: CommentThread[]; showResolved?: boolean; busy?: boolean }>();
+const props = defineProps<{
+  threads: CommentThread[];
+  showResolved?: boolean;
+  busy?: boolean;
+  /** Threads failed to load: never claim there are none (that would look like data loss). */
+  loadFailed?: boolean;
+}>();
 const emit = defineEmits<{
   reply: [threadId: string, body: string];
   resolve: [threadId: string, resolved: boolean];
@@ -39,7 +46,16 @@ const visible = () => props.threads.filter((t) => props.showResolved || !t.resol
 <template>
   <aside class="comments" aria-label="Comments">
     <h2>Comments ({{ visible().length }})</h2>
-    <p v-if="!visible().length" data-test="empty">No open comments.</p>
+    <p v-if="!visible().length && loadFailed" class="muted" data-test="empty-load-failed">
+      Comments couldn't be loaded.
+    </p>
+    <EmptyState
+      v-else-if="!visible().length"
+      data-test="empty"
+      icon="comment"
+      title="No comments yet"
+      text="Select some text and choose Comment to leave yourself a note."
+    />
     <article
       v-for="t in visible()"
       :key="t.id"

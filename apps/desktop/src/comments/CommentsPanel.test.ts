@@ -39,6 +39,13 @@ describe('CommentsPanel', () => {
     expect(w.findAll('[data-test=orphan]')).toHaveLength(1);
     expect(w.findAll('[data-test=comment]')).toHaveLength(3);
   });
+  it('shows the ob8 empty card when there are no open comments', () => {
+    const w = mount(CommentsPanel, { props: { threads: [] } });
+    const card = w.find('.es');
+    expect(card.find('.es__icon').exists()).toBe(true);
+    expect(card.find('h3').text()).toBe('No comments yet');
+    expect(card.text()).toContain('choose Comment to leave yourself a note');
+  });
   it('flags anchors with no comments', () => {
     const empty: CommentThread = {
       id: 'c9',
@@ -76,5 +83,13 @@ describe('CommentsPanel', () => {
       ['c2', false],
     ]);
     expect(w.emitted('focus')).toEqual([['c1']]);
+  });
+});
+
+describe('CommentsPanel load failure', () => {
+  it('never says "No comments yet" while threads failed to load', () => {
+    const w = mount(CommentsPanel, { props: { threads: [], loadFailed: true } });
+    expect(w.text()).not.toContain('No comments yet');
+    expect(w.find('[data-test="empty-load-failed"]').exists()).toBe(true);
   });
 });

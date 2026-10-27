@@ -79,6 +79,8 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #44 · review shortcuts fired while typing in settings · scope global shortcuts to the panel and editor focus
 - 2026-10-26 · #46 · outline click inserted a paragraph (doc edit + undo step) · navigation never changes the document
 - 2026-10-26 · #63 · checklist had wrong typecheck tool and bulk-lock timing · verify every doc claim against the code before review
+- 2026-10-26 · #65 · mapError threw on odd error shapes (null-prototype message, throwing toString) · error handlers never throw; guard every coercion and test hostile shapes
+- 2026-10-26 · #65 · PR said "Closes" while 3 of 5 issue boxes were open · use "Part of #N" unless every acceptance box is done
 - 2026-10-26 · #64 · installer art mixed the v5 "oA" logo BMPs with the Ribbon art the installer currently uses (putting the v5 logo back is a tracked follow-up) · take logo assets from the logo-final set and check which mark each page shows
 - 2026-10-26 · #64 · finish page copy promised a desktop shortcut the user may untick · copy states only what always happens, or matches the option shown
 - 2026-10-26 · #64 · uninstall docs pointed to a Start menu uninstall entry Tauri doesn't create · document only UI paths verified in the actual build
@@ -103,6 +105,15 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #66 · settings defaults hard-coded real-looking names · use neutral sample names in defaults and fixtures
 - 2026-10-26 · #66 · inline card marked role=dialog without modal behavior · use role=dialog only with aria-modal, focus in, Tab trap, Esc and focus return; otherwise an inline card
 - 2026-10-26 · #69 · in-app logo used the superseded plain-c masters, not the c-with-caret pack · take logo assets from the Designer's latest pack and test the exact asset per size
+- 2026-10-26 · #65 · PM QA: App.vue still rendered raw error text (String(err), err.message) in open, import, save, backup and restore alerts · every UI catch goes through mapError/errorLine; raw text goes to console only, and tests assert the raw text is absent
+- 2026-10-26 · #65 · PM QA: save-failure banner and a working 'Save a copy' were missing, so only 1 of 5 acceptance boxes was met · self-check every acceptance box against the running UI before handoff, not just the helper module
+- 2026-10-26 · #65 · PM QA: user-facing copy hard-coded the product name · use PRODUCT_NAME from lib/brand.ts for every user-facing mention of the app
+- 2026-10-26 · #65 · hardcoded product name left in recovery notice · grep for the old product name in every touched file before handoff
+- 2026-10-26 · #65 · save_manuscript_copy took both path and bytes from JS, so any webview script could write any file · a path plus bytes from JS to a write command is an arbitrary write; pick paths in Rust (dialog opened in the command)
+- 2026-10-26 · #65 · replacing the atomic write with a direct write left every test passing · revert-proof atomic writes with a test that fails the write halfway and checks the original is unchanged and no temp file is left
+- 2026-10-26 · #65 · data-folder guard passed `C:\x\nope\..\..\<data>\coauthor.db` · path guards reject `.`/`..`, canonicalize the existing parent, and check every app data folder (roaming and local), case-insensitively on Windows
+- 2026-10-26 · #65 · Save a copy kept comment markers but exported no comments, losing comment text and risking a Word repair · exporters must not drop data silently: export it, or strip it and tell the user, with a test
+- 2026-10-26 · #65 · SectionNav and AgentsSettings still showed raw error text · grep every catch in the app for String(e)/e.message reaching the UI; only show backend text that is written for users and allowlisted
 - 2026-10-26 · #44 · comment tag and tooltips said "Agent" while the pill says "Bot" · use one word for bots everywhere a person sees it
 - 2026-10-26 · #44 · built from ticket text without opening the mockups · find and compare the Designer's mockup files before review
 - 2026-10-26 · #44 · Brett asked for a dropdown defaulting to All; mockup showed a list · Brett's stated UI wording wins over mockup variants
@@ -110,6 +121,9 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #44 · accept/reject shortcuts fired while focus mode hid the review panel · every shortcut that acts on panel content must check the same visibility conditions as the panel
 - 2026-10-26 · #79 · error banners created their role=alert region together with the text · keep an assertive region mounted and insert error text a frame later
 - 2026-10-26 · #79 · live-region tests passed on the component while parents v-if'd it, so the region still mounted with its text · test live regions at the parent level: region exists before the content, same node after it appears and after it clears
+- 2026-10-26 · #81/#77 · live region wrapped in parent v-if so it mounted with its text · test live regions at the parent level: same node before open, after open, after dismiss
+- 2026-10-26 · #77 · "Nothing to review"/"No comments yet" showed while the section failed to load · empty states must not show while a load error is set (looks like data loss)
+- 2026-10-26 · #77 · toast clear on a later failure and on open() was untested · test every toast clear path with fake timers, inside the auto-close window
 - 2026-10-26 · #72 · comments panel used its own hashed hsl author colors, separate from the review panel · author color comes from one shared author-to-slot map (`author-colors.ts`) used by every panel
 - 2026-10-26 · #72 · module-level author slot map carried numbering over from the last manuscript opened · reset per-document caches when a manuscript opens, with an App-level test that opens a second book
 - 2026-10-26 · #75 · Grok Bot color keyed by display name allowed impostors and broke on rename · never key identity by display name; use stable ids

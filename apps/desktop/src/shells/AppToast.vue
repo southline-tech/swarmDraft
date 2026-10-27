@@ -1,19 +1,40 @@
 <script setup lang="ts">
-/** ob7: success toast ("Your book is open…"). Purely presentational. */
+/**
+ * ob7: success toast ("Your book is open…"). Purely presentational.
+ *
+ * Render this component unconditionally and drive it with `open`. The polite
+ * live region is always in the DOM (empty while closed); only the inner
+ * `.toast` content comes and goes. A live region created together with its
+ * text is often skipped by screen readers (#79), so parents must not wrap
+ * AppToast in v-if. Content is also held back one frame after mount so a
+ * toast that is open on first render still lands in an existing region.
+ */
+import { onBeforeUnmount, onMounted, ref } from 'vue';
 import ShellIcon from './ShellIcon.vue';
-defineProps<{ lead: string; message: string; action?: string }>();
+defineProps<{ open: boolean; lead: string; message: string; action?: string }>();
 const emit = defineEmits<{ dismiss: [] }>();
+
+const ready = ref(false);
+let frame = 0;
+onMounted(() => {
+  frame = requestAnimationFrame(() => {
+    ready.value = true;
+  });
+});
+onBeforeUnmount(() => cancelAnimationFrame(frame));
 </script>
 
 <template>
-  <div class="toast" role="status" aria-live="polite" data-test="toast">
-    <span class="toast__icon"><ShellIcon name="check" /></span>
-    <p class="toast__msg">
-      <b>{{ lead }}</b> {{ message }}
-    </p>
-    <button type="button" class="sh-btn" data-test="toast-dismiss" @click="emit('dismiss')">
-      {{ action ?? 'Got it' }}
-    </button>
+  <div role="status" aria-live="polite" data-test="toast-region">
+    <div v-if="open && ready" class="toast" data-test="toast">
+      <span class="toast__icon"><ShellIcon name="check" /></span>
+      <p class="toast__msg">
+        <b>{{ lead }}</b> {{ message }}
+      </p>
+      <button type="button" class="sh-btn" data-test="toast-dismiss" @click="emit('dismiss')">
+        {{ action ?? 'Got it' }}
+      </button>
+    </div>
   </div>
 </template>
 

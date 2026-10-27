@@ -12,6 +12,7 @@ import AppIcon from './icons/AppIcon.vue';
 import { computed, nextTick, ref, watch } from 'vue';
 import type { Section, SectionKind } from '@coauthor/schema';
 import { formatCount } from './status/wordcount';
+import { errorLine } from './errors/map-error';
 import {
   addSection,
   applyOutlineEdit,
@@ -90,7 +91,8 @@ async function commit(edit: (s: Section[]) => Section[]): Promise<Section[] | un
   try {
     await props.save?.(result.sections);
   } catch (e) {
-    saveError.value = `Not saved: ${e instanceof Error ? e.message : String(e)}`;
+    console.error('Outline save failed', e);
+    saveError.value = `Not saved: ${errorLine(e, 'save')}`;
     return undefined;
   } finally {
     busy.value = false;
