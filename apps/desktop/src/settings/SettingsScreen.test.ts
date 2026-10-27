@@ -118,7 +118,7 @@ describe('Settings screen (#99)', () => {
     expect(dlg.attributes('role')).toBe('alertdialog');
     expect(dlg.attributes('aria-modal')).toBe('true');
     expect(document.activeElement).toBe(w.get('[data-test="restore-confirm-no"]').element);
-    await dlg.trigger('keydown', { key: 'Tab' });
+    await dlg.trigger('keydown', { key: 'Tab', shiftKey: true });
     expect(document.activeElement).toBe(w.get('[data-test="restore-confirm-yes"]').element);
     await dlg.trigger('keydown', { key: 'Escape' });
     expect(w.emitted('cancelRestore')).toHaveLength(1);
@@ -126,6 +126,17 @@ describe('Settings screen (#99)', () => {
     await w.setProps({ confirmingRestore: false });
     await flushPromises();
     expect(document.activeElement).toBe(opener);
+  });
+
+  it('restore confirm puts Cancel first, then the danger button (PM, #102)', async () => {
+    const w = screen();
+    await w.setProps({ confirmingRestore: true });
+    await flushPromises();
+    const order = w
+      .findAll('[data-test="restore-confirm"] button')
+      .map((b) => b.attributes('data-test'));
+    expect(order).toEqual(['restore-confirm-no', 'restore-confirm-yes']);
+    expect(document.activeElement).toBe(w.get('[data-test="restore-confirm-no"]').element);
   });
 
   it('restore copy says "key", and the banner live region stays mounted after Dismiss', async () => {

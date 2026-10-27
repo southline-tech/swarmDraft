@@ -141,14 +141,6 @@ function onKeydown(e: KeyboardEvent) {
         </p>
         <div class="bk__actions">
           <button
-            type="button"
-            class="st-btn st-btn--danger"
-            data-test="restore-confirm-yes"
-            @click="emit('confirm')"
-          >
-            Replace everything and restore
-          </button>
-          <button
             ref="cancelButton"
             type="button"
             class="st-btn"
@@ -156,6 +148,14 @@ function onKeydown(e: KeyboardEvent) {
             @click="emit('cancel')"
           >
             Cancel
+          </button>
+          <button
+            type="button"
+            class="st-btn st-btn--danger"
+            data-test="restore-confirm-yes"
+            @click="emit('confirm')"
+          >
+            Replace everything and restore
           </button>
         </div>
       </div>
