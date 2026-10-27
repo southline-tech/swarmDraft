@@ -1,7 +1,7 @@
-; coAuthor custom installer template (issue #61).
+; swarmDraft custom installer template (issue #61).
 ;
 ; Copied from the Tauri v2 default installer.nsi (tauri-cli v2.12.4) and changed only where marked
-; "coAuthor:". Pages follow mockups ob1 to ob3: custom nsDialogs welcome and finish pages, no
+; "swarmDraft:". Pages follow mockups ob1 to ob3: custom nsDialogs welcome and finish pages, no
 ; install location page for per-user installs, and the progress page copy. Colours are the light
 ; --ct-* token values. Passive (/P), silent (/S) and update (/UPDATE) paths are unchanged.
 
@@ -43,9 +43,9 @@ ${StrLoc}
 !include "{{installer_hooks}}"
 {{/if}}
 
-; coAuthor: page art and palette. OB_DIR is set by windows/installer-pages.nsh (the hook file).
+; swarmDraft: page art and palette. OB_DIR is set by windows/installer-pages.nsh (the hook file).
 !ifndef OB_DIR
-  !error "coAuthor: installer-pages.nsh must be set as bundle.windows.nsis.installerHooks"
+  !error "swarmDraft: installer-pages.nsh must be set as bundle.windows.nsis.installerHooks"
 !endif
 !define OB_SURFACE "FFFFFF"    ; --ct-surface
 !define OB_BG "F3EFE8"         ; --ct-bg (footer)
@@ -53,6 +53,16 @@ ${StrLoc}
 !define OB_MUTED "6B6157"      ; --ct-text-muted
 !define OB_ACCENT_BGR 0xA85D2F ; --ct-accent #2f5da8 as a Win32 COLORREF
 !define OB_BORDER_BGR 0xC9D5DD ; --ct-border #ddd5c9 as a Win32 COLORREF
+
+; swarmDraft: page state shared by the installer and uninstaller pages.
+Var ObDialog
+Var ObFontTitle
+Var ObFontLead
+Var ObFontBody
+Var ObImage
+Var ObRunCheckbox
+Var ObRunState
+Var ObSwapped
 
 !define WEBVIEW2APPGUID "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 
@@ -96,9 +106,10 @@ Var WixMode
 Var OldMainBinaryName
 
 Name "${PRODUCTNAME}"
-; coAuthor: window title from the mockups.
+; swarmDraft: window title from the mockups.
 Caption "Install ${PRODUCTNAME}"
-; coAuthor: ob2 shows no install log.
+UninstallCaption "Uninstall ${PRODUCTNAME}"
+; swarmDraft: ob2 shows no install log.
 ShowInstDetails nevershow
 BrandingText "${COPYRIGHT}"
 OutFile "${OUTFILE}"
@@ -189,7 +200,7 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 
 ; Installer pages, must be ordered as they appear
 ; 1. Welcome Page
-; coAuthor: custom nsDialogs page (ob1) instead of MUI_PAGE_WELCOME.
+; swarmDraft: custom nsDialogs page (ob1) instead of MUI_PAGE_WELCOME.
 Page custom ObWelcomeCreate ObWelcomeLeave
 
 ; 2. License Page (if defined)
@@ -265,34 +276,26 @@ Function PageReinstall
   nsis_tauri_utils::SemverCompare "${VERSION}" $R0
   Pop $R0
 
-  ; Read the install choice header through $R5 so a custom language file that only
-  ; defines the misspelled `choowHowToInstall` still shows its own text
-  ; TODO: remove the `choowHowToInstall` fallback in a future major version
-  StrCpy $R5 "$(chooseHowToInstall)"
-  ${IfThen} $R5 == "" ${|} StrCpy $R5 "$(choowHowToInstall)" ${|}
-
   ; Reinstalling the same version
   ${If} $R0 = 0
-    StrCpy $R1 "$(alreadyInstalledLong)"
-    StrCpy $R2 "$(addOrReinstall)"
-    StrCpy $R3 "$(uninstallApp)"
-    !insertmacro MUI_HEADER_TEXT "$(alreadyInstalled)" "$(chooseMaintenanceOption)"
+    ; swarmDraft: plain copy that names the Continue button.
+    StrCpy $R1 "swarmDraft ${VERSION} is already on this computer. Choose what to do, then click Continue."
+    StrCpy $R2 "Reinstall swarmDraft"
+    StrCpy $R3 "Uninstall swarmDraft"
   ; Upgrading
   ${ElseIf} $R0 = 1
-    StrCpy $R1 "$(olderOrUnknownVersionInstalled)"
-    StrCpy $R2 "$(uninstallBeforeInstalling)"
-    StrCpy $R3 "$(dontUninstall)"
-    !insertmacro MUI_HEADER_TEXT "$(alreadyInstalled)" "$R5"
+    StrCpy $R1 "An older version of swarmDraft is on this computer. Your manuscripts are kept either way."
+    StrCpy $R2 "Remove the old version first (recommended)"
+    StrCpy $R3 "Install over it"
   ; Downgrading
   ${ElseIf} $R0 = -1
-    StrCpy $R1 "$(newerVersionInstalled)"
-    StrCpy $R2 "$(uninstallBeforeInstalling)"
+    StrCpy $R1 "A newer version of swarmDraft is on this computer. Your manuscripts are kept either way."
+    StrCpy $R2 "Remove the newer version first (recommended)"
     !if "${ALLOWDOWNGRADES}" == "true"
-      StrCpy $R3 "$(dontUninstall)"
+      StrCpy $R3 "Install over it"
     !else
       StrCpy $R3 "$(dontUninstallDowngrade)"
     !endif
-    !insertmacro MUI_HEADER_TEXT "$(alreadyInstalled)" "$R5"
   ${Else}
     Abort
   ${EndIf}
@@ -306,19 +309,39 @@ Function PageReinstall
   ${If} $PassiveMode = 1
     Call PageLeaveReinstall
   ${Else}
-    nsDialogs::Create 1018
+    ; swarmDraft: ob1 layout (tile, Literata title, lead, two choices) instead of the stock page.
+    InitPluginsDir
+    File "/oname=$PLUGINSDIR\ob-logo.bmp" "${OB_DIR}\ob-logo.bmp"
+    Call ObFonts
+    nsDialogs::Create 1044
     Pop $R4
+    ${If} $R4 == error
+      Abort
+    ${EndIf}
     ${IfThen} $(^RTL) = 1 ${|} nsDialogs::SetRTL $(^RTL) ${|}
+    SetCtlColors $R4 "" "${OB_SURFACE}"
+    StrCpy $0 "ob-logo.bmp"
+    Call ObTile
+    ${If} $R0 = 0
+      StrCpy $0 "swarmDraft is already installed"
+    ${ElseIf} $R0 = 1
+      StrCpy $0 "Update swarmDraft"
+    ${Else}
+      StrCpy $0 "A newer swarmDraft is installed"
+    ${EndIf}
+    StrCpy $1 $R1
+    Call ObTitleLead
 
-    ${NSD_CreateLabel} 0 0 100% 24u $R1
-    Pop $R1
-
-    ${NSD_CreateRadioButton} 30u 50u -30u 8u $R2
+    ${NSD_CreateRadioButton} 26u 130u 280u 12u $R2
     Pop $R2
+    SetCtlColors $R2 "${OB_TEXT}" "${OB_SURFACE}"
+    SendMessage $R2 ${WM_SETFONT} $ObFontBody 1
     ${NSD_OnClick} $R2 PageReinstallUpdateSelection
 
-    ${NSD_CreateRadioButton} 30u 70u -30u 8u $R3
+    ${NSD_CreateRadioButton} 26u 146u 280u 12u $R3
     Pop $R3
+    SetCtlColors $R3 "${OB_TEXT}" "${OB_SURFACE}"
+    SendMessage $R3 ${WM_SETFONT} $ObFontBody 1
     ; Disable this radio button if downgrading and downgrades are disabled
     !if "${ALLOWDOWNGRADES}" == "false"
       ${IfThen} $R0 = -1 ${|} EnableWindow $R3 0 ${|}
@@ -335,7 +358,18 @@ Function PageReinstall
     ${EndIf}
 
     ${NSD_SetFocus} $R2
+    ; Cancel on the left, "Continue" on the right, no Back (same as ob1).
+    GetDlgItem $0 $HWNDPARENT 1
+    SendMessage $0 ${WM_SETTEXT} 0 "STR:Continue"
+    Call ObSwapButtons
+    GetDlgItem $0 $HWNDPARENT 3
+    ShowWindow $0 ${SW_HIDE}
+    Call ObFullWindow
     nsDialogs::Show
+    ${NSD_FreeImage} $ObImage
+    Call ObNormalWindow
+    GetDlgItem $0 $HWNDPARENT 3
+    ShowWindow $0 ${SW_NORMAL}
   ${EndIf}
 FunctionEnd
 Function PageReinstallUpdateSelection
@@ -433,7 +467,7 @@ Function PageLeaveReinstall
 FunctionEnd
 
 ; 5. Choose install directory page
-; coAuthor: per-user installs always go to %LOCALAPPDATA%\${PRODUCTNAME}, so skip the page.
+; swarmDraft: per-user installs always go to %LOCALAPPDATA%\${PRODUCTNAME}, so skip the page.
 !if "${INSTALLMODE}" == "currentUser"
   !define MUI_PAGE_CUSTOMFUNCTION_PRE Skip
 !else
@@ -452,35 +486,31 @@ Var AppStartMenuFolder
 !insertmacro MUI_PAGE_STARTMENU Application $AppStartMenuFolder
 
 ; 7. Installation page
-; coAuthor: the show function turns the stock page into the ob2 layout (full window, Ribbon
+; swarmDraft: the show function turns the stock page into the ob2 layout (full window, Ribbon
 ; tile, title, line and one progress bar, only Cancel). The header text below is only a fallback.
-!define MUI_PAGE_HEADER_TEXT "Installing coAuthor…"
+!define MUI_PAGE_HEADER_TEXT "Installing swarmDraft…"
 !define MUI_PAGE_HEADER_SUBTEXT "Almost there. You can keep using your computer while this finishes."
-!define MUI_INSTFILESPAGE_FINISHHEADER_TEXT "coAuthor is installed"
+!define MUI_INSTFILESPAGE_FINISHHEADER_TEXT "swarmDraft is installed"
 !define MUI_INSTFILESPAGE_FINISHHEADER_SUBTEXT "Click Next to finish."
-!define MUI_INSTFILESPAGE_ABORTHEADER_TEXT "coAuthor wasn't installed"
+!define MUI_INSTFILESPAGE_ABORTHEADER_TEXT "swarmDraft wasn't installed"
 !define MUI_INSTFILESPAGE_ABORTHEADER_SUBTEXT "Nothing was changed. You can run the installer again."
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW ObProgressShow
 !insertmacro MUI_PAGE_INSTFILES
 
 ; 8. Finish page
-; coAuthor: custom nsDialogs page (ob3) instead of MUI_PAGE_FINISH. "Open coAuthor now" runs
+; swarmDraft: custom nsDialogs page (ob3) instead of MUI_PAGE_FINISH. "Open swarmDraft now" runs
 ; RunMainBinary and is ticked by default. The desktop shortcut is always created by the install
 ; section, so there is no checkbox for it. Skipped in passive mode.
 Page custom ObFinishCreate ObFinishLeave
 
-; coAuthor: page helpers.
-Var ObDialog
-Var ObFontTitle
-Var ObFontLead
-Var ObFontBody
-Var ObImage
-Var ObRunCheckbox
-Var ObRunState
-Var ObSwapped
 
+!define /ifndef PBM_SETBARCOLOR 0x0409
+!define /ifndef PBM_SETBKCOLOR 0x2001
+; swarmDraft: the page helpers are needed by the installer and the uninstaller pages, so they are
+; defined twice through this macro (UN = "" or "un.").
+!macro OB_HELPERS UN
 ; Windows 11 ships Segoe UI Variable; Windows 10 has Segoe UI.
-Function ObFonts
+Function ${UN}ObFonts
   ${If} $ObFontTitle != ""
     Return
   ${EndIf}
@@ -505,7 +535,7 @@ FunctionEnd
 
 ; Mockup button order: Cancel on the left, the primary button on the right. Swaps the
 ; Next and Cancel buttons once; they keep these positions on every later page.
-Function ObSwapButtons
+Function ${UN}ObSwapButtons
   ${If} $ObSwapped == 1
     Return
   ${EndIf}
@@ -524,7 +554,7 @@ Function ObSwapButtons
 FunctionEnd
 
 ; Full-window page: hide the MUI header and branding, colour page and footer.
-Function ObFullWindow
+Function ${UN}ObFullWindow
   LockWindow on
   ShowWindow $mui.Branding.Background ${SW_HIDE}
   ShowWindow $mui.Branding.Text ${SW_HIDE}
@@ -537,7 +567,7 @@ Function ObFullWindow
   LockWindow off
 FunctionEnd
 
-Function ObNormalWindow
+Function ${UN}ObNormalWindow
   LockWindow on
   ShowWindow $mui.Branding.Background ${SW_NORMAL}
   ShowWindow $mui.Branding.Text ${SW_NORMAL}
@@ -550,7 +580,7 @@ Function ObNormalWindow
 FunctionEnd
 
 ; Title + lead text block shared by ob1 and ob3. $0 = title, $1 = lead.
-Function ObTitleLead
+Function ${UN}ObTitleLead
   ${NSD_CreateLabel} 26u 64u 280u 24u "$0"
   Pop $2
   SetCtlColors $2 "${OB_TEXT}" "${OB_SURFACE}"
@@ -562,11 +592,32 @@ Function ObTitleLead
 FunctionEnd
 
 ; Page art. $0 = bitmap file name in OB_DIR.
-Function ObTile
+Function ${UN}ObTile
   ${NSD_CreateBitmap} 26u 18u 40u 40u ""
   Pop $2
   ${NSD_SetStretchedImage} $2 "$PLUGINSDIR\$0" $ObImage
 FunctionEnd
+
+; Dialog units to pixels for the inner dialog $R0: $R1..$R4 = x y w h in, out in pixels.
+Function ${UN}ObDlgRect
+  IntOp $R3 $R1 + $R3
+  IntOp $R4 $R2 + $R4
+  System::Call '*(i R1, i R2, i R3, i R4) p .r3'
+  System::Call 'user32::MapDialogRect(p R0, p r3)'
+  System::Call '*$3(i .R1, i .R2, i .R3, i .R4)'
+  System::Free $3
+  IntOp $R3 $R3 - $R1
+  IntOp $R4 $R4 - $R2
+FunctionEnd
+
+; Static control on $R0 at $R1..$R4 (pixels). $5 = text, $6 = style. Returns hwnd in $7.
+Function ${UN}ObStatic
+  System::Call 'user32::CreateWindowEx(i 0, t "STATIC", t r5, i r6, i R1, i R2, i R3, i R4, p R0, p 0, p 0, p 0) p .r7'
+FunctionEnd
+
+!macroend
+!insertmacro OB_HELPERS ""
+!insertmacro OB_HELPERS "un."
 
 Function ObWelcomeCreate
   Call SkipIfPassive ; aborts (skips) the page in passive mode
@@ -581,8 +632,8 @@ Function ObWelcomeCreate
   SetCtlColors $ObDialog "" "${OB_SURFACE}"
   StrCpy $0 "ob-logo.bmp"
   Call ObTile
-  StrCpy $0 "Welcome to coAuthor"
-  StrCpy $1 "This will put coAuthor on your computer. It takes about a minute, and you don't need to change anything."
+  StrCpy $0 "Welcome to swarmDraft"
+  StrCpy $1 "This will put swarmDraft on your computer. It takes about a minute, and you don't need to change anything."
   Call ObTitleLead
   ; Primary button reads "Install"; there is nothing to go back to.
   GetDlgItem $0 $HWNDPARENT 1
@@ -601,32 +652,15 @@ Function ObWelcomeLeave
   ShowWindow $0 ${SW_NORMAL}
 FunctionEnd
 
-!define /ifndef PBM_SETBARCOLOR 0x0409
-!define /ifndef PBM_SETBKCOLOR 0x2001
-; Dialog units to pixels for the inner dialog $R0: $R1..$R4 = x y w h in, out in pixels.
-Function ObDlgRect
-  IntOp $R3 $R1 + $R3
-  IntOp $R4 $R2 + $R4
-  System::Call '*(i R1, i R2, i R3, i R4) p .r3'
-  System::Call 'user32::MapDialogRect(p R0, p r3)'
-  System::Call '*$3(i .R1, i .R2, i .R3, i .R4)'
-  System::Free $3
-  IntOp $R3 $R3 - $R1
-  IntOp $R4 $R4 - $R2
-FunctionEnd
-
-; Static control on $R0 at $R1..$R4 (pixels). $5 = text, $6 = style. Returns hwnd in $7.
-Function ObStatic
-  System::Call 'user32::CreateWindowEx(i 0, t "STATIC", t r5, i r6, i R1, i R2, i R3, i R4, p R0, p 0, p 0, p 0) p .r7'
-FunctionEnd
-
-Function ObProgressShow
-  Call ObFonts
-  Call ObSwapButtons
+; ob2 layout for the stock install and uninstall progress pages.
+!macro OB_PROGRESS_SHOW UN TITLE LEAD
+Function ${UN}ObProgressShow
+  Call ${UN}ObFonts
+  Call ${UN}ObSwapButtons
   InitPluginsDir
   File "/oname=$PLUGINSDIR\ob-logo.bmp" "${OB_DIR}\ob-logo.bmp"
   LockWindow on
-  Call ObFullWindow
+  Call ${UN}ObFullWindow
   ; Only Cancel: hide Back and Next (shown again on the finish page or if the install fails).
   GetDlgItem $0 $HWNDPARENT 1
   ShowWindow $0 ${SW_HIDE}
@@ -655,10 +689,10 @@ Function ObProgressShow
   StrCpy $R2 18
   StrCpy $R3 40
   StrCpy $R4 40
-  Call ObDlgRect
+  Call ${UN}ObDlgRect
   StrCpy $5 ""
   StrCpy $6 0x5000000E ; WS_CHILD | WS_VISIBLE | SS_BITMAP
-  Call ObStatic
+  Call ${UN}ObStatic
   System::Call 'user32::LoadImage(p 0, t "$PLUGINSDIR\ob-logo.bmp", i 0, i R3, i R4, i 0x10) p .r0'
   SendMessage $7 0x172 0 $0 ; STM_SETIMAGE, IMAGE_BITMAP
   ; Title and line.
@@ -666,19 +700,19 @@ Function ObProgressShow
   StrCpy $R2 64
   StrCpy $R3 280
   StrCpy $R4 24
-  Call ObDlgRect
-  StrCpy $5 "Installing coAuthor…"
+  Call ${UN}ObDlgRect
+  StrCpy $5 "${TITLE}"
   StrCpy $6 0x50000000
-  Call ObStatic
+  Call ${UN}ObStatic
   SetCtlColors $7 "${OB_TEXT}" "${OB_SURFACE}"
   SendMessage $7 ${WM_SETFONT} $ObFontTitle 1
   StrCpy $R1 26
   StrCpy $R2 92
   StrCpy $R3 280
   StrCpy $R4 34
-  Call ObDlgRect
-  StrCpy $5 "Almost there. You can keep using your computer while this finishes."
-  Call ObStatic
+  Call ${UN}ObDlgRect
+  StrCpy $5 "${LEAD}"
+  Call ${UN}ObStatic
   SetCtlColors $7 "${OB_MUTED}" "${OB_SURFACE}"
   SendMessage $7 ${WM_SETFONT} $ObFontLead 1
   ; One wide progress bar in the accent colour.
@@ -686,7 +720,7 @@ Function ObProgressShow
   StrCpy $R2 132
   StrCpy $R3 280
   StrCpy $R4 6
-  Call ObDlgRect
+  Call ${UN}ObDlgRect
   GetDlgItem $2 $R0 1004
   System::Call 'user32::SetWindowPos(p r2, p 0, i R1, i R2, i R3, i R4, i 0x14)'
   System::Call 'uxtheme::SetWindowTheme(p r2, w " ", w " ")'
@@ -694,6 +728,9 @@ Function ObProgressShow
   SendMessage $2 ${PBM_SETBKCOLOR} 0 ${OB_BORDER_BGR}
   LockWindow off
 FunctionEnd
+
+!macroend
+!insertmacro OB_PROGRESS_SHOW "" "Installing swarmDraft…" "Almost there. You can keep using your computer while this finishes."
 
 ; If the install fails the page stays; give the buttons back so the user can close it.
 Function .onInstFailed
@@ -714,10 +751,10 @@ Function ObFinishCreate
   SetCtlColors $ObDialog "" "${OB_SURFACE}"
   StrCpy $0 "ob-check.bmp"
   Call ObTile
-  StrCpy $0 "coAuthor is ready"
+  StrCpy $0 "swarmDraft is ready"
   StrCpy $1 "You'll find it in your Start menu and on your desktop."
   Call ObTitleLead
-  ${NSD_CreateCheckbox} 26u 134u 280u 14u "Open coAuthor now"
+  ${NSD_CreateCheckbox} 26u 134u 280u 14u "Open swarmDraft now"
   Pop $ObRunCheckbox
   SetCtlColors $ObRunCheckbox "${OB_TEXT}" "${OB_SURFACE}"
   SendMessage $ObRunCheckbox ${WM_SETFONT} $ObFontBody 1
@@ -749,60 +786,113 @@ Function RunMainBinary
 FunctionEnd
 
 ; Uninstaller Pages
-; 1. Confirm uninstall page
+; swarmDraft: custom nsDialogs pages in the ob1 to ob3 layout instead of the stock confirm and
+; finish pages; the stock progress page gets the ob2 layout. Passive and update runs skip them.
+; 1. Confirm uninstall page (keeps the "delete app data" choice, unticked by default)
 Var DeleteAppDataCheckbox
 Var DeleteAppDataCheckboxState
-!define /ifndef WS_EX_LAYOUTRTL         0x00400000
-!define MUI_PAGE_CUSTOMFUNCTION_SHOW un.ConfirmShow
-Function un.ConfirmShow ; Add add a `Delete app data` check box
-  ; $1 inner dialog HWND
-  ; $2 window DPI
-  ; $3 style
-  ; $4 x
-  ; $5 y
-  ; $6 width
-  ; $7 height
-  FindWindow $1 "#32770" "" $HWNDPARENT ; Find inner dialog
-  System::Call "user32::GetDpiForWindow(p r1) i .r2"
-  ${If} $(^RTL) = 1
-    StrCpy $3 "${__NSD_CheckBox_EXSTYLE} | ${WS_EX_LAYOUTRTL}"
-    IntOp $4 50 * $2
-  ${Else}
-    StrCpy $3 "${__NSD_CheckBox_EXSTYLE}"
-    IntOp $4 0 * $2
-  ${EndIf}
-  IntOp $5 100 * $2
-  IntOp $6 400 * $2
-  IntOp $7 25 * $2
-  IntOp $4 $4 / 96
-  IntOp $5 $5 / 96
-  IntOp $6 $6 / 96
-  IntOp $7 $7 / 96
-  System::Call 'user32::CreateWindowEx(i r3, w "${__NSD_CheckBox_CLASS}", w "$(deleteAppData)", i ${__NSD_CheckBox_STYLE}, i r4, i r5, i r6, i r7, p r1, i0, i0, i0) i .s'
-  Pop $DeleteAppDataCheckbox
-  SendMessage $HWNDPARENT ${WM_GETFONT} 0 0 $1
-  SendMessage $DeleteAppDataCheckbox ${WM_SETFONT} $1 1
-FunctionEnd
-!define MUI_PAGE_CUSTOMFUNCTION_LEAVE un.ConfirmLeave
-Function un.ConfirmLeave
-  SendMessage $DeleteAppDataCheckbox ${BM_GETCHECK} 0 0 $DeleteAppDataCheckboxState
-FunctionEnd
-!define MUI_PAGE_CUSTOMFUNCTION_PRE un.SkipIfPassive
-!insertmacro MUI_UNPAGE_CONFIRM
+UninstPage custom un.ObConfirmCreate un.ObConfirmLeave
 
 ; 2. Uninstalling Page
+!define MUI_PAGE_HEADER_TEXT "Removing swarmDraft…"
+!define MUI_PAGE_HEADER_SUBTEXT "This only takes a moment."
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW un.ObProgressShow
 !insertmacro MUI_UNPAGE_INSTFILES
 
+; 3. Finish page
+UninstPage custom un.ObFinishCreate un.ObFinishLeave
+
+!insertmacro OB_PROGRESS_SHOW "un." "Removing swarmDraft…" "This only takes a moment."
+
+Function un.ObConfirmCreate
+  Call un.SkipIfPassive ; aborts (skips) the page in passive mode
+  InitPluginsDir
+  File "/oname=$PLUGINSDIR\ob-logo.bmp" "${OB_DIR}\ob-logo.bmp"
+  Call un.ObFonts
+  nsDialogs::Create 1044
+  Pop $ObDialog
+  ${If} $ObDialog == error
+    Abort
+  ${EndIf}
+  ${IfThen} $(^RTL) = 1 ${|} nsDialogs::SetRTL $(^RTL) ${|}
+  SetCtlColors $ObDialog "" "${OB_SURFACE}"
+  StrCpy $0 "ob-logo.bmp"
+  Call un.ObTile
+  StrCpy $0 "Uninstall swarmDraft?"
+  StrCpy $1 "This removes the app from this computer. Your manuscripts and settings stay unless you choose to delete them below."
+  Call un.ObTitleLead
+  ${NSD_CreateCheckbox} 26u 134u 280u 14u "Also delete my manuscripts and settings"
+  Pop $DeleteAppDataCheckbox
+  SetCtlColors $DeleteAppDataCheckbox "${OB_TEXT}" "${OB_SURFACE}"
+  SendMessage $DeleteAppDataCheckbox ${WM_SETFONT} $ObFontBody 1
+  ${If} $DeleteAppDataCheckboxState = ${BST_CHECKED}
+    ${NSD_Check} $DeleteAppDataCheckbox
+  ${EndIf}
+  GetDlgItem $0 $HWNDPARENT 1
+  SendMessage $0 ${WM_SETTEXT} 0 "STR:Uninstall"
+  Call un.ObSwapButtons
+  GetDlgItem $0 $HWNDPARENT 3
+  ShowWindow $0 ${SW_HIDE}
+  Call un.ObFullWindow
+  nsDialogs::Show
+  ${NSD_FreeImage} $ObImage
+  Call un.ObNormalWindow
+FunctionEnd
+
+Function un.ObConfirmLeave
+  ${NSD_GetState} $DeleteAppDataCheckbox $DeleteAppDataCheckboxState
+FunctionEnd
+
+Function un.ObFinishCreate
+  Call un.SkipIfPassive
+  ${IfThen} $UpdateMode = 1 ${|} Abort ${|}
+  InitPluginsDir
+  File "/oname=$PLUGINSDIR\ob-check.bmp" "${OB_DIR}\ob-check.bmp"
+  Call un.ObFonts
+  nsDialogs::Create 1044
+  Pop $ObDialog
+  ${If} $ObDialog == error
+    Abort
+  ${EndIf}
+  ${IfThen} $(^RTL) = 1 ${|} nsDialogs::SetRTL $(^RTL) ${|}
+  SetCtlColors $ObDialog "" "${OB_SURFACE}"
+  StrCpy $0 "ob-check.bmp"
+  Call un.ObTile
+  StrCpy $0 "swarmDraft was removed"
+  ${If} $DeleteAppDataCheckboxState = ${BST_CHECKED}
+    StrCpy $1 "The app and its data are gone from this computer."
+  ${Else}
+    StrCpy $1 "Your manuscripts are still on this computer. They'll be there if you install swarmDraft again."
+  ${EndIf}
+  Call un.ObTitleLead
+  ; Only a Finish button.
+  GetDlgItem $0 $HWNDPARENT 1
+  SendMessage $0 ${WM_SETTEXT} 0 "STR:Finish"
+  ShowWindow $0 ${SW_NORMAL}
+  EnableWindow $0 1
+  Call un.ObSwapButtons
+  GetDlgItem $0 $HWNDPARENT 2
+  ShowWindow $0 ${SW_HIDE}
+  GetDlgItem $0 $HWNDPARENT 3
+  ShowWindow $0 ${SW_HIDE}
+  Call un.ObFullWindow
+  nsDialogs::Show
+  ${NSD_FreeImage} $ObImage
+  Call un.ObNormalWindow
+FunctionEnd
+
+Function un.ObFinishLeave
+FunctionEnd
+
+; If the uninstall fails the page stays; give the buttons back so the user can close it.
+Function un.onUninstFailed
+  GetDlgItem $0 $HWNDPARENT 1
+  ShowWindow $0 ${SW_NORMAL}
+FunctionEnd
+
 ;Languages
-; PageReinstall reads the misspelled `choowHowToInstall` as a fallback, and makensis warns
-; about a language string that is read but never set, so default it to an empty string for
-; every language. This runs before the language files are included, so a custom language
-; file that only defines the old spelling overrides the default and the fallback shows its
-; text. `0` as the language id means the language inserted right above.
-; TODO: remove the `choowHowToInstall` fallback in a future major version
 {{#each languages}}
 !insertmacro MUI_LANGUAGE "{{this}}"
-LangString choowHowToInstall 0 ""
 {{/each}}
 !insertmacro MUI_RESERVEFILE_LANGDLL
 {{#each language_files}}
@@ -1070,7 +1160,7 @@ Section Install
     Call CreateOrUpdateStartMenuShortcut
   !insertmacro MUI_STARTMENU_WRITE_END
 
-  ; coAuthor: always create the desktop shortcut (interactive, passive and silent installs).
+  ; swarmDraft: always create the desktop shortcut (interactive, passive and silent installs).
   ; CreateOrUpdateDesktopShortcut still leaves shortcuts alone for /UPDATE and /NS.
   Call CreateOrUpdateDesktopShortcut
 
@@ -1078,7 +1168,7 @@ Section Install
     !insertmacro NSIS_HOOK_POSTINSTALL
   !endif
 
-  ; coAuthor: move on to the finish page as soon as the install succeeds (ob2 has no Next).
+  ; swarmDraft: move on to the finish page as soon as the install succeeds (ob2 has no Next).
   SetAutoClose true
 SectionEnd
 
@@ -1221,6 +1311,11 @@ Section Uninstall
     DeleteRegKey /ifempty HKCU "${MANUKEY}"
 
     SetShellVarContext current
+    ; swarmDraft: only the current identifier's folders. The pre-rename com.radiancelux.coauthor
+    ; folders are the first-run migration source and are never deleted (see src/migrate.rs).
+    !if "${BUNDLEID}" == "com.radiancelux.coauthor"
+      !error "swarmDraft: the uninstaller must never delete the pre-rename data folders"
+    !endif
     RmDir /r "$APPDATA\${BUNDLEID}"
     RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
   ${EndIf}
@@ -1229,11 +1324,9 @@ Section Uninstall
     !insertmacro NSIS_HOOK_POSTUNINSTALL
   !endif
 
-  ; Auto close if passive mode or updating
-  ${If} $PassiveMode = 1
-  ${OrIf} $UpdateMode = 1
-    SetAutoClose true
-  ${EndIf}
+  ; swarmDraft: always move on once removal succeeds (the progress page has no Next); the
+  ; finish page skips itself in passive and update runs.
+  SetAutoClose true
 SectionEnd
 
 Function RestorePreviousInstallLocation
