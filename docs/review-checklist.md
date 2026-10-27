@@ -131,6 +131,8 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #44 · Brett asked for a dropdown defaulting to All; mockup showed a list · Brett's stated UI wording wins over mockup variants
 - 2026-10-26 · #44 · hashed hsl author colors could collide and ignored themes · assign authors --ct-collab-N tokens, Grok Bot = collab-1
 - 2026-10-26 · #44 · accept/reject shortcuts fired while focus mode hid the review panel · every shortcut that acts on panel content must check the same visibility conditions as the panel
+- 2026-10-26 · #73 · create_backup took a destination path from the webview (same arbitrary-write class as #65) · every write command picks its path in Rust and builds its bytes in Rust when it can; grep all commands for path params when one is found
+- 2026-10-26 · #78 · unused unattended write path callable from window · remove write paths nothing uses; every webview-triggered write needs a user gesture/dialog
 - 2026-10-26 · #79 · error banners created their role=alert region together with the text · keep an assertive region mounted and insert error text a frame later
 - 2026-10-26 · #79 · live-region tests passed on the component while parents v-if'd it, so the region still mounted with its text · test live regions at the parent level: region exists before the content, same node after it appears and after it clears
 - 2026-10-26 · #81/#77 · live region wrapped in parent v-if so it mounted with its text · test live regions at the parent level: same node before open, after open, after dismiss
@@ -146,6 +148,7 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #82 · branch conflicted with main when review was requested · merge main and re-run all checks right before each review request
 - 2026-10-26 · #82 · re-importing while the book-open toast was up cleared and set its text in one tick, so the region never changed and nothing was re-announced · to re-announce the same message, clear the region, set the text on nextTick, and test the remove-then-add DOM mutations on the same node
 - 2026-10-26 · #82 · after merging #77, its load-error test failed because #82 defers error text one frame · after merging main, re-run the full suite and fix semantic conflicts in the tests, not only text conflicts
+- 2026-10-26 · #78 · old app-ID folders must be refused as backup destinations · refuse legacy data dirs too
 - 2026-10-26 · #84 · moving the toolbar out of the editor (Teleport) also moved it out of the editor's keydown handler, so Ctrl+F from a toolbar button stopped working · when DOM moves out of a component, re-attach its listeners on the moved root and test a shortcut from inside it
 - 2026-10-26 · #90 · the review column grew to fit its widest child (the comments empty state, 471px at 1024px) and squeezed the page to 217px · give side panels a fixed width from a named token (`--ct-panel-w`, `--ct-panel-w-narrow` below 1200px) with children at `width: 100%`, and exempt collapsed rails
 - 2026-10-26 · #87 · the toolbar host's keydown also ran on the inline path, inside the editor's own handler, so shortcuts fired twice (Ctrl+Shift+F toggled focus mode on and back off) · attach a re-attached listener only when the DOM is actually teleported, and test both paths for exactly-once

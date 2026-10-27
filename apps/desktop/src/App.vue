@@ -4,7 +4,6 @@ import { DEFAULT_TRIM } from '@coauthor/schema';
 import {
   createBackup,
   getAppInfo,
-  pickBackupDestination,
   pickBackupToRestore,
   restoreBackup,
   getRecoveryNotices,
@@ -286,14 +285,10 @@ function askRestore(): void {
 
 async function onBackup(): Promise<void> {
   try {
-    const dest = await pickBackupDestination();
-    if (dest === null) return;
-    // The native save dialog already asked the user to confirm Replace for an existing file,
-    // so the backend may atomically replace it.
-    backupStatus.value = `Backup saved: ${await createBackup(dest, true)}`;
+    if (await createBackup()) backupStatus.value = 'Backup saved.';
   } catch (e) {
-    console.error('Backup failed', e);
-    backupStatus.value = `Backup failed. ${errorLine(e)}`;
+    console.error('backup failed', e);
+    backupStatus.value = "The backup wasn't saved. Please try again.";
   }
 }
 

@@ -35,6 +35,8 @@ use zip::write::SimpleFileOptions;
 
 use crate::storage::{StorageError, Store};
 
+/// Manifest format id. Kept as `coauthor-backup` so backups made before the rename still
+/// restore; only the default file name changed to `swarmdraft-backup-*` (#73).
 pub const FORMAT: &str = "coauthor-backup";
 pub const FORMAT_VERSION: u32 = 1;
 const DB_ENTRY: &str = "db/coauthor.db";
@@ -105,9 +107,16 @@ fn backups_dir(store: &Store) -> PathBuf {
     store.data_dir().join("backups")
 }
 
-/// Default location for a new backup: `<data dir>/backups/coauthor-backup-<unique>.zip`.
-pub fn default_backup_path(store: &Store) -> PathBuf {
-    backups_dir(store).join(format!("coauthor-backup-{}.zip", unique_suffix()))
+/// Default file name offered for a new backup: `swarmdraft-backup-<stamp>.zip`.
+pub fn backup_file_name(stamp: &str) -> String {
+    format!("swarmdraft-backup-{stamp}.zip")
+}
+
+/// Unique backup path in the backups folder. Tests only: the app never writes a backup
+/// without the save dialog (#73).
+#[cfg(test)]
+fn default_backup_path(store: &Store) -> PathBuf {
+    backups_dir(store).join(backup_file_name(&unique_suffix()))
 }
 
 fn files_dir(store: &Store) -> PathBuf {
@@ -791,6 +800,18 @@ pub fn create_backup_to(
     dest: &Path,
     replace: bool,
 ) -> Result<Manifest, BackupError> {
+    create_backup_inner(store, app_version, dest, replace, false)
+}
+
+/// [`create_backup_to`]; `fail_mid_write` (tests only) fails after part of the archive is on
+/// disk, to prove a failed write never touches `dest`.
+fn create_backup_inner(
+    store: &Store,
+    app_version: &str,
+    dest: &Path,
+    replace: bool,
+    fail_mid_write: bool,
+) -> Result<Manifest, BackupError> {
     if !replace && dest.exists() {
         return Err(BackupError::Io(std::io::Error::new(
             std::io::ErrorKind::AlreadyExists,
@@ -839,6 +860,11 @@ pub fn create_backup_to(
         zw.write_all(&serde_json::to_vec_pretty(&manifest).expect("manifest serializes"))?;
         zw.start_file(DB_ENTRY, opts)?;
         std::io::copy(&mut File::open(&snap)?, &mut zw)?;
+        if fail_mid_write {
+            return Err(BackupError::Io(std::io::Error::other(
+                "injected write failure",
+            )));
+        }
         for (rel, path) in &files {
             zw.start_file(format!("{FILES_PREFIX}{rel}"), opts)?;
             std::io::copy(&mut File::open(path)?, &mut zw)?;
@@ -849,12 +875,59 @@ pub fn create_backup_to(
         } else {
             publish_no_clobber(&part, dest)?;
         }
+        sync_parent_dir(dest);
         Ok(())
     })();
     if res.is_err() {
         let _ = std::fs::remove_file(&part);
     }
     res.map(|_| manifest)
+}
+
+/// Make the rename durable (best effort; directories can't be synced this way on Windows).
+fn sync_parent_dir(path: &Path) {
+    #[cfg(unix)]
+    if let Some(dir) = path.parent() {
+        if let Ok(d) = File::open(dir) {
+            let _ = d.sync_all();
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
+#[cfg(test)]
+use crate::save_copy::is_unc_like;
+
+/// Check a backup destination picked in the native save dialog (opened by Rust, #73) and
+/// return the real path to write. Refuses relative paths, `.`/`..` components, non-`.zip`
+/// names, a missing folder, and anything that resolves (after canonicalizing the parent, so
+/// symlinks and junctions are followed) into one of `data_dirs` (the `backups` folder
+/// included), a destination that is itself a link, and UNC / admin-share paths. Uses the
+/// same shared check as `save_manuscript_copy` (#65): [`crate::save_copy::check_write_dest`].
+pub fn check_backup_dest(
+    store: &Store,
+    data_dirs: &[PathBuf],
+    dest: &Path,
+) -> Result<PathBuf, BackupError> {
+    let mut roots = vec![store.data_dir().to_path_buf()];
+    roots.extend(data_dirs.iter().cloned());
+    Ok(crate::save_copy::check_write_dest(
+        &roots, dest, "zip", "backup",
+    )?)
+}
+
+/// Write a backup to a destination the user picked in the save dialog (which already
+/// confirmed Replace), after [`check_backup_dest`]. Returns the real path written.
+pub fn create_backup_checked(
+    store: &Store,
+    app_version: &str,
+    data_dirs: &[PathBuf],
+    dest: &Path,
+) -> Result<PathBuf, BackupError> {
+    let real = check_backup_dest(store, data_dirs, dest)?;
+    create_backup_to(store, app_version, &real, true)?;
+    Ok(real)
 }
 
 const WINDOWS_RESERVED: &[&str] = &[
@@ -2438,5 +2511,149 @@ mod tests {
             std::fs::read(d.join("files/images/map.png")).unwrap(),
             b"edited"
         );
+    }
+    // ---- #73: backend-chosen destination ----
+
+    fn outside() -> tempfile::TempDir {
+        tempfile::tempdir().unwrap()
+    }
+
+    #[test]
+    fn checked_backup_writes_outside_data_dir() {
+        let (_tmp, store) = seeded();
+        let out = outside();
+        let dest = out.path().join("b.zip");
+        let real = create_backup_checked(&store, "0", &[], &dest).unwrap();
+        assert!(stage(&store, &real).is_ok());
+    }
+
+    #[test]
+    fn checked_backup_refuses_relative_and_dot_dot() {
+        let (tmp, store) = seeded();
+        assert!(check_backup_dest(&store, &[], Path::new("b.zip")).is_err());
+        // A relative path whose folder exists (tests run in the crate dir) is refused too.
+        assert!(check_backup_dest(&store, &[], Path::new("src/b.zip")).is_err());
+        let out = outside();
+        std::fs::create_dir_all(out.path().join("x")).unwrap();
+        // x/../b.zip would resolve fine; `..` itself must be refused.
+        let sneaky = out.path().join("x").join("..").join("b.zip");
+        assert!(check_backup_dest(&store, &[], &sneaky).is_err());
+        let into_data = out
+            .path()
+            .join("x")
+            .join("..")
+            .join("..")
+            .join(tmp.path().strip_prefix("/").unwrap_or(tmp.path()))
+            .join("coauthor.db.zip");
+        assert!(check_backup_dest(&store, &[], &into_data).is_err());
+    }
+
+    #[test]
+    fn checked_backup_refuses_all_data_dirs_including_backups_folder() {
+        let (tmp, store) = seeded();
+        assert!(check_backup_dest(&store, &[], &tmp.path().join("x.zip")).is_err());
+        let other = outside();
+        assert!(check_backup_dest(
+            &store,
+            &[other.path().to_path_buf()],
+            &other.path().join("x.zip")
+        )
+        .is_err());
+        // The backups folder is not a write target any more (#73): refused like the rest.
+        std::fs::create_dir_all(tmp.path().join("backups")).unwrap();
+        assert!(check_backup_dest(&store, &[], &tmp.path().join("backups").join("b.zip")).is_err());
+        // Not a non-zip name, even outside.
+        let out = outside();
+        assert!(check_backup_dest(&store, &[], &out.path().join("evil.exe")).is_err());
+        assert!(check_backup_dest(&store, &[], &out.path().join("nope").join("b.zip")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checked_backup_refuses_symlink_escape_into_data_dir() {
+        let (tmp, store) = seeded();
+        let out = outside();
+        let link = out.path().join("link");
+        std::os::unix::fs::symlink(tmp.path(), &link).unwrap();
+        let err = create_backup_checked(&store, "0", &[], &link.join("files.zip"));
+        assert!(err.is_err());
+        assert!(!tmp.path().join("files.zip").exists());
+        // A dest that is itself a link to a file elsewhere is refused too.
+        let victim = out.path().join("victim.txt");
+        std::fs::write(&victim, b"keep").unwrap();
+        let flink = out.path().join("b.zip");
+        std::os::unix::fs::symlink(&victim, &flink).unwrap();
+        assert!(create_backup_checked(&store, "0", &[], &flink).is_err());
+        assert_eq!(std::fs::read(&victim).unwrap(), b"keep");
+    }
+
+    #[test]
+    fn failed_write_leaves_existing_dest_and_no_temp_file() {
+        let (_tmp, store) = seeded();
+        let out = outside();
+        let dest = out.path().join("b.zip");
+        std::fs::write(&dest, b"old backup").unwrap();
+        assert!(create_backup_inner(&store, "0", &dest, true, true).is_err());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"old backup");
+        let names: Vec<_> = std::fs::read_dir(out.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names.len(), 1, "{names:?}");
+    }
+    #[test]
+    fn unc_and_admin_share_paths_are_classified() {
+        for p in [
+            r"\\localhost\C$\Users\v\AppData\Roaming\x\b.zip",
+            r"\\server\share\b.zip",
+            r"\\?\UNC\localhost\C$\b.zip",
+            r"\\?\unc\server\share\b.zip",
+            r"\\.\pipe\x",
+            "//server/share/b.zip",
+        ] {
+            assert!(is_unc_like(p), "{p}");
+        }
+        for p in [
+            r"C:\Users\v\b.zip",
+            r"\\?\C:\Users\v\b.zip",
+            "/home/v/b.zip",
+        ] {
+            assert!(!is_unc_like(p), "{p}");
+        }
+    }
+
+    #[test]
+    fn check_backup_dest_refuses_unc_strings() {
+        let (_tmp, store) = seeded();
+        // Absolute only on Windows; on unix `//x/y` is absolute and must still be refused.
+        assert!(check_backup_dest(&store, &[], Path::new("//server/share/b.zip")).is_err());
+    }
+
+    /// #73: the window must not be able to trigger a backup write without the save dialog.
+    /// `create_backup` takes no arguments from the webview beyond the injected app/store,
+    /// and the only write it reaches is `create_backup_checked` on the dialog's path.
+    #[test]
+    fn create_backup_command_has_no_unattended_path() {
+        let src = include_str!("lib.rs");
+        let start = src.find("async fn create_backup(").expect("command exists");
+        let body = &src[start..];
+        let sig_end = body.find(") -> Result<bool, String>").unwrap();
+        let sig = &body[..sig_end];
+        let params: Vec<&str> = sig
+            .lines()
+            .skip(1)
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        assert_eq!(params.len(), 2, "unexpected webview args: {params:?}");
+        assert!(params[0].starts_with("app: tauri::AppHandle"));
+        assert!(params[1].starts_with("store: tauri::State"));
+        let end = body.find("\nfn ").unwrap_or(body.len());
+        let body = &body[..end];
+        assert!(body.contains("blocking_save_file()"));
+        assert!(!body.contains("default_backup_path"));
+        assert!(!body.contains("create_backup_to("));
+        assert_eq!(body.matches("backup::create_backup").count(), 1);
+        assert!(body.contains("backup::create_backup_checked("));
     }
 }

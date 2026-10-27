@@ -790,9 +790,8 @@ vi.mock('./backend', async (orig) => ({
   ...(await orig<typeof import('./backend')>()),
   agentsApi: { list: vi.fn(async () => []), tokens: vi.fn(async () => []) },
   getAppInfo: vi.fn(async () => ({ version: '0.1.0', dataDir: '/tmp/x', schemaVersion: 1 })),
-  createBackup: vi.fn(async () => '/tmp/x/backups/b.zip'),
+  createBackup: vi.fn(async () => true),
   pickBackupToRestore: vi.fn(async () => 'D:\\Backups\\picked.zip'),
-  pickBackupDestination: vi.fn(async () => 'D:\\Backups\\new.zip'),
   getRecoveryNotices: vi.fn(async () => []),
   persistImport: vi.fn(async () => storedFixture()),
   openLatestManuscript: vi.fn(async () => null),
@@ -1214,14 +1213,15 @@ describe('backup dialogs', () => {
     expect(backend.restoreBackup).toHaveBeenCalledWith('D:\\Backups\\picked.zip');
   });
 
-  it('backup uses the save-as destination', async () => {
+  it('backup lets the backend choose the destination and shows no path', async () => {
     const backend = await import('./backend');
     const wrapper = mount(App);
     await flushPromises();
     await openSettings(wrapper);
     await wrapper.find('[data-test="backup-button"]').trigger('click');
     await flushPromises();
-    expect(backend.createBackup).toHaveBeenCalledWith('D:\\Backups\\new.zip', true);
+    expect(backend.createBackup).toHaveBeenCalledWith();
+    expect(wrapper.find('[data-test="backup-status"]').text()).toBe('Backup saved.');
   });
 });
 
