@@ -250,7 +250,7 @@ fn load_notices(data_dir: &Path) -> std::io::Result<Vec<RecoveryNotice>> {
             rename_retry(&p, &kept)?;
             sync_dir(data_dir);
             eprintln!(
-                "coAuthor: recovery notice file was unreadable ({err}); kept as {}",
+                "swarmDraft: recovery notice file was unreadable ({err}); kept as {}",
                 kept.display()
             );
             let mut n = RecoveryNotice::new(
@@ -261,7 +261,7 @@ fn load_notices(data_dir: &Path) -> std::io::Result<Vec<RecoveryNotice>> {
             n.id = n.content_id();
             let v = vec![n];
             if let Err(e) = write_notices(data_dir, &v) {
-                eprintln!("coAuthor: could not save the recovery notice: {e}");
+                eprintln!("swarmDraft: could not save the recovery notice: {e}");
             }
             Ok(v)
         }
@@ -271,7 +271,7 @@ fn load_notices(data_dir: &Path) -> std::io::Result<Vec<RecoveryNotice>> {
 /// Recovery notices waiting to be dismissed. Reading does not clear them.
 pub fn read_recovery_notices(data_dir: &Path) -> Vec<RecoveryNotice> {
     load_notices(data_dir).unwrap_or_else(|e| {
-        eprintln!("coAuthor: recovery notice file could not be read: {e}");
+        eprintln!("swarmDraft: recovery notice file could not be read: {e}");
         let mut n = RecoveryNotice::new(
             data_dir,
             format!("the recovery notice file could not be read: {e}"),
@@ -314,7 +314,7 @@ pub fn startup_notice(data_dir: &Path, reason: String) -> RecoveryNotice {
 fn notify(data_dir: &Path, mut n: RecoveryNotice, unsaved: &mut Vec<RecoveryNotice>) {
     n.id = n.content_id();
     if let Err(e) = save_notice(data_dir, &n) {
-        eprintln!("coAuthor: could not save the recovery notice: {e}");
+        eprintln!("swarmDraft: could not save the recovery notice: {e}");
         n.save_error = Some(e.to_string());
         unsaved.push(n);
     }
@@ -384,7 +384,7 @@ fn live_restore_id(data_dir: &Path, busy: Duration) -> Result<Option<String>, ru
             Err(e) if is_busy(&e) && Instant::now() < deadline => {
                 if !logged {
                     eprintln!(
-                        "coAuthor: database is locked; waiting up to {}s before recovery",
+                        "swarmDraft: database is locked; waiting up to {}s before recovery",
                         busy.as_secs_f32()
                     );
                     logged = true;
@@ -502,7 +502,7 @@ fn recover_journal(data_dir: &Path, busy: Duration, unsaved: &mut Vec<RecoveryNo
     sync_dir(data_dir);
     if failure.is_none() {
         if let Err(e) = remove_journal(data_dir) {
-            eprintln!("coAuthor: could not remove the restore journal: {e}");
+            eprintln!("swarmDraft: could not remove the restore journal: {e}");
         }
     }
     if moved.is_some() || failure.is_some() {
@@ -684,7 +684,7 @@ fn cleanup_temp_with(data_dir: &Path, busy: Duration) -> CleanupReport {
                         },
                         &mut unsaved,
                     ),
-                    Err(err) => eprintln!("coAuthor: could not move {name} aside: {err}"),
+                    Err(err) => eprintln!("swarmDraft: could not move {name} aside: {err}"),
                 }
             }
         } else if path.is_dir() {
@@ -921,10 +921,10 @@ fn stage(store: &Store, src: &Path) -> Result<Staged, BackupError> {
         serde_json::from_str(&buf).map_err(|e| invalid(format!("bad manifest: {e}")))?
     };
     if manifest.format != FORMAT {
-        return Err(invalid("not a coAuthor backup"));
+        return Err(invalid("not a swarmDraft backup"));
     }
     if manifest.format_version > FORMAT_VERSION {
-        return Err(invalid("backup was made by a newer coAuthor"));
+        return Err(invalid("backup was made by a newer swarmDraft"));
     }
     let current = store.schema_version()?;
     if manifest.schema_version > current {
