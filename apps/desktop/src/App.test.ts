@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
-import { flushPromises, mount } from '@vue/test-utils';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
 import { docToYDoc, importDocx, readStructure, writeStructure, yDocToDoc } from '@coauthor/docx';
 import App from './App.vue';
@@ -9,6 +9,8 @@ import { PRODUCT_NAME } from './lib/brand';
 import { storedFixture } from './stored-fixture.test-helper';
 import { openSession, sessionFromDocx } from './manuscript-session';
 import { docWordCount, sectionTreeDocs } from './status/wordcount';
+
+enableAutoUnmount(afterEach);
 
 const fixture = resolve(
   __dirname,
@@ -1622,6 +1624,161 @@ describe('App UI shells (Part of #36)', () => {
     await settle();
     expect(w.find('#chapter-navigator').isVisible()).toBe(true);
     w.unmount();
+  });
+});
+
+describe('full-width toolbar (#84)', () => {
+  // The toolbar row sits between the title bar and the panel row, as a sibling of both, so it
+  // spans the window and the outline / review panels start below it.
+  const order = (w: ReturnType<typeof mount>) => {
+    const main = w.get('main.shell').element;
+    const kids = [...main.children];
+    return {
+      topbar: kids.indexOf(w.get('.topbar').element),
+      row: kids.indexOf(w.get('[data-test="toolbar-row"]').element),
+      workspace: kids.indexOf(w.get('[data-test="workspace"]').element),
+    };
+  };
+  const toolbarIn = (w: ReturnType<typeof mount>, sel: string) =>
+    w.get(sel).element.contains(w.get('[data-test="tb-navigator"]').element);
+
+  it('renders the toolbar in its own row under the title bar, before and outside the panel row', async () => {
+    const { w } = await withManuscript();
+    const o = order(w);
+    expect(o.topbar).toBeGreaterThanOrEqual(0);
+    expect(o.row).toBeGreaterThan(o.topbar);
+    expect(o.workspace).toBeGreaterThan(o.row);
+    expect(toolbarIn(w, '[data-test="toolbar-row"]')).toBe(true);
+    expect(toolbarIn(w, '[data-test="workspace"]')).toBe(false);
+    // The panels stay in the panel row, never in the toolbar row.
+    const row = w.get('[data-test="toolbar-row"]').element;
+    expect(row.contains(w.get('#chapter-navigator').element)).toBe(false);
+    expect(row.contains(w.get('[data-test="review"]').element)).toBe(false);
+    expect(
+      w.get('[data-test="workspace"]').element.contains(w.get('#chapter-navigator').element),
+    ).toBe(true);
+    w.unmount();
+  });
+
+  it('keeps the toolbar in the row when the outline and review panels are toggled', async () => {
+    const { w } = await withManuscript();
+    await w.get('[data-test="tb-navigator"]').trigger('click');
+    await w.get('[data-test="tb-review"]').trigger('click');
+    await settle();
+    expect(toolbarIn(w, '[data-test="toolbar-row"]')).toBe(true);
+    await w.get('[data-test="tb-navigator"]').trigger('click');
+    await w.get('[data-test="tb-review"]').trigger('click');
+    await settle();
+    expect(toolbarIn(w, '[data-test="toolbar-row"]')).toBe(true);
+    expect(toolbarIn(w, '[data-test="workspace"]')).toBe(false);
+    w.unmount();
+  });
+
+  it('focus mode empties the toolbar row and exiting brings the toolbar back to it', async () => {
+    const { w } = await withManuscript();
+    await w.get('[data-test="focus-mode"]').trigger('click');
+    await settle();
+    expect(w.find('[data-test="tb-navigator"]').exists()).toBe(false);
+    expect(w.get('[data-test="toolbar-row"]').element.children).toHaveLength(0);
+    await w.get('[data-test="focus-exit"]').trigger('click');
+    await settle();
+    expect(toolbarIn(w, '[data-test="toolbar-row"]')).toBe(true);
+    w.unmount();
+  });
+
+  it('Ctrl+F from a toolbar button still opens Find', async () => {
+    const { w } = await withManuscript();
+    await w.get('[data-test="tb-bold"]').trigger('keydown', { key: 'f', ctrlKey: true });
+    await settle();
+    expect(w.find('[data-test="find-panel"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('Ctrl+Shift+F from a teleported toolbar button toggles focus mode exactly once', async () => {
+    const { w } = await withManuscript();
+    const ev = new KeyboardEvent('keydown', {
+      key: 'F',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    const pd = vi.spyOn(ev, 'preventDefault');
+    w.get('[data-test="tb-bold"]').element.dispatchEvent(ev);
+    await settle();
+    expect(pd).toHaveBeenCalledTimes(1);
+    expect(w.find('[data-focus-mode]').exists()).toBe(true);
+    w.unmount();
+  });
+});
+
+describe('focus mode started from the toolbar (#87 QA)', () => {
+  const key = (el: Element, init: KeyboardEventInit) =>
+    el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+
+  it('moves focus into the page, and Ctrl+Shift+F from there exits', async () => {
+    const { w } = await withManuscript();
+    await w.get('[data-test="focus-mode"]').trigger('click');
+    await settle();
+    expect(w.find('[data-focus-mode]').exists()).toBe(true);
+    expect(document.activeElement?.closest('.ProseMirror')).not.toBeNull();
+    key(document.activeElement!, { key: 'F', ctrlKey: true, shiftKey: true });
+    await settle();
+    expect(w.find('[data-focus-mode]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('Escape and Ctrl+Shift+F exit even with focus on the body, each exactly once', async () => {
+    const { w } = await withManuscript();
+    for (const init of [{ key: 'Escape' }, { key: 'F', ctrlKey: true, shiftKey: true }]) {
+      await w.get('[data-test="focus-mode"]').trigger('click');
+      await settle();
+      (document.activeElement as HTMLElement | null)?.blur();
+      expect(document.activeElement).toBe(document.body);
+      key(document.body, init);
+      await settle();
+      expect(w.find('[data-focus-mode]').exists()).toBe(false);
+    }
+    w.unmount();
+  });
+});
+
+describe('context menu in focus mode (#87 QA)', () => {
+  it('Escape with the menu open but focus on the body also closes only the menu', async () => {
+    const { w } = await withManuscript();
+    await w.get('[data-test="focus-mode"]').trigger('click');
+    await settle();
+    await w.get('.ProseMirror').trigger('contextmenu', { clientX: 50, clientY: 50 });
+    await settle();
+    (document.activeElement as HTMLElement | null)?.blur();
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+    await settle();
+    expect(w.find('[data-test="context-menu"]').exists()).toBe(false);
+    expect(w.find('[data-focus-mode]').exists()).toBe(true);
+  });
+
+  it('Escape with the menu open closes only the menu and stays in focus mode', async () => {
+    const { w } = await withManuscript();
+    await w.get('[data-test="focus-mode"]').trigger('click');
+    await settle();
+    await w.get('.ProseMirror').trigger('contextmenu', { clientX: 50, clientY: 50 });
+    await settle();
+    const menu = w.get('[data-test="context-menu"]');
+    const target = (menu.element.querySelector('[role=menuitem]') as HTMLElement) ?? menu.element;
+    target.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+    await settle();
+    expect(w.find('[data-test="context-menu"]').exists()).toBe(false);
+    expect(w.find('[data-focus-mode]').exists()).toBe(true);
+    // With the menu closed, Escape exits focus mode as before.
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+    await settle();
+    expect(w.find('[data-focus-mode]').exists()).toBe(false);
   });
 });
 

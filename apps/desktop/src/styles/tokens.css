@@ -78,6 +78,10 @@
   --ct-space-12: 48px;
   --ct-space-16: 64px;
 
+  /* Panel widths (#90) */
+  --ct-panel-w: 400px;
+  --ct-panel-w-narrow: 320px;
+
   /* Radius */
   --ct-radius-sm: 4px;
   --ct-radius-md: 8px;
