@@ -132,3 +132,5 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #72 · comments panel used its own hashed hsl author colors, separate from the review panel · author color comes from one shared author-to-slot map (`author-colors.ts`) used by every panel
 - 2026-10-26 · #72 · module-level author slot map carried numbering over from the last manuscript opened · reset per-document caches when a manuscript opens, with an App-level test that opens a second book
 - 2026-10-26 · #75 · Grok Bot color keyed by display name allowed impostors and broke on rename · never key identity by display name; use stable ids
+- 2026-10-26 · #71 · migration notice placeholder used one v-if'd role=status block for both info and warn · keep separate always-mounted live regions per urgency (status for info, alert for warn), v-if only on inner content, with a same-node test
+- 2026-10-26 · #71 · a "below the title bar" test passed with the banner moved, because the elements between were all v-if'd off · position tests must render the neighbors they compare against

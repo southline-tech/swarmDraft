@@ -22,6 +22,7 @@ import SectionNav from './SectionNav.vue';
 import HomeScreen from './HomeScreen.vue';
 import AppLogo from './AppLogo.vue';
 import SaveFailureBanner from './errors/SaveFailureBanner.vue';
+import MigrationNoticeBanner from './migration/MigrationNoticeBanner.vue';
 import { errorLine, saveFailed, saveSucceeded, SAVE_OK } from './errors/map-error';
 import { saveCopy } from './errors/save-copy';
 import { PRODUCT_NAME } from './lib/brand';
@@ -52,9 +53,8 @@ const recoveryDismissError = ref('');
 /** Rename-migration notices (#43); their own channel, never shown as restore recovery. */
 const migrationNotices = ref<MigrationNotice[]>([]);
 
-async function dismissMigration() {
-  const ids = migrationNotices.value.map((n) => n.id);
-  migrationNotices.value = [];
+async function dismissMigration(ids: string[]) {
+  migrationNotices.value = migrationNotices.value.filter((n) => !ids.includes(n.id));
   try {
     await dismissMigrationNotices(ids);
   } catch (e) {
@@ -501,6 +501,7 @@ defineExpose({ open });
         </div>
       </details>
     </header>
+    <MigrationNoticeBanner :notices="migrationNotices" @dismiss="dismissMigration" />
     <section
       v-if="settingsOpen"
       ref="settingsPanel"
@@ -565,12 +566,6 @@ defineExpose({ open });
       <p v-else data-test="browser-mode">Running in browser mode (no desktop backend).</p>
       <AgentsSettings v-if="info" />
     </section>
-    <div v-if="migrationNotices.length" role="status" data-test="migration-notice">
-      <p v-for="n in migrationNotices" :key="n.id" :data-kind="n.kind">{{ n.text }}</p>
-      <button type="button" data-test="migration-notice-dismiss" @click="dismissMigration">
-        Dismiss
-      </button>
-    </div>
     <div v-if="recoveryNotices.length" role="alert" data-test="recovery-notice">
       <p>
         A restore was interrupted. Some attachments may be missing. {{ PRODUCT_NAME }} didn't delete

@@ -1317,6 +1317,55 @@ describe('migration notice (#71)', () => {
   });
 });
 
+describe('migration notice banner (#71)', () => {
+  it('keeps the same live regions mounted, dismisses one kind and leaves the other', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.dismissMigrationNotices).mockClear();
+    vi.mocked(backend.getMigrationNotices).mockResolvedValueOnce([
+      { id: 'migration-kept', kind: 'info', text: 'Old files kept.' },
+      { id: 'migration-locked', kind: 'warn', text: 'Close the old app.' },
+      { id: 'migration-copy-failed', kind: 'warn', text: 'Copy failed.' },
+    ]);
+    const wrapper = mount(App);
+    const alertBefore = wrapper.find('[data-test="migration-notice-warn-region"]').element;
+    const statusBefore = wrapper.find('[data-test="migration-notice-info-region"]').element;
+    expect(alertBefore).toBeTruthy();
+    await flushPromises();
+    const alert = wrapper.find('[data-test="migration-notice-warn-region"]');
+    expect(alert.element).toBe(alertBefore);
+    expect(alert.attributes('role')).toBe('alert');
+    expect(alert.text()).toContain('Close the old app.');
+    expect(alert.text()).toContain('Copy failed.');
+    await alert.find('[data-test="migration-notice-dismiss"]').trigger('click');
+    await flushPromises();
+    expect(backend.dismissMigrationNotices).toHaveBeenCalledWith([
+      'migration-locked',
+      'migration-copy-failed',
+    ]);
+    const after = wrapper.find('[data-test="migration-notice-warn-region"]');
+    expect(after.element).toBe(alertBefore);
+    expect(after.text()).toBe('');
+    const status = wrapper.find('[data-test="migration-notice-info-region"]');
+    expect(status.element).toBe(statusBefore);
+    expect(status.attributes('role')).toBe('status');
+    expect(status.text()).toContain('Old files kept.');
+  });
+
+  it('renders below the title bar, not inside or over it', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.getMigrationNotices).mockResolvedValueOnce([
+      { id: 'migration-kept', kind: 'info', text: 'Old files kept.' },
+    ]);
+    const wrapper = mount(App);
+    await flushPromises();
+    await openSettings(wrapper);
+    const region = wrapper.find('[data-test="migration-notice-region"]').element;
+    const topbar = wrapper.find('header.topbar').element;
+    expect(topbar.contains(region)).toBe(false);
+    expect(topbar.nextElementSibling).toBe(region);
+  });
+});
+
 describe('restore closes the open manuscript', () => {
   async function restore(w: ReturnType<typeof mount>) {
     await openSettings(w);
