@@ -113,3 +113,6 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #72 · comments panel used its own hashed hsl author colors, separate from the review panel · author color comes from one shared author-to-slot map (`author-colors.ts`) used by every panel
 - 2026-10-26 · #72 · module-level author slot map carried numbering over from the last manuscript opened · reset per-document caches when a manuscript opens, with an App-level test that opens a second book
 - 2026-10-26 · #75 · Grok Bot color keyed by display name allowed impostors and broke on rename · never key identity by display name; use stable ids
+- 2026-10-26 · #82 · removing external-load-error from App.vue still passed every test, and the error was then announced twice · test parent-hosted live regions with the real child component and assert exactly one role=alert holds the text
+- 2026-10-26 · #82 · useDeferredValue had no tests for a value cleared before its frame or an unmount mid-frame · cover every deferred/timer helper with fake-timer tests for cancel and unmount
+- 2026-10-26 · #82 · branch conflicted with main when review was requested · merge main and re-run all checks right before each review request
