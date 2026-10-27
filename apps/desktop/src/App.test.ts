@@ -1555,6 +1555,74 @@ describe('App UI shells (Part of #36)', () => {
   });
 });
 
+describe('full-width toolbar (#84)', () => {
+  // The toolbar row sits between the title bar and the panel row, as a sibling of both, so it
+  // spans the window and the outline / review panels start below it.
+  const order = (w: ReturnType<typeof mount>) => {
+    const main = w.get('main.shell').element;
+    const kids = [...main.children];
+    return {
+      topbar: kids.indexOf(w.get('.topbar').element),
+      row: kids.indexOf(w.get('[data-test="toolbar-row"]').element),
+      workspace: kids.indexOf(w.get('[data-test="workspace"]').element),
+    };
+  };
+  const toolbarIn = (w: ReturnType<typeof mount>, sel: string) =>
+    w.get(sel).element.contains(w.get('[data-test="tb-navigator"]').element);
+
+  it('renders the toolbar in its own row under the title bar, before and outside the panel row', async () => {
+    const { w } = await withManuscript();
+    const o = order(w);
+    expect(o.topbar).toBeGreaterThanOrEqual(0);
+    expect(o.row).toBeGreaterThan(o.topbar);
+    expect(o.workspace).toBeGreaterThan(o.row);
+    expect(toolbarIn(w, '[data-test="toolbar-row"]')).toBe(true);
+    expect(toolbarIn(w, '[data-test="workspace"]')).toBe(false);
+    // The panels stay in the panel row, never in the toolbar row.
+    const row = w.get('[data-test="toolbar-row"]').element;
+    expect(row.contains(w.get('#chapter-navigator').element)).toBe(false);
+    expect(row.contains(w.get('[data-test="review"]').element)).toBe(false);
+    expect(
+      w.get('[data-test="workspace"]').element.contains(w.get('#chapter-navigator').element),
+    ).toBe(true);
+    w.unmount();
+  });
+
+  it('keeps the toolbar in the row when the outline and review panels are toggled', async () => {
+    const { w } = await withManuscript();
+    await w.get('[data-test="tb-navigator"]').trigger('click');
+    await w.get('[data-test="tb-review"]').trigger('click');
+    await settle();
+    expect(toolbarIn(w, '[data-test="toolbar-row"]')).toBe(true);
+    await w.get('[data-test="tb-navigator"]').trigger('click');
+    await w.get('[data-test="tb-review"]').trigger('click');
+    await settle();
+    expect(toolbarIn(w, '[data-test="toolbar-row"]')).toBe(true);
+    expect(toolbarIn(w, '[data-test="workspace"]')).toBe(false);
+    w.unmount();
+  });
+
+  it('focus mode empties the toolbar row and exiting brings the toolbar back to it', async () => {
+    const { w } = await withManuscript();
+    await w.get('[data-test="focus-mode"]').trigger('click');
+    await settle();
+    expect(w.find('[data-test="tb-navigator"]').exists()).toBe(false);
+    expect(w.get('[data-test="toolbar-row"]').element.children).toHaveLength(0);
+    await w.get('[data-test="focus-exit"]').trigger('click');
+    await settle();
+    expect(toolbarIn(w, '[data-test="toolbar-row"]')).toBe(true);
+    w.unmount();
+  });
+
+  it('Ctrl+F from a toolbar button still opens Find', async () => {
+    const { w } = await withManuscript();
+    await w.get('[data-test="tb-bold"]').trigger('keydown', { key: 'f', ctrlKey: true });
+    await settle();
+    expect(w.find('[data-test="find-panel"]').exists()).toBe(true);
+    w.unmount();
+  });
+});
+
 describe('book-open toast (ob7)', () => {
   it('keeps one persistent polite live region: same node before open, after open, after dismiss (#79)', async () => {
     const backend = await import('./backend');

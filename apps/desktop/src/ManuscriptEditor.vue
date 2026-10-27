@@ -75,6 +75,9 @@ const props = defineProps<{
   saveState?: SaveState;
   /** Display name for a raw author id in the review panel (decisions still key on the id). */
   authorLabels?: (author: string) => AgentName;
+  /** Where the toolbar renders (#84): the parent's full-width row above the side panels. Without
+   *  it the toolbar stays inline above the editor body. */
+  toolbarTarget?: string;
 }>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
@@ -440,56 +443,63 @@ const LABELS: Record<ReviewItem['type'], string> = {
       will be saved. {{ loadError }}
       <button type="button" data-test="reload" @click="emit('reload')">Reload section</button>
     </p>
-    <EditorToolbar
-      v-if="editor && !focusMode"
-      :editor="editor"
-      :review-open="reviewOpen"
-      :navigator-open="props.navigatorOpen"
-      :read-only-reason="loadError ? 'document failed to load' : undefined"
-      :find-enabled="true"
-      @toggle-navigator="emit('toggle-navigator')"
-      @toggle-review="reviewOpen = !reviewOpen"
-      @find="findOpen = true"
-    >
-      <template #end>
-        <button
-          type="button"
-          class="sh-track"
-          data-test="track-changes"
-          :aria-pressed="tracking"
-          title="Track changes (preview: not recording yet)"
-          @click="tracking = !tracking"
+    <!-- #84: the toolbar moves to the parent's full-width row; its own keydown keeps the editor
+         shortcuts (Ctrl+F, Ctrl+/) working from toolbar focus, since teleported DOM no longer
+         sits inside .manuscript-editor. -->
+    <Teleport :to="props.toolbarTarget" :disabled="!props.toolbarTarget" defer>
+      <div v-if="editor && !focusMode" class="toolbar-host" @keydown="onShellKey">
+        <EditorToolbar
+          v-if="editor && !focusMode"
+          :editor="editor"
+          :review-open="reviewOpen"
+          :navigator-open="props.navigatorOpen"
+          :read-only-reason="loadError ? 'document failed to load' : undefined"
+          :find-enabled="true"
+          @toggle-navigator="emit('toggle-navigator')"
+          @toggle-review="reviewOpen = !reviewOpen"
+          @find="findOpen = true"
         >
-          <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M3 13l1-3.5L11 2.5l2.5 2.5L6.5 12z" />
-          </svg>
-          Track changes · {{ tracking ? 'On' : 'Off' }}
-        </button>
-      </template>
-      <template #menu>
-        <button
-          type="button"
-          class="sh-tbtn sh-icon"
-          data-test="shortcuts-open"
-          aria-label="Keyboard shortcuts"
-          title="Keyboard shortcuts (Ctrl+/)"
-          aria-keyshortcuts="Control+/"
-          @click="shortcutsOpen = true"
-        >
-          ?
-        </button>
-        <button
-          type="button"
-          class="sh-tbtn"
-          data-test="focus-mode"
-          title="Focus mode (Ctrl+Shift+F)"
-          aria-keyshortcuts="Control+Shift+F"
-          @click="focusMode = true"
-        >
-          Focus
-        </button>
-      </template>
-    </EditorToolbar>
+          <template #end>
+            <button
+              type="button"
+              class="sh-track"
+              data-test="track-changes"
+              :aria-pressed="tracking"
+              title="Track changes (preview: not recording yet)"
+              @click="tracking = !tracking"
+            >
+              <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M3 13l1-3.5L11 2.5l2.5 2.5L6.5 12z" />
+              </svg>
+              Track changes · {{ tracking ? 'On' : 'Off' }}
+            </button>
+          </template>
+          <template #menu>
+            <button
+              type="button"
+              class="sh-tbtn sh-icon"
+              data-test="shortcuts-open"
+              aria-label="Keyboard shortcuts"
+              title="Keyboard shortcuts (Ctrl+/)"
+              aria-keyshortcuts="Control+/"
+              @click="shortcutsOpen = true"
+            >
+              ?
+            </button>
+            <button
+              type="button"
+              class="sh-tbtn"
+              data-test="focus-mode"
+              title="Focus mode (Ctrl+Shift+F)"
+              aria-keyshortcuts="Control+Shift+F"
+              @click="focusMode = true"
+            >
+              Focus
+            </button>
+          </template>
+        </EditorToolbar>
+      </div>
+    </Teleport>
     <div class="body" :class="{ 'no-review': !reviewOpen || focusMode }">
       <!-- Auto margins (not justify-center) keep a zoomed page that is wider than the desk
            reachable: it centers when it fits and scrolls from its left edge when it does not. -->
