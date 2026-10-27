@@ -86,7 +86,7 @@ describe('page on desk', () => {
     expect(desk.find('[data-test="page"]').classes()).toContain('mx-auto');
     const page = desk.find('[data-test="page"]');
     expect(page.classes()).toEqual(
-      expect.arrayContaining(['box-border', 'w-144', 'min-h-216', 'p-18', 'bg-paper', 'shadow-2']),
+      expect.arrayContaining(['box-border', 'min-h-216', 'p-18', 'bg-paper', 'shadow-2']),
     );
     expect(page.find('.tiptap').exists()).toBe(true);
     expect(w.html()).not.toMatch(/Georgia/);
@@ -102,7 +102,8 @@ describe('page on desk', () => {
     expect(w.find('[data-test="status-bar"] [data-test="zoom-reset"]').text()).toBe('125%');
     await w.find('[data-test="zoom-in"]').trigger('click');
     expect(page().attributes('style')).toContain('zoom: 1.5');
-    expect(page().classes()).toContain('w-144');
+    // #92: the width is the fluid CSS rule (page-width.test.ts), not a fixed utility class.
+    expect(page().classes()).not.toContain('w-144');
     expect(localStorage.getItem(ZOOM_STORAGE_KEY)).toBe('150');
     w.unmount();
   });

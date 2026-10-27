@@ -19,6 +19,7 @@ import AgentsSettings from './AgentsSettings.vue';
 import { authorName, refreshAgents, reloadOnFocus } from './agent-names';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
+import { useOutlineAutoCollapse } from './desk/outline-auto-collapse';
 import HomeScreen from './HomeScreen.vue';
 import AppLogo from './AppLogo.vue';
 import SaveFailureBanner from './errors/SaveFailureBanner.vue';
@@ -107,6 +108,8 @@ function reloadSection() {
 }
 /** The chapter navigator (SectionNav); the toolbar's Chapters button toggles it. */
 const navigatorOpen = ref(true);
+/** #92: closes the outline while the review panel would squeeze the page below its minimum. */
+const outlineAuto = useOutlineAutoCollapse(navigatorOpen);
 
 /** First-run welcome (ob4) shows once; the flag survives restarts and updates. */
 const WELCOMED_KEY = 'coauthor.welcomed';
@@ -738,7 +741,8 @@ defineExpose({ open });
         external-load-error
         @load-error="editorLoadError = $event"
         @reload="reloadSection"
-        @toggle-navigator="navigatorOpen = !navigatorOpen"
+        @toggle-navigator="outlineAuto.toggleByHand()"
+        @layout="outlineAuto.update($event)"
         @focus-mode="focusMode = $event"
       />
     </div>

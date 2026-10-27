@@ -8,6 +8,7 @@
  * from other writers are content-checked before they apply. `content` opens an unbound snapshot.
  */
 import { computed, onBeforeUnmount, onMounted, shallowRef, toRaw, watch } from 'vue';
+import type { EditorLayout } from './desk/outline-auto-collapse';
 import { EditorContent, useEditor } from '@tiptap/vue-3';
 import type { Editor, EditorOptions, JSONContent } from '@tiptap/core';
 import { Selection } from '@tiptap/pm/state';
@@ -94,6 +95,8 @@ const emit = defineEmits<{
   'focus-mode': [on: boolean];
   /** The current load error ('' when none, and on unmount); for a parent-hosted live region. */
   'load-error': [message: string];
+  /** Desk room and review-panel visibility, for the parent's outline auto-collapse (#92). */
+  layout: [layout: EditorLayout];
 }>();
 
 /* UI shells for the audit review (Part of #36). Local view state only: none of these change the
@@ -246,6 +249,29 @@ function onKeydown(ev: KeyboardEvent) {
   else decideCurrent(action === 'accept' ? 'accept' : 'reject');
 }
 onMounted(() => window.addEventListener('keydown', onKeydown, true));
+
+/* #92: report the desk's width and whether the review panel shows, so the parent can close the
+   outline while the page would drop below its minimum width. */
+const deskEl = shallowRef<HTMLElement | null>(null);
+const deskWidth = shallowRef(0);
+const marginNotesShown = computed(
+  () => !focusMode.value && review.value.some((r) => r.type !== 'comment_anchor'),
+);
+const layout = computed<EditorLayout>(() => ({
+  reviewShown: reviewOpen.value && !collapsed.value && !focusMode.value,
+  deskWidth: deskWidth.value,
+  marginNotes: marginNotesShown.value,
+}));
+watch(layout, (l) => emit('layout', l), { immediate: true });
+let deskObserver: ResizeObserver | null = null;
+onMounted(() => {
+  if (!deskEl.value || typeof ResizeObserver === 'undefined') return;
+  deskObserver = new ResizeObserver(() => {
+    deskWidth.value = deskEl.value?.clientWidth ?? 0;
+  });
+  deskObserver.observe(deskEl.value);
+});
+onBeforeUnmount(() => deskObserver?.disconnect());
 
 /** Status bar counts (RAD-256), recounted off the typing path. */
 const chapterWords = shallowRef<number>();
@@ -507,10 +533,10 @@ const LABELS: Record<ReviewItem['type'], string> = {
     <div class="body" :class="{ 'no-review': !reviewOpen || focusMode }">
       <!-- Auto margins (not justify-center) keep a zoomed page that is wider than the desk
            reachable: it centers when it fits and scrolls from its left edge when it does not. -->
-      <div class="desk relative flex min-w-0 overflow-auto bg-bg" data-test="desk">
+      <div ref="deskEl" class="desk relative flex min-w-0 overflow-auto bg-bg" data-test="desk">
         <FindPanel v-if="findOpen && !focusMode" :editor="editor" @close="findOpen = false" />
         <div
-          class="page-sheet box-border mx-auto mt-8 mb-8 h-fit min-h-216 w-144 flex-none bg-paper p-18 text-text shadow-2"
+          class="page-sheet box-border mx-auto mt-8 mb-8 h-fit min-h-216 flex-none bg-paper p-18 text-text shadow-2"
           data-test="page"
           :style="{ zoom: zoom / 100 }"
         >
@@ -544,7 +570,12 @@ const LABELS: Record<ReviewItem['type'], string> = {
           </div>
         </div>
       </div>
-      <div v-if="reviewOpen && !focusMode" class="review" data-test="review">
+      <div
+        v-if="reviewOpen && !focusMode"
+        class="review"
+        :class="{ 'review--collapsed': collapsed }"
+        data-test="review"
+      >
         <ReviewPanel
           :items="suggestions"
           :load-failed="!!loadError"
@@ -664,8 +695,14 @@ const LABELS: Record<ReviewItem['type'], string> = {
   min-height: 0;
 }
 /* 6x9 in trim (576x864 px at 100%), 72 px margins -> 432 px text block. A rule marks each 864 px
-   page height until real pagination lands (RAD-227). */
+   page height until real pagination lands (RAD-227).
+   #92: on a narrow desk the page narrows with it, min(576px, desk minus the side gutters and any
+   margin notes), never below 440px. The parent closes the outline before it would go lower. */
 .manuscript-editor .page-sheet {
+  width: max(
+    var(--ct-page-min-w),
+    min(var(--ct-page-w), 100% - 2 * var(--ct-page-gutter) - var(--ct-page-notes-room))
+  );
   background-image: repeating-linear-gradient(
     to bottom,
     transparent 0 863px,
@@ -743,6 +780,27 @@ const LABELS: Record<ReviewItem['type'], string> = {
 .tiptap .comment-anchor {
   background: var(--ct-comment-bg);
   color: inherit;
+}
+.manuscript-editor .desk:has(> .sh-margin) {
+  --ct-page-notes-room: var(--ct-margin-notes-w);
+}
+/* #92: the review panel never narrows below --ct-panel-w-narrow to make room for the page. */
+.manuscript-editor .review:not(.review--collapsed) {
+  box-sizing: border-box;
+  width: var(--ct-panel-w);
+  min-width: var(--ct-panel-w-narrow);
+}
+.manuscript-editor .review:not(.review--collapsed) > * {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+/* Below 1200px the open panel is exactly --ct-panel-w-narrow, so its contents can't widen it over
+   the page (#90/#92). */
+@media (max-width: 1199.98px) {
+  .manuscript-editor .review:not(.review--collapsed) {
+    width: var(--ct-panel-w-narrow);
+  }
 }
 .manuscript-editor .review {
   display: flex;
