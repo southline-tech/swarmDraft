@@ -554,7 +554,12 @@ const LABELS: Record<ReviewItem['type'], string> = {
           </div>
         </div>
       </div>
-      <div v-if="reviewOpen && !focusMode" class="review" data-test="review">
+      <div
+        v-if="reviewOpen && !focusMode"
+        class="review"
+        :class="{ 'review--collapsed': collapsed }"
+        data-test="review"
+      >
         <ReviewPanel
           :items="suggestions"
           :load-failed="!!loadError"
@@ -762,6 +767,23 @@ const LABELS: Record<ReviewItem['type'], string> = {
 }
 .manuscript-editor .review > :first-child {
   flex: 1;
+}
+/* #90: the open review column has a fixed width (400px; 320px below 1200px), so its contents
+   (e.g. the comments empty state) can't widen it over the page. The desk keeps the rest and
+   scrolls the page, which never sits under a panel. The collapsed rail keeps its own width. */
+.manuscript-editor .review:not(.review--collapsed) {
+  box-sizing: border-box;
+  width: calc(var(--ct-space-10) * 10);
+}
+.manuscript-editor .review:not(.review--collapsed) > * {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+@media (max-width: 1199.98px) {
+  .manuscript-editor .review:not(.review--collapsed) {
+    width: calc(var(--ct-space-16) * 5);
+  }
 }
 .manuscript-editor .comments-empty {
   margin-top: var(--ct-space-4);
