@@ -4,10 +4,9 @@ import type { CommentRow, CommentThread, SuggestionItem } from '@coauthor/editor
 import { collabSlotOf, resetCollabSlots } from './author-colors';
 import CommentsPanel from './comments/CommentsPanel.vue';
 import ReviewPanel from './review/ReviewPanel.vue';
-import { GROK_BOT } from './review/review-state';
 
 const NAMES: Record<string, string> = {
-  'agent:g': GROK_BOT,
+  'agent:g': 'Grok Bot',
   'agent:e': 'Line editor',
   Mara: 'Mara',
 };
@@ -36,13 +35,46 @@ const comment = (id: string, author: string): CommentRow => {
 describe('shared author colors (#72)', () => {
   beforeEach(resetCollabSlots);
 
-  it('gives Grok Bot collab-1 and other authors distinct slots, wrapping only past the palette', () => {
-    expect(collabSlotOf('agent:g', GROK_BOT)).toBe(1);
-    const slots = ['a', 'b', 'c', 'd', 'e', 'f', 'h'].map((k) => collabSlotOf(k, k));
-    expect(new Set(slots).size).toBe(7);
-    expect(slots.every((s) => s >= 2 && s <= 8)).toBe(true);
-    expect(collabSlotOf('a', 'a')).toBe(slots[0]);
-    expect(collabSlotOf('overflow', 'overflow')).toBe(2);
+  it('assigns slots 1..8 in first-seen order, stable per key, wrapping past the palette', () => {
+    const slots = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map((k) => collabSlotOf(k));
+    expect(slots).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(collabSlotOf('a')).toBe(1);
+    expect(collabSlotOf('overflow')).toBe(1);
+  });
+
+  it('gives an agent named "Grok Bot" no special slot (impostor)', () => {
+    const w = mount(ReviewPanel, {
+      props: {
+        items: [sugg('s1', 'Mara'), sugg('s2', 'agent:x')],
+        labels: (a: string) => ({ name: a === 'agent:x' ? 'Grok Bot' : a }),
+      },
+    });
+    const vars = w
+      .findAll('[data-suggester]')
+      .map((e) => (e.element as HTMLElement).style.getPropertyValue('--ct-suggester'));
+    expect(vars).toEqual(['var(--ct-collab-1)', 'var(--ct-collab-2)']);
+    expect(collabSlotOf('agent:x')).toBe(2);
+  });
+
+  it('keeps the same slot when an agent is renamed (same key)', async () => {
+    const names: Record<string, string> = { Mara: 'Mara', 'agent:g': 'Grok Bot' };
+    const w = mount(ReviewPanel, {
+      props: {
+        items: [sugg('s1', 'Mara'), sugg('s2', 'agent:g')],
+        labels: (a: string) => ({ name: names[a] ?? a }),
+      },
+    });
+    const tok = () =>
+      (w.findAll('[data-suggester]')[1]!.element as HTMLElement).style.getPropertyValue(
+        '--ct-suggester',
+      );
+    expect(tok()).toBe('var(--ct-collab-2)');
+    names['agent:g'] = 'Grok';
+    await w.setProps({ labels: (a: string) => ({ name: names[a] ?? a }) });
+    expect(tok()).toBe('var(--ct-collab-2)');
+    names['agent:g'] = 'Something else';
+    await w.setProps({ labels: (a: string) => ({ name: names[a] ?? a }) });
+    expect(tok()).toBe('var(--ct-collab-2)');
   });
 
   it('colors the same author with the same --ct-collab-N token in both panels', () => {
@@ -74,7 +106,8 @@ describe('shared author colors (#72)', () => {
     const mara = tokenOf(commentColor(0));
     const editor = tokenOf(commentColor(1));
     const grok = tokenOf(commentColor(2));
-    expect(grok).toBe('1');
+    // First seen in the comments panel: Mara, Line editor, Grok Bot.
+    expect([mara, editor, grok]).toEqual(['1', '2', '3']);
     expect(new Set([mara, editor, grok]).size).toBe(3);
 
     const review = [...rw.findAll('[data-suggester]')].map((e) =>

@@ -59,7 +59,7 @@ const visible = () => props.threads.filter((t) => props.showResolved || !t.resol
         <li v-for="c in t.comments" :key="c.id" data-test="comment">
           <strong
             class="comment-author agent-label"
-            :style="{ borderLeftColor: collabColor(colorKey(c), nameOf(c).name) }"
+            :style="{ borderLeftColor: collabColor(colorKey(c)) }"
             data-test="comment-author"
             ><template v-for="n in [nameOf(c)]" :key="n.name"
               ><bdi class="agent-name" dir="auto" data-test="agent-name" :title="n.name">{{

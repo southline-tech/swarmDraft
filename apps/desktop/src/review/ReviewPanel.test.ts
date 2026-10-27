@@ -82,7 +82,7 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(w.findAll('[data-test=filter-option]')[1]!.classes()).toContain('sel');
   });
 
-  it('colors each author with a distinct --ct-collab-N token, Grok Bot always collab-1', async () => {
+  it('colors each author with a distinct --ct-collab-N token, in first-seen order, never by display name', async () => {
     const many: SuggestionItem[] = ['brett', 'agent:x', 'agent:g', 'agent:y'].map((author, i) => ({
       id: `m${i}`,
       kind: 'suggestion_insert',
@@ -98,14 +98,15 @@ describe('ReviewPanel (RAD-258)', () => {
     const vars = w
       .findAll('[data-test=filter-option] .av')
       .map((e) => (e.element as HTMLElement).style.getPropertyValue('--ct-suggester'));
+    // agent:g is labelled "Grok Bot" but is third seen, so it gets collab-3, not a pinned collab-1.
     expect(vars).toEqual([
+      'var(--ct-collab-1)',
       'var(--ct-collab-2)',
       'var(--ct-collab-3)',
-      'var(--ct-collab-1)',
       'var(--ct-collab-4)',
     ]);
     const card = w.findAll('[data-test=item]')[2]!.element as HTMLElement;
-    expect(card.style.getPropertyValue('--ct-suggester')).toBe('var(--ct-collab-1)');
+    expect(card.style.getPropertyValue('--ct-suggester')).toBe('var(--ct-collab-3)');
     expect(w.html()).not.toContain('hsl(');
   });
 

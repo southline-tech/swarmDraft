@@ -198,4 +198,3 @@ export function reviewActionFor(e: KeyboardEvent): ReviewAction | null {
 
 /** Number of `--ct-collab-N` tokens in tokens.css (light and dark). */
 export const COLLAB_TOKENS = 8;
-export const GROK_BOT = 'Grok Bot';

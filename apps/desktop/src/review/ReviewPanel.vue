@@ -77,8 +77,8 @@ watch(menuOpen, (open) =>
     : document.removeEventListener('mousedown', onDocDown),
 );
 onBeforeUnmount(() => document.removeEventListener('mousedown', onDocDown));
-/** Theme-aware author color: a --ct-collab-N token, distinct per author, Grok Bot = collab-1. */
-const hue = (a: string) => ({ '--ct-suggester': collabColor(a, parts(a).name) });
+/** Theme-aware author color: a --ct-collab-N token keyed by the raw author id, never the name. */
+const hue = (a: string) => ({ '--ct-suggester': collabColor(a) });
 
 /** Pending bulk decision awaiting confirmation, with the change keys it will act on. */
 const confirming = ref<{ decision: Decision; keys: string[]; authors: string[] } | null>(null);
