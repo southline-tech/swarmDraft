@@ -1,9 +1,10 @@
-//! coAuthor desktop backend.
+//! swarmDraft desktop backend.
 //!
 //! Module ownership:
 //! - `storage`: local data directory and SQLite (manuscript metadata, Yjs updates, backups).
 //! - `backup`: full-project .zip backup and validated restore (RAD-224).
 //! - `agents`: agent principals and hashed per-agent bearer tokens (RAD-205).
+//! - `migrate`: first-run copy of the pre-rename data folders (#43).
 //! - `mcp`: in-app MCP server bound to 127.0.0.1 with per-agent bearer tokens (RAD-205/209/210).
 
 pub mod agents;
@@ -12,6 +13,7 @@ pub mod backup;
 pub mod content;
 pub mod manuscripts;
 pub mod mcp;
+pub mod migrate;
 pub mod storage;
 
 use serde::Serialize;
@@ -259,7 +261,28 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
-            let report = backup::cleanup_temp(&dir);
+            // #43: copy (never move) the pre-rename data folders before anything opens them.
+            let mut migration_notices = Vec::new();
+            for new_dir in [Some(dir.clone()), app.path().app_local_data_dir().ok()]
+                .into_iter()
+                .flatten()
+            {
+                let Some(old_dir) = migrate::old_dir_for(&new_dir) else {
+                    continue;
+                };
+                if let Err(e) = migrate::migrate(&old_dir, &new_dir) {
+                    eprintln!("swarmDraft: could not copy {}: {e}", old_dir.display());
+                    migration_notices.push(backup::startup_notice(
+                        &dir,
+                        format!(
+                            "swarmDraft couldn't copy your earlier documents ({e}). The originals are untouched in {}.",
+                            old_dir.display()
+                        ),
+                    ));
+                }
+            }
+            let mut report = backup::cleanup_temp(&dir);
+            report.unsaved_notices.extend(migration_notices);
             app.manage(UnsavedNotices(std::sync::Mutex::new(
                 report.unsaved_notices,
             )));
@@ -307,5 +330,5 @@ pub fn run() {
             mcp_status
         ])
         .run(tauri::generate_context!())
-        .expect("error while running coAuthor");
+        .expect("error while running swarmDraft");
 }

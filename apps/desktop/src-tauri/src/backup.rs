@@ -303,6 +303,13 @@ fn save_notice(data_dir: &Path, n: &RecoveryNotice) -> std::io::Result<()> {
     write_notices(data_dir, &all)
 }
 
+/// An in-memory notice for a startup problem outside restore (e.g. the #43 data copy failed).
+pub fn startup_notice(data_dir: &Path, reason: String) -> RecoveryNotice {
+    let mut n = RecoveryNotice::new(data_dir, reason);
+    n.id = n.content_id();
+    n
+}
+
 /// Save a notice; if that fails, log it and keep it in `unsaved` so the UI still shows it.
 fn notify(data_dir: &Path, mut n: RecoveryNotice, unsaved: &mut Vec<RecoveryNotice>) {
     n.id = n.content_id();
