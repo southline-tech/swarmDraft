@@ -82,6 +82,14 @@
   --ct-panel-w: 400px;
   --ct-panel-w-narrow: 320px;
 
+  /* Page column (#92): fluid between the min and full 6x9 width, with side gutters on the desk */
+  --ct-page-w: 576px;
+  --ct-page-min-w: 440px;
+  --ct-page-gutter: var(--ct-space-6);
+  --ct-margin-notes-w: 104px;
+  /* Room taken beside the page; the desk sets it to --ct-margin-notes-w while notes show */
+  --ct-page-notes-room: 0px;
+
   /* Radius */
   --ct-radius-sm: 4px;
   --ct-radius-md: 8px;
