@@ -110,3 +110,6 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #44 · accept/reject shortcuts fired while focus mode hid the review panel · every shortcut that acts on panel content must check the same visibility conditions as the panel
 - 2026-10-26 · #79 · error banners created their role=alert region together with the text · keep an assertive region mounted and insert error text a frame later
 - 2026-10-26 · #79 · live-region tests passed on the component while parents v-if'd it, so the region still mounted with its text · test live regions at the parent level: region exists before the content, same node after it appears and after it clears
+- 2026-10-26 · #72 · comments panel used its own hashed hsl author colors, separate from the review panel · author color comes from one shared author-to-slot map (`author-colors.ts`) used by every panel
+- 2026-10-26 · #72 · module-level author slot map carried numbering over from the last manuscript opened · reset per-document caches when a manuscript opens, with an App-level test that opens a second book
+- 2026-10-26 · #75 · Grok Bot color keyed by display name allowed impostors and broke on rename · never key identity by display name; use stable ids
