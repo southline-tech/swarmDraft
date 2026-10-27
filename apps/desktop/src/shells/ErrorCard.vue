@@ -1,5 +1,9 @@
 <script setup lang="ts">
-/** ob9: plain-language error card, and (variant="banner") the save-failure banner. Visual only. */
+/**
+ * ob9: plain-language error card, and (variant="banner") the save-failure banner. Visual only.
+ * No live role of its own: the parent keeps a persistent assertive region mounted and renders
+ * this card inside it, so the region exists before the error text (#79).
+ */
 import ShellIcon from './ShellIcon.vue';
 defineProps<{
   icon: 'alert' | 'lock' | 'disk' | 'save';
@@ -16,7 +20,6 @@ const emit = defineEmits<{ action: [] }>();
   <section
     class="ec"
     :class="[`ec--${tone}`, variant === 'banner' ? 'ec--banner' : '']"
-    role="alert"
     :data-test="variant === 'banner' ? 'save-failure-banner' : 'error-card'"
   >
     <span class="ec__icon"><ShellIcon :name="icon" /></span>
