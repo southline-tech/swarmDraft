@@ -7,6 +7,7 @@
  */
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { PRODUCT_NAME } from './lib/brand';
 
 export const CLOSE_FLUSH_TIMEOUT_MS = 3000;
 export const UNSAVED_QUIT_PROMPT = "Some edits aren't saved. Quit anyway?";
@@ -35,7 +36,7 @@ export function flushWithTimeout(
 export async function confirmQuit(message = UNSAVED_QUIT_PROMPT): Promise<boolean> {
   try {
     const { ask } = await import('@tauri-apps/plugin-dialog');
-    return await ask(message, { title: 'coAuthor', kind: 'warning' });
+    return await ask(message, { title: PRODUCT_NAME, kind: 'warning' });
   } catch {
     return window.confirm(message);
   }

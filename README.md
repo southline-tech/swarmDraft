@@ -1,4 +1,4 @@
-# coAuthor
+# swarmDraft
 
 A local-first desktop word processor for writing books with AI collaborators. Humans and named AI
 agents work on the same manuscript; agent changes arrive as comments and suggestions that the
@@ -6,7 +6,7 @@ author approves.
 
 - Platform: Tauri desktop app (Windows first), local SQLite and files, in-app MCP server on
   `127.0.0.1`, optional Yjs sync.
-- Spec: [docs/mvp-spec.md](docs/mvp-spec.md) · Tracking: Linear project "coAuthor"
+- Spec: [docs/mvp-spec.md](docs/mvp-spec.md) · Tracking: Linear project "coAuthor" (product renamed to swarmDraft)
 
 ## Repository layout
 

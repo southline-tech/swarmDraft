@@ -9,8 +9,11 @@ import {
   restoreBackup,
   getRecoveryNotices,
   dismissRecoveryNotices,
+  getMigrationNotices,
+  dismissMigrationNotices,
   type AppInfo,
   type RecoveryNotice,
+  type MigrationNotice,
 } from './backend';
 import AgentsSettings from './AgentsSettings.vue';
 import { authorName, refreshAgents, reloadOnFocus } from './agent-names';
@@ -19,6 +22,7 @@ import SectionNav from './SectionNav.vue';
 import HomeScreen from './HomeScreen.vue';
 import AppLogo from './AppLogo.vue';
 import SaveFailureBanner from './errors/SaveFailureBanner.vue';
+import MigrationNoticeBanner from './migration/MigrationNoticeBanner.vue';
 import {
   errorLine,
   saveFailed,
@@ -53,6 +57,17 @@ async function focusEditor(id: string) {
 /** Notices from startup recovery after an interrupted restore; kept until dismissed. */
 const recoveryNotices = ref<RecoveryNotice[]>([]);
 const recoveryDismissError = ref('');
+/** Rename-migration notices (#43); their own channel, never shown as restore recovery. */
+const migrationNotices = ref<MigrationNotice[]>([]);
+
+async function dismissMigration(ids: string[]) {
+  migrationNotices.value = migrationNotices.value.filter((n) => !ids.includes(n.id));
+  try {
+    await dismissMigrationNotices(ids);
+  } catch (e) {
+    console.error('Dismiss migration notice failed', e);
+  }
+}
 
 async function dismissRecovery() {
   try {
@@ -169,6 +184,11 @@ onBeforeUnmount(() => {
 onMounted(async () => {
   info.value = await getAppInfo();
   if (info.value) {
+    try {
+      migrationNotices.value = await getMigrationNotices();
+    } catch {
+      migrationNotices.value = [];
+    }
     try {
       recoveryNotices.value = await getRecoveryNotices();
       // Raw reasons stay in the log; the notice shows only plain copy.
@@ -534,6 +554,7 @@ defineExpose({ open });
         </div>
       </details>
     </header>
+    <MigrationNoticeBanner :notices="migrationNotices" @dismiss="dismissMigration" />
     <section
       v-if="settingsOpen"
       ref="settingsPanel"
