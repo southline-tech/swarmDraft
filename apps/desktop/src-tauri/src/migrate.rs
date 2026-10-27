@@ -10,10 +10,10 @@
 //!   app then created an empty folder) does not count as migrated: the copy is retried and the
 //!   empty folder is kept aside under a `.before-migration-*` name, never deleted. A new folder
 //!   without the marker that already holds documents is kept as is.
-//! - The database is copied as a consistent SQLite snapshot (`VACUUM INTO`) read from the old
-//!   database, never as raw `-wal`/`-shm` files, so a running coAuthor can't tear the copy. If
-//!   the old database is locked, the copy fails with a message to close coAuthor and is retried
-//!   on the next launch.
+//! - The database is copied as a consistent SQLite snapshot: the db and `-wal` are copied byte
+//!   for byte into staging, that copy is opened and checked, and `VACUUM INTO` writes the new
+//!   db. SQLite never opens anything in the old folder. If the old database keeps changing or is
+//!   locked, the copy fails with a message to close coAuthor and is retried on the next launch.
 //! - Nothing happens when there is no old folder (fresh install).
 //! - The copy goes into a hidden temp folder next to the target and is renamed into place only
 //!   once it is complete, so an interrupted copy never leaves a half-filled data folder. Stale
@@ -48,6 +48,8 @@ pub enum Outcome {
     NothingToMigrate,
     /// The old folder was copied to the new location.
     Copied,
+    /// The new folder already held documents and was kept; the old documents were not copied.
+    KeptExisting,
 }
 
 /// The pre-rename folder that sits next to `new_dir` (same parent, old identifier).
@@ -77,7 +79,11 @@ pub fn migrate(old: &Path, new: &Path) -> io::Result<Outcome> {
     if new.exists() && has_documents(new) {
         // Real work already lives here; never hide it behind a copy of the old data.
         write_marker(new)?;
-        return Ok(Outcome::AlreadyPresent);
+        return Ok(if old.join(DB_FILE).is_file() {
+            Outcome::KeptExisting
+        } else {
+            Outcome::AlreadyPresent
+        });
     }
     let tmp = parent.join(format!(
         "{TEMP_PREFIX}{}-{}",
@@ -94,14 +100,7 @@ pub fn migrate(old: &Path, new: &Path) -> io::Result<Outcome> {
     }
     if new.exists() {
         // An empty folder left by an earlier failed run: keep it aside, never delete it.
-        let secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or_default();
-        let aside = new.with_file_name(format!(
-            "{}.before-migration-{secs}",
-            new.file_name().unwrap_or_default().to_string_lossy()
-        ));
+        let aside = aside_name(new);
         if let Err(e) = fs::rename(new, &aside) {
             let _ = fs::remove_dir_all(&tmp);
             return Err(e);
@@ -119,6 +118,25 @@ pub fn migrate(old: &Path, new: &Path) -> io::Result<Outcome> {
             }
         }
     }
+}
+
+/// A `.before-migration-{secs}` name that is not taken yet (`-2`, `-3`, … within one second).
+fn aside_name(new: &Path) -> PathBuf {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
+    let base = format!(
+        "{}.before-migration-{secs}",
+        new.file_name().unwrap_or_default().to_string_lossy()
+    );
+    let mut p = new.with_file_name(&base);
+    let mut n = 2u32;
+    while p.exists() {
+        p = new.with_file_name(format!("{base}-{n}"));
+        n += 1;
+    }
+    p
 }
 
 /// Temp folders this module created for `new` in an earlier, interrupted run.
@@ -165,65 +183,89 @@ fn has_documents(dir: &Path) -> bool {
 pub const LOCKED_MESSAGE: &str =
     "The old coAuthor app is still open. Close it, then reopen swarmDraft.";
 
-/// Consistent snapshot of the old database into `dest`, read-only on the source.
+/// Plain text for any other copy failure; the technical error goes to the log only.
+pub const COPY_FAILED_MESSAGE: &str =
+    "swarmDraft couldn't bring over your earlier documents this time. They are safe in the old coAuthor folder, and swarmDraft will try again next time it opens.";
+
+/// Shown when the new folder already holds documents, so the old ones were not copied in.
+pub const KEPT_MESSAGE: &str =
+    "swarmDraft kept the documents you already made in it, so your earlier coAuthor documents were not brought over. They are still safe in the old coAuthor folder.";
+
+/// How many times a changing or locked source is re-copied before giving up.
+const SNAPSHOT_ATTEMPTS: u32 = 3;
+
+fn side_path(src: &Path, ext: &str) -> PathBuf {
+    let mut p = src.as_os_str().to_owned();
+    p.push(ext);
+    PathBuf::from(p)
+}
+
+/// (name, len, mtime) of the db and its side files, to detect a write during the copy.
+fn fingerprint(src: &Path) -> Vec<(String, u64, Option<std::time::SystemTime>)> {
+    ["", "-wal", "-shm", "-journal"]
+        .iter()
+        .filter_map(|ext| {
+            let m = fs::metadata(side_path(src, ext)).ok()?;
+            Some((ext.to_string(), m.len(), m.modified().ok()))
+        })
+        .collect()
+}
+
+/// Consistent snapshot of the old database into `dest`.
+///
+/// The old folder is never opened with SQLite (even a read-only open can create `-shm` there).
+/// Instead the db and its `-wal` are copied byte for byte into a staging folder next to `dest`,
+/// that copy is opened (SQLite replays the WAL into it), checked, and `VACUUM INTO` writes
+/// `dest`. `-shm` is not copied: it is only an index SQLite rebuilds from the `-wal`, and a
+/// live one can disagree with the copied `-wal`. If the source changes during the copy, is
+/// locked, has a hot rollback journal, or the copy fails to open or check, it is retried and
+/// then reported as [`LOCKED_MESSAGE`].
 pub fn snapshot_db(src: &Path, dest: &Path) -> io::Result<()> {
-    let busy = |e: rusqlite::Error| {
-        let locked = matches!(
-            e.sqlite_error_code(),
-            Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
-        );
-        if locked {
-            // Technical detail goes to the log; the user sees plain wording.
-            eprintln!("swarmDraft: old coAuthor database is locked: {e}");
-            io::Error::new(io::ErrorKind::WouldBlock, LOCKED_MESSAGE)
-        } else {
-            io::Error::other(format!("could not read the coAuthor database: {e}"))
+    let staging = dest.with_file_name(".snapshot-src");
+    let mut last = String::new();
+    for attempt in 0..SNAPSHOT_ATTEMPTS {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(300));
         }
-    };
-    // coAuthor closed cleanly: no -wal/-shm, so the file alone is consistent. Copy its bytes
-    // (opening it with SQLite, even read-only, would create side files in the old folder). If
-    // side files appear meanwhile, coAuthor started, so fall through to the live snapshot.
-    let side = |ext: &str| {
-        let mut p = src.as_os_str().to_owned();
-        p.push(ext);
-        Path::new(&p).exists()
-    };
-    // Header bytes 18/19 == 2 mean WAL mode, which coAuthor always uses. In rollback-journal
-    // mode a byte copy could catch a half-written page, so that mode always takes the snapshot.
-    let wal_mode = {
-        let mut h = [0u8; 20];
-        fs::File::open(src)
-            .and_then(|mut f| io::Read::read_exact(&mut f, &mut h))
-            .is_ok()
-            && h[18] == 2
-            && h[19] == 2
-    };
-    if wal_mode && !side("-wal") && !side("-shm") {
-        fs::copy(src, dest)?;
-        if !side("-wal") && !side("-shm") {
-            let ok = Connection::open(dest)
-                .and_then(|c| c.query_row("PRAGMA quick_check", [], |r| r.get::<_, String>(0)))
-                .map_err(busy)?;
-            if ok == "ok" {
-                return Ok(());
-            }
-            return Err(io::Error::other(format!(
-                "the coAuthor database looks damaged ({ok})"
-            )));
+        let _ = fs::remove_dir_all(&staging);
+        let _ = fs::remove_file(dest);
+        let r = snapshot_once(src, dest, &staging);
+        let _ = fs::remove_dir_all(&staging);
+        match r {
+            Ok(()) => return Ok(()),
+            Err(e) => last = e,
         }
-        fs::remove_file(dest)?;
     }
-    let conn = Connection::open_with_flags(
-        src,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(busy)?;
-    conn.busy_timeout(std::time::Duration::from_secs(2))
-        .map_err(busy)?;
-    let dest_str = dest
-        .to_str()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "non-UTF-8 data path"))?;
-    conn.execute("VACUUM INTO ?1", [dest_str]).map_err(busy)?;
+    let _ = fs::remove_file(dest);
+    eprintln!("swarmDraft: old coAuthor database could not be snapshotted: {last}");
+    Err(io::Error::new(io::ErrorKind::WouldBlock, LOCKED_MESSAGE))
+}
+
+fn snapshot_once(src: &Path, dest: &Path, staging: &Path) -> Result<(), String> {
+    if side_path(src, "-journal").exists() {
+        return Err("a rollback journal is present (write in progress)".into());
+    }
+    let before = fingerprint(src);
+    fs::create_dir_all(staging).map_err(|e| format!("staging: {e}"))?;
+    let copy = staging.join(DB_FILE);
+    fs::copy(src, &copy).map_err(|e| format!("copy db: {e}"))?;
+    let wal = side_path(src, "-wal");
+    if wal.exists() {
+        fs::copy(&wal, side_path(&copy, "-wal")).map_err(|e| format!("copy wal: {e}"))?;
+    }
+    if fingerprint(src) != before || side_path(src, "-journal").exists() {
+        return Err("the database changed during the copy".into());
+    }
+    let conn = Connection::open(&copy).map_err(|e| format!("open copy: {e}"))?;
+    let ok: String = conn
+        .query_row("PRAGMA quick_check", [], |r| r.get(0))
+        .map_err(|e| format!("check copy: {e}"))?;
+    if ok != "ok" {
+        return Err(format!("quick_check: {ok}"));
+    }
+    let dest_str = dest.to_str().ok_or("non-UTF-8 data path")?;
+    conn.execute("VACUUM INTO ?1", [dest_str])
+        .map_err(|e| format!("vacuum into: {e}"))?;
     Ok(())
 }
 
@@ -320,7 +362,9 @@ mod tests {
         locker
             .pragma_update(None, "journal_mode", "DELETE")
             .unwrap();
-        locker.execute_batch("BEGIN EXCLUSIVE;").unwrap();
+        locker
+            .execute_batch("BEGIN EXCLUSIVE; INSERT INTO manuscripts VALUES ('pending');")
+            .unwrap();
         let err = migrate(&old, &new).unwrap_err();
         assert_eq!(err.to_string(), LOCKED_MESSAGE);
         assert!(!new.exists());
@@ -329,7 +373,7 @@ mod tests {
             .unwrap()
             .execute_batch("CREATE TABLE manuscripts (id TEXT);")
             .unwrap();
-        locker.execute_batch("COMMIT;").unwrap();
+        locker.execute_batch("ROLLBACK;").unwrap();
         drop(locker);
         // Launch 2: the empty folder doesn't count as migrated.
         assert_eq!(migrate(&old, &new).unwrap(), Outcome::Copied);
@@ -376,8 +420,75 @@ mod tests {
             .unwrap()
             .execute("INSERT INTO manuscripts VALUES ('mine')", [])
             .unwrap();
-        assert_eq!(migrate(&old, &new).unwrap(), Outcome::AlreadyPresent);
+        assert_eq!(migrate(&old, &new).unwrap(), Outcome::KeptExisting);
         assert_eq!(rows(&new), vec!["m1".to_string(), "mine".to_string()]);
+        // The notice is one-time: the kept folder is now marked.
+        assert_eq!(migrate(&old, &new).unwrap(), Outcome::AlreadyPresent);
+    }
+
+    /// Names, bytes and mtimes of every entry under `dir`.
+    fn hash_dir(dir: &Path) -> Vec<(String, Vec<u8>, Option<std::time::SystemTime>)> {
+        snapshot(dir)
+            .into_iter()
+            .map(|(n, b)| {
+                let m = fs::metadata(dir.join(n.trim_end_matches('/')))
+                    .unwrap()
+                    .modified()
+                    .ok();
+                (n, b, m)
+            })
+            .collect()
+    }
+
+    /// Old folder with a committed row ('m2') that lives only in `-wal` and no `-shm`, as left
+    /// by a coAuthor crash. Built by copying a live db + wal, so nothing is checkpointed.
+    fn crashed_old(root: &Path) -> PathBuf {
+        let live_dir = root.join("live");
+        seed(&live_dir);
+        let live = Connection::open(live_dir.join(DB_FILE)).unwrap();
+        live.pragma_update(None, "wal_autocheckpoint", 0).unwrap();
+        live.execute("INSERT INTO manuscripts VALUES ('m2')", [])
+            .unwrap();
+        let old = root.join(OLD_IDENTIFIER);
+        fs::create_dir_all(old.join("files/sub")).unwrap();
+        fs::copy(live_dir.join(DB_FILE), old.join(DB_FILE)).unwrap();
+        fs::copy(
+            live_dir.join("coauthor.db-wal"),
+            old.join("coauthor.db-wal"),
+        )
+        .unwrap();
+        fs::write(old.join("files/sub/a.png"), [0u8, 1, 2, 255]).unwrap();
+        drop(live);
+        assert!(!old.join("coauthor.db-shm").exists());
+        old
+    }
+
+    #[test]
+    fn crash_leftovers_old_folder_is_byte_identical_after_migration() {
+        let t = tempfile::tempdir().unwrap();
+        let old = crashed_old(t.path());
+        let new = t.path().join("com.radiancelux.swarmdraft");
+        let before = hash_dir(&old);
+        assert_eq!(migrate(&old, &new).unwrap(), Outcome::Copied);
+        assert_eq!(hash_dir(&old), before, "old folder was touched");
+        assert_eq!(rows(&new), vec!["m1".to_string(), "m2".to_string()]);
+    }
+
+    #[test]
+    fn live_old_folder_is_byte_identical_after_migration() {
+        let t = tempfile::tempdir().unwrap();
+        let old = t.path().join(OLD_IDENTIFIER);
+        let new = t.path().join("com.radiancelux.swarmdraft");
+        seed(&old);
+        let live = Connection::open(old.join(DB_FILE)).unwrap();
+        live.pragma_update(None, "wal_autocheckpoint", 0).unwrap();
+        live.execute("INSERT INTO manuscripts VALUES ('m2')", [])
+            .unwrap();
+        let before = hash_dir(&old);
+        assert_eq!(migrate(&old, &new).unwrap(), Outcome::Copied);
+        assert_eq!(hash_dir(&old), before, "old folder was touched");
+        assert_eq!(rows(&new), vec!["m1".to_string(), "m2".to_string()]);
+        drop(live);
     }
 
     #[test]
@@ -392,11 +503,50 @@ mod tests {
         live.execute("INSERT INTO manuscripts VALUES ('m2')", [])
             .unwrap();
         assert!(old.join("coauthor.db-wal").exists());
+        let dest = t.path().join("snap.db");
+        snapshot_db(&old.join(DB_FILE), &dest).unwrap();
+        // No side files: everything is in the single file.
+        for ext in ["-wal", "-shm", "-journal"] {
+            assert!(!side_path(&dest, ext).exists(), "{ext} next to snapshot");
+        }
+        // The file alone holds the WAL row: open it immutable so no -wal could be consulted.
+        let uri = format!("file:{}?immutable=1", dest.display());
+        let c = Connection::open_with_flags(
+            &uri,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+        )
+        .unwrap();
+        let n: i64 = c
+            .query_row(
+                "SELECT count(*) FROM manuscripts WHERE id = 'm2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 1, "WAL row missing from the single-file snapshot");
+        // VACUUM output: rollback-journal header (bytes 18/19 == 1) and no free pages.
+        let head = fs::read(&dest).unwrap();
+        assert_eq!((head[18], head[19]), (1, 1), "not a VACUUM INTO file");
+        let free: i64 = c
+            .query_row("PRAGMA freelist_count", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(free, 0);
+        // And through migrate(): no side files land in the new folder either.
         assert_eq!(migrate(&old, &new).unwrap(), Outcome::Copied);
         assert_eq!(rows(&new), vec!["m1".to_string(), "m2".to_string()]);
-        assert!(!new.join("coauthor.db-wal").exists());
-        assert!(!new.join("coauthor.db-shm").exists());
         drop(live);
+    }
+
+    #[test]
+    fn set_aside_names_never_collide() {
+        let t = tempfile::tempdir().unwrap();
+        let new = t.path().join("com.radiancelux.swarmdraft");
+        let a = aside_name(&new);
+        fs::create_dir_all(&a).unwrap();
+        let b = aside_name(&new);
+        assert_ne!(a, b);
+        fs::create_dir_all(&b).unwrap();
+        assert_ne!(aside_name(&new), b);
     }
 
     #[test]

@@ -270,17 +270,29 @@ pub fn run() {
                 let Some(old_dir) = migrate::old_dir_for(&new_dir) else {
                     continue;
                 };
-                if let Err(e) = migrate::migrate(&old_dir, &new_dir) {
-                    eprintln!("swarmDraft: could not copy {}: {e}", old_dir.display());
-                    let text = if e.kind() == std::io::ErrorKind::WouldBlock {
-                        e.to_string()
-                    } else {
-                        format!(
-                            "swarmDraft couldn't copy your earlier documents ({e}). The originals are untouched in {}.",
+                match migrate::migrate(&old_dir, &new_dir) {
+                    Ok(migrate::Outcome::KeptExisting) => {
+                        eprintln!(
+                            "swarmDraft: kept existing documents in {}; {} not copied",
+                            new_dir.display(),
                             old_dir.display()
-                        )
-                    };
-                    migration_notices.push(backup::startup_notice(&dir, text));
+                        );
+                        migration_notices.push(backup::startup_notice(
+                            &dir,
+                            migrate::KEPT_MESSAGE.to_string(),
+                        ));
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        // Raw error and paths go to the log; the notice stays plain.
+                        eprintln!("swarmDraft: could not copy {}: {e}", old_dir.display());
+                        let text = if e.kind() == std::io::ErrorKind::WouldBlock {
+                            migrate::LOCKED_MESSAGE
+                        } else {
+                            migrate::COPY_FAILED_MESSAGE
+                        };
+                        migration_notices.push(backup::startup_notice(&dir, text.to_string()));
+                    }
                 }
             }
             let mut report = backup::cleanup_temp(&dir);
