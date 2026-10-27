@@ -13,14 +13,13 @@ import type { Decision, SuggestionItem } from '@coauthor/editor';
 import {
   authorKind,
   authorsOf,
-  collabSlots,
-  GROK_BOT,
   groupChanges,
   REVIEW_SHORTCUTS,
   visibleItems,
   type AuthorFilter,
 } from './review-state';
 import { authorName, type AgentName } from '../agent-names';
+import { collabColor } from '../author-colors';
 
 const props = withDefaults(
   defineProps<{
@@ -88,9 +87,8 @@ watch(menuOpen, (open) =>
     : document.removeEventListener('mousedown', onDocDown),
 );
 onBeforeUnmount(() => document.removeEventListener('mousedown', onDocDown));
-/** Theme-aware author color: a --ct-collab-N token, distinct per author, Grok Bot = collab-1. */
-const slots = computed(() => collabSlots(authors.value, (a) => parts(a).name === GROK_BOT));
-const hue = (a: string) => ({ '--ct-suggester': `var(--ct-collab-${slots.value.get(a) ?? 1})` });
+/** Theme-aware author color: a --ct-collab-N token keyed by the raw author id, never the name. */
+const hue = (a: string) => ({ '--ct-suggester': collabColor(a) });
 
 /** Pending bulk decision awaiting confirmation, with the change keys it will act on. */
 const confirming = ref<{ decision: Decision; keys: string[]; authors: string[] } | null>(null);

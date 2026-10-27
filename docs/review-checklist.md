@@ -111,3 +111,6 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #81/#77 · live region wrapped in parent v-if so it mounted with its text · test live regions at the parent level: same node before open, after open, after dismiss
 - 2026-10-26 · #77 · "Nothing to review"/"No comments yet" showed while the section failed to load · empty states must not show while a load error is set (looks like data loss)
 - 2026-10-26 · #77 · toast clear on a later failure and on open() was untested · test every toast clear path with fake timers, inside the auto-close window
+- 2026-10-26 · #72 · comments panel used its own hashed hsl author colors, separate from the review panel · author color comes from one shared author-to-slot map (`author-colors.ts`) used by every panel
+- 2026-10-26 · #72 · module-level author slot map carried numbering over from the last manuscript opened · reset per-document caches when a manuscript opens, with an App-level test that opens a second book
+- 2026-10-26 · #75 · Grok Bot color keyed by display name allowed impostors and broke on rename · never key identity by display name; use stable ids

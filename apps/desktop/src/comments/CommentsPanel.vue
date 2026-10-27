@@ -6,11 +6,12 @@
  */
 import { ref } from 'vue';
 import EmptyState from '../shells/EmptyState.vue';
-import { commentAuthorColor, type CommentRow, type CommentThread } from '@coauthor/editor';
+import { type CommentRow, type CommentThread } from '@coauthor/editor';
 import { agentIdOf, agentName } from '../agent-names';
+import { collabColor } from '../author-colors';
 
 /** Agents show their current display name (RAD-263); people show the stored name. */
-/** Swatch colour key: agents by id (stable across renames), people by name. */
+/** Color key (same raw id the review panel uses): agents by id (stable across renames), people by name. */
 const colorKey = (c: CommentRow) =>
   c.authorKind === 'agent' ? `agent:${agentIdOf(c.authorId) ?? c.authorId}` : c.authorName;
 
@@ -74,7 +75,7 @@ const visible = () => props.threads.filter((t) => props.showResolved || !t.resol
         <li v-for="c in t.comments" :key="c.id" data-test="comment">
           <strong
             class="comment-author agent-label"
-            :style="{ borderLeftColor: commentAuthorColor(colorKey(c)) }"
+            :style="{ borderLeftColor: collabColor(colorKey(c)) }"
             data-test="comment-author"
             ><template v-for="n in [nameOf(c)]" :key="n.name"
               ><bdi class="agent-name" dir="auto" data-test="agent-name" :title="n.name">{{

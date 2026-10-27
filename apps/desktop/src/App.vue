@@ -22,6 +22,7 @@ import ShellsPreview from './shells/ShellsPreview.vue';
 import AppToast from './shells/AppToast.vue';
 import { applyThemeParam, readPreview } from './shells/preview';
 import { flushOnClose } from './close-flush';
+import { resetCollabSlots } from './author-colors';
 import { docWordCount, outlineDocs, sectionTreeDocs } from './status/wordcount';
 import {
   importAndOpen,
@@ -235,7 +236,11 @@ const closeQuietly = (s?: ManuscriptSession | null) =>
   void s?.close().catch((err: unknown) => console.error('Edits not saved yet; retrying', err));
 
 function open(next: ManuscriptSession) {
-  if (session.value !== next) closeQuietly(session.value);
+  if (session.value !== next) {
+    closeQuietly(session.value);
+    // Author color slots are per manuscript: numbering restarts for each book opened (#72).
+    resetCollabSlots();
+  }
   // A toast from an earlier book must never describe this one; callers re-show it on success.
   dismissToast();
   saveError.value = '';
