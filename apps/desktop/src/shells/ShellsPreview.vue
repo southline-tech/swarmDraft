@@ -14,6 +14,7 @@ import EmptyState from './EmptyState.vue';
 import ErrorCard from './ErrorCard.vue';
 import ReasonLine from './ReasonLine.vue';
 import { swatchVar } from './colors';
+import { PRODUCT_NAME } from '../lib/brand';
 import PreviewWorkspace from './PreviewWorkspace.vue';
 import type * as Y from 'yjs';
 
@@ -40,7 +41,7 @@ const errors = [
     icon: 'alert',
     tone: 'danger',
     title: "This isn't a Word manuscript",
-    text: 'coAuthor can open books saved from Word. Try choosing a different file.',
+    text: `${PRODUCT_NAME} can open books saved from Word. Try choosing a different file.`,
     action: 'Choose another file',
   },
   {
@@ -68,7 +69,7 @@ const errors = [
     icon: 'save',
     tone: 'danger',
     title: "Your latest changes aren't saved yet",
-    text: "Don't close coAuthor. We'll keep trying — or save a copy somewhere else now.",
+    text: `Don't close ${PRODUCT_NAME}. We'll keep trying — or save a copy somewhere else now.`,
     action: 'Save a copy',
   },
 ] as const;
@@ -216,7 +217,7 @@ const cards = [
         icon="save"
         tone="danger"
         title="Your latest changes aren't saved yet"
-        text="Don't close coAuthor. We'll keep trying — or save a copy somewhere else now."
+        :text="`Don't close ${PRODUCT_NAME}. We'll keep trying — or save a copy somewhere else now.`"
         action="Save a copy"
         @action="stub('Save a copy')"
       />
