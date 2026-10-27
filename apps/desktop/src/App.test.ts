@@ -1513,3 +1513,60 @@ describe('App UI shells (Part of #36)', () => {
     w.unmount();
   });
 });
+
+describe('book-open toast (ob7)', () => {
+  it('shows after a successful import and says the original is untouched', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(null);
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    expect(w.find('[data-test="open-toast"]').exists()).toBe(false);
+    await chooseFile(w);
+    const toast = w.find('[data-test="open-toast"] [data-test="toast"]');
+    expect(toast.exists()).toBe(true);
+    expect(toast.attributes('aria-live')).toBe('polite');
+    expect(toast.text()).toContain('Your book is open.');
+    expect(toast.text()).toContain('original file is untouched');
+    w.unmount();
+  });
+
+  it('does not show when the import fails', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(storedFixture());
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    vi.mocked(backend.persistImport).mockRejectedValueOnce('disk full');
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(storedFixture());
+    await chooseFile(w);
+    expect(w.find('[data-test="open-error"]').exists()).toBe(true);
+    expect(w.find('[data-test="open-toast"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('does not show when the last book reopens at startup', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(storedFixture());
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    expect(w.find('[contenteditable="true"]').exists()).toBe(true);
+    expect(w.find('[data-test="open-toast"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('closes with Got it, and on its own after a few seconds', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(null);
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    await chooseFile(w);
+    await w.find('[data-test="toast-dismiss"]').trigger('click');
+    expect(w.find('[data-test="open-toast"]').exists()).toBe(false);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await chooseFile(w);
+    expect(w.find('[data-test="open-toast"]').exists()).toBe(true);
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(w.find('[data-test="open-toast"]').exists()).toBe(false);
+    vi.useRealTimers();
+    w.unmount();
+  });
+});

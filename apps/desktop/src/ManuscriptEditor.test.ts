@@ -33,6 +33,19 @@ describe('ManuscriptEditor', () => {
     w.unmount();
   });
 
+  it('shows icon-card empty states when there is nothing to review and no comments (ob8)', async () => {
+    const plain = {
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Morning came late.' }] }],
+    };
+    const w = mount(ManuscriptEditor, { props: { content: plain }, attachTo: document.body });
+    await flushPromises();
+    const cards = w.findAll('[data-test="review"] .es');
+    expect(cards.map((c) => c.find('h3').text())).toEqual(['Nothing to review', 'No comments yet']);
+    expect(w.find('.comments').exists()).toBe(false);
+    w.unmount();
+  });
+
   it('renders the document with tracked changes in the review panel and comments below it', async () => {
     const w = mount(ManuscriptEditor, { props: { content: SAMPLE_DOC }, attachTo: document.body });
     await flushPromises();
@@ -52,6 +65,7 @@ describe('ManuscriptEditor', () => {
     expect(items[0]).toContain('Comment');
     // Comments stay read-only; only suggestions get Accept/Reject.
     expect(w.find('.comments button').exists()).toBe(false);
+    expect(w.find('[data-test="comments-empty"]').exists()).toBe(false);
     w.unmount();
   });
 

@@ -148,6 +148,17 @@ describe('ReviewPanel (RAD-258)', () => {
   it('shows an empty state', () => {
     const w = mount(ReviewPanel, { props: { items: [] } });
     expect(w.find('[data-test=empty]').exists()).toBe(true);
+    // ob8: an icon card with the mockup copy, not a single line.
+    const card = w.find('.es');
+    expect(card.find('.es__icon').exists()).toBe(true);
+    expect(card.find('h3').text()).toBe('Nothing to review');
+    expect(card.text()).toContain('keep or skip');
     expect(w.find('[data-test=counter]').text()).toBe('0 of 0');
+  });
+
+  it('keeps a short line, not the empty card, when the author filter hides every change', () => {
+    const w = mount(ReviewPanel, { props: { items, filter: new Set(['nobody']) } });
+    expect(w.find('.es').exists()).toBe(false);
+    expect(w.find('[data-test=empty-filtered]').exists()).toBe(true);
   });
 });

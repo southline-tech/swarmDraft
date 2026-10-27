@@ -5,6 +5,7 @@
  * resolving and reopening here are human desktop actions.
  */
 import { ref } from 'vue';
+import EmptyState from '../shells/EmptyState.vue';
 import { commentAuthorColor, type CommentRow, type CommentThread } from '@coauthor/editor';
 import { agentIdOf, agentName } from '../agent-names';
 
@@ -38,7 +39,13 @@ const visible = () => props.threads.filter((t) => props.showResolved || !t.resol
 <template>
   <aside class="comments" aria-label="Comments">
     <h2>Comments ({{ visible().length }})</h2>
-    <p v-if="!visible().length" data-test="empty">No open comments.</p>
+    <EmptyState
+      v-if="!visible().length"
+      data-test="empty"
+      icon="comment"
+      title="No comments yet"
+      text="Select some text and choose Comment to leave yourself a note."
+    />
     <article
       v-for="t in visible()"
       :key="t.id"
