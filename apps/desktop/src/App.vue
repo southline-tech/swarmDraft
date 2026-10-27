@@ -17,6 +17,11 @@ import AgentsSettings from './AgentsSettings.vue';
 import { authorName, refreshAgents, reloadOnFocus } from './agent-names';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
+import {
+  toastPlacement,
+  useOutlineAutoCollapse,
+  type EditorLayout,
+} from './desk/outline-auto-collapse';
 import HomeScreen from './HomeScreen.vue';
 import AppLogo from './AppLogo.vue';
 import SaveFailureBanner from './errors/SaveFailureBanner.vue';
@@ -111,6 +116,15 @@ function reloadSection() {
 }
 /** The chapter navigator (SectionNav); the toolbar's Chapters button toggles it. */
 const navigatorOpen = ref(true);
+/** #92: closes the outline while the review panel would squeeze the page below its minimum. */
+const outlineAuto = useOutlineAutoCollapse(navigatorOpen);
+/** Last desk layout from the editor; the open-book toast stays on the desk (#93). */
+const editorLayout = shallowRef<EditorLayout | null>(null);
+const toastStyle = computed(() => (session.value ? toastPlacement(editorLayout.value) : null));
+function onEditorLayout(l: EditorLayout) {
+  editorLayout.value = l;
+  outlineAuto.update(l);
+}
 
 /** First-run welcome (ob4) shows once; the flag survives restarts and updates. */
 const WELCOMED_KEY = 'coauthor.welcomed';
@@ -463,6 +477,8 @@ onBeforeUnmount(() => {
 
 /** Focus mode (#56): hides the app chrome; local UI state only. */
 const focusMode = ref(false);
+/** #96: the writer opened the outline by hand while the review panel shows. */
+const outlineForced = computed(() => outlineAuto.manual.value && navigatorOpen.value);
 
 /** Title-bar breadcrumb (#52): "Book — Chapter N · Title". */
 const breadcrumb = computed(() => {
@@ -680,7 +696,7 @@ defineExpose({ open });
       :save-copy="saveCopyOfOpen"
     />
     <!-- Always mounted so the live region exists before its text (#79). -->
-    <div class="open-toast" data-test="open-toast">
+    <div class="open-toast" data-test="open-toast" :style="toastStyle ?? undefined">
       <AppToast
         :open="!!openToast && !!session"
         lead="Your book is open."
@@ -700,8 +716,15 @@ defineExpose({ open });
       @choose="chooseFile"
       @drop-file="importFile"
     />
+    <!-- #84: full-width toolbar row under the title bar; the side panels start below it. -->
     <div
-      v-else
+      v-if="session && !choosingBook"
+      id="toolbar-row"
+      class="toolbar-row"
+      data-test="toolbar-row"
+    />
+    <div
+      v-if="session && !choosingBook"
       class="workspace grid gap-4 p-4"
       :class="navigatorOpen && !focusMode ? 'grid-cols-[18rem_1fr]' : 'grid-cols-1'"
       data-test="workspace"
@@ -731,10 +754,13 @@ defineExpose({ open });
         :chapter-docs="sectionTreeDocs(session.outline.value, selectedId, session.sections)"
         :save-state="saveError ? 'offline' : undefined"
         :author-labels="authorName"
+        toolbar-target="#toolbar-row"
         external-load-error
+        :outline-forced="outlineForced"
         @load-error="editorLoadError = $event"
         @reload="reloadSection"
-        @toggle-navigator="navigatorOpen = !navigatorOpen"
+        @toggle-navigator="outlineAuto.toggleByHand()"
+        @layout="onEditorLayout"
         @focus-mode="focusMode = $event"
       />
     </div>
@@ -761,6 +787,13 @@ body {
   height: 100vh;
   overflow: auto;
   padding-bottom: 1.75rem;
+}
+.toolbar-row {
+  flex: none;
+  background: var(--ct-surface);
+}
+.toolbar-row:empty {
+  display: none;
 }
 .editor-error-region .load-error {
   margin: var(--ct-space-2) var(--ct-space-4) 0;
