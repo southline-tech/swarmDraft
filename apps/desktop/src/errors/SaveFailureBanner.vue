@@ -23,7 +23,10 @@ async function onSaveCopy() {
   try {
     const r = await props.saveCopy();
     resultFailed.value = r.status === 'failed';
-    if (r.status === 'saved') result.value = `Copy saved to ${r.path}.`;
+    if (r.status === 'saved')
+      result.value =
+        `Copy saved to ${r.path}.` +
+        (r.commentsLeftOut > 0 ? " Comments aren't included in the copy." : '');
     else if (r.status === 'failed') result.value = `${r.error.title}. ${r.error.message}`;
   } finally {
     busy.value = false;

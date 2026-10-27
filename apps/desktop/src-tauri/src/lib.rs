@@ -112,16 +112,39 @@ fn create_backup(
     Ok(dest.display().to_string())
 }
 
-/// "Save a copy" from the save-failure banner: atomically write the .docx bytes the frontend
-/// built from the in-memory manuscript to `dest` (picked in the native save dialog).
+/// "Save a copy" from the save-failure banner: the frontend sends only the .docx bytes it
+/// built from the in-memory manuscript (and the title for the default file name). The
+/// destination is picked here in the native save dialog, never taken from the webview, and
+/// written atomically. Returns the path written, or `None` if the user cancelled.
 #[tauri::command]
-fn save_manuscript_copy(
+async fn save_manuscript_copy(
+    app: tauri::AppHandle,
     store: tauri::State<'_, storage::Store>,
-    dest: String,
+    title: String,
     bytes: Vec<u8>,
-) -> Result<(), String> {
-    save_copy::write_copy(store.data_dir(), std::path::Path::new(&dest), &bytes)
-        .map_err(|e| format!("io: {e}"))
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut data_dirs = vec![store.data_dir().to_path_buf()];
+    data_dirs.extend(app.path().app_data_dir().ok());
+    data_dirs.extend(app.path().app_local_data_dir().ok());
+    tauri::async_runtime::spawn_blocking(move || {
+        let picked = app
+            .dialog()
+            .file()
+            .set_title("Save a copy")
+            .set_file_name(save_copy::default_file_name(&title))
+            .add_filter("Word document", &["docx"])
+            .blocking_save_file();
+        let Some(picked) = picked else {
+            return Ok(None);
+        };
+        let dest = picked.into_path().map_err(|e| format!("io: {e}"))?;
+        save_copy::write_copy(&data_dirs, &dest, &bytes)
+            .map(|p| Some(p.display().to_string()))
+            .map_err(|e| format!("io: {e}"))
+    })
+    .await
+    .map_err(|e| format!("io: {e}"))?
 }
 
 /// Recovery notices that could not be saved to disk; shown from memory until dismissed.

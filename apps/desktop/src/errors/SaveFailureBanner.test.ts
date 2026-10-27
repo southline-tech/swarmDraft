@@ -28,12 +28,22 @@ describe('SaveFailureBanner', () => {
     const save = vi.fn(async (): Promise<SaveCopyResult> => ({
       status: 'saved',
       path: 'D:\\b.docx',
+      commentsLeftOut: 0,
     }));
     const w = mountWith(save);
     await w.find('[data-test="save-copy"]').trigger('click');
     await flushPromises();
     expect(save).toHaveBeenCalledTimes(1);
     expect(w.find('[data-test="save-copy-result"]').text()).toBe('Copy saved to D:\\b.docx.');
+  });
+
+  it('says when comments were left out of the copy', async () => {
+    const w = mountWith(async () => ({ status: 'saved', path: 'D:\\b.docx', commentsLeftOut: 2 }));
+    await w.find('[data-test="save-copy"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test="save-copy-result"]').text()).toBe(
+      "Copy saved to D:\\b.docx. Comments aren't included in the copy.",
+    );
   });
 
   it('reports a failed copy with mapped copy', async () => {

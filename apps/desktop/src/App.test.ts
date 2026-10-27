@@ -796,8 +796,7 @@ vi.mock('./backend', async (orig) => ({
   saveSectionUpdate: vi.fn(async () => {}),
   saveOutline: vi.fn(async () => {}),
   dismissRecoveryNotices: vi.fn(async () => {}),
-  pickCopyDestination: vi.fn(async () => 'D:\\Copies\\book.docx'),
-  saveManuscriptCopy: vi.fn(async () => {}),
+  saveManuscriptCopy: vi.fn(async () => 'D:\\Copies\\book.docx'),
   restoreBackup: vi.fn(async () => ({
     tokensRevoked: 2,
     manifest: {},
@@ -825,8 +824,7 @@ describe('save-failure banner', () => {
     await w.find('[data-test="save-copy"]').trigger('click');
     await settle();
     expect(write).toHaveBeenCalledTimes(1);
-    const [dest, bytes] = write.mock.calls[0]!;
-    expect(dest).toBe('D:\\Copies\\book.docx');
+    const [, bytes] = write.mock.calls[0]!;
     expect(JSON.stringify(importDocx(bytes).sections)).toContain('ONLYINMEMORY');
     expect(w.find('[data-test="save-copy-result"]').text()).toContain('Copy saved to');
     vi.mocked(backend.saveSectionUpdate).mockReset().mockResolvedValue(undefined);

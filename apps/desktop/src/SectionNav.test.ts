@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import type { Section } from '@coauthor/schema';
 import SectionNav from './SectionNav.vue';
@@ -213,7 +213,24 @@ describe('SectionNav', () => {
     await settle();
     expect(w.props('sections')).toBe(before);
     expect(w.emitted('update:sections')).toBeUndefined();
-    expect(w.find('[data-test="save-error"]').text()).toContain('disk full');
+    const msg = w.find('[data-test="save-error"]').text();
+    expect(msg).toContain('Not saved');
+    expect(msg).toContain('Your computer is almost full');
+    w.unmount();
+  });
+
+  it('never shows raw error text when an outline save fails', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const w = setup({
+      selectedId: 'sc-2',
+      save: () => Promise.reject(new Error('SQLITE_IOERR at C:\\secret\\coauthor.db')),
+    });
+    await w.find('[data-test="move-up"]').trigger('click');
+    await settle();
+    const msg = w.find('[data-test="save-error"]').text();
+    expect(msg).toContain('Not saved');
+    expect(msg).not.toMatch(/SQLITE|secret/);
+    log.mockRestore();
     w.unmount();
   });
 

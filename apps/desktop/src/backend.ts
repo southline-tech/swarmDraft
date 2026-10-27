@@ -229,19 +229,12 @@ export async function saveOutline(
   });
 }
 
-const DOCX_FILTER = [{ name: 'Word document', extensions: ['docx'] }];
-
-/** Native save-as dialog for "Save a copy"; null if cancelled. */
-export async function pickCopyDestination(title: string): Promise<string | null> {
-  const { save } = await import('@tauri-apps/plugin-dialog');
-  const safe = title.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'Manuscript';
-  return save({ defaultPath: `${safe} (copy).docx`, filters: DOCX_FILTER });
-}
-
 /**
- * Write a "Save a copy" .docx to `dest` (from the save dialog). The backend writes it to a temp
- * file beside `dest` and renames it into place, and refuses paths inside the app data folder.
+ * "Save a copy": send only the .docx bytes (and the title for the default file name). The
+ * backend opens the native save dialog itself, so the webview never chooses the path, then
+ * writes a temp file beside it and renames it into place, refusing the app's data folders.
+ * Returns the path written, or null if the user cancelled.
  */
-export async function saveManuscriptCopy(dest: string, bytes: Uint8Array): Promise<void> {
-  await invoke('save_manuscript_copy', { dest, bytes: Array.from(bytes) });
+export async function saveManuscriptCopy(title: string, bytes: Uint8Array): Promise<string | null> {
+  return invoke<string | null>('save_manuscript_copy', { title, bytes: Array.from(bytes) });
 }

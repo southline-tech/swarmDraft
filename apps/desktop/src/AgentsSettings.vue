@@ -2,6 +2,7 @@
 /** Settings → Agents (RAD-205): create agents, mint tokens (shown once), revoke. */
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { setAgents } from './agent-names';
+import { errorLine, rawErrorText } from './errors/map-error';
 import {
   AGENT_SCOPES,
   agentsApi,
@@ -62,12 +63,23 @@ function clearToken() {
   copyFailed.value = false;
 }
 
+// Name and color rule messages from the backend are written for the user; show those as they
+// are. Anything else (database, I/O) goes through mapError so raw text never reaches the UI.
+const RULE_MESSAGE =
+  /^(name must be 1-64 characters|"[^"\n]{1,64}" is reserved; choose another agent name|an agent named "[^"\n]{1,64}" already exists; choose another name|color must look like #rrggbb)$/;
+
+function agentError(e: unknown): string {
+  const text = rawErrorText(e);
+  return RULE_MESSAGE.test(text) ? text : errorLine(e);
+}
+
 async function guard(fn: () => Promise<void>) {
   error.value = '';
   try {
     await fn();
   } catch (e) {
-    error.value = String(e);
+    console.error('Agent settings action failed', e);
+    error.value = agentError(e);
   }
 }
 

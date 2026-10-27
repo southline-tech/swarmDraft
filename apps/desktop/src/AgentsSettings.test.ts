@@ -174,6 +174,22 @@ describe('AgentsSettings', () => {
     expect(vm.$.setupState.shownToken).toBeNull();
   });
 
+  it('maps other backend errors to plain copy, never raw text', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const api = fakeApi();
+    api.create = vi.fn(async () => {
+      throw 'database is locked (code 5) at C:\\secret\\coauthor.db';
+    });
+    const w = mount(AgentsSettings, { props: { api } });
+    await w.find('input[aria-label="Agent name"]').setValue('Helper');
+    await w.find('[data-test="create-agent"]').trigger('submit');
+    await flushPromises();
+    const text = w.find('[data-test="error"]').text();
+    expect(text).not.toMatch(/database is locked|secret|code 5/);
+    expect(text.length).toBeGreaterThan(0);
+    log.mockRestore();
+  });
+
   it('shows backend errors', async () => {
     const api = fakeApi();
     api.create = vi.fn(async () => {
