@@ -35,6 +35,8 @@ use zip::write::SimpleFileOptions;
 
 use crate::storage::{StorageError, Store};
 
+/// Manifest format id. Kept as `coauthor-backup` so backups made before the rename still
+/// restore; only the default file name changed to `swarmdraft-backup-*` (#73).
 pub const FORMAT: &str = "coauthor-backup";
 pub const FORMAT_VERSION: u32 = 1;
 const DB_ENTRY: &str = "db/coauthor.db";
@@ -105,9 +107,16 @@ fn backups_dir(store: &Store) -> PathBuf {
     store.data_dir().join("backups")
 }
 
-/// Default location for a new backup: `<data dir>/backups/coauthor-backup-<unique>.zip`.
-pub fn default_backup_path(store: &Store) -> PathBuf {
-    backups_dir(store).join(format!("coauthor-backup-{}.zip", unique_suffix()))
+/// Default file name offered for a new backup: `swarmdraft-backup-<stamp>.zip`.
+pub fn backup_file_name(stamp: &str) -> String {
+    format!("swarmdraft-backup-{stamp}.zip")
+}
+
+/// Unique backup path in the backups folder. Tests only: the app never writes a backup
+/// without the save dialog (#73).
+#[cfg(test)]
+fn default_backup_path(store: &Store) -> PathBuf {
+    backups_dir(store).join(backup_file_name(&unique_suffix()))
 }
 
 fn files_dir(store: &Store) -> PathBuf {
@@ -898,6 +907,25 @@ fn is_within(path: &Path, root: &Path, case_insensitive: bool) -> bool {
     p.len() >= r.len() && p[..r.len()] == r[..]
 }
 
+/// True for UNC and admin-share forms (`\\server\share`, `\\localhost\C$`,
+/// `\\?\UNC\...`, and the same with forward slashes). Their canonical form never
+/// prefix-matches the drive-letter data folder, so they are refused outright.
+fn is_unc_like(s: &str) -> bool {
+    let s = s.replace('/', "\\");
+    if s.get(..8)
+        .is_some_and(|h| h.eq_ignore_ascii_case("\\\\?\\UNC\\"))
+    {
+        return true;
+    }
+    if s.starts_with("\\\\?\\") || s.starts_with("\\\\.\\") {
+        // Verbatim/device drive paths (`\\?\C:\...`) are local; anything else is not.
+        let rest = s.get(4..).unwrap_or("");
+        let b = rest.as_bytes();
+        return !(b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':');
+    }
+    s.starts_with("\\\\")
+}
+
 fn denied(msg: &str) -> BackupError {
     BackupError::Io(std::io::Error::new(
         std::io::ErrorKind::PermissionDenied,
@@ -908,8 +936,8 @@ fn denied(msg: &str) -> BackupError {
 /// Check a backup destination picked in the native save dialog (opened by Rust, #73) and
 /// return the real path to write. Refuses relative paths, `.`/`..` components, non-`.zip`
 /// names, a missing folder, and anything that resolves (after canonicalizing the parent, so
-/// symlinks and junctions are followed) into one of `data_dirs`, except the app's own
-/// `backups` folder. Same rules as `save_manuscript_copy` (#65).
+/// symlinks and junctions are followed) into one of `data_dirs` (the `backups` folder
+/// included), and UNC / admin-share paths. Same rules as `save_manuscript_copy` (#65).
 pub fn check_backup_dest(
     store: &Store,
     data_dirs: &[PathBuf],
@@ -917,6 +945,9 @@ pub fn check_backup_dest(
 ) -> Result<PathBuf, BackupError> {
     if !dest.is_absolute() {
         return Err(denied("backup path must be absolute"));
+    }
+    if is_unc_like(&dest.to_string_lossy()) {
+        return Err(denied("backup path is a network share"));
     }
     if dest
         .components()
@@ -940,12 +971,10 @@ pub fn check_backup_dest(
     if std::fs::symlink_metadata(&real).is_ok_and(|m| m.file_type().is_symlink()) {
         return Err(denied("backup path is a link"));
     }
-    let ci = cfg!(windows);
-    let backups = backups_dir(store);
-    let backups = backups.canonicalize().unwrap_or(backups);
-    if is_within(&real, &backups, ci) && real.parent().is_some_and(|p| is_within(p, &backups, ci)) {
-        return Ok(real);
+    if is_unc_like(&real.to_string_lossy()) {
+        return Err(denied("backup path is a network share"));
     }
+    let ci = cfg!(windows);
     let mut roots = vec![store.data_dir().to_path_buf()];
     roots.extend(data_dirs.iter().cloned());
     for dir in roots {
@@ -2589,7 +2618,7 @@ mod tests {
     }
 
     #[test]
-    fn checked_backup_refuses_data_dirs_but_allows_backups_folder() {
+    fn checked_backup_refuses_all_data_dirs_including_backups_folder() {
         let (tmp, store) = seeded();
         assert!(check_backup_dest(&store, &[], &tmp.path().join("x.zip")).is_err());
         let other = outside();
@@ -2599,8 +2628,9 @@ mod tests {
             &other.path().join("x.zip")
         )
         .is_err());
+        // The backups folder is not a write target any more (#73): refused like the rest.
         std::fs::create_dir_all(tmp.path().join("backups")).unwrap();
-        assert!(check_backup_dest(&store, &[], &tmp.path().join("backups").join("b.zip")).is_ok());
+        assert!(check_backup_dest(&store, &[], &tmp.path().join("backups").join("b.zip")).is_err());
         // Not a non-zip name, even outside.
         let out = outside();
         assert!(check_backup_dest(&store, &[], &out.path().join("evil.exe")).is_err());
@@ -2639,5 +2669,60 @@ mod tests {
             .map(|e| e.unwrap().file_name())
             .collect();
         assert_eq!(names.len(), 1, "{names:?}");
+    }
+    #[test]
+    fn unc_and_admin_share_paths_are_classified() {
+        for p in [
+            r"\\localhost\C$\Users\v\AppData\Roaming\x\b.zip",
+            r"\\server\share\b.zip",
+            r"\\?\UNC\localhost\C$\b.zip",
+            r"\\?\unc\server\share\b.zip",
+            r"\\.\pipe\x",
+            "//server/share/b.zip",
+        ] {
+            assert!(is_unc_like(p), "{p}");
+        }
+        for p in [
+            r"C:\Users\v\b.zip",
+            r"\\?\C:\Users\v\b.zip",
+            "/home/v/b.zip",
+        ] {
+            assert!(!is_unc_like(p), "{p}");
+        }
+    }
+
+    #[test]
+    fn check_backup_dest_refuses_unc_strings() {
+        let (_tmp, store) = seeded();
+        // Absolute only on Windows; on unix `//x/y` is absolute and must still be refused.
+        assert!(check_backup_dest(&store, &[], Path::new("//server/share/b.zip")).is_err());
+    }
+
+    /// #73: the window must not be able to trigger a backup write without the save dialog.
+    /// `create_backup` takes no arguments from the webview beyond the injected app/store,
+    /// and the only write it reaches is `create_backup_checked` on the dialog's path.
+    #[test]
+    fn create_backup_command_has_no_unattended_path() {
+        let src = include_str!("lib.rs");
+        let start = src.find("async fn create_backup(").expect("command exists");
+        let body = &src[start..];
+        let sig_end = body.find(") -> Result<bool, String>").unwrap();
+        let sig = &body[..sig_end];
+        let params: Vec<&str> = sig
+            .lines()
+            .skip(1)
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        assert_eq!(params.len(), 2, "unexpected webview args: {params:?}");
+        assert!(params[0].starts_with("app: tauri::AppHandle"));
+        assert!(params[1].starts_with("store: tauri::State"));
+        let end = body.find("\nfn ").unwrap_or(body.len());
+        let body = &body[..end];
+        assert!(body.contains("blocking_save_file()"));
+        assert!(!body.contains("default_backup_path"));
+        assert!(!body.contains("create_backup_to("));
+        assert_eq!(body.matches("backup::create_backup").count(), 1);
+        assert!(body.contains("backup::create_backup_checked("));
     }
 }

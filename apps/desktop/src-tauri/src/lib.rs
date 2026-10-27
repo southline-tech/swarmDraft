@@ -88,14 +88,13 @@ fn agent_token_revoke(
 }
 
 /// Write a full backup. The destination is chosen here, never taken from the webview (#73):
-/// a native save dialog opened from Rust, or with `to_backups_folder` the app's own
-/// `backups` folder. The archive is built from the store in Rust and written atomically.
+/// only a native save dialog opened from Rust, so every write needs the user's gesture.
+/// There is no unattended variant. The archive is built in Rust and written atomically.
 /// Returns `Ok(true)` when written, `Ok(false)` if the user cancelled; details go to the log.
 #[tauri::command]
 async fn create_backup(
     app: tauri::AppHandle,
     store: tauri::State<'_, storage::Store>,
-    to_backups_folder: Option<bool>,
 ) -> Result<bool, String> {
     use tauri_plugin_dialog::DialogExt;
     let store = store.inner().clone();
@@ -104,27 +103,21 @@ async fn create_backup(
     data_dirs.extend(app.path().app_data_dir().ok());
     data_dirs.extend(app.path().app_local_data_dir().ok());
     tauri::async_runtime::spawn_blocking(move || {
-        let res = if to_backups_folder.unwrap_or(false) {
-            let dest = backup::default_backup_path(&store);
-            backup::create_backup_to(&store, &version, &dest, false).map(|_| dest)
-        } else {
-            let stamp = time_stamp();
-            let picked = app
-                .dialog()
-                .file()
-                .set_title("Save backup")
-                .set_file_name(format!("swarmdraft-backup-{stamp}.zip"))
-                .add_filter("Backup", &["zip"])
-                .blocking_save_file();
-            let Some(picked) = picked else {
-                return Ok(false);
-            };
-            let dest = picked.into_path().map_err(|e| {
-                eprintln!("backup: bad dialog path: {e}");
-                "backup failed".to_string()
-            })?;
-            backup::create_backup_checked(&store, &version, &data_dirs, &dest)
+        let picked = app
+            .dialog()
+            .file()
+            .set_title("Save backup")
+            .set_file_name(backup::backup_file_name(&time_stamp()))
+            .add_filter("Backup", &["zip"])
+            .blocking_save_file();
+        let Some(picked) = picked else {
+            return Ok(false);
         };
+        let dest = picked.into_path().map_err(|e| {
+            eprintln!("backup: bad dialog path: {e}");
+            "backup failed".to_string()
+        })?;
+        let res = backup::create_backup_checked(&store, &version, &data_dirs, &dest);
         match res {
             Ok(p) => {
                 eprintln!("backup: wrote {}", p.display());
