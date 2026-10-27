@@ -37,6 +37,17 @@ describe('SaveFailureBanner', () => {
     expect(w.find('[data-test="save-copy-result"]').text()).toBe('Copy saved to D:\\b.docx.');
   });
 
+  it('shows the shared busy notice when a backup, restore or copy is running (#100)', async () => {
+    const w = mountWith(async () => ({ status: 'busy' }));
+    await w.find('[data-test="save-copy"]').trigger('click');
+    await flushPromises();
+    const r = w.find('[data-test="save-copy-result"]');
+    expect(r.text()).toBe(
+      'A backup, restore, or copy is already running. Wait for it to finish, then try again.',
+    );
+    expect(r.classes()).toContain('failed');
+  });
+
   it('says when comments were left out of the copy', async () => {
     const w = mountWith(async () => ({ status: 'saved', path: 'D:\\b.docx', commentsLeftOut: 2 }));
     await w.find('[data-test="save-copy"]').trigger('click');

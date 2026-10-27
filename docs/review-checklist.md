@@ -170,3 +170,4 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-27 · #97 · a forced-open outline left 320px page + 104px notes in a 368px desk · even a forced outline yields when page + margin notes can't fit; reopen when the panel closes or notes hide; never clip a note
 - 2026-10-27 · #97 · focus mode cleared the writer's hand-opened outline · focus-mode layouts must not reset outline choices; the outline comes back as the writer left it
 - 2026-10-27 · #97 · margin note cards touched the review panel border · notes keep --ct-space-4 to the review panel like the page; shrink the page toward 320px, then auto-close the outline (320 + 2×24 + 104 + 16)
+- 2026-10-27 · #100 · save-a-copy skipped the busy lock and wasn't modal · every file-writing dialog takes the shared lock and a parent window

@@ -14,6 +14,7 @@ import { exportDocx, yDocToDoc, type ImportedManuscript } from '@coauthor/docx';
 import { saveManuscriptCopy } from '../backend';
 import type { ManuscriptSession } from '../manuscript-session';
 import { mapError, type MappedError } from './map-error';
+import { BUSY_CODE } from './busy';
 
 /** The in-memory manuscript as a .docx (read-only: no Y.Doc is written to). */
 export function manuscriptDocx(
@@ -70,6 +71,8 @@ export function buildCopy(session: Pick<ManuscriptSession, 'title' | 'outline' |
 export type SaveCopyResult =
   | { status: 'saved'; path: string; commentsLeftOut: number }
   | { status: 'cancelled' }
+  /** A backup, restore or another copy holds the shared lock (#100); nothing was written. */
+  | { status: 'busy' }
   | { status: 'failed'; error: MappedError };
 
 export interface SaveCopyDeps {
@@ -89,6 +92,7 @@ export async function saveCopy(
     if (!path) return { status: 'cancelled' };
     return { status: 'saved', path, commentsLeftOut };
   } catch (err) {
+    if (err === BUSY_CODE) return { status: 'busy' };
     console.error('Save a copy failed', err);
     return { status: 'failed', error: mapError(err, 'save') };
   }

@@ -1225,7 +1225,10 @@ describe('backup dialogs', () => {
       'too-new',
       'This backup is from a newer version of swarmDraft. Update the app, then try again.',
     ],
-    ['busy', 'A backup or restore is already running. Wait for it to finish, then try again.'],
+    [
+      'busy',
+      'A backup, restore, or copy is already running. Wait for it to finish, then try again.',
+    ],
     [
       'restore-incomplete',
       "The restore didn't finish, so swarmDraft closed your book to keep it safe. A copy from just before the restore is in the backups folder.",
@@ -1266,7 +1269,7 @@ describe('backup dialogs', () => {
     await wrapper.find('[data-test="backup-button"]').trigger('click');
     await flushPromises();
     expect(wrapper.find('[data-test="backup-status"]').text()).toBe(
-      'A backup or restore is already running. Wait for it to finish, then try again.',
+      'A backup, restore, or copy is already running. Wait for it to finish, then try again.',
     );
     log.mockRestore();
   });
