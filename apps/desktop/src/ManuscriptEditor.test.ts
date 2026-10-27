@@ -1,5 +1,5 @@
 import { undoDepth as pmUndoDepth } from '@tiptap/pm/history';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import { SAMPLE_DOC } from './fixtures/sample';
@@ -290,3 +290,36 @@ async function typeThroughDom(editor: import('@tiptap/core').Editor, text: strin
   (editor.view as unknown as { domObserver: { flush(): void } }).domObserver.flush();
   await flushPromises();
 }
+
+describe('inline toolbar shortcuts (#87 review)', () => {
+  const fire = async (key: string, shiftKey: boolean) => {
+    const w = mount(ManuscriptEditor, { props: { content: SAMPLE_DOC }, attachTo: document.body });
+    await flushPromises();
+    const ev = new KeyboardEvent('keydown', {
+      key,
+      ctrlKey: true,
+      shiftKey,
+      bubbles: true,
+      cancelable: true,
+    });
+    const pd = vi.spyOn(ev, 'preventDefault');
+    w.get('[data-test="tb-bold"]').element.dispatchEvent(ev);
+    await flushPromises();
+    return { w, pd };
+  };
+
+  it('Ctrl+Shift+F from an inline toolbar button toggles focus mode exactly once', async () => {
+    const { w, pd } = await fire('F', true);
+    expect(pd).toHaveBeenCalledTimes(1);
+    expect(w.emitted('focus-mode')).toEqual([[true]]);
+    expect(w.find('[data-focus-mode]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('Ctrl+F from an inline toolbar button opens Find exactly once', async () => {
+    const { w, pd } = await fire('f', false);
+    expect(pd).toHaveBeenCalledTimes(1);
+    expect(w.find('[data-test="find-panel"]').exists()).toBe(true);
+    w.unmount();
+  });
+});

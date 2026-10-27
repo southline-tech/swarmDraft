@@ -1621,6 +1621,23 @@ describe('full-width toolbar (#84)', () => {
     expect(w.find('[data-test="find-panel"]').exists()).toBe(true);
     w.unmount();
   });
+
+  it('Ctrl+Shift+F from a teleported toolbar button toggles focus mode exactly once', async () => {
+    const { w } = await withManuscript();
+    const ev = new KeyboardEvent('keydown', {
+      key: 'F',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    const pd = vi.spyOn(ev, 'preventDefault');
+    w.get('[data-test="tb-bold"]').element.dispatchEvent(ev);
+    await settle();
+    expect(pd).toHaveBeenCalledTimes(1);
+    expect(w.find('[data-focus-mode]').exists()).toBe(true);
+    w.unmount();
+  });
 });
 
 describe('book-open toast (ob7)', () => {

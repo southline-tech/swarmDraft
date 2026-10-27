@@ -15,7 +15,7 @@ const rule = (body: string, sel: string) => {
 describe('review panel width (#90)', () => {
   it('the open review column has a fixed 400px token width', () => {
     const r = rule(css, '.manuscript-editor .review:not(.review--collapsed)');
-    expect(r).toContain('width: calc(var(--ct-space-10) * 10)');
+    expect(r).toContain('width: var(--ct-panel-w)');
   });
 
   it('its children fill the column instead of setting their own width', () => {
@@ -28,7 +28,7 @@ describe('review panel width (#90)', () => {
     const m = css.indexOf('@media (max-width: 1199.98px)');
     expect(m).toBeGreaterThan(-1);
     const r = rule(css.slice(m), '.manuscript-editor .review:not(.review--collapsed)');
-    expect(r).toContain('width: calc(var(--ct-space-16) * 5)');
+    expect(r).toContain('width: var(--ct-panel-w-narrow)');
   });
 
   it('the collapsed rail is exempt from the fixed width', () => {

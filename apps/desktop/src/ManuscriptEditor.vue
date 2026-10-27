@@ -461,7 +461,11 @@ const LABELS: Record<ReviewItem['type'], string> = {
          shortcuts (Ctrl+F, Ctrl+/) working from toolbar focus, since teleported DOM no longer
          sits inside .manuscript-editor. -->
     <Teleport :to="props.toolbarTarget" :disabled="!props.toolbarTarget" defer>
-      <div v-if="editor && !focusMode" class="toolbar-host" @keydown="onShellKey">
+      <div
+        v-if="editor && !focusMode"
+        class="toolbar-host"
+        @keydown="props.toolbarTarget ? onShellKey($event) : undefined"
+      >
         <EditorToolbar
           v-if="editor && !focusMode"
           :editor="editor"
@@ -773,7 +777,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
    scrolls the page, which never sits under a panel. The collapsed rail keeps its own width. */
 .manuscript-editor .review:not(.review--collapsed) {
   box-sizing: border-box;
-  width: calc(var(--ct-space-10) * 10);
+  width: var(--ct-panel-w);
 }
 .manuscript-editor .review:not(.review--collapsed) > * {
   box-sizing: border-box;
@@ -782,7 +786,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
 }
 @media (max-width: 1199.98px) {
   .manuscript-editor .review:not(.review--collapsed) {
-    width: calc(var(--ct-space-16) * 5);
+    width: var(--ct-panel-w-narrow);
   }
 }
 .manuscript-editor .comments-empty {
