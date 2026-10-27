@@ -7,6 +7,20 @@ import { ref, watch, type Ref } from 'vue';
 export const PAGE_MIN_W = 440;
 export const PAGE_GUTTER = 24;
 export const MARGIN_NOTES_W = 104;
+/** Page floor while the writer forces the outline open (#96); mirrors `--ct-page-forced-min-w`. */
+export const PAGE_FORCED_MIN_W = 320;
+
+/**
+ * #96: with the outline forced open the page may drop below 440px; then its inner side padding
+ * shrinks to --ct-space-8. True when the page column (desk minus gutters and notes) is under 440px.
+ */
+export function forcedPageNarrow(
+  forced: boolean,
+  deskWidth: number,
+  marginNotes: boolean,
+): boolean {
+  return forced && deskWidth > 0 && deskWidth < deskNeeded(marginNotes);
+}
 
 /** Desk width the page needs to stay at or above its 440px minimum, gutters (and notes) included. */
 export function deskNeeded(marginNotes: boolean): number {

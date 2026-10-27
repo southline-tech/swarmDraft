@@ -1993,6 +1993,23 @@ describe('App outline auto-collapse on a narrow desk (#92)', () => {
     w.unmount();
   });
 
+  it('marks the outline forced only while the writer holds it open with the panel shown (#96)', async () => {
+    const { w } = await withManuscript();
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    const desk = () => w.get('[data-test="desk"]');
+    ed().vm.$emit('layout', layout(true, 300));
+    await settle();
+    expect(desk().classes()).not.toContain('desk--outline-forced'); // auto-closed, not forced
+    await w.find('[data-test="tb-navigator"]').trigger('click'); // writer forces it open
+    await settle();
+    expect(ed().props('outlineForced')).toBe(true);
+    expect(desk().classes()).toContain('desk--outline-forced');
+    ed().vm.$emit('layout', layout(false, 900)); // review closes
+    await settle();
+    expect(ed().props('outlineForced')).toBe(false);
+    w.unmount();
+  });
+
   it("the writer's own Chapters toggle wins over the auto reopen", async () => {
     const { w } = await withManuscript();
     const sidebar = () => w.findComponent({ name: 'SectionNav' });

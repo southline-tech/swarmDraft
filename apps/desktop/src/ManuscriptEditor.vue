@@ -17,7 +17,7 @@ import {
   useTemplateRef,
   watch,
 } from 'vue';
-import type { EditorLayout } from './desk/outline-auto-collapse';
+import { forcedPageNarrow, type EditorLayout } from './desk/outline-auto-collapse';
 import { EditorContent, useEditor } from '@tiptap/vue-3';
 import type { Editor, EditorOptions, JSONContent } from '@tiptap/core';
 import { Selection } from '@tiptap/pm/state';
@@ -95,6 +95,9 @@ const props = defineProps<{
    * renders no inline region and reports the error through `load-error` instead.
    */
   externalLoadError?: boolean;
+  /** #96: the writer forced the outline open while the review panel shows; the page may then go
+   *  down to --ct-page-forced-min-w instead of overflowing the desk. */
+  outlineForced?: boolean;
 }>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
@@ -301,6 +304,10 @@ const deskWidth = shallowRef(0);
 const deskLeft = shallowRef(0);
 const marginNotesShown = computed(
   () => !focusMode.value && review.value.some((r) => r.type !== 'comment_anchor'),
+);
+/** #96: page under 440px in the forced state, so it gets the narrower inner padding. */
+const pageNarrow = computed(() =>
+  forcedPageNarrow(!!props.outlineForced, deskWidth.value, marginNotesShown.value),
 );
 const layout = computed<EditorLayout>(() => ({
   reviewShown: reviewOpen.value && !collapsed.value && !focusMode.value,
@@ -596,9 +603,15 @@ const LABELS: Record<ReviewItem['type'], string> = {
     <div class="body" :class="{ 'no-review': !reviewOpen || focusMode }">
       <!-- Auto margins (not justify-center) keep a zoomed page that is wider than the desk
            reachable: it centers when it fits and scrolls from its left edge when it does not. -->
-      <div ref="deskEl" class="desk relative flex min-w-0 overflow-auto bg-bg" data-test="desk">
+      <div
+        ref="deskEl"
+        class="desk relative flex min-w-0 overflow-auto bg-bg"
+        :class="{ 'desk--outline-forced': outlineForced }"
+        data-test="desk"
+      >
         <FindPanel v-if="findOpen && !focusMode" :editor="editor" @close="findOpen = false" />
         <div
+          :class="{ 'page-sheet--narrow': pageNarrow }"
           class="page-sheet box-border mx-auto mt-8 mb-8 h-fit min-h-216 flex-none bg-paper p-18 text-text shadow-2"
           data-test="page"
           :style="{ zoom: zoom / 100 }"
@@ -771,6 +784,19 @@ const LABELS: Record<ReviewItem['type'], string> = {
     transparent 0 863px,
     var(--ct-border) 863px 864px
   );
+}
+/* #96: the writer forced the outline open on a narrow desk. The page may shrink to 320px so it
+   never overflows the desk; the 24px gutters stay, so text never touches the review panel. */
+.manuscript-editor .desk--outline-forced .page-sheet {
+  width: clamp(
+    var(--ct-page-forced-min-w),
+    100% - 2 * var(--ct-page-gutter) - var(--ct-page-notes-room),
+    var(--ct-page-w)
+  );
+}
+.manuscript-editor .page-sheet.page-sheet--narrow {
+  padding-left: var(--ct-space-8);
+  padding-right: var(--ct-space-8);
 }
 .manuscript-editor .page .tiptap {
   font-family: var(--ct-font-manuscript);

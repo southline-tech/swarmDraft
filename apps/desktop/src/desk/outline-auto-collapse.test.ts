@@ -9,7 +9,7 @@ import {
   PAGE_MIN_W,
   useOutlineAutoCollapse,
 } from './outline-auto-collapse';
-import { toastPlacement } from './outline-auto-collapse';
+import { forcedPageNarrow, PAGE_FORCED_MIN_W, toastPlacement } from './outline-auto-collapse';
 
 const narrow = { reviewShown: true, deskWidth: deskNeeded(false) - 1, marginNotes: false };
 const wide = { reviewShown: true, deskWidth: 900, marginNotes: false };
@@ -123,5 +123,19 @@ describe('toastPlacement (#93)', () => {
   it('falls back to CSS until the desk is measured', () => {
     expect(toastPlacement(null)).toBeNull();
     expect(toastPlacement({ reviewShown: false, deskWidth: 0, marginNotes: false })).toBeNull();
+  });
+});
+
+describe('forced outline page (#96)', () => {
+  it('the page is narrow (tighter padding) only when forced and under 440px', () => {
+    expect(forcedPageNarrow(true, deskNeeded(false) - 1, false)).toBe(true);
+    expect(forcedPageNarrow(true, deskNeeded(false), false)).toBe(false);
+    expect(forcedPageNarrow(true, deskNeeded(true) - 1, true)).toBe(true);
+    expect(forcedPageNarrow(false, 300, false)).toBe(false);
+    expect(forcedPageNarrow(true, 0, false)).toBe(false); // not measured yet
+  });
+  it('the forced floor matches --ct-page-forced-min-w', () => {
+    const css = readFileSync(resolve(__dirname, '../styles/tokens.css'), 'utf8');
+    expect(css).toContain(`--ct-page-forced-min-w: ${PAGE_FORCED_MIN_W}px;`);
   });
 });

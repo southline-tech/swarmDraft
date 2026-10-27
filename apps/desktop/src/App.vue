@@ -482,6 +482,10 @@ onBeforeUnmount(() => {
 
 /** Focus mode (#56): hides the app chrome; local UI state only. */
 const focusMode = ref(false);
+/** #96: the writer opened the outline by hand while the review panel shows. */
+const outlineForced = computed(
+  () => outlineAuto.manual.value && navigatorOpen.value && !focusMode.value,
+);
 
 /** Title-bar breadcrumb (#52): "Book — Chapter N · Title". */
 const breadcrumb = computed(() => {
@@ -765,6 +769,7 @@ defineExpose({ open });
         :author-labels="authorName"
         toolbar-target="#toolbar-row"
         external-load-error
+        :outline-forced="outlineForced"
         @load-error="editorLoadError = $event"
         @reload="reloadSection"
         @toggle-navigator="outlineAuto.toggleByHand()"
