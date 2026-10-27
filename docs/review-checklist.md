@@ -127,3 +127,6 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #72 · comments panel used its own hashed hsl author colors, separate from the review panel · author color comes from one shared author-to-slot map (`author-colors.ts`) used by every panel
 - 2026-10-26 · #72 · module-level author slot map carried numbering over from the last manuscript opened · reset per-document caches when a manuscript opens, with an App-level test that opens a second book
 - 2026-10-26 · #75 · Grok Bot color keyed by display name allowed impostors and broke on rename · never key identity by display name; use stable ids
+- 2026-10-26 · #86 · moving a sync command to async + spawn_blocking with an unparented dialog let two restores/backups run at once over one journal · take a process-wide op lock before the dialog and hold it to the end; parent dialogs to the calling window
+- 2026-10-26 · #86 · a failed rollback was reported like a clean failure ("try again") and the stale editor stayed open · give "storage may be mid-swap" its own code; the window closes the session on it, and only claim "nothing changed" for codes that guarantee it
+- 2026-10-26 · #86 · newer-version backups and corrupt zip entries surfaced as "not a backup" / "try again" · map each error variant to its own UI code, with a test per variant

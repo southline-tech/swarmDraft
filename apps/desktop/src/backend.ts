@@ -79,7 +79,8 @@ export interface RestoreOutcome {
  * Restore a backup. The backend opens the native open dialog itself (filtered to
  * 'swarmDraft backup' .zip files), validates the archive by its contents and restores it, so
  * the webview never supplies a path (#83). Resolves to null if the user cancelled. Rejects
- * with 'not-a-backup' or 'restore-failed'; details go to the log.
+ * with 'not-a-backup', 'too-new', 'busy', 'restore-failed' (book unchanged) or
+ * 'restore-incomplete' (close the session); details go to the log.
  */
 export async function restoreBackup(): Promise<RestoreOutcome | null> {
   return invoke<RestoreOutcome | null>('restore_backup', {});

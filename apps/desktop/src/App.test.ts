@@ -1213,7 +1213,19 @@ describe('backup dialogs', () => {
 
   it.each([
     ['not-a-backup', "That file isn't a backup. Nothing was changed."],
-    ['restore-failed', "The restore didn't finish. Please try again."],
+    [
+      'restore-failed',
+      "The restore didn't finish, and your book wasn't changed. Please try again.",
+    ],
+    [
+      'too-new',
+      'This backup is from a newer version of swarmDraft. Update the app, then try again.',
+    ],
+    ['busy', 'A backup or restore is already running. Wait for it to finish, then try again.'],
+    [
+      'restore-incomplete',
+      "The restore didn't finish cleanly. Your previous work is saved in the backups folder.",
+    ],
     [new Error('io: C:\\secret\\b.zip denied'), "The restore didn't finish. Please try again."],
   ])('restore failure %s shows a plain notice only', async (err, text) => {
     const backend = await import('./backend');
@@ -1238,6 +1250,21 @@ describe('backup dialogs', () => {
     await flushPromises();
     expect(backend.createBackup).toHaveBeenCalledWith();
     expect(wrapper.find('[data-test="backup-status"]').text()).toBe('Backup saved.');
+  });
+
+  it('a backup refused as busy says another one is running (#86)', async () => {
+    const backend = await import('./backend');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(backend.createBackup).mockRejectedValueOnce('busy');
+    const wrapper = mount(App);
+    await flushPromises();
+    await openSettings(wrapper);
+    await wrapper.find('[data-test="backup-button"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-test="backup-status"]').text()).toBe(
+      'A backup or restore is already running. Wait for it to finish, then try again.',
+    );
+    log.mockRestore();
   });
 });
 
@@ -1357,6 +1384,31 @@ describe('restore closes the open manuscript', () => {
     );
     expect(w.find('[data-test="no-manuscript"]').exists()).toBe(false);
     expect(w.find('.tiptap').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('closes the session when the restore is incomplete (#86)', async () => {
+    const backend = await import('./backend');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(backend.restoreBackup).mockRejectedValueOnce('restore-incomplete');
+    const { w } = await withManuscript();
+    await restore(w);
+    expect(w.find('[data-test="backup-status"]').text()).toBe(
+      "The restore didn't finish cleanly. Your previous work is saved in the backups folder.",
+    );
+    expect(w.find('.tiptap').exists()).toBe(false);
+    log.mockRestore();
+    w.unmount();
+  });
+
+  it('keeps the session when the restore failed cleanly (#86)', async () => {
+    const backend = await import('./backend');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(backend.restoreBackup).mockRejectedValueOnce('restore-failed');
+    const { w } = await withManuscript();
+    await restore(w);
+    expect(w.find('.tiptap').exists()).toBe(true);
+    log.mockRestore();
     w.unmount();
   });
 });

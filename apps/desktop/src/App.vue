@@ -175,6 +175,19 @@ onMounted(async () => {
 });
 
 const backupStatus = ref('');
+const BUSY_NOTICE =
+  'A backup or restore is already running. Wait for it to finish, then try again.';
+/** Plain notices for the restore codes from the backend (#83, #86); anything else is generic. */
+const RESTORE_NOTICES: Record<string, string> = {
+  'not-a-backup': "That file isn't a backup. Nothing was changed.",
+  'too-new': 'This backup is from a newer version of swarmDraft. Update the app, then try again.',
+  busy: BUSY_NOTICE,
+  // Only sent when nothing was replaced or the swap was rolled back (RollbackFailed is
+  // 'restore-incomplete'), so "wasn't changed" is true.
+  'restore-failed': "The restore didn't finish, and your book wasn't changed. Please try again.",
+  'restore-incomplete':
+    "The restore didn't finish cleanly. Your previous work is saved in the backups folder.",
+};
 const confirmingRestore = ref(false);
 /** One-time notice after a restore revoked agent tokens; cleared when dismissed. */
 const tokensNotice = ref<number | null>(null);
@@ -184,7 +197,7 @@ async function onBackup(): Promise<void> {
     if (await createBackup()) backupStatus.value = 'Backup saved.';
   } catch (e) {
     console.error('backup failed', e);
-    backupStatus.value = "The backup wasn't saved. Please try again.";
+    backupStatus.value = e === 'busy' ? BUSY_NOTICE : "The backup wasn't saved. Please try again.";
   }
 }
 
@@ -206,14 +219,16 @@ async function onRestore(): Promise<void> {
     // The restore replaced storage, so the open session's in-memory docs are stale: close them
     // (stops the structure observer and unmounts the editor) so nothing can write them back.
     closeSession();
-    backupStatus.value = 'Restored. A copy of your book from just before the restore is in the backups folder.';
+    backupStatus.value =
+      'Restored. A copy of your book from just before the restore is in the backups folder.';
     tokensNotice.value = r.tokensRevoked > 0 ? r.tokensRevoked : null;
   } catch (e) {
     console.error('Restore failed', e);
+    // Storage may be mid-swap: close the session so stale in-memory docs can't be saved.
+    if (e === 'restore-incomplete') closeSession();
     backupStatus.value =
-      e === 'not-a-backup'
-        ? "That file isn't a backup. Nothing was changed."
-        : "The restore didn't finish. Please try again.";
+      (typeof e === 'string' && RESTORE_NOTICES[e]) ||
+      "The restore didn't finish. Please try again.";
   }
 }
 onBeforeUnmount(() => {
