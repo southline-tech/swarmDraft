@@ -2026,3 +2026,54 @@ describe('author color slots per manuscript (#72)', () => {
     w.unmount();
   });
 });
+
+describe('App outline auto-collapse on a narrow desk (#92)', () => {
+  const layout = (reviewShown: boolean, deskWidth: number) => ({
+    reviewShown,
+    deskWidth,
+    marginNotes: false,
+  });
+
+  it('closes the outline when the editor reports a too-narrow desk, reopens on review close', async () => {
+    const { w } = await withManuscript();
+    const sidebar = () => w.findComponent({ name: 'SectionNav' });
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    expect(sidebar().isVisible()).toBe(true);
+    ed().vm.$emit('layout', layout(true, 300));
+    await settle();
+    expect(sidebar().isVisible()).toBe(false);
+    expect(w.find('[data-test="tb-navigator"]').attributes('aria-pressed')).toBe('false');
+    // Real toggle: the toolbar's review button closes the panel, and the editor reports it.
+    await w.find('[data-test="tb-review"]').trigger('click');
+    await settle();
+    expect(sidebar().isVisible()).toBe(true);
+    w.unmount();
+  });
+
+  it('keeps the open-book toast centred on the desk, clear of the review panel (#93)', async () => {
+    const { w } = await withManuscript();
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    // 1024px window, outline auto-closed: desk 16..688, review panel from 688.
+    ed().vm.$emit('layout', { ...layout(true, 672), deskLeft: 16 });
+    await settle();
+    const style = w.find('[data-test="open-toast"]').attributes('style') ?? '';
+    expect(style).toContain('left: 352px');
+    expect(style).toContain('max-width: 624px');
+    w.unmount();
+  });
+
+  it("the writer's own Chapters toggle wins over the auto reopen", async () => {
+    const { w } = await withManuscript();
+    const sidebar = () => w.findComponent({ name: 'SectionNav' });
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    const chapters = w.find('[data-test="tb-navigator"]');
+    ed().vm.$emit('layout', layout(true, 300));
+    await settle();
+    await chapters.trigger('click'); // reopen by hand
+    await chapters.trigger('click'); // and close by hand
+    ed().vm.$emit('layout', layout(false, 900));
+    await settle();
+    expect(sidebar().isVisible()).toBe(false);
+    w.unmount();
+  });
+});

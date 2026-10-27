@@ -295,7 +295,7 @@
 }
 .sh-margin {
   position: relative;
-  width: 104px;
+  width: var(--ct-margin-notes-w);
   flex: none;
   margin-top: 8rem;
   display: flex;
