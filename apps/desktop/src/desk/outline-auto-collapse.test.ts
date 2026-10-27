@@ -28,6 +28,17 @@ describe('outline auto-collapse (#92)', () => {
     expect(a.autoClosed.value).toBe(true);
   });
 
+  it('a hand toggle while the review panel is closed does not stop a later auto-close (#93)', () => {
+    const a = setup();
+    a.update(closed);
+    a.toggleByHand(); // close Chapters
+    a.toggleByHand(); // and open it again, panel still closed
+    expect(a.manual.value).toBe(false);
+    a.update(narrow); // now open the review panel on a narrow desk
+    expect(a.nav.value).toBe(false);
+    expect(a.autoClosed.value).toBe(true);
+  });
+
   it('reopens it when the review panel closes', () => {
     const a = setup();
     a.update(narrow);

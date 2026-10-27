@@ -70,7 +70,8 @@ export function useOutlineAutoCollapse(navigatorOpen: Ref<boolean>) {
   function toggleByHand() {
     navigatorOpen.value = !navigatorOpen.value;
     autoClosed.value = false;
-    manual.value = true;
+    // Only a choice made while the review panel shows overrides auto-collapse (#93 review).
+    if (layout.value?.reviewShown) manual.value = true;
   }
 
   // The writer toggled while no review panel shows: nothing pending to restore.
