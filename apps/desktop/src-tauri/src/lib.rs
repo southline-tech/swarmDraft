@@ -272,13 +272,15 @@ pub fn run() {
                 };
                 if let Err(e) = migrate::migrate(&old_dir, &new_dir) {
                     eprintln!("swarmDraft: could not copy {}: {e}", old_dir.display());
-                    migration_notices.push(backup::startup_notice(
-                        &dir,
+                    let text = if e.kind() == std::io::ErrorKind::WouldBlock {
+                        e.to_string()
+                    } else {
                         format!(
                             "swarmDraft couldn't copy your earlier documents ({e}). The originals are untouched in {}.",
                             old_dir.display()
-                        ),
-                    ));
+                        )
+                    };
+                    migration_notices.push(backup::startup_notice(&dir, text));
                 }
             }
             let mut report = backup::cleanup_temp(&dir);

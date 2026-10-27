@@ -161,6 +161,10 @@ fn has_documents(dir: &Path) -> bool {
     .unwrap_or_else(|e| !e.to_string().contains("no such table"))
 }
 
+/// Shown when the old database is locked because coAuthor is still running.
+pub const LOCKED_MESSAGE: &str =
+    "The old coAuthor app is still open. Close it, then reopen swarmDraft.";
+
 /// Consistent snapshot of the old database into `dest`, read-only on the source.
 pub fn snapshot_db(src: &Path, dest: &Path) -> io::Result<()> {
     let busy = |e: rusqlite::Error| {
@@ -169,10 +173,9 @@ pub fn snapshot_db(src: &Path, dest: &Path) -> io::Result<()> {
             Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
         );
         if locked {
-            io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "coAuthor is still using its database. Close coAuthor and reopen swarmDraft",
-            )
+            // Technical detail goes to the log; the user sees plain wording.
+            eprintln!("swarmDraft: old coAuthor database is locked: {e}");
+            io::Error::new(io::ErrorKind::WouldBlock, LOCKED_MESSAGE)
         } else {
             io::Error::other(format!("could not read the coAuthor database: {e}"))
         }
@@ -319,7 +322,7 @@ mod tests {
             .unwrap();
         locker.execute_batch("BEGIN EXCLUSIVE;").unwrap();
         let err = migrate(&old, &new).unwrap_err();
-        assert!(err.to_string().contains("Close coAuthor"), "{err}");
+        assert_eq!(err.to_string(), LOCKED_MESSAGE);
         assert!(!new.exists());
         fs::create_dir_all(&new).unwrap();
         Connection::open(new.join(DB_FILE))

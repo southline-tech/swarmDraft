@@ -338,12 +338,7 @@ pub fn router(store: Store, cfg: McpConfig) -> axum::Router {
 
 /// Shown when the MCP port is taken, most likely by a pre-rename coAuthor still running (both
 /// apps default to the same port, and agents would otherwise keep writing into the old data).
-pub fn port_in_use_message(port: u16) -> String {
-    format!(
-        "Agents can't connect: port {port} is already in use by another app, most likely coAuthor. \
-         Close coAuthor and restart swarmDraft so agents write to your swarmDraft documents."
-    )
-}
+pub const PORT_IN_USE_MESSAGE: &str = "Your bots can't connect because the old coAuthor app is still open. Close it, then restart swarmDraft.";
 
 /// Bind the MCP port on loopback synchronously, so startup can tell the user right away when
 /// another process (an old coAuthor) already holds it.
@@ -353,10 +348,14 @@ pub fn bind(port: u16) -> std::io::Result<std::net::TcpListener> {
             l.set_nonblocking(true)?;
             Ok(l)
         }
-        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => Err(std::io::Error::new(
-            std::io::ErrorKind::AddrInUse,
-            port_in_use_message(port),
-        )),
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+            // Port and OS error go to the log only; the user sees plain wording.
+            eprintln!("swarmDraft: MCP port {port} on {DEFAULT_HOST} is in use: {e}");
+            Err(std::io::Error::new(
+                std::io::ErrorKind::AddrInUse,
+                PORT_IN_USE_MESSAGE,
+            ))
+        }
         Err(e) => Err(e),
     }
 }

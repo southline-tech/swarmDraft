@@ -108,3 +108,4 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #71 · a failed rename copy was never retried because the app then created an empty new folder · mark a completed migration with a marker written last; an unmarked or empty target is not migrated
 - 2026-10-26 · #71 · the db and its -wal/-shm were copied raw while the old app might be running · copy SQLite only as a consistent snapshot (VACUUM INTO or backup API), read-only on the source; if locked, tell the user to close the other app and retry next launch
 - 2026-10-26 · #71 · old and renamed apps both defaulted to MCP port 7337, so agents could write to the old data · detect a taken port at startup and show a visible message naming the app to close
+- 2026-10-26 · #71 · user-facing notices said 'database' and 'port 7337' · user-visible text stays plain for writers; technical details go to logs
