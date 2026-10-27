@@ -11,10 +11,8 @@ const props = defineProps<{
   confirming: boolean;
   tokensNotice: number | null;
 }>();
-const restorePath = defineModel<string>('restorePath', { required: true });
 const emit = defineEmits<{
   backup: [];
-  pick: [];
   ask: [];
   confirm: [];
   cancel: [];
@@ -92,27 +90,12 @@ function onKeydown(e: KeyboardEvent) {
     <section class="st-card" aria-labelledby="bk-restore">
       <h2 id="bk-restore" class="st-h2">Restore from a backup</h2>
       <p class="st-muted st-desc">
-        Replaces everything in swarmDraft with what's in the backup. You'll be asked to confirm
-        first.
+        Replaces everything in swarmDraft with what's in the backup. You'll confirm first, then
+        choose the backup file.
       </p>
-      <button type="button" class="st-btn" data-test="restore-pick" @click="emit('pick')">
+      <button type="button" class="st-btn" data-test="restore-pick" @click="emit('ask')">
         Restore from backup…
       </button>
-      <details class="bk__fallback" data-test="restore-fallback">
-        <summary>Enter a path instead</summary>
-        <div class="bk__pathrow">
-          <input
-            v-model="restorePath"
-            class="st-inp st-mono"
-            aria-label="Path to backup .zip"
-            data-test="restore-path"
-            placeholder="Path to backup .zip"
-          />
-          <button type="button" class="st-btn" data-test="restore-button" @click="emit('ask')">
-            Restore…
-          </button>
-        </div>
-      </details>
     </section>
     <p role="status" class="st-status" data-test="backup-status">{{ status }}</p>
     <div v-if="confirming" class="bk__scrim">
@@ -132,12 +115,11 @@ function onKeydown(e: KeyboardEvent) {
             <path d="M12 10v5M12 18h.01" />
           </svg>
         </div>
-        <h2 id="bk-confirm-title" class="bk__title">Replace everything with this backup?</h2>
-        <p class="st-mono bk__target" data-test="restore-target">{{ restorePath }}</p>
+        <h2 id="bk-confirm-title" class="bk__title">Replace everything with a backup?</h2>
         <p id="bk-confirm-body">
           Restoring replaces all manuscripts, comments, suggestions, settings and attached files
-          with the contents of this backup, and turns off all agent keys. Your current state is
-          saved first as a pre-restore snapshot in the backups folder.
+          with the contents of the backup you choose next, and turns off all agent keys. Your
+          current state is saved first as a pre-restore snapshot in the backups folder.
         </p>
         <div class="bk__actions">
           <button
@@ -164,39 +146,6 @@ function onKeydown(e: KeyboardEvent) {
 </template>
 
 <style scoped>
-.bk__fallback {
-  margin-top: var(--ct-space-4);
-}
-.bk__fallback summary {
-  min-height: var(--ct-space-10);
-  display: flex;
-  align-items: center;
-  gap: var(--ct-space-2);
-  width: fit-content;
-  font-size: var(--ct-text-sm);
-  font-weight: var(--ct-weight-semibold);
-  cursor: pointer;
-  list-style: none;
-}
-.bk__fallback summary::-webkit-details-marker {
-  display: none;
-}
-.bk__fallback summary::before {
-  content: '▸';
-}
-.bk__fallback[open] summary::before {
-  content: '▾';
-}
-.bk__fallback summary:focus-visible {
-  box-shadow: var(--ct-focus-ring);
-  outline: 0;
-  border-radius: var(--ct-radius-md);
-}
-.bk__pathrow {
-  display: flex;
-  gap: var(--ct-space-3);
-  margin-top: var(--ct-space-2);
-}
 .bk__scrim {
   position: fixed;
   inset: 0;
@@ -237,13 +186,6 @@ function onKeydown(e: KeyboardEvent) {
   font-family: var(--ct-font-manuscript);
   font-size: var(--ct-text-xl);
   font-weight: var(--ct-weight-semibold);
-}
-.bk__target {
-  margin: var(--ct-space-2) 0 var(--ct-space-3);
-  padding: var(--ct-space-2) var(--ct-space-3);
-  border-radius: var(--ct-radius-md);
-  background: var(--ct-bg);
-  overflow-wrap: anywhere;
 }
 .bk__actions {
   display: flex;

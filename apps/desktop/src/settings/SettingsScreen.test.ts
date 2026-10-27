@@ -19,7 +19,6 @@ function screen(props: Record<string, unknown> = {}) {
       backupStatus: '',
       confirmingRestore: false,
       tokensNotice: null,
-      restorePath: '',
       ...props,
     },
     global: { stubs: { AgentsSettings: { template: '<div data-test="agents-stub" />' } } },
@@ -112,6 +111,10 @@ describe('Settings screen (#99)', () => {
     await w.get('[data-test="settings-nav-backups"]').trigger('click');
     const opener = w.get('[data-test="restore-pick"]').element as HTMLElement;
     opener.focus();
+    // #86: Restore asks first; the backend opens the file picker after confirming. No path field.
+    await w.get('[data-test="restore-pick"]').trigger('click');
+    expect(w.emitted('askRestore')).toHaveLength(1);
+    expect(w.find('[data-test="restore-path"]').exists()).toBe(false);
     await w.setProps({ confirmingRestore: true });
     await flushPromises();
     const dlg = w.get('[data-test="restore-confirm"]');
@@ -140,9 +143,9 @@ describe('Settings screen (#99)', () => {
   });
 
   it('restore copy says "key", and the banner live region stays mounted after Dismiss', async () => {
-    const w = screen({ confirmingRestore: true, tokensNotice: 3, restorePath: '/tmp/b.zip' });
+    const w = screen({ confirmingRestore: true, tokensNotice: 3 });
     const text = w.get('[data-test="settings-backups"]').text();
-    expect(text).toContain('and turns off all agent keys.');
+    expect(text).toContain('the backup you choose next, and turns off all agent keys.');
     expect(text).toContain('turned off all 3 agent key(s)');
     expect(text).toContain('create new keys in Settings > Agents');
     expect(text.toLowerCase()).not.toContain('token');

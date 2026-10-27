@@ -29,53 +29,92 @@ fn is_within(path: &Path, root: &Path, case_insensitive: bool) -> bool {
     p.len() >= r.len() && p[..r.len()] == r[..]
 }
 
+/// True for UNC and admin-share forms (`\\\\server\\share`, `\\\\localhost\\C$`,
+/// `\\\\?\\UNC\\...`, and the same with forward slashes). Their canonical form never
+/// prefix-matches the drive-letter data folder, so they are refused outright.
+pub(crate) fn is_unc_like(s: &str) -> bool {
+    let s = s.replace('/', "\\");
+    if s.get(..8)
+        .is_some_and(|h| h.eq_ignore_ascii_case("\\\\?\\UNC\\"))
+    {
+        return true;
+    }
+    if s.starts_with("\\\\?\\") || s.starts_with("\\\\.\\") {
+        // Verbatim/device drive paths (`\\?\C:\...`) are local; anything else is not.
+        let rest = s.get(4..).unwrap_or("");
+        let b = rest.as_bytes();
+        return !(b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':');
+    }
+    s.starts_with("\\\\")
+}
+
 /// Check `dest` and return the real path the copy will be written to.
-///
-/// Refuses relative paths, `.`/`..` components, anything not ending in `.docx`, a missing
-/// parent folder, and anything that resolves (after canonicalizing the parent, so symlinks
-/// and junctions are followed) into one of `data_dirs`.
 pub fn check_dest(data_dirs: &[PathBuf], dest: &Path) -> std::io::Result<PathBuf> {
+    check_write_dest(data_dirs, dest, "docx", "copy")
+}
+
+/// Shared destination check for every user-picked write (save a copy #65, backup #73).
+///
+/// Refuses relative paths, UNC / admin-share paths, `.`/`..` components, a file name not
+/// ending in `.{ext}`, a missing parent folder, a destination that is itself a symlink, and
+/// anything that resolves (after canonicalizing the parent, so symlinks and junctions are
+/// followed) into one of `data_dirs`. `what` names the file in error messages.
+pub fn check_write_dest(
+    data_dirs: &[PathBuf],
+    dest: &Path,
+    ext: &str,
+    what: &str,
+) -> std::io::Result<PathBuf> {
+    let invalid = |m: String| Error::new(ErrorKind::InvalidInput, m);
+    let denied = |m: String| Error::new(ErrorKind::PermissionDenied, m);
     if !dest.is_absolute() {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "copy path must be absolute",
-        ));
+        return Err(invalid(format!("{what} path must be absolute")));
+    }
+    if is_unc_like(&dest.to_string_lossy()) {
+        return Err(denied(format!(
+            "permission denied: {what} path is a network share"
+        )));
     }
     if dest
         .components()
         .any(|c| matches!(c, Component::CurDir | Component::ParentDir))
     {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "copy path must not contain . or ..",
-        ));
+        return Err(invalid(format!("{what} path must not contain . or ..")));
     }
     let name = dest
         .file_name()
-        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "copy path has no file name"))?;
-    let is_docx = Path::new(name)
+        .ok_or_else(|| invalid(format!("{what} path has no file name")))?;
+    let ext_ok = Path::new(name)
         .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("docx"));
-    if !is_docx {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "copy must be a .docx file",
-        ));
+        .is_some_and(|e| e.eq_ignore_ascii_case(ext));
+    if !ext_ok {
+        return Err(invalid(format!("{what} must be a .{ext} file")));
     }
     let parent = dest
         .parent()
-        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "copy path has no folder"))?;
+        .ok_or_else(|| invalid(format!("{what} path has no folder")))?;
     // Fails if the folder does not exist.
     let parent = parent.canonicalize()?;
     let real = parent.join(name);
+    if std::fs::symlink_metadata(&real).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(denied(format!("permission denied: {what} path is a link")));
+    }
+    if is_unc_like(&real.to_string_lossy()) {
+        return Err(denied(format!(
+            "permission denied: {what} path is a network share"
+        )));
+    }
     let ci = cfg!(windows);
-    for dir in data_dirs {
-        let dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+    // The pre-rename (com.radiancelux.coauthor) folders count as data folders too.
+    let legacy = data_dirs
+        .iter()
+        .filter_map(|d| crate::migrate::old_dir_for(d));
+    for dir in data_dirs.iter().cloned().chain(legacy) {
+        let dir = dir.canonicalize().unwrap_or(dir);
         if is_within(&real, &dir, ci) {
-            return Err(Error::new(
-                ErrorKind::PermissionDenied,
-                "permission denied: copy path is inside the app data folder",
-            ));
+            return Err(denied(format!(
+                "permission denied: {what} path is inside the app data folder"
+            )));
         }
     }
     Ok(real)
@@ -136,6 +175,17 @@ mod tests {
     }
 
     #[test]
+    fn refuses_a_destination_inside_the_old_app_id_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().join("com.radiancelux.swarmdraft");
+        let legacy = root.path().join(crate::migrate::OLD_IDENTIFIER);
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&legacy).unwrap();
+        let err = check_write_dest(&[data], &legacy.join("b.docx"), "docx", "copy").unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::PermissionDenied);
+    }
+
+    #[test]
     fn writes_the_bytes_and_leaves_no_temp_file() {
         let data = tempfile::tempdir().unwrap();
         let out = tempfile::tempdir().unwrap();
@@ -183,6 +233,34 @@ mod tests {
         let err = write_copy(&dirs(&data), &db, b"x").unwrap_err();
         assert_eq!(err.kind(), ErrorKind::PermissionDenied);
         assert_eq!(std::fs::read(&db).unwrap(), b"db");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_destination_that_is_itself_a_link() {
+        let out = tempfile::tempdir().unwrap();
+        let target = out.path().join("target.docx");
+        std::fs::write(&target, b"keep").unwrap();
+        let link = out.path().join("link.docx");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let err = write_copy(&[], &link, b"x").unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::PermissionDenied);
+        assert_eq!(std::fs::read(&target).unwrap(), b"keep");
+    }
+
+    #[test]
+    fn refuses_network_share_paths() {
+        for p in ["//server/share/a.docx", "//localhost/C$/a.docx"] {
+            let err = check_dest(&[], Path::new(p)).unwrap_err();
+            assert!(
+                matches!(
+                    err.kind(),
+                    ErrorKind::PermissionDenied | ErrorKind::InvalidInput
+                ),
+                "{p}"
+            );
+        }
+        assert!(is_unc_like(r"\\localhost\C$\a.docx"));
     }
 
     #[test]

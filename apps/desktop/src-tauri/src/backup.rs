@@ -35,6 +35,8 @@ use zip::write::SimpleFileOptions;
 
 use crate::storage::{StorageError, Store};
 
+/// Manifest format id. Kept as `coauthor-backup` so backups made before the rename still
+/// restore; only the default file name changed to `swarmdraft-backup-*` (#73).
 pub const FORMAT: &str = "coauthor-backup";
 pub const FORMAT_VERSION: u32 = 1;
 const DB_ENTRY: &str = "db/coauthor.db";
@@ -73,6 +75,8 @@ pub enum BackupError {
     Zip(#[from] zip::result::ZipError),
     #[error("invalid backup: {0}")]
     Invalid(String),
+    #[error("backup is from a newer version: {0}")]
+    TooNew(String),
     #[error("restore failed and was rolled back: {0}")]
     RolledBack(String),
     #[error("restore failed ({0}) and rollback also failed ({1}); previous state is in {2}")]
@@ -105,9 +109,16 @@ fn backups_dir(store: &Store) -> PathBuf {
     store.data_dir().join("backups")
 }
 
-/// Default location for a new backup: `<data dir>/backups/coauthor-backup-<unique>.zip`.
-pub fn default_backup_path(store: &Store) -> PathBuf {
-    backups_dir(store).join(format!("coauthor-backup-{}.zip", unique_suffix()))
+/// Default file name offered for a new backup: `swarmdraft-backup-<stamp>.zip`.
+pub fn backup_file_name(stamp: &str) -> String {
+    format!("swarmdraft-backup-{stamp}.zip")
+}
+
+/// Unique backup path in the backups folder. Tests only: the app never writes a backup
+/// without the save dialog (#73).
+#[cfg(test)]
+fn default_backup_path(store: &Store) -> PathBuf {
+    backups_dir(store).join(backup_file_name(&unique_suffix()))
 }
 
 fn files_dir(store: &Store) -> PathBuf {
@@ -791,6 +802,18 @@ pub fn create_backup_to(
     dest: &Path,
     replace: bool,
 ) -> Result<Manifest, BackupError> {
+    create_backup_inner(store, app_version, dest, replace, false)
+}
+
+/// [`create_backup_to`]; `fail_mid_write` (tests only) fails after part of the archive is on
+/// disk, to prove a failed write never touches `dest`.
+fn create_backup_inner(
+    store: &Store,
+    app_version: &str,
+    dest: &Path,
+    replace: bool,
+    fail_mid_write: bool,
+) -> Result<Manifest, BackupError> {
     if !replace && dest.exists() {
         return Err(BackupError::Io(std::io::Error::new(
             std::io::ErrorKind::AlreadyExists,
@@ -839,6 +862,11 @@ pub fn create_backup_to(
         zw.write_all(&serde_json::to_vec_pretty(&manifest).expect("manifest serializes"))?;
         zw.start_file(DB_ENTRY, opts)?;
         std::io::copy(&mut File::open(&snap)?, &mut zw)?;
+        if fail_mid_write {
+            return Err(BackupError::Io(std::io::Error::other(
+                "injected write failure",
+            )));
+        }
         for (rel, path) in &files {
             zw.start_file(format!("{FILES_PREFIX}{rel}"), opts)?;
             std::io::copy(&mut File::open(path)?, &mut zw)?;
@@ -849,12 +877,60 @@ pub fn create_backup_to(
         } else {
             publish_no_clobber(&part, dest)?;
         }
+        sync_parent_dir(dest);
         Ok(())
     })();
     if res.is_err() {
         let _ = std::fs::remove_file(&part);
     }
     res.map(|_| manifest)
+}
+
+/// Make the rename durable (best effort; directories can't be synced this way on Windows).
+fn sync_parent_dir(path: &Path) {
+    #[cfg(unix)]
+    if let Some(dir) = path.parent() {
+        if let Ok(d) = File::open(dir) {
+            let _ = d.sync_all();
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
+#[cfg(test)]
+use crate::save_copy::is_unc_like;
+
+/// Check a backup destination picked in the native save dialog (opened by Rust, #73) and
+/// return the real path to write. Refuses relative paths, `.`/`..` components, non-`.zip`
+/// names, a missing folder, and anything that resolves (after canonicalizing the parent, so
+/// symlinks and junctions are followed) into one of `data_dirs` (the `backups` folder
+/// included), a destination that is itself a link, and UNC / admin-share paths. Uses the
+/// same shared check as `save_manuscript_copy` (#65): [`crate::save_copy::check_write_dest`].
+pub fn check_backup_dest(
+    store: &Store,
+    data_dirs: &[PathBuf],
+    dest: &Path,
+) -> Result<PathBuf, BackupError> {
+    let mut roots = vec![store.data_dir().to_path_buf()];
+    roots.extend(data_dirs.iter().cloned());
+    Ok(crate::save_copy::check_write_dest(
+        &roots, dest, "zip", "backup",
+    )?)
+}
+
+/// Write a backup to a destination the user picked in the save dialog (which already
+/// confirmed Replace), after [`check_backup_dest`]. Returns the real path written.
+pub fn create_backup_checked(
+    _held: &OpGuard<'_>,
+    store: &Store,
+    app_version: &str,
+    data_dirs: &[PathBuf],
+    dest: &Path,
+) -> Result<PathBuf, BackupError> {
+    let real = check_backup_dest(store, data_dirs, dest)?;
+    create_backup_to(store, app_version, &real, true)?;
+    Ok(real)
 }
 
 const WINDOWS_RESERVED: &[&str] = &[
@@ -903,7 +979,9 @@ fn stage(store: &Store, src: &Path) -> Result<Staged, BackupError> {
 
     let mut names = HashSet::new();
     for i in 0..za.len() {
-        let e = za.by_index_raw(i)?;
+        let e = za
+            .by_index_raw(i)
+            .map_err(|e| invalid(format!("unreadable entry: {e}")))?;
         if e.encrypted() {
             return Err(invalid("encrypted entries are not supported"));
         }
@@ -917,18 +995,22 @@ fn stage(store: &Store, src: &Path) -> Result<Staged, BackupError> {
             .by_name(MANIFEST_ENTRY)
             .map_err(|_| invalid("missing manifest.json"))?;
         let mut buf = String::new();
-        e.take(MAX_MANIFEST_BYTES).read_to_string(&mut buf)?;
+        e.take(MAX_MANIFEST_BYTES)
+            .read_to_string(&mut buf)
+            .map_err(|e| invalid(format!("unreadable manifest: {e}")))?;
         serde_json::from_str(&buf).map_err(|e| invalid(format!("bad manifest: {e}")))?
     };
     if manifest.format != FORMAT {
         return Err(invalid("not a swarmDraft backup"));
     }
     if manifest.format_version > FORMAT_VERSION {
-        return Err(invalid("backup was made by a newer swarmDraft"));
+        return Err(BackupError::TooNew(
+            "backup format is newer than this build".into(),
+        ));
     }
     let current = store.schema_version()?;
     if manifest.schema_version > current {
-        return Err(invalid(format!(
+        return Err(BackupError::TooNew(format!(
             "backup schema v{} is newer than this build (v{current})",
             manifest.schema_version
         )));
@@ -958,7 +1040,9 @@ fn stage(store: &Store, src: &Path) -> Result<Staged, BackupError> {
     std::fs::create_dir_all(&files)?;
     let mut total: u64 = 0;
     for i in 0..za.len() {
-        let mut e = za.by_index(i)?;
+        let mut e = za
+            .by_index(i)
+            .map_err(|e| invalid(format!("unreadable entry: {e}")))?;
         let name = e.name().to_string();
         if e.is_dir() || name == MANIFEST_ENTRY {
             continue;
@@ -985,7 +1069,10 @@ fn stage(store: &Store, src: &Path) -> Result<Staged, BackupError> {
         // Read at most declared+1 bytes so a lying header is caught without bombing the disk.
         let mut r = (&mut e).take(declared + 1);
         loop {
-            let k = r.read(&mut buf)?;
+            // A read error here is a corrupt archive entry, not a local disk problem.
+            let k = r
+                .read(&mut buf)
+                .map_err(|e| invalid(format!("corrupt entry {name:?}: {e}")))?;
             if k == 0 {
                 break;
             }
@@ -1035,6 +1122,94 @@ pub struct RestoreReport {
     pub manifest: Manifest,
     /// Snapshot of the state that was replaced; restore it to undo.
     pub pre_restore_snapshot: String,
+}
+
+/// Label of the restore dialog's file filter (#83).
+pub const RESTORE_FILTER_NAME: &str = "swarmDraft backup";
+/// UI error code: the chosen file is not a backup (nothing was changed).
+pub const NOT_A_BACKUP: &str = "not-a-backup";
+/// UI error code: the restore did not finish, and the book is as it was (nothing was
+/// replaced, or the swap was rolled back from the pre-restore snapshot).
+pub const RESTORE_FAILED: &str = "restore-failed";
+/// UI error code: the restore failed and so did the rollback, so storage may be mid-swap.
+/// The window must close the session; the pre-restore snapshot is in the backups folder.
+pub const RESTORE_INCOMPLETE: &str = "restore-incomplete";
+/// UI error code: the backup was made by a newer app (format or schema).
+pub const TOO_NEW: &str = "too-new";
+/// UI error code: another backup or restore is already running.
+pub const BUSY: &str = "busy";
+
+/// Process-wide lock so only one backup or restore runs at a time (#86). Held from before
+/// the file dialog until the work finishes.
+#[derive(Default)]
+pub struct OpLock(std::sync::atomic::AtomicBool);
+
+/// Proof that the [`OpLock`] is held; released on drop.
+pub struct OpGuard<'a>(&'a OpLock);
+
+impl OpLock {
+    /// Take the lock, or `Err(BUSY)` if a backup or restore is already running.
+    pub fn try_acquire(&self) -> Result<OpGuard<'_>, &'static str> {
+        use std::sync::atomic::Ordering;
+        self.0
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| OpGuard(self))
+            .map_err(|_| BUSY)
+    }
+}
+
+impl Drop for OpGuard<'_> {
+    fn drop(&mut self) {
+        self.0 .0.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
+/// The UI code for a restore error. Only `RollbackFailed` can leave storage changed.
+pub fn restore_error_code(e: &BackupError) -> &'static str {
+    match e {
+        BackupError::Invalid(_) => NOT_A_BACKUP,
+        BackupError::TooNew(_) => TOO_NEW,
+        BackupError::RollbackFailed(..) => RESTORE_INCOMPLETE,
+        BackupError::Storage(_)
+        | BackupError::Io(_)
+        | BackupError::Sqlite(_)
+        | BackupError::Zip(_)
+        | BackupError::RolledBack(_) => RESTORE_FAILED,
+    }
+}
+
+/// What the window learns about a restore: no paths, no raw errors (#83).
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreOutcome {
+    pub tokens_revoked: u64,
+}
+
+/// Restore from a file the user picked in the native dialog. The file is validated by its
+/// manifest format id and contents (see `stage`), never by its name or extension. Details
+/// and paths are logged; the caller gets only a UI code.
+pub fn restore_picked(
+    _held: &OpGuard<'_>,
+    store: &Store,
+    app_version: &str,
+    src: &Path,
+) -> Result<RestoreOutcome, &'static str> {
+    match restore_backup(store, app_version, src) {
+        Ok(r) => {
+            eprintln!(
+                "restore: restored {} (pre-restore snapshot {})",
+                src.display(),
+                r.pre_restore_snapshot
+            );
+            Ok(RestoreOutcome {
+                tokens_revoked: r.tokens_revoked,
+            })
+        }
+        Err(e) => {
+            eprintln!("restore: {} failed: {e}", src.display());
+            Err(restore_error_code(&e))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1279,6 +1454,13 @@ fn apply(
 mod tests {
     use super::*;
 
+    /// A held lock for tests that call the guarded entry points directly.
+    fn held() -> OpGuard<'static> {
+        Box::leak(Box::new(OpLock::default()))
+            .try_acquire()
+            .unwrap()
+    }
+
     fn seeded() -> (tempfile::TempDir, Store) {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(tmp.path()).unwrap();
@@ -1428,13 +1610,14 @@ mod tests {
             cases.push((label, full));
         }
         let e = with_db(vec![]);
-        cases.push((
-            "newer schema",
-            vec![
-                (MANIFEST_ENTRY, manifest_for(v + 1, &e)),
-                (DB_ENTRY, db.clone()),
-            ],
-        ));
+        let newer = tmp.path().join("newer.zip");
+        let m = manifest_for(v + 1, &e);
+        write_zip(&newer, &[(MANIFEST_ENTRY, &m), (DB_ENTRY, &db)]);
+        let r = restore_backup(&store, "0", &newer);
+        assert!(
+            matches!(r, Err(BackupError::TooNew(_))),
+            "newer schema: {r:?}"
+        );
         let corrupt = vec![(DB_ENTRY, b"SQLite format 3\0garbage".to_vec())];
         cases.push((
             "corrupt db",
@@ -2437,6 +2620,425 @@ mod tests {
         assert_eq!(
             std::fs::read(d.join("files/images/map.png")).unwrap(),
             b"edited"
+        );
+    }
+    // ---- #73: backend-chosen destination ----
+
+    fn outside() -> tempfile::TempDir {
+        tempfile::tempdir().unwrap()
+    }
+
+    #[test]
+    fn checked_backup_writes_outside_data_dir() {
+        let (_tmp, store) = seeded();
+        let out = outside();
+        let dest = out.path().join("b.zip");
+        let real = create_backup_checked(&held(), &store, "0", &[], &dest).unwrap();
+        assert!(stage(&store, &real).is_ok());
+    }
+
+    #[test]
+    fn checked_backup_refuses_relative_and_dot_dot() {
+        let (tmp, store) = seeded();
+        assert!(check_backup_dest(&store, &[], Path::new("b.zip")).is_err());
+        // A relative path whose folder exists (tests run in the crate dir) is refused too.
+        assert!(check_backup_dest(&store, &[], Path::new("src/b.zip")).is_err());
+        let out = outside();
+        std::fs::create_dir_all(out.path().join("x")).unwrap();
+        // x/../b.zip would resolve fine; `..` itself must be refused.
+        let sneaky = out.path().join("x").join("..").join("b.zip");
+        assert!(check_backup_dest(&store, &[], &sneaky).is_err());
+        let into_data = out
+            .path()
+            .join("x")
+            .join("..")
+            .join("..")
+            .join(tmp.path().strip_prefix("/").unwrap_or(tmp.path()))
+            .join("coauthor.db.zip");
+        assert!(check_backup_dest(&store, &[], &into_data).is_err());
+    }
+
+    #[test]
+    fn checked_backup_refuses_all_data_dirs_including_backups_folder() {
+        let (tmp, store) = seeded();
+        assert!(check_backup_dest(&store, &[], &tmp.path().join("x.zip")).is_err());
+        let other = outside();
+        assert!(check_backup_dest(
+            &store,
+            &[other.path().to_path_buf()],
+            &other.path().join("x.zip")
+        )
+        .is_err());
+        // The backups folder is not a write target any more (#73): refused like the rest.
+        std::fs::create_dir_all(tmp.path().join("backups")).unwrap();
+        assert!(check_backup_dest(&store, &[], &tmp.path().join("backups").join("b.zip")).is_err());
+        // Not a non-zip name, even outside.
+        let out = outside();
+        assert!(check_backup_dest(&store, &[], &out.path().join("evil.exe")).is_err());
+        assert!(check_backup_dest(&store, &[], &out.path().join("nope").join("b.zip")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checked_backup_refuses_symlink_escape_into_data_dir() {
+        let (tmp, store) = seeded();
+        let out = outside();
+        let link = out.path().join("link");
+        std::os::unix::fs::symlink(tmp.path(), &link).unwrap();
+        let err = create_backup_checked(&held(), &store, "0", &[], &link.join("files.zip"));
+        assert!(err.is_err());
+        assert!(!tmp.path().join("files.zip").exists());
+        // A dest that is itself a link to a file elsewhere is refused too.
+        let victim = out.path().join("victim.txt");
+        std::fs::write(&victim, b"keep").unwrap();
+        let flink = out.path().join("b.zip");
+        std::os::unix::fs::symlink(&victim, &flink).unwrap();
+        assert!(create_backup_checked(&held(), &store, "0", &[], &flink).is_err());
+        assert_eq!(std::fs::read(&victim).unwrap(), b"keep");
+    }
+
+    #[test]
+    fn failed_write_leaves_existing_dest_and_no_temp_file() {
+        let (_tmp, store) = seeded();
+        let out = outside();
+        let dest = out.path().join("b.zip");
+        std::fs::write(&dest, b"old backup").unwrap();
+        assert!(create_backup_inner(&store, "0", &dest, true, true).is_err());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"old backup");
+        let names: Vec<_> = std::fs::read_dir(out.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names.len(), 1, "{names:?}");
+    }
+    #[test]
+    fn unc_and_admin_share_paths_are_classified() {
+        for p in [
+            r"\\localhost\C$\Users\v\AppData\Roaming\x\b.zip",
+            r"\\server\share\b.zip",
+            r"\\?\UNC\localhost\C$\b.zip",
+            r"\\?\unc\server\share\b.zip",
+            r"\\.\pipe\x",
+            "//server/share/b.zip",
+        ] {
+            assert!(is_unc_like(p), "{p}");
+        }
+        for p in [
+            r"C:\Users\v\b.zip",
+            r"\\?\C:\Users\v\b.zip",
+            "/home/v/b.zip",
+        ] {
+            assert!(!is_unc_like(p), "{p}");
+        }
+    }
+
+    #[test]
+    fn check_backup_dest_refuses_unc_strings() {
+        let (_tmp, store) = seeded();
+        // Absolute only on Windows; on unix `//x/y` is absolute and must still be refused.
+        assert!(check_backup_dest(&store, &[], Path::new("//server/share/b.zip")).is_err());
+    }
+
+    /// #73: the window must not be able to trigger a backup write without the save dialog.
+    /// `create_backup` takes no arguments from the webview beyond the injected app/store,
+    /// and the only write it reaches is `create_backup_checked` on the dialog's path.
+    #[test]
+    fn create_backup_command_has_no_unattended_path() {
+        let src = include_str!("lib.rs");
+        let start = src.find("async fn create_backup(").expect("command exists");
+        let body = &src[start..];
+        let sig_end = body.find(") -> Result<bool, String>").unwrap();
+        let sig = &body[..sig_end];
+        let params: Vec<&str> = sig
+            .lines()
+            .skip(1)
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        assert_eq!(params.len(), 3, "unexpected webview args: {params:?}");
+        assert!(params[0].starts_with("app: tauri::AppHandle"));
+        // The window is only the dialog's parent (modal on Windows), never a path source.
+        assert!(params[1].starts_with("window: tauri::Window"));
+        assert!(params[2].starts_with("store: tauri::State"));
+        assert!(
+            !sig.contains("String") && !sig.contains("Path"),
+            "no path argument"
+        );
+        let end = body.find("\nfn ").unwrap_or(body.len());
+        let body = &body[..end];
+        assert!(body.contains("blocking_save_file()"));
+        assert!(body.contains(".set_parent(&window)"));
+        let lock = body.find("try_acquire()").expect("takes the op lock");
+        assert!(
+            lock < body.find(".dialog()").unwrap(),
+            "lock before the dialog"
+        );
+        assert!(!body.contains("default_backup_path"));
+        assert!(!body.contains("create_backup_to("));
+        assert_eq!(body.matches("backup::create_backup").count(), 1);
+        assert!(body.contains("backup::create_backup_checked("));
+    }
+
+    /// Pre-rename fixture (#83): a backup written by the coAuthor-era format (manifest format
+    /// `coauthor-backup`, file named `coauthor-backup-*.zip`). Regenerate only with
+    /// `cargo test write_coauthor_era_fixture -- --ignored`; it must stay as committed.
+    const COAUTHOR_ERA_FIXTURE: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../fixtures/backups/coauthor-backup-1761500000.zip"
+    );
+
+    #[test]
+    #[ignore]
+    fn write_coauthor_era_fixture() {
+        let (_tmp, store) = seeded();
+        store
+            .with_sql(|c| c.execute_batch("UPDATE t SET body = 'Sample chapter — naïve café 😀.'"))
+            .unwrap();
+        create_backup(&store, "0.1.0", Path::new(COAUTHOR_ERA_FIXTURE)).unwrap();
+    }
+
+    #[test]
+    fn coauthor_era_backup_restores_intact() {
+        let fixture = Path::new(COAUTHOR_ERA_FIXTURE);
+        // It really is a coAuthor-era backup.
+        let mut za = zip::ZipArchive::new(File::open(fixture).unwrap()).unwrap();
+        let mut buf = String::new();
+        za.by_name(MANIFEST_ENTRY)
+            .unwrap()
+            .read_to_string(&mut buf)
+            .unwrap();
+        let m: Manifest = serde_json::from_str(&buf).unwrap();
+        assert_eq!(m.format, "coauthor-backup");
+
+        let (tmp, store) = seeded();
+        store
+            .with_sql(|c| c.execute_batch("UPDATE app_meta SET value='v2'; DELETE FROM t;"))
+            .unwrap();
+        std::fs::remove_dir_all(tmp.path().join("files")).unwrap();
+        // Restore from a copy so a failing restore can never touch the committed fixture.
+        let copy = tmp.path().join("picked.zip");
+        std::fs::copy(fixture, &copy).unwrap();
+        let out = restore_picked(&held(), &store, "0.2.0", &copy).unwrap();
+        assert_eq!(out, RestoreOutcome { tokens_revoked: 0 });
+        assert_eq!(meta(&store), "v1");
+        let (body, blob): (String, Vec<u8>) = store
+            .with_sql(|c| {
+                c.query_row("SELECT body, blob FROM t", [], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })
+            })
+            .unwrap();
+        assert_eq!(body, "Sample chapter — naïve café 😀.");
+        assert_eq!(blob, vec![1, 2, 255]);
+        assert_eq!(
+            std::fs::read(tmp.path().join("files/images/cover.png")).unwrap(),
+            b"\x89PNGfake"
+        );
+    }
+
+    /// #83: validation is by manifest format id and contents, not the file name.
+    #[test]
+    fn restore_validates_contents_not_file_name() {
+        let (tmp, store) = seeded();
+        // A real backup under an unrelated name and extension restores.
+        let odd = tmp.path().join("notes.txt");
+        create_backup(&store, "0.1.0", &odd).unwrap();
+        store
+            .with_sql(|c| c.execute_batch("UPDATE app_meta SET value='v2'"))
+            .unwrap();
+        restore_picked(&held(), &store, "0", &odd).unwrap();
+        assert_eq!(meta(&store), "v1");
+
+        // A backup-looking name with the wrong format id is refused, state untouched.
+        store
+            .with_sql(|c| c.execute_batch("UPDATE app_meta SET value='v3'"))
+            .unwrap();
+        let fake = tmp.path().join("swarmdraft-backup-1.zip");
+        {
+            let mut src = zip::ZipArchive::new(File::open(&odd).unwrap()).unwrap();
+            let mut w = zip::ZipWriter::new(File::create(&fake).unwrap());
+            for i in 0..src.len() {
+                let mut e = src.by_index(i).unwrap();
+                let name = e.name().to_string();
+                let mut bytes = Vec::new();
+                e.read_to_end(&mut bytes).unwrap();
+                if name == MANIFEST_ENTRY {
+                    let mut m: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                    m["format"] = "other-backup".into();
+                    bytes = serde_json::to_vec(&m).unwrap();
+                }
+                w.start_file(name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                std::io::Write::write_all(&mut w, &bytes).unwrap();
+            }
+            w.finish().unwrap();
+        }
+        assert_eq!(
+            restore_picked(&held(), &store, "0", &fake),
+            Err(NOT_A_BACKUP)
+        );
+        assert_eq!(meta(&store), "v3");
+    }
+
+    /// #83: the restore command takes no path from the webview (Tauri ignores unknown args,
+    /// so this reads the source): only app/store, the native open dialog, and the label.
+    #[test]
+    fn restore_backup_command_takes_no_path() {
+        let src = include_str!("lib.rs");
+        let start = src
+            .find("async fn restore_backup(")
+            .expect("command exists");
+        let body = &src[start..];
+        let sig_end = body
+            .find(") -> Result<Option<backup::RestoreOutcome>, String>")
+            .unwrap();
+        let params: Vec<&str> = body[..sig_end]
+            .lines()
+            .skip(1)
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        assert_eq!(params.len(), 3, "unexpected webview args: {params:?}");
+        assert!(params[0].starts_with("app: tauri::AppHandle"));
+        // The window is only the dialog's parent (modal on Windows), never a path source.
+        assert!(params[1].starts_with("window: tauri::Window"));
+        assert!(params[2].starts_with("store: tauri::State"));
+        assert!(
+            !body[..sig_end].contains("String") && !body[..sig_end].contains("Path"),
+            "no path argument"
+        );
+        let end = body.find("\nfn ").unwrap_or(body.len());
+        let body = &body[..end];
+        assert!(body.contains("blocking_pick_file()"));
+        assert!(body.contains(".set_parent(&window)"));
+        let lock = body.find("try_acquire()").expect("takes the op lock");
+        assert!(
+            lock < body.find(".dialog()").unwrap(),
+            "lock before the dialog"
+        );
+        assert!(
+            body.contains("backup::RESTORE_INCOMPLETE"),
+            "panic is not 'unchanged'"
+        );
+        assert!(body.contains("backup::RESTORE_FILTER_NAME"));
+        assert_eq!(body.matches("backup::restore_").count(), 1);
+        assert!(body.contains("backup::restore_picked(&held, &store, &version, &src)"));
+        assert_eq!(RESTORE_FILTER_NAME, "swarmDraft backup");
+    }
+
+    /// #86: every error variant maps to the right UI code; only RollbackFailed is incomplete.
+    #[test]
+    fn restore_error_codes_per_variant() {
+        let io = || std::io::Error::other("x");
+        let cases: Vec<(BackupError, &str)> = vec![
+            (BackupError::Invalid("x".into()), NOT_A_BACKUP),
+            (BackupError::TooNew("x".into()), TOO_NEW),
+            (
+                BackupError::RollbackFailed("a".into(), "b".into(), "c".into()),
+                RESTORE_INCOMPLETE,
+            ),
+            (BackupError::RolledBack("x".into()), RESTORE_FAILED),
+            (BackupError::Io(io()), RESTORE_FAILED),
+            (BackupError::Storage(StorageError::Io(io())), RESTORE_FAILED),
+            (
+                BackupError::Sqlite(rusqlite::Error::InvalidQuery),
+                RESTORE_FAILED,
+            ),
+            (
+                BackupError::Zip(zip::result::ZipError::FileNotFound),
+                RESTORE_FAILED,
+            ),
+        ];
+        for (e, code) in cases {
+            assert_eq!(restore_error_code(&e), code, "{e}");
+        }
+    }
+
+    /// #86: restore_picked reports a newer-version backup as too-new and leaves data alone.
+    #[test]
+    fn restore_picked_too_new() {
+        let (tmp, store) = seeded();
+        let zip = tmp.path().join("b.zip");
+        create_backup(&store, "0", &zip).unwrap();
+        // Bump the manifest's schema version past this build's.
+        let mut za = zip::ZipArchive::new(File::open(&zip).unwrap()).unwrap();
+        let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
+        for i in 0..za.len() {
+            let mut e = za.by_index(i).unwrap();
+            let mut b = Vec::new();
+            e.read_to_end(&mut b).unwrap();
+            entries.push((e.name().to_string(), b));
+        }
+        for (n, b) in entries.iter_mut() {
+            if n == MANIFEST_ENTRY {
+                let mut m: Manifest = serde_json::from_slice(b).unwrap();
+                m.schema_version += 1;
+                *b = serde_json::to_vec(&m).unwrap();
+            }
+        }
+        let newer = tmp.path().join("newer.zip");
+        let refs: Vec<(&str, &[u8])> = entries
+            .iter()
+            .map(|(n, b)| (n.as_str(), b.as_slice()))
+            .collect();
+        write_zip(&newer, &refs);
+        assert_eq!(restore_picked(&held(), &store, "0", &newer), Err(TOO_NEW));
+        assert_eq!(meta(&store), "v1");
+    }
+
+    /// #86: a zip whose entry data is corrupt is not a backup (retrying won't help).
+    #[test]
+    fn corrupt_zip_entry_is_not_a_backup() {
+        let (tmp, store) = seeded();
+        let zip = tmp.path().join("b.zip");
+        create_backup(&store, "0", &zip).unwrap();
+        let mut bytes = std::fs::read(&zip).unwrap();
+        // Find the db entry's local header and flip bytes inside its compressed data.
+        let name = DB_ENTRY.as_bytes();
+        let at = bytes
+            .windows(name.len())
+            .position(|w| w == name)
+            .expect("db entry header");
+        for b in &mut bytes[at + name.len() + 40..at + name.len() + 240] {
+            *b ^= 0x5a;
+        }
+        let bad = tmp.path().join("bad.zip");
+        std::fs::write(&bad, &bytes).unwrap();
+        let err = restore_backup(&store, "0", &bad).unwrap_err();
+        assert!(matches!(err, BackupError::Invalid(_)), "{err}");
+        assert_eq!(
+            restore_picked(&held(), &store, "0", &bad),
+            Err(NOT_A_BACKUP)
+        );
+        assert_eq!(meta(&store), "v1");
+    }
+
+    /// #86: while one backup or restore holds the lock, another (from any thread) is busy.
+    #[test]
+    fn op_lock_refuses_a_second_backup_or_restore() {
+        let lock = std::sync::Arc::new(OpLock::default());
+        let (held_tx, held_rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+        let l1 = lock.clone();
+        let first = std::thread::spawn(move || {
+            let _g = l1.try_acquire().unwrap();
+            held_tx.send(()).unwrap();
+            done_rx.recv().unwrap();
+        });
+        held_rx.recv().unwrap();
+        let l2 = lock.clone();
+        let second = std::thread::spawn(move || {
+            // A second restore and a second backup both take the same lock first.
+            (l2.try_acquire().err(), l2.try_acquire().err())
+        })
+        .join()
+        .unwrap();
+        assert_eq!(second, (Some(BUSY), Some(BUSY)));
+        done_tx.send(()).unwrap();
+        first.join().unwrap();
+        assert!(
+            lock.try_acquire().is_ok(),
+            "released when the first finishes"
         );
     }
 }

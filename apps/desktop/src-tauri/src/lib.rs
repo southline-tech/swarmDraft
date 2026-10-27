@@ -90,28 +90,65 @@ fn agent_token_revoke(
     store.revoke_token(&token_id).map_err(err)
 }
 
-/// Write a full backup to `dest` (from the save dialog; `replace` = user confirmed Replace,
-/// which atomically replaces an existing file) or, if omitted,
-/// to `<data dir>/backups/`, and return its path.
+/// Write a full backup. The destination is chosen here, never taken from the webview (#73):
+/// only a native save dialog opened from Rust, so every write needs the user's gesture.
+/// There is no unattended variant. The archive is built in Rust and written atomically.
+/// Returns `Ok(true)` when written, `Ok(false)` if the user cancelled; details go to the log.
 #[tauri::command]
-fn create_backup(
+async fn create_backup(
     app: tauri::AppHandle,
+    window: tauri::Window,
     store: tauri::State<'_, storage::Store>,
-    dest: Option<String>,
-    replace: Option<bool>,
-) -> Result<String, String> {
-    let replace = replace.unwrap_or(false) && dest.is_some();
-    let dest = dest
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| backup::default_backup_path(&store));
-    backup::create_backup_to(
-        &store,
-        &app.package_info().version.to_string(),
-        &dest,
-        replace,
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(dest.display().to_string())
+) -> Result<bool, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let store = store.inner().clone();
+    let version = app.package_info().version.to_string();
+    let mut data_dirs = vec![store.data_dir().to_path_buf()];
+    data_dirs.extend(app.path().app_data_dir().ok());
+    data_dirs.extend(app.path().app_local_data_dir().ok());
+    tauri::async_runtime::spawn_blocking(move || {
+        // One backup or restore at a time, held from before the dialog to the end (#86).
+        let lock = app.state::<backup::OpLock>();
+        let held = lock.try_acquire().map_err(str::to_string)?;
+        let picked = app
+            .dialog()
+            .file()
+            .set_parent(&window)
+            .set_title("Save backup")
+            .set_file_name(backup::backup_file_name(&time_stamp()))
+            .add_filter("Backup", &["zip"])
+            .blocking_save_file();
+        let Some(picked) = picked else {
+            return Ok(false);
+        };
+        let dest = picked.into_path().map_err(|e| {
+            eprintln!("backup: bad dialog path: {e}");
+            "backup failed".to_string()
+        })?;
+        let res = backup::create_backup_checked(&held, &store, &version, &data_dirs, &dest);
+        match res {
+            Ok(p) => {
+                eprintln!("backup: wrote {}", p.display());
+                Ok(true)
+            }
+            Err(e) => {
+                eprintln!("backup: failed: {e}");
+                Err("backup failed".to_string())
+            }
+        }
+    })
+    .await
+    .map_err(|e| {
+        eprintln!("backup: task failed: {e}");
+        "backup failed".to_string()
+    })?
+}
+
+fn time_stamp() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_default()
 }
 
 /// "Save a copy" from the save-failure banner: the frontend sends only the .docx bytes it
@@ -207,19 +244,47 @@ fn dismiss_migration_notices(notices: tauri::State<'_, MigrationNotices>, ids: V
         .retain(|n| !ids.contains(&n.id));
 }
 
-/// Validate and restore a backup .zip; the replaced state is kept as a pre-restore snapshot.
+/// Restore a backup. The file is chosen here in a native open dialog, never taken from the
+/// webview (#83), and validated by the archive's manifest format id and contents, not its name.
+/// Returns `Ok(None)` if the user cancelled. Errors are short codes for the UI
+/// (`not-a-backup`, `too-new`, `busy`, `restore-failed`, `restore-incomplete`); paths and details go to the log only.
 #[tauri::command]
-fn restore_backup(
+async fn restore_backup(
     app: tauri::AppHandle,
+    window: tauri::Window,
     store: tauri::State<'_, storage::Store>,
-    path: String,
-) -> Result<backup::RestoreReport, String> {
-    backup::restore_backup(
-        &store,
-        &app.package_info().version.to_string(),
-        std::path::Path::new(&path),
-    )
-    .map_err(|e| e.to_string())
+) -> Result<Option<backup::RestoreOutcome>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let store = store.inner().clone();
+    let version = app.package_info().version.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        // One backup or restore at a time, held from before the dialog to the end (#86).
+        let lock = app.state::<backup::OpLock>();
+        let held = lock.try_acquire().map_err(str::to_string)?;
+        let picked = app
+            .dialog()
+            .file()
+            .set_parent(&window)
+            .set_title("Restore from backup")
+            .add_filter(backup::RESTORE_FILTER_NAME, &["zip"])
+            .blocking_pick_file();
+        let Some(picked) = picked else {
+            return Ok(None);
+        };
+        let src = picked.into_path().map_err(|e| {
+            eprintln!("restore: bad dialog path: {e}");
+            backup::RESTORE_FAILED.to_string()
+        })?;
+        backup::restore_picked(&held, &store, &version, &src)
+            .map(Some)
+            .map_err(str::to_string)
+    })
+    .await
+    .map_err(|e| {
+        // A panicked task may have stopped mid-swap, so don't claim the book is unchanged.
+        eprintln!("restore: task failed: {e}");
+        backup::RESTORE_INCOMPLETE.to_string()
+    })?
 }
 
 /// Run a store call off the main thread. Sync commands run on the main thread, so a locked
@@ -343,6 +408,7 @@ pub fn run() {
             )));
             let store = storage::Store::open(&dir)?;
             app.manage(store.clone());
+            app.manage(backup::OpLock::default());
             app.manage(std::sync::Mutex::new(McpStatus {
                 url: None,
                 error: listener.as_ref().err().cloned(),

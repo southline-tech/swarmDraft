@@ -23,12 +23,10 @@ defineProps<{
   confirmingRestore: boolean;
   tokensNotice: number | null;
 }>();
-const restorePath = defineModel<string>('restorePath', { required: true });
 const emit = defineEmits<{
   close: [];
   openPreviews: [];
   backup: [];
-  pickRestore: [];
   askRestore: [];
   confirmRestore: [];
   cancelRestore: [];
@@ -197,12 +195,10 @@ onMounted(() => root.value?.focus());
           <div v-show="section === 'backups'" data-test="settings-backups">
             <BackupsSection
               v-if="info"
-              v-model:restore-path="restorePath"
               :status="backupStatus"
               :confirming="confirmingRestore"
               :tokens-notice="tokensNotice"
               @backup="emit('backup')"
-              @pick="emit('pickRestore')"
               @ask="emit('askRestore')"
               @confirm="emit('confirmRestore')"
               @cancel="emit('cancelRestore')"

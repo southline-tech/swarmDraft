@@ -3,8 +3,6 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import {
   createBackup,
   getAppInfo,
-  pickBackupDestination,
-  pickBackupToRestore,
   restoreBackup,
   getRecoveryNotices,
   dismissRecoveryNotices,
@@ -259,63 +257,60 @@ onMounted(async () => {
 });
 
 const backupStatus = ref('');
-const restorePath = ref('');
+const BUSY_NOTICE =
+  'A backup or restore is already running. Wait for it to finish, then try again.';
+/** Plain notices for the restore codes from the backend (#83, #86); anything else is generic. */
+const RESTORE_NOTICES: Record<string, string> = {
+  'not-a-backup': "That file isn't a backup. Nothing was changed.",
+  'too-new': 'This backup is from a newer version of swarmDraft. Update the app, then try again.',
+  busy: BUSY_NOTICE,
+  // Only sent when nothing was replaced or the swap was rolled back (RollbackFailed is
+  // 'restore-incomplete'), so "wasn't changed" is true.
+  'restore-failed': "The restore didn't finish, and your book wasn't changed. Please try again.",
+  'restore-incomplete':
+    "The restore didn't finish, so swarmDraft closed your book to keep it safe. A copy from just before the restore is in the backups folder.",
+};
 const confirmingRestore = ref(false);
 /** One-time notice after a restore revoked agent tokens; cleared when dismissed. */
 const tokensNotice = ref<number | null>(null);
 
-async function chooseRestoreFile(): Promise<void> {
-  try {
-    const p = await pickBackupToRestore();
-    if (p) {
-      restorePath.value = p;
-      confirmingRestore.value = true;
-    }
-  } catch (e) {
-    console.error('File picker failed', e);
-    backupStatus.value = `Couldn't open the file picker. ${errorLine(e)}`;
-  }
-}
-
-function askRestore(): void {
-  if (restorePath.value.trim()) confirmingRestore.value = true;
-}
-
 async function onBackup(): Promise<void> {
   try {
-    const dest = await pickBackupDestination();
-    if (dest === null) return;
-    // The native save dialog already asked the user to confirm Replace for an existing file,
-    // so the backend may atomically replace it.
-    backupStatus.value = `Backup saved: ${await createBackup(dest, true)}`;
+    if (await createBackup()) backupStatus.value = 'Backup saved.';
   } catch (e) {
-    console.error('Backup failed', e);
-    backupStatus.value = `Backup failed. ${errorLine(e)}`;
+    console.error('backup failed', e);
+    backupStatus.value = e === 'busy' ? BUSY_NOTICE : "The backup wasn't saved. Please try again.";
   }
 }
 
 async function onRestore(): Promise<void> {
   confirmingRestore.value = false;
-  if (!restorePath.value.trim()) return;
+  // Save pending edits first so the pre-restore snapshot includes them; if they can't be
+  // saved, don't restore (that would lose them).
   try {
-    // Save pending edits first so the pre-restore snapshot includes them; if they can't be
-    // saved, don't restore (that would lose them).
-    try {
-      await session.value?.flush();
-    } catch (e) {
-      console.error('Restore flush failed', e);
-      backupStatus.value = `Restore cancelled: ${errorLine(e, 'save')} Nothing was changed.`;
-      return;
-    }
-    const r = await restoreBackup(restorePath.value.trim());
+    await session.value?.flush();
+  } catch (e) {
+    console.error('Restore flush failed', e);
+    backupStatus.value = `Restore cancelled: ${errorLine(e, 'save')} Nothing was changed.`;
+    return;
+  }
+  try {
+    // The backend opens the file picker and validates the backup (#83).
+    const r = await restoreBackup();
+    if (!r) return;
     // The restore replaced storage, so the open session's in-memory docs are stale: close them
     // (stops the structure observer and unmounts the editor) so nothing can write them back.
     closeSession();
-    backupStatus.value = `Restored. Previous state saved: ${r.preRestoreSnapshot}`;
+    backupStatus.value =
+      'Restored. A copy of your book from just before the restore is in the backups folder.';
     tokensNotice.value = r.tokensRevoked > 0 ? r.tokensRevoked : null;
   } catch (e) {
     console.error('Restore failed', e);
-    backupStatus.value = `Restore failed. ${errorLine(e, 'open')}`;
+    // Storage may be mid-swap: close the session so stale in-memory docs can't be saved.
+    if (e === 'restore-incomplete') closeSession();
+    backupStatus.value =
+      (typeof e === 'string' && RESTORE_NOTICES[e]) ||
+      "The restore didn't finish. Please try again.";
   }
 }
 onBeforeUnmount(() => {
@@ -609,7 +604,6 @@ defineExpose({ open });
     <MigrationNoticeBanner :notices="migrationNotices" @dismiss="dismissMigration" />
     <SettingsScreen
       v-if="settingsOpen"
-      v-model:restore-path="restorePath"
       :info="info"
       :backup-status="backupStatus"
       :confirming-restore="confirmingRestore"
@@ -617,8 +611,7 @@ defineExpose({ open });
       @close="settingsOpen = false"
       @open-previews="openPreview('all')"
       @backup="onBackup"
-      @pick-restore="chooseRestoreFile"
-      @ask-restore="askRestore"
+      @ask-restore="confirmingRestore = true"
       @confirm-restore="onRestore"
       @cancel-restore="confirmingRestore = false"
       @dismiss-notice="tokensNotice = null"
