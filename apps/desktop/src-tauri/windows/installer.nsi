@@ -278,20 +278,21 @@ Function PageReinstall
 
   ; Reinstalling the same version
   ${If} $R0 = 0
-    StrCpy $R1 "$(alreadyInstalledLong)"
-    StrCpy $R2 "$(addOrReinstall)"
-    StrCpy $R3 "$(uninstallApp)"
+    ; swarmDraft: plain copy that names the Continue button.
+    StrCpy $R1 "swarmDraft ${VERSION} is already on this computer. Choose what to do, then click Continue."
+    StrCpy $R2 "Reinstall swarmDraft"
+    StrCpy $R3 "Uninstall swarmDraft"
   ; Upgrading
   ${ElseIf} $R0 = 1
-    StrCpy $R1 "$(olderOrUnknownVersionInstalled)"
-    StrCpy $R2 "$(uninstallBeforeInstalling)"
-    StrCpy $R3 "$(dontUninstall)"
+    StrCpy $R1 "An older version of swarmDraft is on this computer. Your manuscripts are kept either way."
+    StrCpy $R2 "Remove the old version first (recommended)"
+    StrCpy $R3 "Install over it"
   ; Downgrading
   ${ElseIf} $R0 = -1
-    StrCpy $R1 "$(newerVersionInstalled)"
-    StrCpy $R2 "$(uninstallBeforeInstalling)"
+    StrCpy $R1 "A newer version of swarmDraft is on this computer. Your manuscripts are kept either way."
+    StrCpy $R2 "Remove the newer version first (recommended)"
     !if "${ALLOWDOWNGRADES}" == "true"
-      StrCpy $R3 "$(dontUninstall)"
+      StrCpy $R3 "Install over it"
     !else
       StrCpy $R3 "$(dontUninstallDowngrade)"
     !endif
