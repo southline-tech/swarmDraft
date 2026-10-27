@@ -70,6 +70,12 @@ const persistHooks = {
  * editor was read-only after a content error was ever accepted, so there is nothing else to lose.
  */
 const reloads = ref(0);
+/** The open section's load error, shown in a live region that stays mounted (#79). */
+const editorLoadError = ref('');
+function reloadSection() {
+  editorLoadError.value = '';
+  reloads.value++;
+}
 /** The chapter navigator (SectionNav); the toolbar's Chapters button toggles it. */
 const navigatorOpen = ref(true);
 
@@ -553,6 +559,23 @@ defineExpose({ open });
       </button>
       <p v-if="recoveryDismissError">{{ recoveryDismissError }}</p>
     </div>
+    <!-- Always mounted so screen readers know the region before an error lands in it (#79). -->
+    <div
+      class="editor-error-region"
+      role="alert"
+      aria-live="assertive"
+      data-test="load-error-region"
+    >
+      <p
+        v-if="editorLoadError && session && !choosingBook"
+        class="load-error"
+        data-test="load-error"
+      >
+        This section has content the editor does not support, so it was opened read-only and nothing
+        will be saved. {{ editorLoadError }}
+        <button type="button" data-test="reload" @click="reloadSection">Reload section</button>
+      </p>
+    </div>
     <input
       ref="fileInput"
       class="visually-hidden"
@@ -610,7 +633,9 @@ defineExpose({ open });
         :chapter-docs="sectionTreeDocs(session.outline.value, selectedId, session.sections)"
         :save-state="saveError ? 'offline' : undefined"
         :author-labels="authorName"
-        @reload="reloads++"
+        external-load-error
+        @load-error="editorLoadError = $event"
+        @reload="reloadSection"
         @toggle-navigator="navigatorOpen = !navigatorOpen"
         @focus-mode="focusMode = $event"
       />
@@ -631,6 +656,9 @@ body {
   height: 100vh;
   overflow: auto;
   padding-bottom: 1.75rem;
+}
+.editor-error-region .load-error {
+  margin: var(--ct-space-2) var(--ct-space-4) 0;
 }
 .shell > .workspace {
   flex: 1 0 20rem;

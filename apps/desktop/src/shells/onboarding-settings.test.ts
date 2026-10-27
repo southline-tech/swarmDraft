@@ -13,11 +13,8 @@ describe('UI shells (Part of #36)', () => {
     expect(w.findAll('[data-screen]')).toHaveLength(1);
   });
 
-  it('renders every surface in the "all" view', async () => {
+  it('renders every surface in the "all" view', () => {
     const w = mount(ShellsPreview, { props: { initial: 'all' } });
-    // Error cards fill their assertive live region one frame after mount (#79).
-    await new Promise((r) => requestAnimationFrame(() => r(undefined)));
-    await w.vm.$nextTick();
     for (const t of [
       'name-prompt',
       'settings-screen',

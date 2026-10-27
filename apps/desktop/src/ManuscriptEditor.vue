@@ -75,6 +75,11 @@ const props = defineProps<{
   saveState?: SaveState;
   /** Display name for a raw author id in the review panel (decisions still key on the id). */
   authorLabels?: (author: string) => AgentName;
+  /**
+   * The parent shows the load error in its own persistent live region (#79); this editor then
+   * renders no inline region and reports the error through `load-error` instead.
+   */
+  externalLoadError?: boolean;
 }>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
@@ -86,6 +91,8 @@ const emit = defineEmits<{
   decisions: [records: DecisionRecord[]];
   /** Focus mode (wp5) on or off; the parent hides its own chrome. */
   'focus-mode': [on: boolean];
+  /** The current load error ('' when none, and on unmount); for a parent-hosted live region. */
+  'load-error': [message: string];
 }>();
 
 /* UI shells for the audit review (Part of #36). Local view state only: none of these change the
@@ -363,6 +370,8 @@ defineExpose({ focusBody });
 const loadError = shallowRef<string>('');
 // Shown in an always-mounted assertive region one frame after it is set (#79).
 const shownLoadError = useDeferredValue(loadError);
+watch(loadError, (message) => emit('load-error', message), { immediate: true });
+onBeforeUnmount(() => emit('load-error', ''));
 /** Retry of the opening cursor placement; cleared when the editor closes. */
 let cursorTimer: ReturnType<typeof setTimeout> | undefined;
 const options: Partial<EditorOptions> = {
@@ -437,7 +446,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
     :data-focus-mode="focusMode || undefined"
     @keydown="onShellKey"
   >
-    <div role="alert" aria-live="assertive" data-test="load-error-region">
+    <div v-if="!externalLoadError" role="alert" aria-live="assertive" data-test="load-error-region">
       <p v-if="shownLoadError" class="load-error" data-test="load-error">
         This section has content the editor does not support, so it was opened read-only and nothing
         will be saved. {{ shownLoadError }}
@@ -618,7 +627,8 @@ const LABELS: Record<ReviewItem['type'], string> = {
 </template>
 
 <style>
-.manuscript-editor .load-error {
+.manuscript-editor .load-error,
+.editor-error-region .load-error {
   border: 1px solid var(--ct-danger);
   border-radius: var(--ct-radius-md);
   background: var(--ct-danger-bg);
