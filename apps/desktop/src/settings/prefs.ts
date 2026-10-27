@@ -3,6 +3,7 @@
  * localStorage on this computer; a missing or broken store falls back to the defaults.
  */
 import { SWATCHES } from '../shells/colors';
+import { applyThemeParam } from '../shells/preview';
 
 export type Theme = 'light' | 'dark';
 export const THEME_KEY = 'swarmdraft.theme';
@@ -20,6 +21,19 @@ export function loadTheme(storage: Store = globalThis.localStorage): Theme {
 
 export function applyTheme(theme: Theme, root: HTMLElement = document.documentElement): void {
   root.dataset.theme = theme;
+}
+
+/**
+ * Startup (#102): apply the saved theme before the first paint, then let a `?theme=` preview
+ * param override it. Called from main.ts before the app mounts.
+ */
+export function bootTheme(
+  search: string = globalThis.location?.search ?? '',
+  storage: Store = globalThis.localStorage,
+  root: HTMLElement = document.documentElement,
+): void {
+  applyTheme(loadTheme(storage), root);
+  applyThemeParam(search, root);
 }
 
 export function saveTheme(theme: Theme, storage: Store = globalThis.localStorage): void {

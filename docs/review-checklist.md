@@ -174,3 +174,6 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-27 · #101 · the no-restart toast test advanced past 8s in one jump, so it couldn't tell "closes at 8s" from "closes later" · test a timer boundary on both sides (still visible at T−1ms, gone at T) after the event that must not reset it
 - 2026-10-27 · #101 · the cue's clearTimeout-on-unmount had no test · spy on setTimeout/clearTimeout and assert the exact timer id is cleared on unmount
 - 2026-10-27 · #102 · restore confirm had the danger button first · PM: Cancel first, danger second, focus starts on Cancel; a test asserts the button order
+- 2026-10-27 · #102 · the startup theme was applied inline in main.ts with no test · put boot logic in an exported function (bootTheme) and test both the stored value and the ?theme= override
+- 2026-10-27 · #102 · loadProfile's typeof-string name check had no test, so String(p.name) would have let "[object Object]" through · seed non-string JSON in tests for every stored-value guard
+- 2026-10-27 · #102 · the PR body's test counts (447) didn't match the log (462) after merging main · regenerate the checks log and revert table from the pushed head and copy counts from that run
