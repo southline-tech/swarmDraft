@@ -112,10 +112,3 @@ export function buildThreads(doc: DocNode, rows: CommentRow[]): CommentThread[] 
   }
   return threads;
 }
-
-/** Stable per-author color, shared by the comments and suggestions panels. */
-export function commentAuthorColor(author: string): string {
-  let h = 0;
-  for (const ch of author) h = (h * 31 + ch.codePointAt(0)!) >>> 0;
-  return `hsl(${h % 360} 70% 45%)`;
-}

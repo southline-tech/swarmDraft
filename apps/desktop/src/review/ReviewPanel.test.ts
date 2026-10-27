@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import type { SuggestionItem } from '@coauthor/editor';
 import ReviewPanel from './ReviewPanel.vue';
+import { resetCollabSlots } from '../author-colors';
 
 const items: SuggestionItem[] = [
   { id: 's1', kind: 'suggestion_insert', author: 'agent:a', ts: 't', text: 'flickered' },
@@ -13,6 +14,7 @@ const NAMES: Record<string, string> = { 'agent:a': 'Writing assistant', brett: '
 const labels = (a: string) => ({ name: NAMES[a] ?? a, agent: a.startsWith('agent:') });
 
 describe('ReviewPanel (RAD-258)', () => {
+  beforeEach(resetCollabSlots);
   it('lists changes with the counter in the header and emits step-through actions', async () => {
     const w = mount(ReviewPanel, { props: { items, labels, currentKey: key(items[1]!) } });
     expect(w.find('h2').text()).toBe('Review changes');
@@ -80,7 +82,7 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(w.findAll('[data-test=filter-option]')[1]!.classes()).toContain('sel');
   });
 
-  it('colors each author with a distinct --ct-collab-N token, Grok Bot always collab-1', async () => {
+  it('colors each author with a distinct --ct-collab-N token, in first-seen order, never by display name', async () => {
     const many: SuggestionItem[] = ['brett', 'agent:x', 'agent:g', 'agent:y'].map((author, i) => ({
       id: `m${i}`,
       kind: 'suggestion_insert',
@@ -96,14 +98,15 @@ describe('ReviewPanel (RAD-258)', () => {
     const vars = w
       .findAll('[data-test=filter-option] .av')
       .map((e) => (e.element as HTMLElement).style.getPropertyValue('--ct-suggester'));
+    // agent:g is labelled "Grok Bot" but is third seen, so it gets collab-3, not a pinned collab-1.
     expect(vars).toEqual([
+      'var(--ct-collab-1)',
       'var(--ct-collab-2)',
       'var(--ct-collab-3)',
-      'var(--ct-collab-1)',
       'var(--ct-collab-4)',
     ]);
     const card = w.findAll('[data-test=item]')[2]!.element as HTMLElement;
-    expect(card.style.getPropertyValue('--ct-suggester')).toBe('var(--ct-collab-1)');
+    expect(card.style.getPropertyValue('--ct-suggester')).toBe('var(--ct-collab-3)');
     expect(w.html()).not.toContain('hsl(');
   });
 
