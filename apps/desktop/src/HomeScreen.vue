@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { PRODUCT_NAME } from './lib/brand';
 import AppLogo from './AppLogo.vue';
 import { nextTick, ref } from 'vue';
 
@@ -51,7 +52,7 @@ defineExpose({ focusOpen });
   <section class="home" data-test="home">
     <div v-if="step === 'welcome'" class="home__inner" data-test="home-welcome">
       <AppLogo class="home__mark" :size="64" />
-      <h1 class="home__title">Welcome to coAuthor</h1>
+      <h1 class="home__title">Welcome to {{ PRODUCT_NAME }}</h1>
       <p class="home__lede">
         A calm place to write and revise your book. Your writing assistant can only suggest changes
         — you decide what stays.
@@ -65,7 +66,7 @@ defineExpose({ focusOpen });
         Get started
       </button>
       <p class="home__note">
-        Your book stays on this computer. coAuthor saves your work as you go.
+        Your book stays on this computer. {{ PRODUCT_NAME }} saves your work as you go.
       </p>
     </div>
     <div v-else class="home__inner" data-test="home-open">

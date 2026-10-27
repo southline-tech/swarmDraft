@@ -1,9 +1,10 @@
-//! coAuthor desktop backend.
+//! swarmDraft desktop backend.
 //!
 //! Module ownership:
 //! - `storage`: local data directory and SQLite (manuscript metadata, Yjs updates, backups).
 //! - `backup`: full-project .zip backup and validated restore (RAD-224).
 //! - `agents`: agent principals and hashed per-agent bearer tokens (RAD-205).
+//! - `migrate`: first-run copy of the pre-rename data folders (#43).
 //! - `mcp`: in-app MCP server bound to 127.0.0.1 with per-agent bearer tokens (RAD-205/209/210).
 
 pub mod agents;
@@ -12,6 +13,7 @@ pub mod backup;
 pub mod content;
 pub mod manuscripts;
 pub mod mcp;
+pub mod migrate;
 pub mod save_copy;
 pub mod storage;
 
@@ -221,6 +223,27 @@ fn dismiss_recovery_notices(
     backup::dismiss_recovery_notices(store.data_dir(), &ids).map_err(|e| e.to_string())
 }
 
+/// Migration notices from this launch (#43), kept apart from restore recovery.
+#[derive(Default)]
+struct MigrationNotices(std::sync::Mutex<Vec<migrate::MigrationNotice>>);
+
+/// `migration_notices` → `[{ id, kind: "info" | "warn", text }]`: plain-text notices from the
+/// rename migration this launch. Separate from `recovery_notices`. Reading does not clear.
+#[tauri::command]
+fn migration_notices(notices: tauri::State<'_, MigrationNotices>) -> Vec<migrate::MigrationNotice> {
+    notices.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// `dismiss_migration_notices({ ids })`: hide the shown migration notices for this launch.
+#[tauri::command]
+fn dismiss_migration_notices(notices: tauri::State<'_, MigrationNotices>, ids: Vec<String>) {
+    notices
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|n| !ids.contains(&n.id));
+}
+
 /// Restore a backup. The file is chosen here in a native open dialog, never taken from the
 /// webview (#83), and validated by the archive's manifest format id and contents, not its name.
 /// Returns `Ok(None)` if the user cancelled. Errors are short codes for the UI
@@ -360,7 +383,26 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
+            // #43: copy (never move) the pre-rename data folder before anything opens it.
+            // Only the roaming folder: the local one holds just the WebView2 cache.
+            let mut migration_notices = migrate::startup_migration(&dir);
             let report = backup::cleanup_temp(&dir);
+            // #43: both apps default to the same MCP port; if an old coAuthor holds it, say so
+            // at startup instead of letting agents keep writing into the old data.
+            let listener = match mcp::bind(mcp::DEFAULT_PORT) {
+                Ok(l) => Ok(l),
+                Err(e) => {
+                    eprintln!("MCP server not started: {e}");
+                    if e.kind() == std::io::ErrorKind::AddrInUse {
+                        migration_notices.push(migrate::MigrationNotice::new(
+                            migrate::NoticeKind::Warn,
+                            mcp::PORT_IN_USE_MESSAGE,
+                        ));
+                    }
+                    Err(e.to_string())
+                }
+            };
+            app.manage(MigrationNotices(std::sync::Mutex::new(migration_notices)));
             app.manage(UnsavedNotices(std::sync::Mutex::new(
                 report.unsaved_notices,
             )));
@@ -369,13 +411,16 @@ pub fn run() {
             app.manage(backup::OpLock::default());
             app.manage(std::sync::Mutex::new(McpStatus {
                 url: None,
-                error: None,
+                error: listener.as_ref().err().cloned(),
             }));
-            // The MCP server shares the store. If the port is taken, the app still runs and
-            // the settings screen shows the error.
+            // The MCP server shares the store. If the port is taken, the app still runs, the
+            // startup notice explains it, and mcp_status reports the error.
             let handle = app.handle().clone();
+            let Ok(listener) = listener else {
+                return Ok(());
+            };
             tauri::async_runtime::spawn(async move {
-                let result = mcp::serve(store, mcp::DEFAULT_PORT).await;
+                let result = mcp::serve_on(store, listener).await;
                 let state = handle.state::<std::sync::Mutex<McpStatus>>();
                 let mut st = state.lock().expect("status poisoned");
                 match result {
@@ -399,6 +444,8 @@ pub fn run() {
             create_backup,
             recovery_notices,
             dismiss_recovery_notices,
+            migration_notices,
+            dismiss_migration_notices,
             restore_backup,
             manuscript_import_json,
             manuscripts_list,
@@ -410,5 +457,5 @@ pub fn run() {
             save_manuscript_copy
         ])
         .run(tauri::generate_context!())
-        .expect("error while running coAuthor");
+        .expect("error while running swarmDraft");
 }

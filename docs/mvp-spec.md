@@ -1,10 +1,10 @@
-# coAuthor — MVP Spec
+# swarmDraft — MVP Spec
 
 Owner: Brett Humphreys · Org: radiancelux · Status: Draft v1 (2026-10-25)
 
 ## 1. Summary
 
-coAuthor is a bot-native collaborative word processor. Humans and AI agents co-write manuscripts asynchronously without overwriting each other, and coAuthor outputs publication-ready manuscripts: Amazon KDP print PDF, EPUB 3, and .docx. First user: a novelist prepping a manuscript.
+swarmDraft is a bot-native collaborative word processor. Humans and AI agents co-write manuscripts asynchronously without overwriting each other, and swarmDraft outputs publication-ready manuscripts: Amazon KDP print PDF, EPUB 3, and .docx. First user: a novelist prepping a manuscript.
 
 ## 2. Goals
 
@@ -48,7 +48,7 @@ coAuthor is a bot-native collaborative word processor. Humans and AI agents co-w
 
 ## 5. Architecture
 
-coAuthor is a local-first Tauri desktop app (Windows first). Everything runs on the author's
+swarmDraft is a local-first Tauri desktop app (Windows first). Everything runs on the author's
 machine; there is no hosted server.
 
 ```

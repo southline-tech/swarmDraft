@@ -336,9 +336,36 @@ pub fn router(store: Store, cfg: McpConfig) -> axum::Router {
     router_with_stats(store, cfg).0
 }
 
-/// Bind on loopback and serve until the process exits. Returns the bound address.
-pub async fn serve(store: Store, port: u16) -> std::io::Result<SocketAddr> {
-    let listener = tokio::net::TcpListener::bind((DEFAULT_HOST, port)).await?;
+/// Shown when the MCP port is taken, most likely by a pre-rename coAuthor still running (both
+/// apps default to the same port, and agents would otherwise keep writing into the old data).
+pub const PORT_IN_USE_MESSAGE: &str = "Your bots can't connect because the old coAuthor app is still open. Close it, then restart swarmDraft.";
+
+/// Bind the MCP port on loopback synchronously, so startup can tell the user right away when
+/// another process (an old coAuthor) already holds it.
+pub fn bind(port: u16) -> std::io::Result<std::net::TcpListener> {
+    match std::net::TcpListener::bind((DEFAULT_HOST, port)) {
+        Ok(l) => {
+            l.set_nonblocking(true)?;
+            Ok(l)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+            // Port and OS error go to the log only; the user sees plain wording.
+            eprintln!("swarmDraft: MCP port {port} on {DEFAULT_HOST} is in use: {e}");
+            Err(std::io::Error::new(
+                std::io::ErrorKind::AddrInUse,
+                PORT_IN_USE_MESSAGE,
+            ))
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Serve on a listener from [`bind`] until the process exits. Returns the bound address.
+pub async fn serve_on(
+    store: Store,
+    listener: std::net::TcpListener,
+) -> std::io::Result<SocketAddr> {
+    let listener = tokio::net::TcpListener::from_std(listener)?;
     let addr = listener.local_addr()?;
     let app = router(store, McpConfig::new(addr.port()));
     tokio::spawn(async move {
@@ -348,4 +375,9 @@ pub async fn serve(store: Store, port: u16) -> std::io::Result<SocketAddr> {
         }
     });
     Ok(addr)
+}
+
+/// Bind on loopback and serve until the process exits. Returns the bound address.
+pub async fn serve(store: Store, port: u16) -> std::io::Result<SocketAddr> {
+    serve_on(store, bind(port)?).await
 }
