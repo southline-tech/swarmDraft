@@ -146,3 +146,4 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #82 · branch conflicted with main when review was requested · merge main and re-run all checks right before each review request
 - 2026-10-26 · #82 · re-importing while the book-open toast was up cleared and set its text in one tick, so the region never changed and nothing was re-announced · to re-announce the same message, clear the region, set the text on nextTick, and test the remove-then-add DOM mutations on the same node
 - 2026-10-26 · #82 · after merging #77, its load-error test failed because #82 defers error text one frame · after merging main, re-run the full suite and fix semantic conflicts in the tests, not only text conflicts
+- 2026-10-26 · #78 · old app-ID folders must be refused as backup destinations · refuse legacy data dirs too
