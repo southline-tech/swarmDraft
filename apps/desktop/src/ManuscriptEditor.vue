@@ -320,13 +320,18 @@ const marginNotesShown = computed(
 );
 /** #96: page under 440px in the forced state, so it gets the narrower inner padding. */
 const pageNarrow = computed(() =>
-  forcedPageNarrow(!!props.outlineForced, deskWidth.value, marginNotesShown.value),
+  forcedPageNarrow(
+    !!props.outlineForced && !focusMode.value,
+    deskWidth.value,
+    marginNotesShown.value,
+  ),
 );
 const layout = computed<EditorLayout>(() => ({
   reviewShown: reviewOpen.value && !collapsed.value && !focusMode.value,
   deskWidth: deskWidth.value,
   marginNotes: marginNotesShown.value,
   deskLeft: deskLeft.value,
+  focusMode: focusMode.value,
 }));
 watch(layout, (l) => emit('layout', l), { immediate: true });
 let deskObserver: ResizeObserver | null = null;

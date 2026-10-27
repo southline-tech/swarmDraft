@@ -2108,6 +2108,47 @@ describe('App outline auto-collapse on a narrow desk (#92)', () => {
     w.unmount();
   });
 
+  it('a forced outline stays open and forced across focus mode (#97)', async () => {
+    const { w } = await withManuscript();
+    const sidebar = () => w.findComponent({ name: 'SectionNav' });
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    ed().vm.$emit('layout', layout(true, 300));
+    await settle();
+    await w.find('[data-test="tb-navigator"]').trigger('click'); // force it open
+    await settle();
+    ed().vm.$emit('focus-mode', true);
+    ed().vm.$emit('layout', { ...layout(false, 1000), focusMode: true });
+    await settle();
+    ed().vm.$emit('focus-mode', false);
+    ed().vm.$emit('layout', layout(true, 368));
+    await settle();
+    expect(sidebar().isVisible()).toBe(true);
+    expect(ed().props('outlineForced')).toBe(true);
+    w.unmount();
+  });
+
+  it('the editor marks its focus-mode layout so the App keeps the forced outline (#97)', async () => {
+    const { w } = await withManuscript();
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    await w.find('[data-test="focus-mode"]').trigger('click');
+    await settle();
+    const emitted = (ed().emitted('layout') ?? []) as [{ focusMode?: boolean }][];
+    expect(emitted.at(-1)?.[0].focusMode).toBe(true);
+    w.unmount();
+  });
+
+  it('the forced state does not drop while focus mode is on (#97)', async () => {
+    const { w } = await withManuscript();
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    ed().vm.$emit('layout', layout(true, 300));
+    await settle();
+    await w.find('[data-test="tb-navigator"]').trigger('click');
+    ed().vm.$emit('focus-mode', true);
+    await settle();
+    expect(ed().props('outlineForced')).toBe(true);
+    w.unmount();
+  });
+
   it("the writer's own Chapters toggle wins over the auto reopen", async () => {
     const { w } = await withManuscript();
     const sidebar = () => w.findComponent({ name: 'SectionNav' });

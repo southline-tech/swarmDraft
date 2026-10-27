@@ -9,7 +9,12 @@ import {
   PAGE_MIN_W,
   useOutlineAutoCollapse,
 } from './outline-auto-collapse';
-import { forcedPageNarrow, PAGE_FORCED_MIN_W, toastPlacement } from './outline-auto-collapse';
+import {
+  forcedDeskNeeded,
+  forcedPageNarrow,
+  PAGE_FORCED_MIN_W,
+  toastPlacement,
+} from './outline-auto-collapse';
 
 const narrow = { reviewShown: true, deskWidth: deskNeeded(false) - 1, marginNotes: false };
 const wide = { reviewShown: true, deskWidth: 900, marginNotes: false };
@@ -137,5 +142,51 @@ describe('forced outline page (#96)', () => {
   it('the forced floor matches --ct-page-forced-min-w', () => {
     const css = readFileSync(resolve(__dirname, '../styles/tokens.css'), 'utf8');
     expect(css).toContain(`--ct-page-forced-min-w: ${PAGE_FORCED_MIN_W}px;`);
+  });
+});
+
+describe('forced outline vs margin notes and focus mode (#97)', () => {
+  const forcedOpen = () => {
+    const a = setup();
+    a.update(narrow); // auto-closed
+    a.toggleByHand(); // writer forces it open
+    return a;
+  };
+  const deskWithOutline = 368; // 1024px window, outline + review open
+
+  it('a forced outline closes when page + notes cannot fit', () => {
+    const a = forcedOpen();
+    a.update({ reviewShown: true, deskWidth: deskWithOutline, marginNotes: false });
+    expect(a.nav.value).toBe(true); // 320 page + gutters fits without notes
+    a.update({ reviewShown: true, deskWidth: deskWithOutline, marginNotes: true });
+    expect(deskWithOutline).toBeLessThan(forcedDeskNeeded(true));
+    expect(a.nav.value).toBe(false);
+    expect(a.forcedClosed.value).toBe(true);
+  });
+
+  it('comes back when the notes hide', () => {
+    const a = forcedOpen();
+    a.update({ reviewShown: true, deskWidth: deskWithOutline, marginNotes: true });
+    a.update({ reviewShown: true, deskWidth: 672, marginNotes: true }); // outline closed, more room
+    expect(a.nav.value).toBe(false);
+    a.update({ reviewShown: true, deskWidth: 672, marginNotes: false });
+    expect(a.nav.value).toBe(true);
+    expect(a.forcedClosed.value).toBe(false);
+  });
+
+  it('comes back when the review panel closes', () => {
+    const a = forcedOpen();
+    a.update({ reviewShown: true, deskWidth: deskWithOutline, marginNotes: true });
+    a.update({ reviewShown: false, deskWidth: 990, marginNotes: true });
+    expect(a.nav.value).toBe(true);
+  });
+
+  it('focus mode keeps the forced choice: the outline comes back open after it', () => {
+    const a = forcedOpen();
+    a.update({ reviewShown: false, deskWidth: 1000, marginNotes: false, focusMode: true });
+    expect(a.manual.value).toBe(true);
+    a.update({ reviewShown: true, deskWidth: deskWithOutline, marginNotes: false });
+    expect(a.nav.value).toBe(true);
+    expect(a.manual.value).toBe(true);
   });
 });
