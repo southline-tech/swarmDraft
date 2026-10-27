@@ -135,7 +135,11 @@ function onWindowKey(e: KeyboardEvent) {
   if (e.target instanceof Node && rootEl.value?.contains(e.target)) return;
   if (isField(e.target)) return;
   const mod = e.ctrlKey || e.metaKey;
-  if (
+  // An open context menu owns Escape: close it and stay in focus mode.
+  if (e.key === 'Escape' && menuAt.value) {
+    e.preventDefault();
+    menuAt.value = null;
+  } else if (
     (mod && e.shiftKey && e.key.toLowerCase() === 'f') ||
     (e.key === 'Escape' && !shortcutsOpen.value)
   ) {
@@ -157,6 +161,8 @@ function onShellKey(e: KeyboardEvent) {
   } else if (mod && e.shiftKey && e.key.toLowerCase() === 'f') {
     e.preventDefault();
     focusMode.value = !focusMode.value;
+  } else if (e.key === 'Escape' && menuAt.value) {
+    menuAt.value = null;
   } else if (e.key === 'Escape' && focusMode.value && !shortcutsOpen.value) {
     focusMode.value = false;
   }

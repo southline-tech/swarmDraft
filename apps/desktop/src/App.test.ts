@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
-import { flushPromises, mount } from '@vue/test-utils';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
 import { docToYDoc, importDocx, readStructure, writeStructure, yDocToDoc } from '@coauthor/docx';
 import App from './App.vue';
@@ -9,6 +9,8 @@ import { PRODUCT_NAME } from './lib/brand';
 import { storedFixture } from './stored-fixture.test-helper';
 import { openSession, sessionFromDocx } from './manuscript-session';
 import { docWordCount, sectionTreeDocs } from './status/wordcount';
+
+enableAutoUnmount(afterEach);
 
 const fixture = resolve(
   __dirname,
@@ -1738,6 +1740,45 @@ describe('focus mode started from the toolbar (#87 QA)', () => {
       expect(w.find('[data-focus-mode]').exists()).toBe(false);
     }
     w.unmount();
+  });
+});
+
+describe('context menu in focus mode (#87 QA)', () => {
+  it('Escape with the menu open but focus on the body also closes only the menu', async () => {
+    const { w } = await withManuscript();
+    await w.get('[data-test="focus-mode"]').trigger('click');
+    await settle();
+    await w.get('.ProseMirror').trigger('contextmenu', { clientX: 50, clientY: 50 });
+    await settle();
+    (document.activeElement as HTMLElement | null)?.blur();
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+    await settle();
+    expect(w.find('[data-test="context-menu"]').exists()).toBe(false);
+    expect(w.find('[data-focus-mode]').exists()).toBe(true);
+  });
+
+  it('Escape with the menu open closes only the menu and stays in focus mode', async () => {
+    const { w } = await withManuscript();
+    await w.get('[data-test="focus-mode"]').trigger('click');
+    await settle();
+    await w.get('.ProseMirror').trigger('contextmenu', { clientX: 50, clientY: 50 });
+    await settle();
+    const menu = w.get('[data-test="context-menu"]');
+    const target = (menu.element.querySelector('[role=menuitem]') as HTMLElement) ?? menu.element;
+    target.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+    await settle();
+    expect(w.find('[data-test="context-menu"]').exists()).toBe(false);
+    expect(w.find('[data-focus-mode]').exists()).toBe(true);
+    // With the menu closed, Escape exits focus mode as before.
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+    await settle();
+    expect(w.find('[data-focus-mode]').exists()).toBe(false);
   });
 });
 
