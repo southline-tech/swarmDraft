@@ -39,7 +39,7 @@ describe('App agent-name reloads', () => {
     const w = mount(App, { attachTo: document.body });
     await flushPromises();
     expect(bridge.list).toHaveBeenCalledTimes(1);
-    expect(authorLabel('agent:a1')).toBe('Draft Helper (agent)');
+    expect(authorLabel('agent:a1')).toBe('Draft Helper (bot)');
 
     window.dispatchEvent(new Event('focus'));
     window.dispatchEvent(new Event('focus'));
@@ -53,7 +53,7 @@ describe('App agent-name reloads', () => {
     await flushPromises();
     expect(bridge.list).toHaveBeenCalledTimes(3);
     expect(err).toHaveBeenCalled();
-    expect(authorLabel('agent:a1')).toBe('Draft Helper (agent)');
+    expect(authorLabel('agent:a1')).toBe('Draft Helper (bot)');
     err.mockRestore();
 
     w.unmount();

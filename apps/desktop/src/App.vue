@@ -14,7 +14,7 @@ import {
   type RecoveryNotice,
 } from './backend';
 import AgentsSettings from './AgentsSettings.vue';
-import { refreshAgents, reloadOnFocus } from './agent-names';
+import { authorName, refreshAgents, reloadOnFocus } from './agent-names';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
 import HomeScreen from './HomeScreen.vue';
@@ -611,6 +611,7 @@ defineExpose({ open });
         :book-docs="outlineDocs(session.outline.value, session.sections)"
         :chapter-docs="sectionTreeDocs(session.outline.value, selectedId, session.sections)"
         :save-state="saveError ? 'offline' : undefined"
+        :author-labels="authorName"
         @reload="reloads++"
         @toggle-navigator="navigatorOpen = !navigatorOpen"
         @focus-mode="focusMode = $event"

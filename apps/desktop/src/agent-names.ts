@@ -82,7 +82,7 @@ export const agentIdOf = (author: string) =>
 export interface AgentName {
   name: string;
   note?: string;
-  /** True for agent authors: shown with an "Agent" tag, and "(agent)" in hover text. */
+  /** True for agent authors: shown with a "Bot" tag, and "(bot)" in hover text. */
   agent?: boolean;
 }
 
@@ -115,12 +115,12 @@ export function agentName(id: string, saved?: string): AgentName {
   return { name: kept ?? UNNAMED_AGENT, agent: true };
 }
 
-/** Plain-text form: "Name (agent)", "Name (agent, revoked)"; people as stored. */
+/** Plain-text form: "Name (bot)", "Name (bot, revoked)"; people as stored. */
 export function joinName(n: AgentName): string {
   if (!n.agent || n.name === UNNAMED_AGENT || n.name === REMOVED_AGENT)
     return n.note ? `${n.name} ${n.note}` : n.name;
   const extra = n.note ? `, ${n.note.replace(/[()]/g, '')}` : '';
-  return `${n.name} (agent${extra})`;
+  return `${n.name} (bot${extra})`;
 }
 
 /** Plain-text label for an agent id (used for hover text). */

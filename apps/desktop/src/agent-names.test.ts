@@ -74,17 +74,17 @@ const content = {
 describe('agent display names (RAD-263)', () => {
   it('labels agents by name, with neutral fallbacks and people as stored', () => {
     expect(authorLabel('agent:a1')).toBe(UNNAMED_AGENT); // not loaded yet: never the raw id
-    expect(agentLabel('a1', 'Stored Name')).toBe('Stored Name (agent)');
+    expect(agentLabel('a1', 'Stored Name')).toBe('Stored Name (bot)');
     expect(agentLabel('a1', 'agent:a1')).toBe(UNNAMED_AGENT);
     setAgents([agent('a1', 'Draft Helper'), agent('a2', '   ')]);
-    expect(authorLabel('agent:a1')).toBe('Draft Helper (agent)');
+    expect(authorLabel('agent:a1')).toBe('Draft Helper (bot)');
     expect(authorLabel('agent:a2')).toBe(UNNAMED_AGENT);
     expect(authorLabel('agent:gone')).toBe(REMOVED_AGENT);
-    expect(agentLabel('gone', 'Old Name')).toBe('Old Name (agent, removed)');
+    expect(agentLabel('gone', 'Old Name')).toBe('Old Name (bot, removed)');
     expect(agentLabel('gone', 'agent:gone')).toBe(REMOVED_AGENT);
     setAgents([{ ...agent('a3', 'Retired Bot'), revokedAt: '2026-10-26T01:00:00Z' }]);
     expect(agentName('a3')).toEqual({ name: 'Retired Bot', note: '(revoked)', agent: true });
-    expect(authorLabel('agent:a3')).toBe('Retired Bot (agent, revoked)');
+    expect(authorLabel('agent:a3')).toBe('Retired Bot (bot, revoked)');
     expect(authorLabel('Brett')).toBe('Brett');
     expect(authorLabel(undefined)).toBe('');
   });
@@ -93,9 +93,9 @@ describe('agent display names (RAD-263)', () => {
     setAgents([agent('a1', 'Draft Helper')]);
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     await refreshAgents(() => Promise.reject(new Error('locked')));
-    expect(authorLabel('agent:a1')).toBe('Draft Helper (agent)');
+    expect(authorLabel('agent:a1')).toBe('Draft Helper (bot)');
     await refreshAgents(async () => [agent('a1', 'Renamed')]);
-    expect(authorLabel('agent:a1')).toBe('Renamed (agent)');
+    expect(authorLabel('agent:a1')).toBe('Renamed (bot)');
     err.mockRestore();
   });
 
@@ -104,11 +104,11 @@ describe('agent display names (RAD-263)', () => {
     const w = mount(ManuscriptEditor, { props: { content }, attachTo: document.body });
     await flushPromises();
     const authors = () =>
-      w.findAll('[data-test="review-author"] [data-test=agent-name]').map((a) => a.text());
+      w.findAll('[data-test="item"] [data-test=agent-name]').map((a) => a.text());
     expect(authors()).toEqual(['Draft Helper', REMOVED_AGENT]);
-    expect(w.findAll('[data-test="review-author"] [data-test=agent-tag]')).toHaveLength(2);
+    expect(w.findAll('[data-test="item"] .pill').map((p) => p.text())).toEqual(['Bot', 'Bot']);
     expect(w.find('ins.suggestion-insert [title]').attributes('title')).toBe(
-      'Added by Draft Helper (agent)',
+      'Added by Draft Helper (bot)',
     );
     expect(w.find('del.suggestion-delete [title]').attributes('title')).toBe(
       `Deleted by ${REMOVED_AGENT}`,
@@ -121,7 +121,7 @@ describe('agent display names (RAD-263)', () => {
     await flushPromises();
     expect(authors()[0]).toBe('Line Editor');
     expect(w.find('ins.suggestion-insert [title]').attributes('title')).toBe(
-      'Added by Line Editor (agent)',
+      'Added by Line Editor (bot)',
     );
     w.unmount();
   });
@@ -131,9 +131,9 @@ describe('agent display names (RAD-263)', () => {
     const w = mount(ManuscriptEditor, { props: { content }, attachTo: document.body });
     await flushPromises();
     expect(w.find('img').exists()).toBe(false);
-    expect(w.find('[data-test="review-author"] [data-test=agent-name]').text()).toBe(EVIL);
+    expect(w.find('[data-test="item"] [data-test=agent-name]').text()).toBe(EVIL);
     expect(w.find('ins.suggestion-insert [title]').attributes('title')).toBe(
-      `Added by ${EVIL} (agent)`,
+      `Added by ${EVIL} (bot)`,
     );
 
     const items: SuggestionItem[] = [
@@ -141,7 +141,7 @@ describe('agent display names (RAD-263)', () => {
     ];
     const p = mount(ReviewPanel, { props: { items } });
     expect(p.find('img').exists()).toBe(false);
-    expect(p.find('[data-test=author-group] h3').text()).toContain(EVIL);
+    expect(p.find('[data-test=item] .who').text()).toContain(EVIL);
     w.unmount();
   });
 
@@ -152,18 +152,19 @@ describe('agent display names (RAD-263)', () => {
       { id: 's2', kind: 'suggestion_delete', author: 'agent:gone', ts: 't', text: 'y' },
     ];
     const p = mount(ReviewPanel, { props: { items } });
-    const heads = p.findAll('[data-test=author-group] h3').map((h) => h.text());
+    const heads = p.findAll('[data-test=item] .who').map((h) => h.text());
     expect(heads[0]).toContain('Draft Helper');
     expect(heads[1]).toContain(REMOVED_AGENT);
     setAgents([{ ...agent('a1', 'Draft Helper'), revokedAt: 't' }]);
     await flushPromises();
-    const revoked = p.find('[data-test=author-group] h3 [data-test=agent-note]');
+    const revoked = p.find('[data-test=item] .who [data-test=agent-note]');
     expect(revoked.text()).toBe('(revoked)');
-    expect(revoked.classes()).toEqual(['agent-note']);
     setAgents([agent('a1', 'Draft Helper')]);
+    await flushPromises();
+    await p.find('[data-test=filter-toggle]').trigger('click');
     expect(p.text()).not.toContain('agent:');
-    await p.find('[data-test=accept-author]').trigger('click');
-    expect(p.emitted('decide')![0]).toEqual([{ kind: 'author', author: 'agent:a1' }, 'accept']);
+    await p.findAll('[data-test=filter-option]')[0]!.trigger('click');
+    expect(p.emitted('show-only')![0]).toEqual(['agent:a1']);
 
     const row = (
       id: string,
@@ -217,11 +218,10 @@ describe('agent display names (RAD-263)', () => {
       { id: 's1', kind: 'suggestion_insert', author: 'agent:a1', ts: 't', text: 'x' },
     ];
     const p = mount(ReviewPanel, { props: { items } });
-    const head = p.find('[data-test=author-group] h3');
+    const head = p.find('[data-test=item] .who');
     const name = head.find('[data-test=agent-name]');
-    expect(name.attributes('title')).toBe(LONG);
-    expect(name.classes()).toContain('agent-name');
-    expect(head.find('.author-head-name').exists()).toBe(true);
+    expect(name.attributes('title')).toBe(`${LONG}`);
+    expect(name.classes()).toContain('name');
     // The hashed hue is only a swatch (border), never the text colour.
     expect((head.element as HTMLElement).style.color).toBe('');
 
@@ -259,13 +259,13 @@ describe('agent display names (RAD-263)', () => {
     tauri.list.mockResolvedValue([agent('a1', 'Draft Helper')]);
     await Promise.all([refreshAgents(), refreshAgents()]);
     expect(tauri.list).toHaveBeenCalledTimes(1); // concurrent reloads share one request
-    expect(authorLabel('agent:a1')).toBe('Draft Helper (agent)');
+    expect(authorLabel('agent:a1')).toBe('Draft Helper (bot)');
 
     // Failure through the real path keeps the last list.
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     tauri.list.mockRejectedValueOnce(new Error('db locked'));
     await refreshAgents();
-    expect(authorLabel('agent:a1')).toBe('Draft Helper (agent)');
+    expect(authorLabel('agent:a1')).toBe('Draft Helper (bot)');
     expect(err).toHaveBeenCalled();
     err.mockRestore();
 
@@ -283,7 +283,7 @@ describe('agent display names (RAD-263)', () => {
     await refreshAgents(async () => [agent('a1', 'Newest')]);
     releaseOld([agent('a1', 'Stale')]);
     await old;
-    expect(authorLabel('agent:a1')).toBe('Newest (agent)');
+    expect(authorLabel('agent:a1')).toBe('Newest (bot)');
 
     // A list set directly (AgentsSettings) also wins over a reload still in flight.
     let releaseLate!: (v: Agent[]) => void;
@@ -291,26 +291,26 @@ describe('agent display names (RAD-263)', () => {
     setAgents([agent('a1', 'From settings')]);
     releaseLate([agent('a1', 'Late reply')]);
     await late;
-    expect(authorLabel('agent:a1')).toBe('From settings (agent)');
+    expect(authorLabel('agent:a1')).toBe('From settings (bot)');
   });
 
   it('isolates bidi text and strips bidi controls from labels', async () => {
     const RTL = '\u202Eמסייע 🤖';
     setAgents([agent('a1', RTL)]);
-    expect(authorLabel('agent:a1')).toBe('מסייע 🤖 (agent)');
+    expect(authorLabel('agent:a1')).toBe('מסייע 🤖 (bot)');
     const w = mount(ManuscriptEditor, { props: { content }, attachTo: document.body });
     await flushPromises();
     const title = w.find('ins.suggestion-insert [title]').attributes('title')!;
-    expect(title).toBe('Added by מסייע 🤖 (agent)');
+    expect(title).toBe('Added by מסייע 🤖 (bot)');
     expect(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/.test(title)).toBe(false);
-    const name = w.find('[data-test="review-author"] [data-test=agent-name]');
+    const name = w.find('[data-test="item"] [data-test=agent-name]');
     expect(name.element.tagName).toBe('BDI');
     expect(name.attributes('dir')).toBe('auto');
     expect(name.text()).toBe('מסייע 🤖');
     w.unmount();
   });
 
-  it('comments: injection-safe names and saved names, Agent tag, colour keyed by agent id', async () => {
+  it('comments: injection-safe names and saved names, Bot tag, colour keyed by agent id', async () => {
     setAgents([agent('a1', EVIL)]);
     const row = (id: string, authorId: string, authorName: string) => ({
       id,
@@ -341,7 +341,7 @@ describe('agent display names (RAD-263)', () => {
     expect(authors[0]!.find('[data-test=agent-name]').text()).toBe(EVIL);
     expect(authors[1]!.find('[data-test=agent-name]').text()).toBe(`${EVIL} (revoked)`);
     expect(authors[1]!.find('[data-test=agent-note]').text()).toBe('(removed)');
-    expect(authors.every((a) => a.find('[data-test=agent-tag]').text() === 'Agent')).toBe(true);
+    expect(authors.every((a) => a.find('[data-test=agent-tag]').text() === 'Bot')).toBe(true);
     expect(c.find('.badge').exists()).toBe(false);
 
     // Same agent id, different saved names: same swatch colour.

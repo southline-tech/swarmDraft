@@ -64,7 +64,7 @@ const visible = () => props.threads.filter((t) => props.showResolved || !t.resol
               ><bdi class="agent-name" dir="auto" data-test="agent-name" :title="n.name">{{
                 n.name
               }}</bdi
-              ><span v-if="n.agent" class="agent-tag" data-test="agent-tag">Agent</span>
+              ><span v-if="n.agent" class="agent-tag" data-test="agent-tag">Bot</span>
               <template v-if="n.note"
                 >{{ ' '
                 }}<span class="agent-note" data-test="agent-note">{{ n.note }}</span></template
