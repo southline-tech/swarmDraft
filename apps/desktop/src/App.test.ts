@@ -1793,6 +1793,35 @@ describe('Find in focus mode (#94)', () => {
   const find = (w: ReturnType<typeof mount>) => w.find('[data-test="find-panel"]').exists();
   const focused = (w: ReturnType<typeof mount>) => w.find('[data-focus-mode]').exists();
 
+  const openFindFromPage = async (w: ReturnType<typeof mount>) => {
+    await enterFocus(w);
+    const pm = w.get('.ProseMirror').element as HTMLElement;
+    pm.focus();
+    key(pm, { key: 'f', ctrlKey: true });
+    await settle();
+    expect(document.activeElement).toBe(w.get('[data-test="find-input"]').element);
+  };
+  const focusInPage = (w: ReturnType<typeof mount>) =>
+    w.get('.ProseMirror').element.contains(document.activeElement);
+
+  it('Escape in the find input returns focus to the page (focus mode)', async () => {
+    const { w } = await withManuscript();
+    await openFindFromPage(w);
+    key(w.get('[data-test="find-input"]').element, { key: 'Escape' });
+    await settle();
+    expect(find(w)).toBe(false);
+    expect(focusInPage(w)).toBe(true);
+  });
+
+  it('the Find close button returns focus to the page (focus mode)', async () => {
+    const { w } = await withManuscript();
+    await openFindFromPage(w);
+    await w.get('[data-test="find-close"]').trigger('click');
+    await settle();
+    expect(find(w)).toBe(false);
+    expect(focusInPage(w)).toBe(true);
+  });
+
   it('Ctrl+F from the page opens Find in focus mode and keeps focus mode on', async () => {
     const { w } = await withManuscript();
     await enterFocus(w);
