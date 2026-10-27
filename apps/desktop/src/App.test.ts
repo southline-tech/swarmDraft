@@ -1710,6 +1710,37 @@ describe('full-width toolbar (#84)', () => {
   });
 });
 
+describe('focus mode started from the toolbar (#87 QA)', () => {
+  const key = (el: Element, init: KeyboardEventInit) =>
+    el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+
+  it('moves focus into the page, and Ctrl+Shift+F from there exits', async () => {
+    const { w } = await withManuscript();
+    await w.get('[data-test="focus-mode"]').trigger('click');
+    await settle();
+    expect(w.find('[data-focus-mode]').exists()).toBe(true);
+    expect(document.activeElement?.closest('.ProseMirror')).not.toBeNull();
+    key(document.activeElement!, { key: 'F', ctrlKey: true, shiftKey: true });
+    await settle();
+    expect(w.find('[data-focus-mode]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('Escape and Ctrl+Shift+F exit even with focus on the body, each exactly once', async () => {
+    const { w } = await withManuscript();
+    for (const init of [{ key: 'Escape' }, { key: 'F', ctrlKey: true, shiftKey: true }]) {
+      await w.get('[data-test="focus-mode"]').trigger('click');
+      await settle();
+      (document.activeElement as HTMLElement | null)?.blur();
+      expect(document.activeElement).toBe(document.body);
+      key(document.body, init);
+      await settle();
+      expect(w.find('[data-focus-mode]').exists()).toBe(false);
+    }
+    w.unmount();
+  });
+});
+
 describe('book-open toast (ob7)', () => {
   it('keeps one persistent polite live region: same node before open, after open, after dismiss (#79)', async () => {
     const backend = await import('./backend');

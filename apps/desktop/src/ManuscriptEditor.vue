@@ -7,7 +7,16 @@
  * (`collaborativeEditorOptions`): every edit is written to the doc as it is typed, and changes
  * from other writers are content-checked before they apply. `content` opens an unbound snapshot.
  */
-import { computed, onBeforeUnmount, onMounted, shallowRef, toRaw, watch } from 'vue';
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  shallowRef,
+  toRaw,
+  useTemplateRef,
+  watch,
+} from 'vue';
 import { EditorContent, useEditor } from '@tiptap/vue-3';
 import type { Editor, EditorOptions, JSONContent } from '@tiptap/core';
 import { Selection } from '@tiptap/pm/state';
@@ -107,7 +116,32 @@ const shortcutsOpen = shallowRef(false);
 const focusMode = shallowRef(false);
 /** Track changes toggle (tc1/tc2): visual state only until suggestion mode is wired. */
 const tracking = shallowRef(false);
-watch(focusMode, (on) => emit('focus-mode', on));
+watch(focusMode, (on) => {
+  emit('focus-mode', on);
+  // #87 QA: focus mode hides the toolbar, so a toolbar button that started it would drop focus
+  // to <body>. Move focus into the page, and listen on window for the exit keys while active.
+  if (on) {
+    window.addEventListener('keydown', onWindowKey);
+    void nextTick(() => editor.value?.view.focus());
+  } else window.removeEventListener('keydown', onWindowKey);
+});
+onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKey));
+const rootEl = useTemplateRef<HTMLElement>('root');
+/** Exit keys for focus mode when focus is outside the editor (e.g. on <body>). Events from inside
+    the editor root already reach onShellKey, so they are skipped here to avoid a double toggle. */
+function onWindowKey(e: KeyboardEvent) {
+  if (e.defaultPrevented) return;
+  if (e.target instanceof Node && rootEl.value?.contains(e.target)) return;
+  if (isField(e.target)) return;
+  const mod = e.ctrlKey || e.metaKey;
+  if (
+    (mod && e.shiftKey && e.key.toLowerCase() === 'f') ||
+    (e.key === 'Escape' && !shortcutsOpen.value)
+  ) {
+    e.preventDefault();
+    focusMode.value = false;
+  }
+}
 const isField = (t: EventTarget | null) =>
   t instanceof HTMLElement && !!t.closest('input, textarea, select');
 function onShellKey(e: KeyboardEvent) {
@@ -445,6 +479,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
 
 <template>
   <div
+    ref="root"
     class="manuscript-editor"
     :class="{ 'focus-mode': focusMode }"
     :data-focus-mode="focusMode || undefined"
