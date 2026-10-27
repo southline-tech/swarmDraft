@@ -111,6 +111,9 @@ describe('page on desk', () => {
     const bad = { type: 'doc', content: [{ type: 'table' }] };
     const w = mount(ManuscriptEditor, { props: { content: bad }, attachTo: document.body });
     await flushPromises();
+    // The error fills its assertive region one frame after it is set (#79).
+    await new Promise((r) => requestAnimationFrame(() => r(undefined)));
+    await w.vm.$nextTick();
     expect(w.find('[data-test="load-error"]').exists()).toBe(true);
     await w.find('[data-test="zoom-out"]').trigger('click');
     expect(w.find('[data-test="page"]').attributes('style')).toContain('zoom: 0.9');
