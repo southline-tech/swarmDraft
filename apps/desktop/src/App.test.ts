@@ -1661,6 +1661,34 @@ describe('book-open toast (ob7)', () => {
     w.unmount();
   });
 
+  it('re-importing while the toast is up empties the same region, then re-fills it (#82)', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(null);
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    await chooseFile(w);
+    const node = w.get('[data-test="open-toast"] [data-test="toast-region"]').element;
+    expect(node.textContent).toContain('original file is untouched');
+    // Each mutation record is one DOM change; replay them to get the region's text over time.
+    const steps: string[] = [];
+    const isToast = (n: Node) => n instanceof HTMLElement && n.dataset.test === 'toast';
+    const obs = new MutationObserver((records) => {
+      for (const r of records) {
+        if ([...r.removedNodes].some(isToast)) steps.push('');
+        if ([...r.addedNodes].some(isToast)) steps.push('text');
+      }
+    });
+    obs.observe(node, { childList: true, subtree: true, characterData: true });
+    await chooseFile(w);
+    await new Promise((r) => setTimeout(r, 0));
+    obs.disconnect();
+    expect(w.get('[data-test="open-toast"] [data-test="toast-region"]').element).toBe(node);
+    // The region went empty, then got the text back (a fresh announcement), on the same node.
+    expect(steps.join(',')).toMatch(/(^|,),text$/);
+    expect(node.textContent).toContain('original file is untouched');
+    w.unmount();
+  });
+
   it('does not show when the import fails', async () => {
     const backend = await import('./backend');
     vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(storedFixture());

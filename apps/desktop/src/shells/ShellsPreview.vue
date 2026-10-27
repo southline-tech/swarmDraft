@@ -216,21 +216,24 @@ const cards = [
       </div>
     </section>
 
-    <section v-if="show('ob9')" class="sp__sec" data-screen="ob9">
-      <h2 class="sp__h">ob9 · Errors in plain language</h2>
-      <ErrorCard
-        variant="banner"
-        icon="save"
-        tone="danger"
-        title="Your latest changes aren't saved yet"
-        :text="`Don't close ${PRODUCT_NAME}. We'll keep trying — or save a copy somewhere else now.`"
-        action="Save a copy"
-        @action="stub('Save a copy')"
-      />
-      <div class="sp__grid sp__grid--gap">
-        <ErrorCard v-for="e in errors" :key="e.title" v-bind="e" @action="stub(e.action)" />
-      </div>
-    </section>
+    <!-- Persistent assertive region: only its content mounts/unmounts (#79). -->
+    <div role="alert" aria-live="assertive" data-test="preview-error-region">
+      <section v-if="show('ob9')" class="sp__sec" data-screen="ob9">
+        <h2 class="sp__h">ob9 · Errors in plain language</h2>
+        <ErrorCard
+          variant="banner"
+          icon="save"
+          tone="danger"
+          title="Your latest changes aren't saved yet"
+          :text="`Don't close ${PRODUCT_NAME}. We'll keep trying — or save a copy somewhere else now.`"
+          action="Save a copy"
+          @action="stub('Save a copy')"
+        />
+        <div class="sp__grid sp__grid--gap">
+          <ErrorCard v-for="e in errors" :key="e.title" v-bind="e" @action="stub(e.action)" />
+        </div>
+      </section>
+    </div>
 
     <section v-if="show('reason')" class="sp__sec" data-screen="reason">
       <h2 class="sp__h">#60 · Reason line on bot cards</h2>
