@@ -1137,7 +1137,7 @@ describe('restore confirmation', () => {
     await flushPromises();
     expect(backend.restoreBackup).toHaveBeenCalledWith();
     expect(wrapper.find('[data-test="backup-status"]').text()).toBe(
-      'Restored. Your previous state was saved in the backups folder.',
+      'Restored. A copy of your book from just before the restore is in the backups folder.',
     );
     const notice = wrapper.find('[data-test="tokens-revoked-notice"]');
     expect(notice.text()).toContain('revoked all 2 agent token');

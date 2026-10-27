@@ -206,7 +206,7 @@ async function onRestore(): Promise<void> {
     // The restore replaced storage, so the open session's in-memory docs are stale: close them
     // (stops the structure observer and unmounts the editor) so nothing can write them back.
     closeSession();
-    backupStatus.value = 'Restored. Your previous state was saved in the backups folder.';
+    backupStatus.value = 'Restored. A copy of your book from just before the restore is in the backups folder.';
     tokensNotice.value = r.tokensRevoked > 0 ? r.tokensRevoked : null;
   } catch (e) {
     console.error('Restore failed', e);
