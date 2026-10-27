@@ -1,4 +1,4 @@
-# AGENTS.md — coAuthor
+# AGENTS.md — swarmDraft
 
 Windows-first Tauri desktop manuscript editor: Vue 3 + Tiptap + Yjs frontend, Rust backend with local SQLite and an in-app localhost MCP server for agents (per-agent tokens). Read `docs/review-checklist.md` before asking for review.
 
