@@ -141,10 +141,16 @@ function onWindowKey(e: KeyboardEvent) {
   if (e.target instanceof Node && rootEl.value?.contains(e.target)) return;
   if (isField(e.target)) return;
   const mod = e.ctrlKey || e.metaKey;
-  // An open context menu owns Escape: close it and stay in focus mode.
+  // An open context menu or Find owns Escape: close it and stay in focus mode (#94).
   if (e.key === 'Escape' && menuAt.value) {
     e.preventDefault();
     menuAt.value = null;
+  } else if (e.key === 'Escape' && findOpen.value) {
+    e.preventDefault();
+    closeFind();
+  } else if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    findOpen.value = true;
   } else if (
     (mod && e.shiftKey && e.key.toLowerCase() === 'f') ||
     (e.key === 'Escape' && !shortcutsOpen.value)
@@ -169,9 +175,16 @@ function onShellKey(e: KeyboardEvent) {
     focusMode.value = !focusMode.value;
   } else if (e.key === 'Escape' && menuAt.value) {
     menuAt.value = null;
+  } else if (e.key === 'Escape' && findOpen.value) {
+    closeFind();
   } else if (e.key === 'Escape' && focusMode.value && !shortcutsOpen.value) {
     focusMode.value = false;
   }
+}
+/** Close Find and put focus back in the page, so Escape and the focus-mode keys keep working. */
+function closeFind() {
+  findOpen.value = false;
+  void nextTick(() => editor.value?.view.focus());
 }
 function openMenu(e: MouseEvent) {
   menuAt.value = {
@@ -609,7 +622,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
         :class="{ 'desk--outline-forced': outlineForced }"
         data-test="desk"
       >
-        <FindPanel v-if="findOpen && !focusMode" :editor="editor" @close="findOpen = false" />
+        <FindPanel v-if="findOpen" :editor="editor" @close="closeFind" />
         <div
           :class="{ 'page-sheet--narrow': pageNarrow }"
           class="page-sheet box-border mx-auto mt-8 mb-8 h-fit min-h-216 flex-none bg-paper p-18 text-text shadow-2"
