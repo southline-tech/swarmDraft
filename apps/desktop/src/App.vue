@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { PRODUCT_NAME } from './lib/brand';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { DEFAULT_TRIM } from '@coauthor/schema';
 import {
@@ -267,7 +268,7 @@ async function reopenAfterFailure(delays = REOPEN_BACKOFF_MS): Promise<Manuscrip
     }
   }
   session.value = null;
-  fatalError.value = "Couldn't reopen the manuscript. Please restart coAuthor.";
+  fatalError.value = `Couldn't reopen the manuscript. Please restart ${PRODUCT_NAME}.`;
   return null;
 }
 
@@ -423,7 +424,7 @@ defineExpose({ open });
       <span class="topbar__brand">
         <AppLogo :size="24" />
         <span class="topbar__name">{{
-          session && !choosingBook ? session.title : 'coAuthor'
+          session && !choosingBook ? session.title : PRODUCT_NAME
         }}</span>
       </span>
       <span v-if="breadcrumb" class="topbar__crumb" data-test="breadcrumb">— {{ breadcrumb }}</span>
@@ -521,7 +522,7 @@ defineExpose({ open });
     </section>
     <div v-if="recoveryNotices.length" role="alert" data-test="recovery-notice">
       <p>
-        A restore was interrupted. Some attachments may be missing. coAuthor didn't delete anything.
+        A restore was interrupted. Some attachments may be missing. {{ PRODUCT_NAME }} didn't delete anything.
       </p>
       <div v-for="(n, i) in recoveryNotices" :key="n.id || i" data-test="recovery-notice-item">
         <p v-if="n.folder && n.moved.length">
@@ -535,7 +536,7 @@ defineExpose({ open });
           >.
         </p>
         <p v-if="n.retryPending">
-          coAuthor couldn't finish and will try again the next time it starts.
+          {{ PRODUCT_NAME }} couldn't finish and will try again the next time it starts.
         </p>
         <p>Details: {{ n.reason }}</p>
         <p v-if="n.corruptFile" data-test="recovery-notice-corrupt">
@@ -544,7 +545,7 @@ defineExpose({ open });
           >.
         </p>
         <p v-if="n.saveError" data-test="recovery-notice-save-error">
-          This notice couldn't be saved and won't show again after you close coAuthor:
+          This notice couldn't be saved and won't show again after you close {{ PRODUCT_NAME }}:
           {{ n.saveError }}
         </p>
       </div>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * The coAuthor mark: lowercase c with caret on the accent tile. One asset serves light
+ * The swarmDraft mark: lowercase c with caret on the accent tile. One asset serves light
  * and dark themes. 48px and up use the SVG master; below that the hinted 24px PNG
  * (48px PNG for 2x screens) keeps the c and caret crisp.
  */

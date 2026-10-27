@@ -1,3 +1,4 @@
+import { PRODUCT_NAME } from './lib/brand';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 
 export interface AppInfo {
@@ -77,7 +78,7 @@ export async function createBackup(dest?: string, replace = false): Promise<stri
   return invoke<string>('create_backup', { dest: dest ?? null, replace });
 }
 
-const ZIP_FILTER = [{ name: 'coAuthor backup', extensions: ['zip'] }];
+const ZIP_FILTER = [{ name: `${PRODUCT_NAME} backup`, extensions: ['zip'] }];
 
 /** Native open dialog for a backup .zip; null if cancelled. */
 export async function pickBackupToRestore(): Promise<string | null> {
