@@ -27,6 +27,23 @@ describe('ManuscriptEditor', () => {
     w.unmount();
   });
 
+  it('shows the chapter label above the page as display only, never in the document', async () => {
+    const w = mount(ManuscriptEditor, {
+      props: { content: SAMPLE_DOC, chapterLabel: 'Chapter Three' },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    const label = w.find('[data-test="chapter-label"]');
+    expect(label.exists()).toBe(true);
+    expect(label.text()).toBe('Chapter Three');
+    expect(label.attributes('aria-hidden')).toBe('true');
+    // Outside the editable area and absent from the editor's document and history.
+    expect(label.element.closest('.tiptap')).toBeNull();
+    expect(w.find('.tiptap').text()).not.toContain('Chapter Three');
+    expect(w.emitted('change')).toBeUndefined();
+    w.unmount();
+  });
+
   it('offers the four toolbar paragraph styles', async () => {
     const w = mount(ManuscriptEditor, { props: { content: SAMPLE_DOC }, attachTo: document.body });
     await flushPromises();

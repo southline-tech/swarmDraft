@@ -32,6 +32,10 @@ import {
   visibleItems,
   type AuthorFilter,
 } from './review/review-state';
+import FindPanel from './shells/FindPanel.vue';
+import ContextMenu from './shells/ContextMenu.vue';
+import ShortcutsSheet from './shells/ShortcutsSheet.vue';
+import './shells/shells.css';
 import {
   collaborativeEditorOptions,
   AuthorLabels,
@@ -59,6 +63,8 @@ const props = defineProps<{
   navigatorOpen?: boolean;
   /** Status bar (RAD-256): the open chapter's title, when known. */
   chapterTitle?: string;
+  /** Display-only label above the chapter heading ("Chapter Three"); not part of the doc. */
+  chapterLabel?: string;
   /** Every section doc of the manuscript, for the live book word count. */
   /** Every section doc in outline order; re-derived from the outline so adds/deletes show. */
   bookDocs?: readonly Y.Doc[];
@@ -77,7 +83,43 @@ const emit = defineEmits<{
   'toggle-navigator': [];
   /** Human accept/reject decisions as recorded (and withdrawn again on undo). */
   decisions: [records: DecisionRecord[]];
+  /** Focus mode (wp5) on or off; the parent hides its own chrome. */
+  'focus-mode': [on: boolean];
 }>();
+
+/* UI shells for the audit review (Part of #36). Local view state only: none of these change the
+   manuscript, the Y.Doc, the selection or the undo history. */
+const findOpen = shallowRef(false);
+const menuAt = shallowRef<{ x: number; y: number } | null>(null);
+const shortcutsOpen = shallowRef(false);
+const focusMode = shallowRef(false);
+/** Track changes toggle (tc1/tc2): visual state only until suggestion mode is wired. */
+const tracking = shallowRef(false);
+watch(focusMode, (on) => emit('focus-mode', on));
+const isField = (t: EventTarget | null) =>
+  t instanceof HTMLElement && !!t.closest('input, textarea, select');
+function onShellKey(e: KeyboardEvent) {
+  if (isField(e.target)) return;
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    findOpen.value = true;
+  } else if (mod && e.key === '/') {
+    e.preventDefault();
+    shortcutsOpen.value = true;
+  } else if (mod && e.shiftKey && e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    focusMode.value = !focusMode.value;
+  } else if (e.key === 'Escape' && focusMode.value && !shortcutsOpen.value) {
+    focusMode.value = false;
+  }
+}
+function openMenu(e: MouseEvent) {
+  menuAt.value = {
+    x: Math.min(e.clientX, window.innerWidth - 280),
+    y: Math.min(e.clientY, window.innerHeight - 300),
+  };
+}
 /** Review list visibility, driven by the toolbar's review toggle. */
 const reviewOpen = shallowRef(true);
 
@@ -368,6 +410,7 @@ watch(agentDirectory, () => {
 });
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown, true);
+  if (focusMode.value) emit('focus-mode', false);
   clearTimeout(countTimer);
   stopBook();
   stopChapter();
@@ -384,34 +427,108 @@ const LABELS: Record<ReviewItem['type'], string> = {
 </script>
 
 <template>
-  <div class="manuscript-editor">
+  <div
+    class="manuscript-editor"
+    :class="{ 'focus-mode': focusMode }"
+    :data-focus-mode="focusMode || undefined"
+    @keydown="onShellKey"
+  >
     <p v-if="loadError" class="load-error" role="alert" data-test="load-error">
       This section has content the editor does not support, so it was opened read-only and nothing
       will be saved. {{ loadError }}
       <button type="button" data-test="reload" @click="emit('reload')">Reload section</button>
     </p>
     <EditorToolbar
-      v-if="editor"
+      v-if="editor && !focusMode"
       :editor="editor"
       :review-open="reviewOpen"
       :navigator-open="props.navigatorOpen"
       :read-only-reason="loadError ? 'document failed to load' : undefined"
+      :find-enabled="true"
       @toggle-navigator="emit('toggle-navigator')"
       @toggle-review="reviewOpen = !reviewOpen"
-    />
-    <div class="body" :class="{ 'no-review': !reviewOpen }">
+      @find="findOpen = true"
+    >
+      <template #end>
+        <button
+          type="button"
+          class="sh-track"
+          data-test="track-changes"
+          :aria-pressed="tracking"
+          title="Track changes (preview: not recording yet)"
+          @click="tracking = !tracking"
+        >
+          <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M3 13l1-3.5L11 2.5l2.5 2.5L6.5 12z" />
+          </svg>
+          Track changes · {{ tracking ? 'On' : 'Off' }}
+        </button>
+      </template>
+      <template #menu>
+        <button
+          type="button"
+          class="sh-tbtn sh-icon"
+          data-test="shortcuts-open"
+          aria-label="Keyboard shortcuts"
+          title="Keyboard shortcuts (Ctrl+/)"
+          aria-keyshortcuts="Control+/"
+          @click="shortcutsOpen = true"
+        >
+          ?
+        </button>
+        <button
+          type="button"
+          class="sh-tbtn"
+          data-test="focus-mode"
+          title="Focus mode (Ctrl+Shift+F)"
+          aria-keyshortcuts="Control+Shift+F"
+          @click="focusMode = true"
+        >
+          Focus
+        </button>
+      </template>
+    </EditorToolbar>
+    <div class="body" :class="{ 'no-review': !reviewOpen || focusMode }">
       <!-- Auto margins (not justify-center) keep a zoomed page that is wider than the desk
            reachable: it centers when it fits and scrolls from its left edge when it does not. -->
-      <div class="desk flex min-w-0 overflow-auto bg-bg" data-test="desk">
+      <div class="desk relative flex min-w-0 overflow-auto bg-bg" data-test="desk">
+        <FindPanel v-if="findOpen && !focusMode" :editor="editor" @close="findOpen = false" />
         <div
           class="page-sheet box-border mx-auto mt-8 mb-8 h-fit min-h-216 w-144 flex-none bg-paper p-18 text-text shadow-2"
           data-test="page"
           :style="{ zoom: zoom / 100 }"
         >
-          <EditorContent :editor="editor" class="page" data-suggester />
+          <p v-if="chapterLabel" class="chapter-label" data-test="chapter-label" aria-hidden="true">
+            {{ chapterLabel }}
+          </p>
+          <EditorContent
+            :editor="editor"
+            class="page"
+            data-suggester
+            @contextmenu.prevent="openMenu"
+          />
+        </div>
+        <!-- Margin notes (wp1): suggestion callouts beside the page, read-only. -->
+        <div
+          v-if="!focusMode && review.some((r) => r.type !== 'comment_anchor')"
+          class="sh-margin"
+          data-test="margin-notes"
+          aria-label="Suggestion notes"
+        >
+          <div
+            v-for="r in review.filter((x) => x.type !== 'comment_anchor')"
+            :key="`m-${r.type}-${r.id}`"
+            class="sh-callout"
+            data-test="margin-note"
+          >
+            <b
+              ><bdi dir="auto">{{ r.author ? authorName(r.author).name : 'Suggestion' }}</bdi></b
+            >
+            Suggested, not applied. Review to accept.
+          </div>
         </div>
       </div>
-      <div v-if="reviewOpen" class="review" data-test="review">
+      <div v-if="reviewOpen && !focusMode" class="review" data-test="review">
         <ReviewPanel
           :items="suggestions"
           :filter="filter"
@@ -452,23 +569,55 @@ const LABELS: Record<ReviewItem['type'], string> = {
         </section>
       </div>
     </div>
+    <ContextMenu v-if="menuAt" :x="menuAt.x" :y="menuAt.y" @close="menuAt = null" />
+    <div
+      v-if="menuAt"
+      class="fixed inset-0 z-30"
+      data-test="context-dismiss"
+      @click="menuAt = null"
+      @contextmenu.prevent="menuAt = null"
+    />
+    <ShortcutsSheet v-if="shortcutsOpen" @close="shortcutsOpen = false" />
+    <template v-if="focusMode">
+      <div class="sh-esc" data-test="focus-pill">
+        Focus mode · press <kbd class="sh-kbd">Esc</kbd> to exit
+        <button
+          type="button"
+          class="sh-tbtn sh-icon"
+          data-test="focus-exit"
+          aria-label="Exit focus mode"
+          @click="focusMode = false"
+        >
+          ×
+        </button>
+      </div>
+      <div class="sh-fwc" data-test="focus-words">
+        {{ (chapterWords ?? 0).toLocaleString('en-US') }} words
+      </div>
+    </template>
     <StatusBar
+      v-if="!focusMode"
       v-model:zoom="zoom"
       :chapter-title="chapterTitle"
       :chapter-words="chapterWords"
       :selection-words="selectionWords"
       :book-words="bookWords"
       :save-state="saveState"
-    />
+    >
+      <span v-if="tracking" class="sh-status-track" data-test="status-tracking"
+        >Tracking changes</span
+      >
+    </StatusBar>
   </div>
 </template>
 
 <style>
 .manuscript-editor .load-error {
   border: 1px solid var(--ct-danger);
-  color: var(--ct-danger);
+  border-radius: var(--ct-radius-md);
   background: var(--ct-danger-bg);
-  padding: 0.5rem 0.75rem;
+  color: var(--ct-danger);
+  padding: var(--ct-space-2) var(--ct-space-3);
 }
 .manuscript-editor {
   display: flex;
@@ -503,6 +652,20 @@ const LABELS: Record<ReviewItem['type'], string> = {
   line-height: var(--ct-leading-body);
   color: var(--ct-text);
   outline: none;
+}
+.manuscript-editor .page .tiptap h1 {
+  font-family: var(--ct-font-manuscript);
+  font-weight: 400;
+  text-align: center;
+}
+.manuscript-editor .chapter-label {
+  margin: 0 0 var(--ct-space-2);
+  font-family: var(--ct-font-manuscript);
+  font-variant: small-caps;
+  letter-spacing: 0.18em;
+  text-align: center;
+  text-transform: lowercase;
+  color: var(--ct-text-muted);
 }
 .tiptap p {
   margin: 0;

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppLogo from './AppLogo.vue';
 import { nextTick, ref } from 'vue';
 
 defineProps<{
@@ -49,7 +50,7 @@ defineExpose({ focusOpen });
 <template>
   <section class="home" data-test="home">
     <div v-if="step === 'welcome'" class="home__inner" data-test="home-welcome">
-      <div class="home__mark" aria-hidden="true">c</div>
+      <AppLogo class="home__mark" :size="64" />
       <h1 class="home__title">Welcome to coAuthor</h1>
       <p class="home__lede">
         A calm place to write and revise your book. Your writing assistant can only suggest changes
@@ -136,16 +137,6 @@ defineExpose({ focusOpen });
   gap: var(--ct-space-4);
 }
 .home__mark {
-  display: grid;
-  place-items: center;
-  width: var(--ct-space-16);
-  height: var(--ct-space-16);
-  border-radius: var(--ct-radius-lg);
-  background: var(--ct-accent);
-  color: var(--ct-accent-contrast);
-  font-family: var(--ct-font-manuscript);
-  font-weight: var(--ct-weight-bold);
-  font-size: var(--ct-text-2xl);
   margin-bottom: var(--ct-space-2);
 }
 .home__title {
