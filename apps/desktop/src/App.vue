@@ -309,7 +309,9 @@ async function reopenAfterFailure(delays = REOPEN_BACKOFF_MS): Promise<Manuscrip
 const TOAST_MS = 8000;
 const openToast = ref('');
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
+let toastToken = 0;
 function dismissToast() {
+  toastToken++;
   clearTimeout(toastTimer);
   openToast.value = '';
 }
@@ -321,9 +323,17 @@ function showOpenToast(next: ManuscriptSession) {
       : n === 1
         ? 'Your chapter is here, and your'
         : 'Your';
-  openToast.value = `${here} original file is untouched.`;
+  const text = `${here} original file is untouched.`;
+  // Clear first and set the text on the next tick: re-importing while the toast is up must
+  // change the region's DOM, or screen readers won't announce it again (#82).
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(dismissToast, TOAST_MS);
+  openToast.value = '';
+  const token = ++toastToken;
+  void nextTick(() => {
+    if (token !== toastToken) return;
+    openToast.value = text;
+    toastTimer = setTimeout(dismissToast, TOAST_MS);
+  });
 }
 onBeforeUnmount(() => clearTimeout(toastTimer));
 

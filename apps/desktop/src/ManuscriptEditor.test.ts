@@ -45,6 +45,9 @@ describe('ManuscriptEditor', () => {
     };
     const w = mount(ManuscriptEditor, { props: { content: bad }, attachTo: document.body });
     await flushPromises();
+    // The error text lands in its live region one frame later (#79).
+    await new Promise((r) => requestAnimationFrame(() => r(undefined)));
+    await flushPromises();
     expect(w.find('[data-test="load-error"]').exists()).toBe(true);
     expect(w.text()).not.toContain('Nothing to review');
     expect(w.text()).not.toContain('No comments yet');
