@@ -167,12 +167,18 @@ const cards = [
     <section v-if="show('ob7')" class="sp__sec" data-screen="ob7">
       <h2 class="sp__h">ob7 · Toast</h2>
       <AppToast
-        v-if="toastOpen"
+        :open="toastOpen"
         lead="Your book is open."
         message="All 7 chapters are here, and your original file is untouched."
         @dismiss="toastOpen = false"
       />
-      <button v-else type="button" class="sh-btn" data-test="toast-show" @click="toastOpen = true">
+      <button
+        v-if="!toastOpen"
+        type="button"
+        class="sh-btn"
+        data-test="toast-show"
+        @click="toastOpen = true"
+      >
         Show toast
       </button>
     </section>
