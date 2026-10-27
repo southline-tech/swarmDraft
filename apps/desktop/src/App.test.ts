@@ -1782,6 +1782,104 @@ describe('context menu in focus mode (#87 QA)', () => {
   });
 });
 
+describe('Find in focus mode (#94)', () => {
+  const key = (el: Element, init: KeyboardEventInit) =>
+    el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+  const enterFocus = async (w: ReturnType<typeof mount>) => {
+    await w.get('[data-test="focus-mode"]').trigger('click');
+    await settle();
+    expect(w.find('[data-focus-mode]').exists()).toBe(true);
+  };
+  const find = (w: ReturnType<typeof mount>) => w.find('[data-test="find-panel"]').exists();
+  const focused = (w: ReturnType<typeof mount>) => w.find('[data-focus-mode]').exists();
+
+  const openFindFromPage = async (w: ReturnType<typeof mount>) => {
+    await enterFocus(w);
+    const pm = w.get('.ProseMirror').element as HTMLElement;
+    pm.focus();
+    key(pm, { key: 'f', ctrlKey: true });
+    await settle();
+    expect(document.activeElement).toBe(w.get('[data-test="find-input"]').element);
+  };
+  const focusInPage = (w: ReturnType<typeof mount>) =>
+    w.get('.ProseMirror').element.contains(document.activeElement);
+
+  it('Escape in the find input returns focus to the page (focus mode)', async () => {
+    const { w } = await withManuscript();
+    await openFindFromPage(w);
+    key(w.get('[data-test="find-input"]').element, { key: 'Escape' });
+    await settle();
+    expect(find(w)).toBe(false);
+    expect(focusInPage(w)).toBe(true);
+  });
+
+  it('the Find close button returns focus to the page (focus mode)', async () => {
+    const { w } = await withManuscript();
+    await openFindFromPage(w);
+    await w.get('[data-test="find-close"]').trigger('click');
+    await settle();
+    expect(find(w)).toBe(false);
+    expect(focusInPage(w)).toBe(true);
+  });
+
+  it('Ctrl+F from the page opens Find in focus mode and keeps focus mode on', async () => {
+    const { w } = await withManuscript();
+    await enterFocus(w);
+    key(w.get('.ProseMirror').element, { key: 'f', ctrlKey: true });
+    await settle();
+    expect(find(w)).toBe(true);
+    expect(focused(w)).toBe(true);
+  });
+
+  it('Ctrl+F with focus on the body opens Find in focus mode', async () => {
+    const { w } = await withManuscript();
+    await enterFocus(w);
+    (document.activeElement as HTMLElement | null)?.blur();
+    key(document.body, { key: 'f', ctrlKey: true });
+    await settle();
+    expect(find(w)).toBe(true);
+    expect(focused(w)).toBe(true);
+  });
+
+  it('Escape closes Find first; a later Escape exits focus mode; Find does not pop up after', async () => {
+    const { w } = await withManuscript();
+    await enterFocus(w);
+    key(w.get('.ProseMirror').element, { key: 'f', ctrlKey: true });
+    await settle();
+    key(w.get('[data-test="find-input"]').element, { key: 'Escape' });
+    await settle();
+    expect(find(w)).toBe(false);
+    expect(focused(w)).toBe(true);
+    key(document.activeElement ?? document.body, { key: 'Escape' });
+    await settle();
+    expect(focused(w)).toBe(false);
+    expect(find(w)).toBe(false);
+  });
+
+  it('Escape with Find open and focus back in the page closes Find, not focus mode', async () => {
+    const { w } = await withManuscript();
+    await enterFocus(w);
+    key(w.get('.ProseMirror').element, { key: 'f', ctrlKey: true });
+    await settle();
+    key(w.get('.ProseMirror').element, { key: 'Escape' });
+    await settle();
+    expect(find(w)).toBe(false);
+    expect(focused(w)).toBe(true);
+  });
+
+  it('Escape with Find open and focus on the body closes Find, not focus mode', async () => {
+    const { w } = await withManuscript();
+    await enterFocus(w);
+    key(w.get('.ProseMirror').element, { key: 'f', ctrlKey: true });
+    await settle();
+    (document.activeElement as HTMLElement | null)?.blur();
+    key(document.body, { key: 'Escape' });
+    await settle();
+    expect(find(w)).toBe(false);
+    expect(focused(w)).toBe(true);
+  });
+});
+
 describe('book-open toast (ob7)', () => {
   it('keeps one persistent polite live region: same node before open, after open, after dismiss (#79)', async () => {
     const backend = await import('./backend');
