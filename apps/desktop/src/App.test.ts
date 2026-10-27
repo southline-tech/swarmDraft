@@ -5,6 +5,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
 import { docToYDoc, importDocx, readStructure, writeStructure, yDocToDoc } from '@coauthor/docx';
 import App from './App.vue';
+import { PRODUCT_NAME } from './lib/brand';
 import { storedFixture } from './stored-fixture.test-helper';
 import { openSession, sessionFromDocx } from './manuscript-session';
 import { docWordCount, sectionTreeDocs } from './status/wordcount';
@@ -158,7 +159,10 @@ describe('App', () => {
     const w = mount(App, { attachTo: document.body });
     await flushPromises();
     await chooseFile(w);
-    expect(w.text()).toContain('Could not import synthetic.docx: database is locked');
+    expect(w.text()).toContain(
+      "Couldn't open synthetic.docx. This book is open in another program.",
+    );
+    expect(w.text()).not.toContain('database is locked');
     expect(w.findAll('.row')).toHaveLength(0);
     w.unmount();
   });
@@ -168,7 +172,7 @@ describe('App', () => {
     vi.mocked(backend.getAppInfo).mockResolvedValueOnce(null);
     const w = mount(App);
     await flushPromises();
-    expect(w.text()).toContain('coAuthor');
+    expect(w.text()).toContain(PRODUCT_NAME);
     await openSettings(w);
     expect(w.find('[data-test="browser-mode"]').exists()).toBe(true);
     expect(w.find('[data-test="no-manuscript"]').exists()).toBe(true);
@@ -598,7 +602,8 @@ describe('App open-file input', () => {
     expect(w.text()).not.toContain('Could not import');
 
     await pick(w, 'broken.docx', new TextEncoder().encode('not a zip'));
-    expect(w.text()).toContain('Could not import broken.docx');
+    expect(w.text()).toContain("Couldn't open broken.docx. This isn't a Word manuscript.");
+    expect(w.text()).not.toContain('zip directory');
     expect(w.findAll('.row')).toHaveLength(rows);
     w.unmount();
   });
@@ -722,7 +727,10 @@ describe('App status bar on an imported manuscript', () => {
     await vi.waitFor(() =>
       expect(w.find('[data-test="status-save"]').text()).toBe('Not saved, retrying'),
     );
-    expect(w.find('[data-test="save-error"]').text()).toContain('Not saved, retrying');
+    expect(w.find('[data-test="save-error"]').text()).toContain(
+      "Your latest changes aren't saved yet",
+    );
+    expect(w.find('[data-test="save-error"]').text()).not.toContain('disk full');
     vi.mocked(backend.saveSectionUpdate).mockReset().mockResolvedValue(undefined);
     w.unmount();
   });
@@ -788,12 +796,42 @@ vi.mock('./backend', async (orig) => ({
   saveSectionUpdate: vi.fn(async () => {}),
   saveOutline: vi.fn(async () => {}),
   dismissRecoveryNotices: vi.fn(async () => {}),
+  saveManuscriptCopy: vi.fn(async () => 'D:\\Copies\\book.docx'),
   restoreBackup: vi.fn(async () => ({
     tokensRevoked: 2,
     manifest: {},
     preRestoreSnapshot: '/tmp/x/backups/p.zip',
   })),
 }));
+
+describe('save-failure banner', () => {
+  it('Save a copy writes a .docx with the unsaved edits while saves keep failing', async () => {
+    const backend = await import('./backend');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    vi.mocked(backend.saveSectionUpdate).mockRejectedValue('io: database is locked');
+    await vi.waitFor(() => expect(w.find('.tiptap').exists()).toBe(true));
+    const editor = (
+      w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+    ).editor;
+    editor.commands.insertContentAt(1, 'ONLYINMEMORY ');
+    await vi.waitFor(() => expect(w.find('[data-test="save-copy"]').exists()).toBe(true));
+    expect(w.find('[data-test="save-error"]').text()).not.toContain('database is locked');
+    const write = vi.mocked(backend.saveManuscriptCopy);
+    write.mockClear();
+    await w.find('[data-test="save-copy"]').trigger('click');
+    await settle();
+    expect(write).toHaveBeenCalledTimes(1);
+    const [, bytes] = write.mock.calls[0]!;
+    expect(JSON.stringify(importDocx(bytes).sections)).toContain('ONLYINMEMORY');
+    expect(w.find('[data-test="save-copy-result"]').text()).toContain('Copy saved to');
+    vi.mocked(backend.saveSectionUpdate).mockReset().mockResolvedValue(undefined);
+    w.unmount();
+    log.mockRestore();
+  });
+});
 
 describe('restore confirmation', () => {
   it('saves pending edits before the restore snapshot, then drops the stale session', async () => {
@@ -909,7 +947,7 @@ describe('restore confirmation', () => {
     await settle();
     expect(backend.openLatestManuscript).toHaveBeenCalledTimes(4); // first try + 3 backoff retries
     expect(w.find('[data-test="fatal-error"]').text()).toBe(
-      "Couldn't reopen the manuscript. Please restart coAuthor.",
+      `Couldn't reopen the manuscript. Please restart ${PRODUCT_NAME}.`,
     );
     expect(w.find('.tiptap').exists()).toBe(false);
     expect(w.find('[contenteditable="true"]').exists()).toBe(false);
@@ -949,7 +987,7 @@ describe('restore confirmation', () => {
     vi.mocked(backend.persistImport).mockResolvedValueOnce(bad);
     vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(storedFixture()); // same id
     await chooseFile(w);
-    expect(w.find('[data-test="open-error"]').text()).toContain('Could not import synthetic.docx');
+    expect(w.find('[data-test="open-error"]').text()).toContain("Couldn't open synthetic.docx");
     w.unmount();
   });
 
@@ -1083,7 +1121,8 @@ describe('restore confirmation', () => {
     expect(backend.restoreBackup).not.toHaveBeenCalled();
     expect(w.text()).toContain('Restore cancelled');
     expect(w.text()).toContain("aren't saved yet");
-    expect(w.find('[data-test="save-error"]').text()).toContain('Not saved, retrying');
+    expect(w.find('[data-test="save-error"]').text()).toContain("aren't saved yet");
+    expect(w.text()).not.toContain('database is locked');
     expect(w.find('.tiptap').exists()).toBe(true); // the session (and its edits) stays open
     vi.mocked(backend.saveSectionUpdate).mockReset();
     vi.mocked(backend.saveSectionUpdate).mockResolvedValue(undefined);
@@ -1222,7 +1261,9 @@ describe('recovery notice', () => {
     const n = wrapper.find('[data-test="recovery-notice"]');
     expect(n.text()).not.toContain('Moved to');
     expect(n.text()).toContain('try again');
-    expect(wrapper.find('[data-test="recovery-notice-save-error"]').text()).toContain('disk full');
+    expect(wrapper.find('[data-test="recovery-notice-save-error"]').text()).toContain(
+      'Your computer is almost full',
+    );
   });
 
   it('shows where a corrupt notice file was kept', async () => {
@@ -1510,6 +1551,17 @@ describe('App UI shells (Part of #36)', () => {
     await w.find('[data-test="focus-exit"]').trigger('click');
     await settle();
     expect(w.find('#chapter-navigator').isVisible()).toBe(true);
+    w.unmount();
+  });
+});
+
+describe('product name in App.vue', () => {
+  it('never hardcodes the old product name and shows the brand constant in the topbar', async () => {
+    const src = readFileSync(resolve(__dirname, 'App.vue'), 'utf8');
+    expect(src).not.toMatch(/coAuthor/);
+    const w = mount(App);
+    await flushPromises();
+    expect(w.find('.topbar__name').text()).toBe(PRODUCT_NAME);
     w.unmount();
   });
 });
