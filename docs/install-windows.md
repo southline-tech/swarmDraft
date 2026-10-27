@@ -30,11 +30,20 @@ new:
 | `%LOCALAPPDATA%\com.radiancelux.coauthor\` | `%LOCALAPPDATA%\com.radiancelux.swarmdraft\` |
 | `%LOCALAPPDATA%\coAuthor\` (program files) | `%LOCALAPPDATA%\swarmDraft\`                 |
 
-On first start, for each of the two folders: if the new folder doesn't exist yet and the old one
-does, swarmDraft **copies** the old folder to the new location (through a temporary folder, so an
-interrupted copy never leaves a half-filled one). The old folder is never changed or deleted, so you
-can go back to an older build. If the copy fails, the app starts empty, shows a notice, and does not
-retry; the old data is still there. After the first start the two folders are independent.
+On first start, for each of the two folders: if the new folder isn't marked as migrated yet and the
+old one exists, swarmDraft **copies** the old folder to the new location (through a temporary folder,
+so an interrupted copy never leaves a half-filled one). The database is copied as a consistent
+snapshot, so it is safe even if coAuthor is still open. A marker file (`.swarmdraft-migrated`) is
+written last. The old folder is never changed or deleted, so you can go back to an older build.
+
+If the copy fails (for example coAuthor holds its database locked), the app shows a notice asking you
+to close coAuthor and starts empty; the next start retries. The empty folder from that start is kept
+aside as `com.radiancelux.swarmdraft.before-migration-<time>`, not deleted. A new folder that already
+holds documents is never replaced. After a successful copy the two folders are independent.
+
+Both apps use MCP port 7337. If coAuthor is running when swarmDraft starts, swarmDraft doesn't start
+its MCP server and shows a notice to close coAuthor and restart swarmDraft, so agents never write into
+the old data by mistake.
 
 An existing coAuthor install is not removed by the swarmDraft installer (it is a different product
 to Windows), so both can sit side by side. Uninstall **coAuthor** from Settings > Apps when you no

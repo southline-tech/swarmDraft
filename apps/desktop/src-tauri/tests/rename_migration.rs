@@ -57,7 +57,12 @@ fn existing_install_opens_intact_under_new_identifier() {
                 "Synthetic Harbor",
                 &[
                     sec("t", "front_matter", "Title Page", "Synthetic Harbor"),
-                    sec("c1", "chapter", "Chapter One", "naïve café — 😀 at the quay."),
+                    sec(
+                        "c1",
+                        "chapter",
+                        "Chapter One",
+                        "naïve café — 😀 at the quay.",
+                    ),
                 ],
             )
             .unwrap();
@@ -75,7 +80,11 @@ fn existing_install_opens_intact_under_new_identifier() {
     assert_eq!(ms.len(), 1);
     assert_eq!(ms[0].id, mid);
     let loaded = store.load_manuscript(&mid).unwrap();
-    let titles: Vec<_> = loaded.sections.iter().map(|s| s.section.title.clone()).collect();
+    let titles: Vec<_> = loaded
+        .sections
+        .iter()
+        .map(|s| s.section.title.clone())
+        .collect();
     assert_eq!(titles, ["Title Page", "Chapter One"]);
     let text = content::read_view(&content::decode(&store.load_doc(&docs[1]).unwrap())).text;
     assert_eq!(text, "naïve café — 😀 at the quay.");
@@ -90,10 +99,17 @@ fn existing_install_opens_intact_under_new_identifier() {
         .import_manuscript("Second Book", &[sec("x", "chapter", "One", "New text.")])
         .unwrap();
     drop(store);
-    assert_eq!(files(&old), before, "old folder changed after using the new one");
+    assert_eq!(
+        files(&old),
+        before,
+        "old folder changed after using the new one"
+    );
     assert_eq!(
         migrate::migrate(&old, &new).unwrap(),
         Outcome::AlreadyPresent
     );
-    assert_eq!(Store::open(&new).unwrap().list_manuscripts().unwrap().len(), 2);
+    assert_eq!(
+        Store::open(&new).unwrap().list_manuscripts().unwrap().len(),
+        2
+    );
 }

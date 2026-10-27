@@ -105,3 +105,6 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #69 · in-app logo used the superseded plain-c masters, not the c-with-caret pack · take logo assets from the Designer's latest pack and test the exact asset per size
 - 2026-10-26 · #43 · `makensis -WX` failed on main (unused choowHowToInstall label) · run `makensis -WX` on the generated script for every installer change, not only a plain compile
 - 2026-10-26 · #43 · uninstaller could delete the old identifier's data after a rename · uninstall delete paths must only name the current identifier; guard old ids at compile time
+- 2026-10-26 · #71 · a failed rename copy was never retried because the app then created an empty new folder · mark a completed migration with a marker written last; an unmarked or empty target is not migrated
+- 2026-10-26 · #71 · the db and its -wal/-shm were copied raw while the old app might be running · copy SQLite only as a consistent snapshot (VACUUM INTO or backup API), read-only on the source; if locked, tell the user to close the other app and retry next launch
+- 2026-10-26 · #71 · old and renamed apps both defaulted to MCP port 7337, so agents could write to the old data · detect a taken port at startup and show a visible message naming the app to close

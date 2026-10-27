@@ -283,6 +283,20 @@ pub fn run() {
             }
             let mut report = backup::cleanup_temp(&dir);
             report.unsaved_notices.extend(migration_notices);
+            // #43: both apps default to the same MCP port; if an old coAuthor holds it, say so
+            // at startup instead of letting agents keep writing into the old data.
+            let listener = match mcp::bind(mcp::DEFAULT_PORT) {
+                Ok(l) => Ok(l),
+                Err(e) => {
+                    eprintln!("MCP server not started: {e}");
+                    if e.kind() == std::io::ErrorKind::AddrInUse {
+                        report
+                            .unsaved_notices
+                            .push(backup::startup_notice(&dir, e.to_string()));
+                    }
+                    Err(e.to_string())
+                }
+            };
             app.manage(UnsavedNotices(std::sync::Mutex::new(
                 report.unsaved_notices,
             )));
@@ -290,13 +304,16 @@ pub fn run() {
             app.manage(store.clone());
             app.manage(std::sync::Mutex::new(McpStatus {
                 url: None,
-                error: None,
+                error: listener.as_ref().err().cloned(),
             }));
-            // The MCP server shares the store. If the port is taken, the app still runs and
-            // the settings screen shows the error.
+            // The MCP server shares the store. If the port is taken, the app still runs, the
+            // startup notice explains it, and mcp_status reports the error.
             let handle = app.handle().clone();
+            let Ok(listener) = listener else {
+                return Ok(());
+            };
             tauri::async_runtime::spawn(async move {
-                let result = mcp::serve(store, mcp::DEFAULT_PORT).await;
+                let result = mcp::serve_on(store, listener).await;
                 let state = handle.state::<std::sync::Mutex<McpStatus>>();
                 let mut st = state.lock().expect("status poisoned");
                 match result {
