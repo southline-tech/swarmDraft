@@ -1151,7 +1151,7 @@ describe('restore confirmation', () => {
     expect(backend.restoreBackup).toHaveBeenCalledWith('C:\\Users\\a\\b.zip');
     expect(wrapper.find('[data-test="backup-status"]').text()).toContain('p.zip');
     const notice = wrapper.find('[data-test="tokens-revoked-notice"]');
-    expect(notice.text()).toContain('revoked all 2 agent token');
+    expect(notice.text()).toContain('turned off all 2 agent key(s)');
     await wrapper.find('[data-test="tokens-notice-dismiss"]').trigger('click');
     expect(wrapper.find('[data-test="tokens-revoked-notice"]').exists()).toBe(false);
   });
@@ -1173,8 +1173,8 @@ describe('tokens-revoked notice', () => {
     await restoreOnce(wrapper);
     const notice = wrapper.find('[data-test="tokens-revoked-notice"]');
     expect(notice.exists()).toBe(true);
-    expect(notice.attributes('role')).toBe('status');
-    expect(notice.text()).toContain('revoked all 2 agent token');
+    expect(notice.element.parentElement?.getAttribute('role')).toBe('status');
+    expect(notice.text()).toContain('turned off all 2 agent key(s)');
     expect(notice.text()).toContain('agents are kept');
     await wrapper.find('[data-test="tokens-notice-dismiss"]').trigger('click');
     expect(wrapper.find('[data-test="tokens-revoked-notice"]').exists()).toBe(false);

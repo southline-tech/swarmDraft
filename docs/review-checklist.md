@@ -163,3 +163,8 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-27 · #97 · a forced-open outline left 320px page + 104px notes in a 368px desk · even a forced outline yields when page + margin notes can't fit; reopen when the panel closes or notes hide; never clip a note
 - 2026-10-27 · #97 · focus mode cleared the writer's hand-opened outline · focus-mode layouts must not reset outline choices; the outline comes back as the writer left it
 - 2026-10-27 · #97 · margin note cards touched the review panel border · notes keep --ct-space-4 to the review panel like the page; shrink the page toward 320px, then auto-close the outline (320 + 2×24 + 104 + 16)
+- 2026-10-27 · #99 · splitting Settings into sections could unmount live regions and break tests that type into restore-path right after opening · switch sections with v-show, keep every section and live region mounted; test that only one is visible
+- 2026-10-27 · #99 · Escape in the restore confirm would also close Settings behind it · a nested modal stops Escape propagation, traps Tab and returns focus to its opener
+- 2026-10-27 · #99 · writer copy said "token" · UI says "key", code keeps "token"; a test scans rendered text for "token"
+- 2026-10-27 · #99 · swatch colors went through a local --c custom property and failed the token sweep · per-item colors go inline via :style; never add non --ct-* vars
+- 2026-10-27 · #99 · theme/profile read back from localStorage unchecked · validate stored prefs and fall back to defaults; tests seed broken data

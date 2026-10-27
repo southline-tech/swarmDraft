@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import { DEFAULT_TRIM } from '@coauthor/schema';
 import {
   createBackup,
   getAppInfo,
@@ -15,7 +14,7 @@ import {
   type RecoveryNotice,
   type MigrationNotice,
 } from './backend';
-import AgentsSettings from './AgentsSettings.vue';
+import SettingsScreen from './settings/SettingsScreen.vue';
 import { authorName, refreshAgents, reloadOnFocus } from './agent-names';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import SectionNav from './SectionNav.vue';
@@ -158,17 +157,15 @@ const settingsOpen = ref(false);
 // UI-shell previews (Part of #36): `?preview=<id|all>`, or Settings → Preview new screens.
 applyThemeParam(window.location.search, document.documentElement);
 const preview = ref(readPreview(window.location.search));
-function openPreview(id: 'all' | 'tc5') {
+function openPreview(id: 'all') {
   settingsOpen.value = false;
   preview.value = id;
 }
-const settingsPanel = ref<HTMLElement | null>(null);
 const settingsButton = ref<HTMLButtonElement | null>(null);
 watch(settingsOpen, async (isOpen) => {
   await nextTick();
-  // Into the panel on open; back to the button that opened it on close.
-  if (isOpen) settingsPanel.value?.focus();
-  else settingsButton.value?.focus();
+  // SettingsScreen moves focus into itself on mount; back to the button that opened it on close.
+  if (!isOpen) settingsButton.value?.focus();
 });
 const fileInput = ref<HTMLInputElement | null>(null);
 const chooseFile = () => fileInput.value?.click();
@@ -571,70 +568,22 @@ defineExpose({ open });
       </details>
     </header>
     <MigrationNoticeBanner :notices="migrationNotices" @dismiss="dismissMigration" />
-    <section
+    <SettingsScreen
       v-if="settingsOpen"
-      ref="settingsPanel"
-      class="settings"
-      role="dialog"
-      aria-label="Settings"
-      tabindex="-1"
-      data-test="settings"
-      @keydown.esc="settingsOpen = false"
-    >
-      <h2>Settings</h2>
-      <button type="button" class="btn" data-test="settings-close" @click="settingsOpen = false">
-        Close
-      </button>
-      <p>
-        <button type="button" class="btn" data-test="open-name-color" @click="openPreview('tc5')">
-          Your name &amp; color…
-        </button>
-        <button type="button" class="btn" data-test="open-previews" @click="openPreview('all')">
-          Preview new screens
-        </button>
-      </p>
-      <p>Default trim: {{ DEFAULT_TRIM }}</p>
-      <p v-if="info" data-test="app-info">
-        v{{ info.version }} · data: {{ info.dataDir }} · db schema {{ info.schemaVersion }}
-      </p>
-      <section v-if="info" data-test="backup">
-        <button type="button" data-test="backup-button" @click="onBackup">Download backup</button>
-        <button type="button" data-test="restore-pick" @click="chooseRestoreFile">
-          Restore from backup…
-        </button>
-        <details data-test="restore-fallback">
-          <summary>Enter a path instead</summary>
-          <input v-model="restorePath" data-test="restore-path" placeholder="Path to backup .zip" />
-          <button type="button" data-test="restore-button" @click="askRestore">Restore…</button>
-        </details>
-        <div v-if="confirmingRestore" role="alertdialog" data-test="restore-confirm">
-          <p data-test="restore-target">{{ restorePath }}</p>
-          <p>
-            Restoring replaces all manuscripts, comments, suggestions, settings and attached files
-            with the contents of this backup, and revokes all agent tokens. Your current state is
-            saved first as a pre-restore snapshot in the backups folder.
-          </p>
-          <button type="button" data-test="restore-confirm-yes" @click="onRestore">
-            Replace everything and restore
-          </button>
-          <button type="button" data-test="restore-confirm-no" @click="confirmingRestore = false">
-            Cancel
-          </button>
-        </div>
-        <p v-if="backupStatus" data-test="backup-status">{{ backupStatus }}</p>
-        <div v-if="tokensNotice !== null" role="status" data-test="tokens-revoked-notice">
-          <p>
-            For safety, restoring revoked all {{ tokensNotice }} agent token(s). Your agents are
-            kept; create new tokens in Settings → Agents to reconnect them.
-          </p>
-          <button type="button" data-test="tokens-notice-dismiss" @click="tokensNotice = null">
-            Dismiss
-          </button>
-        </div>
-      </section>
-      <p v-else data-test="browser-mode">Running in browser mode (no desktop backend).</p>
-      <AgentsSettings v-if="info" />
-    </section>
+      v-model:restore-path="restorePath"
+      :info="info"
+      :backup-status="backupStatus"
+      :confirming-restore="confirmingRestore"
+      :tokens-notice="tokensNotice"
+      @close="settingsOpen = false"
+      @open-previews="openPreview('all')"
+      @backup="onBackup"
+      @pick-restore="chooseRestoreFile"
+      @ask-restore="askRestore"
+      @confirm-restore="onRestore"
+      @cancel-restore="confirmingRestore = false"
+      @dismiss-notice="tokensNotice = null"
+    />
     <div v-if="recoveryNotices.length" role="alert" data-test="recovery-notice">
       <p>
         A restore was interrupted. Some attachments may be missing. {{ PRODUCT_NAME }} didn't delete
@@ -878,17 +827,6 @@ body {
   color: var(--ct-text);
   font: inherit;
   cursor: pointer;
-}
-.settings {
-  margin: var(--ct-space-4);
-  padding: var(--ct-space-6);
-  border: 1px solid var(--ct-border);
-  border-radius: var(--ct-radius-lg);
-  background: var(--ct-surface-raised);
-  box-shadow: var(--ct-elevation-2);
-}
-.settings h2 {
-  margin-top: 0;
 }
 .visually-hidden {
   position: absolute;

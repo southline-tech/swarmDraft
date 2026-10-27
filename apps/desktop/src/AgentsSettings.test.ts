@@ -39,6 +39,31 @@ function fakeApi() {
 }
 
 describe('AgentsSettings', () => {
+  it('user-facing copy says "key", never "token" (#99)', async () => {
+    const api = fakeApi();
+    const w = mount(AgentsSettings, { props: { api, writeClipboard: async () => {} } });
+    await flushPromises();
+    await w.find('input[aria-label="Agent name"]').setValue('Sample Agent');
+    await w.find('[data-test="create-agent"]').trigger('submit');
+    await flushPromises();
+    await w.find('[data-test="mint"]').trigger('click');
+    await flushPromises();
+    expect(w.get('[data-test="token-once"]').text()).toContain('New key for Sample Agent');
+    expect(w.text()).toContain("Copy this key now. You won't see it again.");
+    expect(w.text()).toContain('New keys can');
+    await w.find('[data-test="revoke-token"]').trigger('click');
+    await flushPromises();
+    await w.find('[data-test="revoke-agent"]').trigger('click');
+    await flushPromises();
+    expect(w.get('[data-test="agent"]').text()).toContain('Removed');
+    const visible = w
+      .text()
+      .replace(/cat_abcdef/g, '')
+      .toLowerCase();
+    expect(visible).not.toContain('token');
+    expect(visible).not.toContain('revoke');
+  });
+
   it('shows the backend error when a name is reserved or taken (RAD-263)', async () => {
     const api = fakeApi();
     api.create = vi.fn(async () => {
@@ -84,7 +109,7 @@ describe('AgentsSettings', () => {
 
     await w.find('[data-test="revoke-token"]').trigger('click');
     await flushPromises();
-    expect(w.find('[data-test="token"]').text()).toContain('(revoked)');
+    expect(w.find('[data-test="token"]').text()).toContain('Turned off');
   });
 
   it('copies the token and confirms', async () => {
@@ -131,7 +156,7 @@ describe('AgentsSettings', () => {
     await flushPromises();
     expect(writeClipboard).toHaveBeenCalledWith('cat_abcdefSECRET');
     expect(w.find('[data-test="copied"]').exists()).toBe(false);
-    expect(w.find('[data-test="copy-failed"]').text()).toContain('copy it manually');
+    expect(w.find('[data-test="copy-failed"]').text()).toContain('press Ctrl+C to copy it');
     const input = w.find('[data-test="token-value"]');
     const el = input.element as HTMLInputElement;
     expect(w.find('[data-test="token-once"]').exists()).toBe(true);
@@ -241,7 +266,7 @@ describe('AgentsSettings', () => {
       setClipboard(make());
       const w = await mintAndCopy();
       expect(w.find('[data-test="copied"]').exists()).toBe(false);
-      expect(w.find('[data-test="copy-failed"]').text()).toContain('copy it manually');
+      expect(w.find('[data-test="copy-failed"]').text()).toContain('press Ctrl+C to copy it');
       const el = w.find('[data-test="token-value"]').element as HTMLInputElement;
       expect(el.value).toBe('cat_abcdefSECRET');
       expect(document.activeElement).toBe(el);
