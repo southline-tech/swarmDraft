@@ -7,7 +7,16 @@
  * (`collaborativeEditorOptions`): every edit is written to the doc as it is typed, and changes
  * from other writers are content-checked before they apply. `content` opens an unbound snapshot.
  */
-import { computed, onBeforeUnmount, onMounted, shallowRef, toRaw, watch } from 'vue';
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  shallowRef,
+  toRaw,
+  useTemplateRef,
+  watch,
+} from 'vue';
 import type { EditorLayout } from './desk/outline-auto-collapse';
 import { EditorContent, useEditor } from '@tiptap/vue-3';
 import type { Editor, EditorOptions, JSONContent } from '@tiptap/core';
@@ -78,6 +87,9 @@ const props = defineProps<{
   saveState?: SaveState;
   /** Display name for a raw author id in the review panel (decisions still key on the id). */
   authorLabels?: (author: string) => AgentName;
+  /** Where the toolbar renders (#84): the parent's full-width row above the side panels. Without
+   *  it the toolbar stays inline above the editor body. */
+  toolbarTarget?: string;
   /**
    * The parent shows the load error in its own persistent live region (#79); this editor then
    * renders no inline region and reports the error through `load-error` instead.
@@ -108,7 +120,36 @@ const shortcutsOpen = shallowRef(false);
 const focusMode = shallowRef(false);
 /** Track changes toggle (tc1/tc2): visual state only until suggestion mode is wired. */
 const tracking = shallowRef(false);
-watch(focusMode, (on) => emit('focus-mode', on));
+watch(focusMode, (on) => {
+  emit('focus-mode', on);
+  // #87 QA: focus mode hides the toolbar, so a toolbar button that started it would drop focus
+  // to <body>. Move focus into the page, and listen on window for the exit keys while active.
+  if (on) {
+    window.addEventListener('keydown', onWindowKey);
+    void nextTick(() => editor.value?.view.focus());
+  } else window.removeEventListener('keydown', onWindowKey);
+});
+onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKey));
+const rootEl = useTemplateRef<HTMLElement>('root');
+/** Exit keys for focus mode when focus is outside the editor (e.g. on <body>). Events from inside
+    the editor root already reach onShellKey, so they are skipped here to avoid a double toggle. */
+function onWindowKey(e: KeyboardEvent) {
+  if (e.defaultPrevented) return;
+  if (e.target instanceof Node && rootEl.value?.contains(e.target)) return;
+  if (isField(e.target)) return;
+  const mod = e.ctrlKey || e.metaKey;
+  // An open context menu owns Escape: close it and stay in focus mode.
+  if (e.key === 'Escape' && menuAt.value) {
+    e.preventDefault();
+    menuAt.value = null;
+  } else if (
+    (mod && e.shiftKey && e.key.toLowerCase() === 'f') ||
+    (e.key === 'Escape' && !shortcutsOpen.value)
+  ) {
+    e.preventDefault();
+    focusMode.value = false;
+  }
+}
 const isField = (t: EventTarget | null) =>
   t instanceof HTMLElement && !!t.closest('input, textarea, select');
 function onShellKey(e: KeyboardEvent) {
@@ -123,6 +164,8 @@ function onShellKey(e: KeyboardEvent) {
   } else if (mod && e.shiftKey && e.key.toLowerCase() === 'f') {
     e.preventDefault();
     focusMode.value = !focusMode.value;
+  } else if (e.key === 'Escape' && menuAt.value) {
+    menuAt.value = null;
   } else if (e.key === 'Escape' && focusMode.value && !shortcutsOpen.value) {
     focusMode.value = false;
   }
@@ -475,6 +518,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
 
 <template>
   <div
+    ref="root"
     class="manuscript-editor"
     :class="{ 'focus-mode': focusMode }"
     :data-focus-mode="focusMode || undefined"
@@ -488,56 +532,67 @@ const LABELS: Record<ReviewItem['type'], string> = {
         </button>
       </p>
     </div>
-    <EditorToolbar
-      v-if="editor && !focusMode"
-      :editor="editor"
-      :review-open="reviewOpen"
-      :navigator-open="props.navigatorOpen"
-      :read-only-reason="loadError ? 'document failed to load' : undefined"
-      :find-enabled="true"
-      @toggle-navigator="emit('toggle-navigator')"
-      @toggle-review="reviewOpen = !reviewOpen"
-      @find="findOpen = true"
-    >
-      <template #end>
-        <button
-          type="button"
-          class="sh-track"
-          data-test="track-changes"
-          :aria-pressed="tracking"
-          title="Track changes (preview: not recording yet)"
-          @click="tracking = !tracking"
+    <!-- #84: the toolbar moves to the parent's full-width row; its own keydown keeps the editor
+         shortcuts (Ctrl+F, Ctrl+/) working from toolbar focus, since teleported DOM no longer
+         sits inside .manuscript-editor. -->
+    <Teleport :to="props.toolbarTarget" :disabled="!props.toolbarTarget" defer>
+      <div
+        v-if="editor && !focusMode"
+        class="toolbar-host"
+        @keydown="props.toolbarTarget ? onShellKey($event) : undefined"
+      >
+        <EditorToolbar
+          v-if="editor && !focusMode"
+          :editor="editor"
+          :review-open="reviewOpen"
+          :navigator-open="props.navigatorOpen"
+          :read-only-reason="loadError ? 'document failed to load' : undefined"
+          :find-enabled="true"
+          @toggle-navigator="emit('toggle-navigator')"
+          @toggle-review="reviewOpen = !reviewOpen"
+          @find="findOpen = true"
         >
-          <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M3 13l1-3.5L11 2.5l2.5 2.5L6.5 12z" />
-          </svg>
-          Track changes · {{ tracking ? 'On' : 'Off' }}
-        </button>
-      </template>
-      <template #menu>
-        <button
-          type="button"
-          class="sh-tbtn sh-icon"
-          data-test="shortcuts-open"
-          aria-label="Keyboard shortcuts"
-          title="Keyboard shortcuts (Ctrl+/)"
-          aria-keyshortcuts="Control+/"
-          @click="shortcutsOpen = true"
-        >
-          ?
-        </button>
-        <button
-          type="button"
-          class="sh-tbtn"
-          data-test="focus-mode"
-          title="Focus mode (Ctrl+Shift+F)"
-          aria-keyshortcuts="Control+Shift+F"
-          @click="focusMode = true"
-        >
-          Focus
-        </button>
-      </template>
-    </EditorToolbar>
+          <template #end>
+            <button
+              type="button"
+              class="sh-track"
+              data-test="track-changes"
+              :aria-pressed="tracking"
+              title="Track changes (preview: not recording yet)"
+              @click="tracking = !tracking"
+            >
+              <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M3 13l1-3.5L11 2.5l2.5 2.5L6.5 12z" />
+              </svg>
+              Track changes · {{ tracking ? 'On' : 'Off' }}
+            </button>
+          </template>
+          <template #menu>
+            <button
+              type="button"
+              class="sh-tbtn sh-icon"
+              data-test="shortcuts-open"
+              aria-label="Keyboard shortcuts"
+              title="Keyboard shortcuts (Ctrl+/)"
+              aria-keyshortcuts="Control+/"
+              @click="shortcutsOpen = true"
+            >
+              ?
+            </button>
+            <button
+              type="button"
+              class="sh-tbtn"
+              data-test="focus-mode"
+              title="Focus mode (Ctrl+Shift+F)"
+              aria-keyshortcuts="Control+Shift+F"
+              @click="focusMode = true"
+            >
+              Focus
+            </button>
+          </template>
+        </EditorToolbar>
+      </div>
+    </Teleport>
     <div class="body" :class="{ 'no-review': !reviewOpen || focusMode }">
       <!-- Auto margins (not justify-center) keep a zoomed page that is wider than the desk
            reachable: it centers when it fits and scrolls from its left edge when it does not. -->
@@ -792,7 +847,19 @@ const LABELS: Record<ReviewItem['type'], string> = {
 .manuscript-editor .desk:has(> .sh-margin) {
   --ct-page-notes-room: var(--ct-margin-notes-w);
 }
-/* #92: the review panel never narrows below --ct-panel-w-narrow to make room for the page. */
+.manuscript-editor .review {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--ct-surface);
+}
+.manuscript-editor .review > :first-child {
+  flex: 1;
+}
+/* #90: the open review column has a fixed width (400px; 320px below 1200px), so its contents
+   (e.g. the comments empty state) can't widen it over the page. The desk keeps the rest and
+   scrolls the page, which never sits under a panel. The collapsed rail keeps its own width.
+   #92: it never narrows below --ct-panel-w-narrow to make room for the page. */
 .manuscript-editor .review:not(.review--collapsed) {
   box-sizing: border-box;
   width: var(--ct-panel-w);
@@ -803,21 +870,10 @@ const LABELS: Record<ReviewItem['type'], string> = {
   width: 100%;
   min-width: 0;
 }
-/* Below 1200px the open panel is exactly --ct-panel-w-narrow, so its contents can't widen it over
-   the page (#90/#92). */
 @media (max-width: 1199.98px) {
   .manuscript-editor .review:not(.review--collapsed) {
     width: var(--ct-panel-w-narrow);
   }
-}
-.manuscript-editor .review {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  background: var(--ct-surface);
-}
-.manuscript-editor .review > :first-child {
-  flex: 1;
 }
 .manuscript-editor .comments-empty {
   margin-top: var(--ct-space-4);

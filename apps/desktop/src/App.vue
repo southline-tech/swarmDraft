@@ -725,8 +725,15 @@ defineExpose({ open });
       @choose="chooseFile"
       @drop-file="importFile"
     />
+    <!-- #84: full-width toolbar row under the title bar; the side panels start below it. -->
     <div
-      v-else
+      v-if="session && !choosingBook"
+      id="toolbar-row"
+      class="toolbar-row"
+      data-test="toolbar-row"
+    />
+    <div
+      v-if="session && !choosingBook"
       class="workspace grid gap-4 p-4"
       :class="navigatorOpen && !focusMode ? 'grid-cols-[18rem_1fr]' : 'grid-cols-1'"
       data-test="workspace"
@@ -756,6 +763,7 @@ defineExpose({ open });
         :chapter-docs="sectionTreeDocs(session.outline.value, selectedId, session.sections)"
         :save-state="saveError ? 'offline' : undefined"
         :author-labels="authorName"
+        toolbar-target="#toolbar-row"
         external-load-error
         @load-error="editorLoadError = $event"
         @reload="reloadSection"
@@ -787,6 +795,13 @@ body {
   height: 100vh;
   overflow: auto;
   padding-bottom: 1.75rem;
+}
+.toolbar-row {
+  flex: none;
+  background: var(--ct-surface);
+}
+.toolbar-row:empty {
+  display: none;
 }
 .editor-error-region .load-error {
   margin: var(--ct-space-2) var(--ct-space-4) 0;
