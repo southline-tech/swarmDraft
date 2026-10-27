@@ -195,3 +195,26 @@ export function reviewActionFor(e: KeyboardEvent): ReviewAction | null {
     return 'toggle';
   return null;
 }
+
+/** Number of `--ct-collab-N` tokens in tokens.css (light and dark). */
+export const COLLAB_TOKENS = 8;
+export const GROK_BOT = 'Grok Bot';
+
+/**
+ * Per-author `--ct-collab-N` slot for one document: Grok Bot always gets 1; everyone else gets
+ * 2..N in first-seen order, so authors in a doc are distinct until the palette runs out (then it
+ * wraps over 2..N). Theme and contrast come from the tokens, never from a computed color.
+ */
+export function collabSlots(
+  authors: readonly string[],
+  isGrok: (author: string) => boolean,
+): Map<string, number> {
+  const slots = new Map<string, number>();
+  let next = 0;
+  for (const a of authors) {
+    if (slots.has(a)) continue;
+    if (isGrok(a)) slots.set(a, 1);
+    else slots.set(a, 2 + (next++ % (COLLAB_TOKENS - 1)));
+  }
+  return slots;
+}

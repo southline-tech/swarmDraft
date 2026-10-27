@@ -80,6 +80,33 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(w.findAll('[data-test=filter-option]')[1]!.classes()).toContain('sel');
   });
 
+  it('colors each author with a distinct --ct-collab-N token, Grok Bot always collab-1', async () => {
+    const many: SuggestionItem[] = ['brett', 'agent:x', 'agent:g', 'agent:y'].map((author, i) => ({
+      id: `m${i}`,
+      kind: 'suggestion_insert',
+      author,
+      ts: 't',
+      text: 'x',
+    }));
+    const names: Record<string, string> = { 'agent:g': 'Grok Bot', 'agent:x': 'Editor bot' };
+    const w = mount(ReviewPanel, {
+      props: { items: many, labels: (a: string) => ({ name: names[a] ?? a }) },
+    });
+    await w.find('[data-test=filter-toggle]').trigger('click');
+    const vars = w
+      .findAll('[data-test=filter-option] .av')
+      .map((e) => (e.element as HTMLElement).style.getPropertyValue('--ct-suggester'));
+    expect(vars).toEqual([
+      'var(--ct-collab-2)',
+      'var(--ct-collab-3)',
+      'var(--ct-collab-1)',
+      'var(--ct-collab-4)',
+    ]);
+    const card = w.findAll('[data-test=item]')[2]!.element as HTMLElement;
+    expect(card.style.getPropertyValue('--ct-suggester')).toBe('var(--ct-collab-1)');
+    expect(w.html()).not.toContain('hsl(');
+  });
+
   it('confirms Accept all with the count and names of the visible changes', async () => {
     const w = mount(ReviewPanel, { props: { items, labels } });
     await w.find('[data-test=accept-all]').trigger('click');
