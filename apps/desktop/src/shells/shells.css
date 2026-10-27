@@ -295,7 +295,7 @@
 }
 .sh-margin {
   position: relative;
-  width: 104px;
+  width: var(--ct-margin-notes-w);
   flex: none;
   margin-top: 8rem;
   display: flex;
@@ -377,4 +377,11 @@
 .sh-btn:focus-visible {
   outline: var(--ct-focus-outline);
   outline-offset: var(--ct-focus-offset);
+}
+
+/* #94: in focus mode Find sits below the centred "Focus mode" pill instead of under it. */
+[data-focus-mode] .sh-find {
+  position: fixed;
+  top: var(--ct-space-16);
+  z-index: 1;
 }

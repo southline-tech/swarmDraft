@@ -5,6 +5,7 @@ Built from review, design and QA findings on PRs #1–#46. Most common first. Ti
 ## 1. Persistence and data safety (≈20 PRs)
 
 - [ ] Typed text survives **save → reload → app restart** and a section switch away and back. Test through the real stored path, not just the in-memory Y.Doc. _Why: QA's most frequent fail; text has been silently lost before._
+- [ ] Error banners show writer copy from `errors/map-error.ts` (with `PRODUCT_NAME`), never parser/developer text; raw detail goes to the console only, and a test asserts the raw text is absent. Banner buttons use `.sh-btn`. _Why: #89 showed `Unknown node type: ...` to writers._
 - [ ] Saves and errors surface to the user ("Not saved, retrying"); no `catch` that swallows a failure. _Why: silent failures hid data loss (≈15 PRs)._
 - [ ] Backend reads used for validation happen inside the same transaction as the write. _Why: race between check and write._
 - [ ] Editor/session wiring changes: tests type, then reload via a real remount from saved state, assert the text persists, and switch sections. Cover every section kind (front matter, chapter, part, back matter).
@@ -43,6 +44,7 @@ Built from review, design and QA findings on PRs #1–#46. Most common first. Ti
 - [ ] Global shortcuts do nothing while focus is in an input/textarea/select/other contenteditable or when the panel is hidden.
 - [ ] Every enabled control works; tooltips/`aria-keyshortcuts` list only shortcuts that are actually bound; disabled controls are `aria-disabled`.
 - [ ] Interactive regions have roles and labels.
+- [ ] `--ct-focus-ring` is a box-shadow value: use it only in `box-shadow` (`:focus-visible`); for outline/border/color use `--ct-focus-ring-color` or `--ct-focus-outline`. _Why: #85 had no visible focus ring; `focus-ring-usage.test.ts` enforces it._
 
 ## 6. MCP server and agent tokens (≈18 PRs)
 
@@ -147,3 +149,20 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-26 · #82 · re-importing while the book-open toast was up cleared and set its text in one tick, so the region never changed and nothing was re-announced · to re-announce the same message, clear the region, set the text on nextTick, and test the remove-then-add DOM mutations on the same node
 - 2026-10-26 · #82 · after merging #77, its load-error test failed because #82 defers error text one frame · after merging main, re-run the full suite and fix semantic conflicts in the tests, not only text conflicts
 - 2026-10-26 · #78 · old app-ID folders must be refused as backup destinations · refuse legacy data dirs too
+- 2026-10-26 · #84 · moving the toolbar out of the editor (Teleport) also moved it out of the editor's keydown handler, so Ctrl+F from a toolbar button stopped working · when DOM moves out of a component, re-attach its listeners on the moved root and test a shortcut from inside it
+- 2026-10-26 · #90 · the review column grew to fit its widest child (the comments empty state, 471px at 1024px) and squeezed the page to 217px · give side panels a fixed width from a named token (`--ct-panel-w`, `--ct-panel-w-narrow` below 1200px) with children at `width: 100%`, and exempt collapsed rails
+- 2026-10-26 · #87 · the toolbar host's keydown also ran on the inline path, inside the editor's own handler, so shortcuts fired twice (Ctrl+Shift+F toggled focus mode on and back off) · attach a re-attached listener only when the DOM is actually teleported, and test both paths for exactly-once
+- 2026-10-26 · #87 · starting focus mode from a toolbar button hid the focused button, so focus fell to <body> and Ctrl+Shift+F / Escape (handled only on the editor root) could no longer exit · when a mode hides the focused control, move focus somewhere real (the page), and give the mode's exit keys a window listener while it is active, skipping events the root handler already saw
+- 2026-10-26 · #85 · SaveFailureBanner used `outline: 2px solid var(--ct-focus-ring)`, a box-shadow value, so no focus ring showed · use --ct-focus-ring only in box-shadow; a test scans every .vue/.css file
+- 2026-10-26 · #89 · load-error banner showed raw parser text (`Unknown node type: ...`) and a browser-default Reload button · banner copy comes from map-error with PRODUCT_NAME, raw text to console only; banner buttons use .sh-btn
+- 2026-10-26 · #87 · in focus mode, Escape on the open context menu closed the menu and also bubbled to the focus-mode exit · an overlay that handles Escape must stopPropagation, and outer Escape handlers must check every open overlay (menu, sheet) before acting
+- 2026-10-26 · #92 · the page kept a fixed 576px width and the review column sized to its content (471–675px), so 1024–1280px windows clipped the page and scrolled sideways · size the page with clamp-style min/max from tokens, pin side panels to token widths, and measure scrollWidth vs clientWidth for every scroller at each target width in light and dark
+- 2026-10-26 · #93 · the open-book toast was centred on the window, so at 1024px it covered the review panel's 'No comments yet' card · overlays that belong to the manuscript sit on the desk (centred on it, capped to its width); QA measures every overlay's rect against side panels
+- 2026-10-27 · #93 · toggleByHand() set the manual flag even with the review panel closed, so a later narrow review open never auto-closed the outline and the page fell below 440px · state that overrides an automatic rule is only recorded while that rule is in force; test the toggle-then-trigger sequence
+- 2026-10-26 · #94 · FindPanel was v-if'd off in focus mode, so Ctrl+F silently set state that popped Find up after exit · don't hide a panel by mode while its open-state can still be set; give every overlay's Escape priority over the mode exit
+- 2026-10-27 · #95 · closeFind() returned focus to the page but no test covered it, so dropping the refocus would strand keyboard focus on <body> after Find closed · every overlay close path (Escape and close button) gets a test asserting document.activeElement lands back in .ProseMirror, proven to fail with the refocus removed
+- 2026-10-27 · #96 · with the outline forced open at 1024px the page kept its 440px floor inside a 368px desk, so it overflowed and the desk scrolled sideways · a writer override may relax a minimum but never break containment: give the override state its own floor (token) and padding, keep the gutters, and measure page vs desk edges in that state
+- 2026-10-27 · #97 · merging main dropped nothing from #95: Find and Escape handling and all its tests kept · merge main, keep every test from both sides
+- 2026-10-27 · #97 · a forced-open outline left 320px page + 104px notes in a 368px desk · even a forced outline yields when page + margin notes can't fit; reopen when the panel closes or notes hide; never clip a note
+- 2026-10-27 · #97 · focus mode cleared the writer's hand-opened outline · focus-mode layouts must not reset outline choices; the outline comes back as the writer left it
+- 2026-10-27 · #97 · margin note cards touched the review panel border · notes keep --ct-space-4 to the review panel like the page; shrink the page toward 320px, then auto-close the outline (320 + 2×24 + 104 + 16)

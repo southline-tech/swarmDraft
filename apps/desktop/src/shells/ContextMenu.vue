@@ -32,7 +32,9 @@ function onKey(e: KeyboardEvent) {
     e.preventDefault();
     items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
   } else if (e.key === 'Escape') {
+    // Escape closes only the menu; don't let it reach the editor's focus-mode exit.
     e.preventDefault();
+    e.stopPropagation();
     emit('close');
   }
 }

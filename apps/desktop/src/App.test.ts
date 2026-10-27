@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
-import { flushPromises, mount } from '@vue/test-utils';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
 import { docToYDoc, importDocx, readStructure, writeStructure, yDocToDoc } from '@coauthor/docx';
 import App from './App.vue';
@@ -9,6 +9,8 @@ import { PRODUCT_NAME } from './lib/brand';
 import { storedFixture } from './stored-fixture.test-helper';
 import { openSession, sessionFromDocx } from './manuscript-session';
 import { docWordCount, sectionTreeDocs } from './status/wordcount';
+
+enableAutoUnmount(afterEach);
 
 const fixture = resolve(
   __dirname,
@@ -1625,6 +1627,259 @@ describe('App UI shells (Part of #36)', () => {
   });
 });
 
+describe('full-width toolbar (#84)', () => {
+  // The toolbar row sits between the title bar and the panel row, as a sibling of both, so it
+  // spans the window and the outline / review panels start below it.
+  const order = (w: ReturnType<typeof mount>) => {
+    const main = w.get('main.shell').element;
+    const kids = [...main.children];
+    return {
+      topbar: kids.indexOf(w.get('.topbar').element),
+      row: kids.indexOf(w.get('[data-test="toolbar-row"]').element),
+      workspace: kids.indexOf(w.get('[data-test="workspace"]').element),
+    };
+  };
+  const toolbarIn = (w: ReturnType<typeof mount>, sel: string) =>
+    w.get(sel).element.contains(w.get('[data-test="tb-navigator"]').element);
+
+  it('renders the toolbar in its own row under the title bar, before and outside the panel row', async () => {
+    const { w } = await withManuscript();
+    const o = order(w);
+    expect(o.topbar).toBeGreaterThanOrEqual(0);
+    expect(o.row).toBeGreaterThan(o.topbar);
+    expect(o.workspace).toBeGreaterThan(o.row);
+    expect(toolbarIn(w, '[data-test="toolbar-row"]')).toBe(true);
+    expect(toolbarIn(w, '[data-test="workspace"]')).toBe(false);
+    // The panels stay in the panel row, never in the toolbar row.
+    const row = w.get('[data-test="toolbar-row"]').element;
+    expect(row.contains(w.get('#chapter-navigator').element)).toBe(false);
+    expect(row.contains(w.get('[data-test="review"]').element)).toBe(false);
+    expect(
+      w.get('[data-test="workspace"]').element.contains(w.get('#chapter-navigator').element),
+    ).toBe(true);
+    w.unmount();
+  });
+
+  it('keeps the toolbar in the row when the outline and review panels are toggled', async () => {
+    const { w } = await withManuscript();
+    await w.get('[data-test="tb-navigator"]').trigger('click');
+    await w.get('[data-test="tb-review"]').trigger('click');
+    await settle();
+    expect(toolbarIn(w, '[data-test="toolbar-row"]')).toBe(true);
+    await w.get('[data-test="tb-navigator"]').trigger('click');
+    await w.get('[data-test="tb-review"]').trigger('click');
+    await settle();
+    expect(toolbarIn(w, '[data-test="toolbar-row"]')).toBe(true);
+    expect(toolbarIn(w, '[data-test="workspace"]')).toBe(false);
+    w.unmount();
+  });
+
+  it('focus mode empties the toolbar row and exiting brings the toolbar back to it', async () => {
+    const { w } = await withManuscript();
+    await w.get('[data-test="focus-mode"]').trigger('click');
+    await settle();
+    expect(w.find('[data-test="tb-navigator"]').exists()).toBe(false);
+    expect(w.get('[data-test="toolbar-row"]').element.children).toHaveLength(0);
+    await w.get('[data-test="focus-exit"]').trigger('click');
+    await settle();
+    expect(toolbarIn(w, '[data-test="toolbar-row"]')).toBe(true);
+    w.unmount();
+  });
+
+  it('Ctrl+F from a toolbar button still opens Find', async () => {
+    const { w } = await withManuscript();
+    await w.get('[data-test="tb-bold"]').trigger('keydown', { key: 'f', ctrlKey: true });
+    await settle();
+    expect(w.find('[data-test="find-panel"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('Ctrl+Shift+F from a teleported toolbar button toggles focus mode exactly once', async () => {
+    const { w } = await withManuscript();
+    const ev = new KeyboardEvent('keydown', {
+      key: 'F',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    const pd = vi.spyOn(ev, 'preventDefault');
+    w.get('[data-test="tb-bold"]').element.dispatchEvent(ev);
+    await settle();
+    expect(pd).toHaveBeenCalledTimes(1);
+    expect(w.find('[data-focus-mode]').exists()).toBe(true);
+    w.unmount();
+  });
+});
+
+describe('focus mode started from the toolbar (#87 QA)', () => {
+  const key = (el: Element, init: KeyboardEventInit) =>
+    el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+
+  it('moves focus into the page, and Ctrl+Shift+F from there exits', async () => {
+    const { w } = await withManuscript();
+    await w.get('[data-test="focus-mode"]').trigger('click');
+    await settle();
+    expect(w.find('[data-focus-mode]').exists()).toBe(true);
+    expect(document.activeElement?.closest('.ProseMirror')).not.toBeNull();
+    key(document.activeElement!, { key: 'F', ctrlKey: true, shiftKey: true });
+    await settle();
+    expect(w.find('[data-focus-mode]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('Escape and Ctrl+Shift+F exit even with focus on the body, each exactly once', async () => {
+    const { w } = await withManuscript();
+    for (const init of [{ key: 'Escape' }, { key: 'F', ctrlKey: true, shiftKey: true }]) {
+      await w.get('[data-test="focus-mode"]').trigger('click');
+      await settle();
+      (document.activeElement as HTMLElement | null)?.blur();
+      expect(document.activeElement).toBe(document.body);
+      key(document.body, init);
+      await settle();
+      expect(w.find('[data-focus-mode]').exists()).toBe(false);
+    }
+    w.unmount();
+  });
+});
+
+describe('context menu in focus mode (#87 QA)', () => {
+  it('Escape with the menu open but focus on the body also closes only the menu', async () => {
+    const { w } = await withManuscript();
+    await w.get('[data-test="focus-mode"]').trigger('click');
+    await settle();
+    await w.get('.ProseMirror').trigger('contextmenu', { clientX: 50, clientY: 50 });
+    await settle();
+    (document.activeElement as HTMLElement | null)?.blur();
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+    await settle();
+    expect(w.find('[data-test="context-menu"]').exists()).toBe(false);
+    expect(w.find('[data-focus-mode]').exists()).toBe(true);
+  });
+
+  it('Escape with the menu open closes only the menu and stays in focus mode', async () => {
+    const { w } = await withManuscript();
+    await w.get('[data-test="focus-mode"]').trigger('click');
+    await settle();
+    await w.get('.ProseMirror').trigger('contextmenu', { clientX: 50, clientY: 50 });
+    await settle();
+    const menu = w.get('[data-test="context-menu"]');
+    const target = (menu.element.querySelector('[role=menuitem]') as HTMLElement) ?? menu.element;
+    target.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+    await settle();
+    expect(w.find('[data-test="context-menu"]').exists()).toBe(false);
+    expect(w.find('[data-focus-mode]').exists()).toBe(true);
+    // With the menu closed, Escape exits focus mode as before.
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+    await settle();
+    expect(w.find('[data-focus-mode]').exists()).toBe(false);
+  });
+});
+
+describe('Find in focus mode (#94)', () => {
+  const key = (el: Element, init: KeyboardEventInit) =>
+    el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+  const enterFocus = async (w: ReturnType<typeof mount>) => {
+    await w.get('[data-test="focus-mode"]').trigger('click');
+    await settle();
+    expect(w.find('[data-focus-mode]').exists()).toBe(true);
+  };
+  const find = (w: ReturnType<typeof mount>) => w.find('[data-test="find-panel"]').exists();
+  const focused = (w: ReturnType<typeof mount>) => w.find('[data-focus-mode]').exists();
+
+  const openFindFromPage = async (w: ReturnType<typeof mount>) => {
+    await enterFocus(w);
+    const pm = w.get('.ProseMirror').element as HTMLElement;
+    pm.focus();
+    key(pm, { key: 'f', ctrlKey: true });
+    await settle();
+    expect(document.activeElement).toBe(w.get('[data-test="find-input"]').element);
+  };
+  const focusInPage = (w: ReturnType<typeof mount>) =>
+    w.get('.ProseMirror').element.contains(document.activeElement);
+
+  it('Escape in the find input returns focus to the page (focus mode)', async () => {
+    const { w } = await withManuscript();
+    await openFindFromPage(w);
+    key(w.get('[data-test="find-input"]').element, { key: 'Escape' });
+    await settle();
+    expect(find(w)).toBe(false);
+    expect(focusInPage(w)).toBe(true);
+  });
+
+  it('the Find close button returns focus to the page (focus mode)', async () => {
+    const { w } = await withManuscript();
+    await openFindFromPage(w);
+    await w.get('[data-test="find-close"]').trigger('click');
+    await settle();
+    expect(find(w)).toBe(false);
+    expect(focusInPage(w)).toBe(true);
+  });
+
+  it('Ctrl+F from the page opens Find in focus mode and keeps focus mode on', async () => {
+    const { w } = await withManuscript();
+    await enterFocus(w);
+    key(w.get('.ProseMirror').element, { key: 'f', ctrlKey: true });
+    await settle();
+    expect(find(w)).toBe(true);
+    expect(focused(w)).toBe(true);
+  });
+
+  it('Ctrl+F with focus on the body opens Find in focus mode', async () => {
+    const { w } = await withManuscript();
+    await enterFocus(w);
+    (document.activeElement as HTMLElement | null)?.blur();
+    key(document.body, { key: 'f', ctrlKey: true });
+    await settle();
+    expect(find(w)).toBe(true);
+    expect(focused(w)).toBe(true);
+  });
+
+  it('Escape closes Find first; a later Escape exits focus mode; Find does not pop up after', async () => {
+    const { w } = await withManuscript();
+    await enterFocus(w);
+    key(w.get('.ProseMirror').element, { key: 'f', ctrlKey: true });
+    await settle();
+    key(w.get('[data-test="find-input"]').element, { key: 'Escape' });
+    await settle();
+    expect(find(w)).toBe(false);
+    expect(focused(w)).toBe(true);
+    key(document.activeElement ?? document.body, { key: 'Escape' });
+    await settle();
+    expect(focused(w)).toBe(false);
+    expect(find(w)).toBe(false);
+  });
+
+  it('Escape with Find open and focus back in the page closes Find, not focus mode', async () => {
+    const { w } = await withManuscript();
+    await enterFocus(w);
+    key(w.get('.ProseMirror').element, { key: 'f', ctrlKey: true });
+    await settle();
+    key(w.get('.ProseMirror').element, { key: 'Escape' });
+    await settle();
+    expect(find(w)).toBe(false);
+    expect(focused(w)).toBe(true);
+  });
+
+  it('Escape with Find open and focus on the body closes Find, not focus mode', async () => {
+    const { w } = await withManuscript();
+    await enterFocus(w);
+    key(w.get('.ProseMirror').element, { key: 'f', ctrlKey: true });
+    await settle();
+    (document.activeElement as HTMLElement | null)?.blur();
+    key(document.body, { key: 'Escape' });
+    await settle();
+    expect(find(w)).toBe(false);
+    expect(focused(w)).toBe(true);
+  });
+});
+
 describe('book-open toast (ob7)', () => {
   it('keeps one persistent polite live region: same node before open, after open, after dismiss (#79)', async () => {
     const backend = await import('./backend');
@@ -1797,6 +2052,115 @@ describe('author color slots per manuscript (#72)', () => {
     await settle();
     // Bob is the first author seen in the new book, so he starts at collab-1.
     expect(collabSlotOf('person:Bob')).toBe(1);
+    w.unmount();
+  });
+});
+
+describe('App outline auto-collapse on a narrow desk (#92)', () => {
+  const layout = (reviewShown: boolean, deskWidth: number) => ({
+    reviewShown,
+    deskWidth,
+    marginNotes: false,
+  });
+
+  it('closes the outline when the editor reports a too-narrow desk, reopens on review close', async () => {
+    const { w } = await withManuscript();
+    const sidebar = () => w.findComponent({ name: 'SectionNav' });
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    expect(sidebar().isVisible()).toBe(true);
+    ed().vm.$emit('layout', layout(true, 300));
+    await settle();
+    expect(sidebar().isVisible()).toBe(false);
+    expect(w.find('[data-test="tb-navigator"]').attributes('aria-pressed')).toBe('false');
+    // Real toggle: the toolbar's review button closes the panel, and the editor reports it.
+    await w.find('[data-test="tb-review"]').trigger('click');
+    await settle();
+    expect(sidebar().isVisible()).toBe(true);
+    w.unmount();
+  });
+
+  it('keeps the open-book toast centred on the desk, clear of the review panel (#93)', async () => {
+    const { w } = await withManuscript();
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    // 1024px window, outline auto-closed: desk 16..688, review panel from 688.
+    ed().vm.$emit('layout', { ...layout(true, 672), deskLeft: 16 });
+    await settle();
+    const style = w.find('[data-test="open-toast"]').attributes('style') ?? '';
+    expect(style).toContain('left: 352px');
+    expect(style).toContain('max-width: 624px');
+    w.unmount();
+  });
+
+  it('marks the outline forced only while the writer holds it open with the panel shown (#96)', async () => {
+    const { w } = await withManuscript();
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    const desk = () => w.get('[data-test="desk"]');
+    ed().vm.$emit('layout', layout(true, 300));
+    await settle();
+    expect(desk().classes()).not.toContain('desk--outline-forced'); // auto-closed, not forced
+    await w.find('[data-test="tb-navigator"]').trigger('click'); // writer forces it open
+    await settle();
+    expect(ed().props('outlineForced')).toBe(true);
+    expect(desk().classes()).toContain('desk--outline-forced');
+    ed().vm.$emit('layout', layout(false, 900)); // review closes
+    await settle();
+    expect(ed().props('outlineForced')).toBe(false);
+    w.unmount();
+  });
+
+  it('a forced outline stays open and forced across focus mode (#97)', async () => {
+    const { w } = await withManuscript();
+    const sidebar = () => w.findComponent({ name: 'SectionNav' });
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    ed().vm.$emit('layout', layout(true, 300));
+    await settle();
+    await w.find('[data-test="tb-navigator"]').trigger('click'); // force it open
+    await settle();
+    ed().vm.$emit('focus-mode', true);
+    ed().vm.$emit('layout', { ...layout(false, 1000), focusMode: true });
+    await settle();
+    ed().vm.$emit('focus-mode', false);
+    ed().vm.$emit('layout', layout(true, 368));
+    await settle();
+    expect(sidebar().isVisible()).toBe(true);
+    expect(ed().props('outlineForced')).toBe(true);
+    w.unmount();
+  });
+
+  it('the editor marks its focus-mode layout so the App keeps the forced outline (#97)', async () => {
+    const { w } = await withManuscript();
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    await w.find('[data-test="focus-mode"]').trigger('click');
+    await settle();
+    const emitted = (ed().emitted('layout') ?? []) as [{ focusMode?: boolean }][];
+    expect(emitted.at(-1)?.[0].focusMode).toBe(true);
+    w.unmount();
+  });
+
+  it('the forced state does not drop while focus mode is on (#97)', async () => {
+    const { w } = await withManuscript();
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    ed().vm.$emit('layout', layout(true, 300));
+    await settle();
+    await w.find('[data-test="tb-navigator"]').trigger('click');
+    ed().vm.$emit('focus-mode', true);
+    await settle();
+    expect(ed().props('outlineForced')).toBe(true);
+    w.unmount();
+  });
+
+  it("the writer's own Chapters toggle wins over the auto reopen", async () => {
+    const { w } = await withManuscript();
+    const sidebar = () => w.findComponent({ name: 'SectionNav' });
+    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    const chapters = w.find('[data-test="tb-navigator"]');
+    ed().vm.$emit('layout', layout(true, 300));
+    await settle();
+    await chapters.trigger('click'); // reopen by hand
+    await chapters.trigger('click'); // and close by hand
+    ed().vm.$emit('layout', layout(false, 900));
+    await settle();
+    expect(sidebar().isVisible()).toBe(false);
     w.unmount();
   });
 });
