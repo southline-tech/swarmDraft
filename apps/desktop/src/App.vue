@@ -21,6 +21,7 @@ import AppLogo from './AppLogo.vue';
 import ShellsPreview from './shells/ShellsPreview.vue';
 import { applyThemeParam, readPreview } from './shells/preview';
 import { flushOnClose } from './close-flush';
+import { resetCollabSlots } from './author-colors';
 import { docWordCount, outlineDocs, sectionTreeDocs } from './status/wordcount';
 import {
   importAndOpen,
@@ -234,7 +235,11 @@ const closeQuietly = (s?: ManuscriptSession | null) =>
   void s?.close().catch((err: unknown) => console.error('Edits not saved yet; retrying', err));
 
 function open(next: ManuscriptSession) {
-  if (session.value !== next) closeQuietly(session.value);
+  if (session.value !== next) {
+    closeQuietly(session.value);
+    // Author color slots are per manuscript: numbering restarts for each book opened (#72).
+    resetCollabSlots();
+  }
   saveError.value = '';
   // A manuscript is open again, so an earlier "please restart" or open failure no longer holds.
   fatalError.value = '';
