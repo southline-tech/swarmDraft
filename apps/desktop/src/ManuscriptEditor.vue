@@ -104,8 +104,6 @@ const props = defineProps<{
   notesHidden?: boolean;
   /** One continuous manuscript (#107): body-only slice; chrome lives on the active section. */
   sliceMode?: boolean;
-  /** Stacked in the continuous scroll (#107): never fill the scrollport height. */
-  continuousStack?: boolean;
   /** Parent-hosted review column (outside the scroll area). */
   reviewTarget?: string;
   /** Parent-hosted status bar (outside the scroll area). */
@@ -561,11 +559,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
   <div
     ref="root"
     class="manuscript-editor"
-    :class="{
-      'focus-mode': focusMode,
-      'manuscript-editor--slice': sliceMode,
-      'manuscript-editor--stacked': continuousStack,
-    }"
+    :class="{ 'focus-mode': focusMode, 'manuscript-editor--slice': sliceMode }"
     :data-focus-mode="focusMode || undefined"
     @keydown="onShellKey"
   >
@@ -812,21 +806,8 @@ const LABELS: Record<ReviewItem['type'], string> = {
   height: 100%;
   min-height: 0;
 }
-.manuscript-editor--slice,
-.manuscript-editor--stacked {
+.manuscript-editor--slice {
   height: auto;
-}
-/* Continuous manuscript (107): scrollport is the outer column; never trap prose in the desk. */
-.manuscript-editor--stacked .body {
-  flex: none;
-  min-height: auto;
-}
-.manuscript-editor--stacked .body > .desk {
-  min-height: auto;
-  overflow: visible;
-}
-.manuscript-editor--stacked .page-sheet {
-  min-height: unset;
 }
 .manuscript-editor--slice .page-sheet {
   margin-top: var(--ct-space-4);

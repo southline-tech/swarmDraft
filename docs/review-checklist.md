@@ -115,8 +115,7 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-28 · #115 · CI: Escape in Find focus-mode test flaky under parallel vitest · handle Esc on the find input (shell skips fields); panel div alone is not enough when focus is in the input
 - 2026-10-28 · #115 · Windows `port_listener_pids` used `?` in a `Vec` return · platform-specific helpers must compile on every target CI skips; use explicit early returns instead of `?` outside `Option`/`Result` fns
 - 2026-10-28 · #127 · cfg(windows) never built on Linux CI · add mingw + `cargo check --target x86_64-pc-windows-gnu` on the existing job; cache the extra target
-- 2026-10-28 · #107 · continuous view put review/status inside the scroll stack and lead slice used `height: 100%` · teleported chrome to a fixed rail beside the scroll column; stacked editors use `height: auto`
-- 2026-10-28 · #107 · chapter body looked missing because the desk stayed a viewport-tall inner scroller · in stacked mode use `overflow: visible` on the desk and drop `min-h-216` so prose rides the outer scroll
+- 2026-10-28 · #107 · continuous view put review/status inside the scroll stack · teleported chrome to a fixed rail beside the scroll column (height/layout of stacked sections deferred to PM)
 - 2026-10-28 · #128 · #107 PM review · outline row needs `:hover`; add tests for scroll/focus/title; arrow keys should `activate` like click; document perf in `docs/perf-107.md`
 - 2026-10-28 · #107 · continuous view mounts many editors; tests must scope to lead slice · use `[data-test="lead-editor"]` helpers, not first `.tiptap` in the DOM
 - 2026-10-26 · #71 · user-facing notices said 'database' and 'port 7337' · user-visible text stays plain for writers; technical details go to logs

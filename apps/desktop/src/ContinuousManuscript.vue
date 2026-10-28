@@ -161,7 +161,6 @@ onBeforeUnmount(() => observer?.disconnect());
             :readonly="readonly"
             :read-only-reason="readOnlyReason"
             :navigator-open="navigatorOpen"
-            continuous-stack
             :slice-mode="sec.id !== selectedId"
             :toolbar-target="sec.id === selectedId ? toolbarTarget : undefined"
             :review-target="sec.id === selectedId ? REVIEW_RAIL : undefined"
