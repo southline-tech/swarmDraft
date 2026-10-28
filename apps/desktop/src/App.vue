@@ -92,13 +92,21 @@ const importing = ref(false);
  * succeeds. Edits are never dropped. Raw error text only goes to the console. */
 const saveFailure = ref({ ...SAVE_OK });
 const saveError = computed(() => saveFailure.value.failing);
+/** RAD-265: show "Saved" in the status bar after at least one successful persist. */
+const saveStatusShown = ref(false);
 const persistHooks = {
   onError: (err: unknown) => {
     console.error('Save failed; retrying', err);
     saveFailure.value = saveFailed(saveFailure.value, err);
   },
-  onSaved: () => (saveFailure.value = saveSucceeded()),
+  onSaved: () => {
+    saveFailure.value = saveSucceeded();
+    saveStatusShown.value = true;
+  },
 };
+const saveStatus = computed(() =>
+  saveError.value ? 'offline' : saveStatusShown.value ? 'saved' : undefined,
+);
 const saveCopyOfOpen = () =>
   session.value ? saveCopy(session.value) : Promise.resolve({ status: 'cancelled' as const });
 /**
@@ -270,6 +278,8 @@ const RESTORE_NOTICES: Record<string, string> = {
     "The restore didn't finish, so swarmDraft closed your book to keep it safe. A copy from just before the restore is in the backups folder.",
 };
 const confirmingRestore = ref(false);
+/** RAD-237: lock editing while the backend restore runs. */
+const restoreInProgress = ref(false);
 /** One-time notice after a restore revoked agent tokens; cleared when dismissed. */
 const tokensNotice = ref<number | null>(null);
 
@@ -293,6 +303,7 @@ async function onRestore(): Promise<void> {
     backupStatus.value = `Restore cancelled: ${errorLine(e, 'save')} Nothing was changed.`;
     return;
   }
+  restoreInProgress.value = true;
   try {
     // The backend opens the file picker and validates the backup (#83).
     const r = await restoreBackup();
@@ -310,6 +321,8 @@ async function onRestore(): Promise<void> {
     backupStatus.value =
       (typeof e === 'string' && RESTORE_NOTICES[e]) ||
       "The restore didn't finish. Please try again.";
+  } finally {
+    restoreInProgress.value = false;
   }
 }
 onBeforeUnmount(() => {
@@ -322,6 +335,7 @@ function closeSession() {
   // Storage was replaced: drop pending edits rather than write them into the restored data.
   void session.value?.close({ discard: true });
   session.value = null;
+  saveStatusShown.value = false;
   selectedId.value = undefined;
   choosingBook.value = false;
 }
@@ -740,13 +754,14 @@ defineExpose({ open });
         ref="editorPane"
         :key="`${selected!.docId}#${reloads}`"
         :doc="selectedDoc"
-        :readonly="session.closed"
+        :readonly="session.closed || restoreInProgress"
+        :read-only-reason="restoreInProgress ? 'restore in progress' : undefined"
         :navigator-open="navigatorOpen"
         :chapter-title="selected!.title"
         :chapter-label="chapterLabel"
         :book-docs="outlineDocs(session.outline.value, session.sections)"
         :chapter-docs="sectionTreeDocs(session.outline.value, selectedId, session.sections)"
-        :save-state="saveError ? 'offline' : undefined"
+        :save-state="saveStatus"
         :author-labels="authorName"
         toolbar-target="#toolbar-row"
         external-load-error

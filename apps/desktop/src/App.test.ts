@@ -735,6 +735,10 @@ describe('App status bar on an imported manuscript', () => {
     );
     expect(w.find('[data-test="save-error"]').text()).not.toContain('disk full');
     vi.mocked(backend.saveSectionUpdate).mockReset().mockResolvedValue(undefined);
+    editorOf(w).commands.insertContentAt(1, 'Recovered ');
+    await settle();
+    await vi.waitFor(() => expect(w.find('[data-test="save-error"]').exists()).toBe(false));
+    await vi.waitFor(() => expect(w.find('[data-test="status-save"]').text()).toBe('Saved'));
     w.unmount();
   });
 });
@@ -833,6 +837,33 @@ describe('save-failure banner', () => {
 });
 
 describe('restore confirmation', () => {
+  it('keeps the editor read-only while restore_backup runs (RAD-237)', async () => {
+    const backend = await import('./backend');
+    let release!: () => void;
+    const gate = new Promise<{ tokensRevoked: number }>((resolve) => {
+      release = () => resolve({ tokensRevoked: 0 });
+    });
+    vi.mocked(backend.restoreBackup).mockImplementationOnce(() => gate);
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    await vi.waitFor(() => expect(w.find('.tiptap').exists()).toBe(true));
+    const editor = (
+      w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+    ).editor;
+    expect(editor.isEditable).toBe(true);
+    await openSettings(w);
+    await w.find('[data-test="restore-pick"]').trigger('click');
+    await w.find('[data-test="restore-confirm-yes"]').trigger('click');
+    await vi.waitFor(() => expect(editor.isEditable).toBe(false));
+    release();
+    await flushPromises();
+    await vi.waitFor(() =>
+      expect(w.find('[data-test="backup-status"]').text()).toContain('Restored'),
+    );
+    w.unmount();
+  });
+
   it('saves pending edits before the restore snapshot, then drops the stale session', async () => {
     const backend = await import('./backend');
     const order: string[] = [];
