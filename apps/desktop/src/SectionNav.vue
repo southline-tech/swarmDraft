@@ -337,13 +337,13 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
         >
       </li>
     </ul>
-    <!-- UI shell (#52): the add flow is not wired yet, so this row only shows the target design. -->
     <button
       type="button"
       class="new-chapter"
       data-test="new-chapter"
-      aria-disabled="true"
-      title="New chapter: coming soon"
+      :disabled="busy || parentFor('chapter') === undefined"
+      title="Add a chapter"
+      @click="add('chapter')"
     >
       <span aria-hidden="true">+</span> New chapter
     </button>
@@ -513,7 +513,11 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
   color: var(--ct-text-muted);
   font: inherit;
   font-size: var(--ct-text-sm);
+  cursor: pointer;
+}
+.new-chapter:disabled {
   cursor: default;
+  opacity: 0.5;
 }
 .row:focus-visible {
   outline: var(--ct-focus-outline);

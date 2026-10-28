@@ -234,6 +234,20 @@ describe('SectionNav', () => {
     w.unmount();
   });
 
+  it('adds a chapter from the New chapter row (#52)', async () => {
+    const saved = vi.fn(async (s: Section[]) => s);
+    const w = setup({ selectedId: 'ch-1', save: saved });
+    const before = w.props('sections').length;
+    await w.find('[data-test="new-chapter"]').trigger('click');
+    await settle();
+    expect(saved).toHaveBeenCalled();
+    expect(w.props('sections').length).toBe(before + 1);
+    expect(w.props('sections').some((s) => s.kind === 'chapter' && s.title === 'New chapter')).toBe(
+      true,
+    );
+    w.unmount();
+  });
+
   it('renders corrupt input without hanging and flags it', async () => {
     const corrupt: Section[] = [
       { id: 'a', kind: 'part', title: 'A', docId: 'd/a', parentId: 'b' },

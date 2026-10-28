@@ -188,3 +188,4 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-28 · #35 · save-failure test unmounted before a successful save could clear the banner (RAD-265) · after mocking recovery, drive one more edit and assert the banner is gone and status shows Saved
 - 2026-10-28 · #113 · read-only restore test used `isEditable` only · assert `contenteditable="false"`, toolbar read-only title, and `typeThroughDom` leaves the doc unchanged
 - 2026-10-28 · #113 · `saveStatusShown` survived `open()` on another book · reset it in `open()` and test the status line is empty until the next successful persist
+- 2026-10-28 · #52 · New chapter row was a disabled shell · wire it to the same add flow as More sections and test outline + session doc creation
