@@ -1,0 +1,3 @@
+# Linux CI cross-checks cfg(windows) via x86_64-pc-windows-gnu (#127).
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"

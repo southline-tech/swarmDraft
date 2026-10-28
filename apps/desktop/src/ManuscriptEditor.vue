@@ -102,6 +102,8 @@ const props = defineProps<{
   outlineForced?: boolean;
   /** #98: the writer chose "Hide notes" to make room for the outline. */
   notesHidden?: boolean;
+  /** One continuous manuscript (#107): body-only slice; chrome lives on the active section. */
+  sliceMode?: boolean;
 }>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
@@ -468,7 +470,10 @@ function focusBody() {
   clearTimeout(focusTimer);
   focusTimer = setTimeout(() => landInBody(e));
 }
-defineExpose({ focusBody });
+function reportLoadError() {
+  emit('load-error', loadError.value);
+}
+defineExpose({ focusBody, reportLoadError });
 
 /** Set when the content does not fit the schema; the editor is then read-only and never emits. */
 const loadError = shallowRef<string>('');
@@ -550,7 +555,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
   <div
     ref="root"
     class="manuscript-editor"
-    :class="{ 'focus-mode': focusMode }"
+    :class="{ 'focus-mode': focusMode, 'manuscript-editor--slice': sliceMode }"
     :data-focus-mode="focusMode || undefined"
     @keydown="onShellKey"
   >
@@ -565,9 +570,9 @@ const LABELS: Record<ReviewItem['type'], string> = {
     <!-- #84: the toolbar moves to the parent's full-width row; its own keydown keeps the editor
          shortcuts (Ctrl+F, Ctrl+/) working from toolbar focus, since teleported DOM no longer
          sits inside .manuscript-editor. -->
-    <Teleport :to="props.toolbarTarget" :disabled="!props.toolbarTarget" defer>
+    <Teleport :to="props.toolbarTarget" :disabled="!props.toolbarTarget || sliceMode" defer>
       <div
-        v-if="editor && !focusMode"
+        v-if="editor && !focusMode && !sliceMode"
         class="toolbar-host"
         @keydown="props.toolbarTarget ? onShellKey($event) : undefined"
       >
@@ -634,7 +639,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
         :class="{ 'desk--outline-forced': outlineForced }"
         data-test="desk"
       >
-        <FindPanel v-if="findOpen" :editor="editor" @close="closeFind" />
+        <FindPanel v-if="findOpen && !sliceMode" :editor="editor" @close="closeFind" />
         <div
           :class="{ 'page-sheet--narrow': pageNarrow }"
           class="page-sheet box-border mx-auto mt-8 mb-8 h-fit min-h-216 flex-none bg-paper p-18 text-text shadow-2"
@@ -672,7 +677,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
         </div>
       </div>
       <div
-        v-if="reviewOpen && !focusMode"
+        v-if="reviewOpen && !focusMode && !sliceMode"
         class="review"
         :class="{ 'review--collapsed': collapsed }"
         data-test="review"
@@ -753,7 +758,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
       </div>
     </template>
     <StatusBar
-      v-if="!focusMode"
+      v-if="!focusMode && !sliceMode"
       v-model:zoom="zoom"
       :chapter-title="chapterTitle"
       :chapter-words="chapterWords"
@@ -782,6 +787,14 @@ const LABELS: Record<ReviewItem['type'], string> = {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+}
+.manuscript-editor--slice {
+  height: auto;
+}
+.manuscript-editor--slice .page-sheet {
+  margin-top: var(--ct-space-4);
+  margin-bottom: var(--ct-space-4);
+  box-shadow: none;
 }
 .manuscript-editor .body {
   flex: 1;

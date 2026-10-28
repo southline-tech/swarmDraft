@@ -63,7 +63,9 @@ describe('App load-error region with the real editor (#82)', () => {
     expect(region().text()).toBe('');
     expect(alertsWithError()).toHaveLength(0);
     const editor = (
-      w.get('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+      w.get('[data-test="lead-editor"] .tiptap').element as unknown as {
+        editor: import('@tiptap/core').Editor;
+      }
     ).editor;
     editor.commands.insertContent('Synthetic survives reload');
     await settle();
@@ -80,7 +82,9 @@ describe('App load-error region with the real editor (#82)', () => {
 
     await w.get(`[data-test="section-${good!.id}"]`).trigger('click');
     await settle();
-    expect(w.get('.tiptap').text()).toContain('Synthetic survives reload');
+    expect(w.get('[data-test="lead-editor"] .tiptap').text()).toContain(
+      'Synthetic survives reload',
+    );
     expect(region().text()).toBe('');
     w.unmount();
   });
