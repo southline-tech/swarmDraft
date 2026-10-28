@@ -3,14 +3,14 @@
  * and (mirrored in Rust) the in-app MCP server.
  */
 
-export const SECTION_KINDS = ['front_matter', 'part', 'chapter', 'scene', 'back_matter'] as const;
+export const SECTION_KINDS = ['front_matter', 'part', 'chapter', 'back_matter'] as const;
 export type SectionKind = (typeof SECTION_KINDS)[number];
 
 export interface Section {
   id: string;
   kind: SectionKind;
   title: string;
-  /** Parent section id (scene -> chapter, chapter -> part). */
+  /** Parent section id (chapter -> part). */
   parentId?: string;
   /** Id of this section's own Yjs document (see sectionDocId). */
   docId: string;
@@ -37,7 +37,7 @@ export function isSectionKind(value: string): value is SectionKind {
 }
 
 /**
- * Each section (chapter/scene) has its own Yjs document so it can be loaded,
+ * Each section has its own Yjs document so it can be loaded,
  * synced, persisted and exposed over MCP independently. The manuscript-level
  * doc only holds metadata and the outline.
  */

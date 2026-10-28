@@ -49,21 +49,19 @@ describe('Y.Doc counts', () => {
     expect(docWordCount(new Y.Doc())).toBe(0);
   });
 
-  it('collects a chapter and its scenes, not its siblings', () => {
+  it('collects a chapter doc, not its siblings', () => {
     const d = (t: string) => docToYDoc(para(t) as never);
     const docs = new Map([
       ['p', d('Part')],
       ['c1', d('Chapter one')],
-      ['s1', d('Scene one text here')],
       ['c2', d('Chapter two')],
     ]);
     const outline = [
       { id: 'P', kind: 'part', title: 'Part', docId: 'p' },
       { id: 'C1', kind: 'chapter', title: 'One', parentId: 'P', docId: 'c1' },
-      { id: 'S1', kind: 'scene', title: 'S', parentId: 'C1', docId: 's1' },
       { id: 'C2', kind: 'chapter', title: 'Two', parentId: 'P', docId: 'c2' },
     ] as never;
-    expect(bookWordCount(sectionTreeDocs(outline, 'C1', docs))).toBe(6);
+    expect(bookWordCount(sectionTreeDocs(outline, 'C1', docs))).toBe(2);
     expect(sectionTreeDocs(outline, undefined, docs)).toEqual([]);
   });
 

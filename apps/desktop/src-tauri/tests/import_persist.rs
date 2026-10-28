@@ -145,13 +145,13 @@ fn hierarchy_is_kept_and_ids_match_doc_ids() {
     let input = vec![
         sec("s001", None, "part", "Part One"),
         sec("s002", Some("s001"), "chapter", "Chapter One"),
-        sec("s003", Some("s002"), "scene", "Scene One"),
+        sec("s003", Some("s001"), "chapter", "Chapter Two"),
         sec("s004", None, "back_matter", "Afterword"),
     ];
     let (m, secs) = store.import_manuscript("Synthetic Harbor", &input).unwrap();
     assert_eq!(secs[0].parent_id, None);
     assert_eq!(secs[1].parent_id.as_deref(), Some(secs[0].id.as_str()));
-    assert_eq!(secs[2].parent_id.as_deref(), Some(secs[1].id.as_str()));
+    assert_eq!(secs[2].parent_id.as_deref(), Some(secs[0].id.as_str()));
     assert_eq!(secs[3].parent_id, None);
     // What the app opens (and reopens after a restart) is exactly the stored rows.
     drop(store);

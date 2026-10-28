@@ -15,7 +15,7 @@ describe('schema', () => {
   });
 
   it('recognises section kinds', () => {
-    expect(isSectionKind('scene')).toBe(true);
+    expect(isSectionKind('scene')).toBe(false);
     expect(isSectionKind('appendix')).toBe(false);
   });
 });

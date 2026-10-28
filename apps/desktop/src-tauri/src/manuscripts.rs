@@ -10,7 +10,7 @@ use yrs::{Doc, ReadTxn, StateVector, Transact, Update};
 use crate::storage::{StorageError, Store};
 
 pub(crate) const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
-pub const SECTION_KINDS: &[&str] = &["front_matter", "part", "chapter", "scene", "back_matter"];
+pub const SECTION_KINDS: &[&str] = &["front_matter", "part", "chapter", "back_matter"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -872,15 +872,10 @@ fn insert_suggestion_on(
 }
 
 /// Current state vector of a doc (pair with `save_doc_changes`).
-/// Which kinds may contain which (mirrors the editor's outline rules): chapters go in parts,
-/// scenes in chapters; everything else is top level only, and a scene is never top level.
+/// Which kinds may contain which (mirrors the editor's outline rules): chapters go in parts;
+/// everything else is top level only.
 fn can_nest(child: &str, parent: Option<&str>) -> bool {
-    match (child, parent) {
-        ("scene", None) => false,
-        (_, None) => true,
-        ("chapter", Some("part")) | ("scene", Some("chapter")) => true,
-        _ => false,
-    }
+    matches!((child, parent), (_, None) | ("chapter", Some("part")))
 }
 
 fn validate_outline(

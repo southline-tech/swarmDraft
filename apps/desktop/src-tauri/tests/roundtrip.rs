@@ -24,7 +24,7 @@ fn as_doc(d: &yrs::Doc) -> Value {
 fn roundtrip_fixture() {
     let secs = read("sections.json");
     let secs = secs.as_array().unwrap();
-    assert!(secs.len() >= 53, "{}", secs.len());
+    assert!(secs.len() >= 22, "{}", secs.len());
     let mut rust = Vec::new();
     for (i, s) in secs.iter().enumerate() {
         validate_doc(s).unwrap();

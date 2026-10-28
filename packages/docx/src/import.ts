@@ -917,32 +917,24 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
 
   let part: ImportedSection | undefined;
   let chapter: ImportedSection | undefined;
-  let scene: ImportedSection | undefined;
   let back: ImportedSection | undefined;
-  let sceneHasText = false;
+  let chapterHasBody = false;
   let blanks = 0;
   let pendingPageBreak = false;
   let sceneBreaks = 0;
 
-  const startScene = (marker?: string) => {
+  const appendSceneBreak = (marker: string) => {
     if (!chapter) return;
-    const n = sections.filter((s) => s.parentId === chapter!.id && s.kind === 'scene').length;
-    scene = newSection('scene', `Scene ${n + 1}`, chapter.id);
-    if (marker !== undefined) {
-      scene.content.content.push({ type: 'scene_break', attrs: { marker } });
-      sceneBreaks++;
-    }
-    sceneHasText = false;
+    chapter.content.content.push({ type: 'scene_break', attrs: { marker } });
+    sceneBreaks++;
+    chapterHasBody = false;
   };
   const target = (): ImportedSection => {
     if (back) return back;
-    if (chapter) {
-      if (!scene) startScene();
-      return scene!;
-    }
+    if (chapter) return chapter;
     if (part) return part;
     chapter = newSection('chapter', 'Untitled');
-    return target();
+    return chapter;
   };
   const titleBlock = (p: Para, level: number): BlockNode => ({
     type: 'heading',
@@ -961,44 +953,44 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
         blanks = 0;
         break;
       case 'empty':
-        if (sceneHasText || back) blanks++;
+        if (chapterHasBody || back) blanks++;
         else report.add('info', 'spacing', 'Empty spacing paragraphs removed');
         break;
       case 'part':
         part = newSection('part', title);
         part.content.content.push(titleBlock(p, 1));
-        chapter = scene = back = undefined;
+        chapter = back = undefined;
         pendingPageBreak = false;
-        sceneHasText = false;
+        chapterHasBody = false;
         blanks = 0;
         break;
       case 'chapter':
         chapter = newSection('chapter', title, part?.id);
         chapter.content.content.push(titleBlock(p, 1));
-        scene = back = undefined;
+        back = undefined;
         pendingPageBreak = false;
-        sceneHasText = false;
+        chapterHasBody = false;
         blanks = 0;
         break;
       case 'back':
         back = newSection('back_matter', title);
         back.content.content.push(titleBlock(p, 1));
-        part = chapter = scene = undefined;
+        part = chapter = undefined;
         pendingPageBreak = false;
-        sceneHasText = false;
+        chapterHasBody = false;
         blanks = 0;
         break;
       case 'scene_break':
         blanks = 0;
         if (back)
           back.content.content.push({ type: 'scene_break', attrs: { marker: role.marker } });
-        else if (chapter && sceneHasText) startScene(role.marker);
+        else if (chapter && chapterHasBody) appendSceneBreak(role.marker);
         else report.add('info', 'leading_break', 'Scene break before any text ignored');
         break;
       case 'heading':
       case 'text': {
-        if (blanks >= 2 && sceneHasText && chapter && !back) startScene('');
-        else if (blanks === 1 && sceneHasText && chapter && !back)
+        if (blanks >= 2 && chapterHasBody && chapter && !back) appendSceneBreak('');
+        else if (blanks === 1 && chapterHasBody && chapter && !back)
           report.add(
             'warning',
             'single_blank_line',
@@ -1015,7 +1007,7 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
           report.add('info', 'subheading', `Heading ${role.level} kept as a subheading`, title);
           t.content.content.push(titleBlock(p, role.level));
         } else {
-          const first = t.kind === 'scene' && !sceneHasText;
+          const first = t === chapter && !chapterHasBody;
           const style = paragraphStyle(p, first, report);
           t.content.content.push({
             type: 'paragraph',
@@ -1036,14 +1028,13 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
               title,
             );
         }
-        if (t.kind === 'scene') sceneHasText = true;
+        if (t === chapter) chapterHasBody = true;
         break;
       }
     }
     if (p.breakAfter) pendingPageBreak = true;
   }
-  // Drop empty scenes (e.g. a chapter with no text).
-  const doc = { sections: sections.filter((s) => s.kind !== 'scene' || s.content.content.length) };
+  const doc = { sections };
 
   // Orphan anchors: a commentRangeStart/End id with no comments.xml entry. Drop the mark
   // (there is no comment behind it) and say so, with the id and the text it covered.
@@ -1132,7 +1123,7 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
       frontMatter: count('front_matter'),
       parts: count('part'),
       chapters: hasChapters ? count('chapter') : 0,
-      scenes: count('scene'),
+      scenes: 0,
       sceneBreaks,
       backMatter: count('back_matter'),
       footnotes: JSON.stringify(doc.sections).split('"type":"footnote"').length - 1,

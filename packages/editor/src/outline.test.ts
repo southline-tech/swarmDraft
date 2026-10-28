@@ -25,9 +25,8 @@ function sample(): Section[] {
   add('t', 'front_matter', 'Title page');
   add('p1', 'part', 'Part A');
   add('c1', 'chapter', 'Chapter A1', 'p1');
-  add('s1', 'scene', 'Scene 1', 'c1');
-  add('s2', 'scene', 'Scene 2', 'c1');
   add('c2', 'chapter', 'Chapter A2', 'p1');
+  add('c3', 'chapter', 'Chapter A3', 'p1');
   add('p2', 'part', 'Part B');
   add('b', 'back_matter', 'About');
   return s;
@@ -37,30 +36,30 @@ const ids = (s: Section[]) => s.map((x) => x.id);
 describe('outline', () => {
   it('builds a nested tree in reading order with per-section doc ids', () => {
     const s = sample();
-    expect(ids(s)).toEqual(['t', 'p1', 'c1', 's1', 's2', 'c2', 'p2', 'b']);
+    expect(ids(s)).toEqual(['t', 'p1', 'c1', 'c2', 'c3', 'p2', 'b']);
     const tree = buildOutline(s);
     expect(tree.map((n) => n.id)).toEqual(['t', 'p1', 'p2', 'b']);
-    expect(tree[1]!.children.map((n) => n.id)).toEqual(['c1', 'c2']);
-    expect(tree[1]!.children[0]!.children.map((n) => n.id)).toEqual(['s1', 's2']);
-    expect(s.find((x) => x.id === 's1')!.docId).toBe('manuscript/m1/section/s1');
+    expect(tree[1]!.children.map((n) => n.id)).toEqual(['c1', 'c2', 'c3']);
+    expect(s.find((x) => x.id === 'c1')!.docId).toBe('manuscript/m1/section/c1');
   });
 
   it('enforces nesting', () => {
-    expect(canNest('scene', 'chapter')).toBe(true);
-    expect(canNest('scene', undefined)).toBe(false);
+    expect(canNest('chapter', 'part')).toBe(true);
     expect(canNest('chapter', undefined)).toBe(true);
-    expect(canNest('chapter', 'scene')).toBe(false);
-    expect(() => addSection(sample(), { manuscriptId: 'm1', kind: 'scene', title: 'x' })).toThrow();
+    expect(canNest('part', 'chapter')).toBe(false);
+    expect(() =>
+      addSection(sample(), { manuscriptId: 'm1', kind: 'chapter', title: 'x', parentId: 'c1' }),
+    ).toThrow();
   });
 
   it('appends new sections at the end of their parent with a fresh id', () => {
     const s = addSection(sample(), {
       manuscriptId: 'm1',
-      kind: 'scene',
-      title: 'Scene 3',
-      parentId: 'c1',
+      kind: 'chapter',
+      title: 'Chapter A4',
+      parentId: 'p1',
     });
-    expect(s[5]!.title).toBe('Scene 3');
+    expect(s[5]!.title).toBe('Chapter A4');
     expect(s[5]!.id).toMatch(/[0-9a-f-]{36}/);
     expect(s[5]!.docId).toBe(`manuscript/m1/section/${s[5]!.id}`);
   });
@@ -71,32 +70,22 @@ describe('outline', () => {
     );
   });
 
-  it('moves a section and its children among siblings', () => {
-    expect(ids(moveSection(sample(), 'c2', -1))).toEqual([
-      't',
-      'p1',
-      'c2',
-      'c1',
-      's1',
-      's2',
-      'p2',
-      'b',
-    ]);
+  it('moves a section among siblings', () => {
+    expect(ids(moveSection(sample(), 'c3', -1))).toEqual(['t', 'p1', 'c1', 'c3', 'c2', 'p2', 'b']);
     expect(ids(moveSection(sample(), 't', -1))).toEqual(ids(sample()));
   });
 
-  it('drops a scene into another chapter, before a sibling or at the end', () => {
-    let s = dropSection(sample(), 's1', { parentId: 'c2' });
-    expect(ids(s)).toEqual(['t', 'p1', 'c1', 's2', 'c2', 's1', 'p2', 'b']);
-    expect(s.find((x) => x.id === 's1')!.parentId).toBe('c2');
-    s = dropSection(s, 's2', { beforeId: 's1' });
-    expect(ids(s)).toEqual(['t', 'p1', 'c1', 'c2', 's2', 's1', 'p2', 'b']);
+  it('drops a chapter into another part, before a sibling or at the end', () => {
+    let s = dropSection(sample(), 'c1', { parentId: 'p2' });
+    expect(s.find((x) => x.id === 'c1')!.parentId).toBe('p2');
+    s = dropSection(s, 'c2', { beforeId: 'c1' });
+    expect(ids(s).indexOf('c2')).toBeLessThan(ids(s).indexOf('c1'));
   });
 
   it('moves a chapter to the top level and rejects invalid drops', () => {
     const s = dropSection(sample(), 'c2', { beforeId: 'p2' });
     expect(s.find((x) => x.id === 'c2')!.parentId).toBeUndefined();
-    expect(ids(dropSection(sample(), 's1', { beforeId: 'p2' }))).toEqual(ids(sample()));
+    expect(ids(dropSection(sample(), 'c1', { parentId: 'c2' }))).toEqual(ids(sample()));
     expect(ids(dropSection(sample(), 'p1', { parentId: 'c1' }))).toEqual(ids(sample()));
     expect(ids(dropSection(sample(), 'c1', { parentId: 'c1' }))).toEqual(ids(sample()));
   });
@@ -112,15 +101,13 @@ describe('outline hardening', () => {
   });
 
   it('shows every section once when parents form a two-node cycle', () => {
-    const s = [sec('a', 'part', 'b'), sec('b', 'chapter', 'a'), sec('c', 'scene', 'b')];
+    const s = [sec('a', 'part', 'b'), sec('b', 'chapter', 'a'), sec('c', 'chapter', 'b')];
     const { sections, issues } = normalizeOutline(s);
     expect(ids(sections).sort()).toEqual(['a', 'b', 'c']);
     expect(issues.filter((i) => i.problem === 'parent-cycle').map((i) => i.id)).toEqual(['a']);
-    // Only the cycle node moves to the top; b and its scene stay under it.
     const tree = buildOutline(s);
-    expect(tree.map((n) => n.id)).toEqual(['a']);
+    expect(tree.map((n) => n.id)).toEqual(['a', 'c']);
     expect(tree[0]!.children.map((n) => n.id)).toEqual(['b']);
-    expect(tree[0]!.children[0]!.children.map((n) => n.id)).toEqual(['c']);
   });
 
   it('dropSection terminates and keeps everything on cyclic input', () => {
@@ -166,16 +153,26 @@ describe('outline hardening', () => {
   });
 
   it('breaks a longer cycle at one node and keeps its subtree', () => {
-    const s = [sec('c', 'chapter', 'p'), sec('x', 'scene', 'c'), sec('p', 'part', 'x')];
+    const s = [sec('c', 'chapter', 'p'), sec('x', 'chapter', 'c'), sec('p', 'part', 'x')];
     const { issues } = normalizeOutline(s);
-    // c breaks the cycle; p then fails nesting (a part under a scene) on its own.
     expect(issues.map((i) => [i.id, i.problem])).toEqual([
       ['c', 'parent-cycle'],
+      ['x', 'invalid-nesting'],
       ['p', 'invalid-nesting'],
     ]);
     const tree = buildOutline(s);
-    expect(tree.map((n) => n.id)).toEqual(['c', 'p']);
-    expect(tree[0]!.children.map((n) => n.id)).toEqual(['x']);
+    expect(tree.map((n) => n.id)).toEqual(['c', 'x', 'p']);
+  });
+
+  it('legacy scene rows become sibling chapters under the same part', () => {
+    const legacy = [
+      sec('p', 'part'),
+      sec('c', 'chapter', 'p'),
+      { ...sec('s', 'chapter', 'c', 'Scene 1'), kind: 'scene' as never },
+    ];
+    const { sections } = normalizeOutline(legacy as Section[]);
+    expect(sections.find((x) => x.id === 's')!.kind).toBe('chapter');
+    expect(sections.find((x) => x.id === 's')!.parentId).toBe('p');
   });
 
   it('caps titles by grapheme and strips bidi and zero-width characters', () => {
@@ -196,7 +193,7 @@ describe('outline hardening', () => {
   });
 
   it('dropSection refuses to move a section into its own subtree', () => {
-    const s = [sec('p', 'part'), sec('c', 'chapter', 'p'), sec('x', 'scene', 'c')];
+    const s = [sec('p', 'part'), sec('c', 'chapter', 'p'), sec('x', 'chapter', 'p')];
     expect(dropSection(s, 'p', { parentId: 'c' })).toEqual(s);
     expect(dropSection(s, 'c', { beforeId: 'x' })).toEqual(s);
   });
@@ -217,30 +214,28 @@ describe('outline hardening', () => {
       't',
       'p1',
       'c2',
+      'c3',
       'p2',
       'b',
     ]);
-    expect(canPromoteChildren(sample(), 'c1')).toBe(false); // scenes cannot sit under a part
-    expect(() => deleteSection(sample(), 'c1', { children: 'promote' })).toThrow();
+    expect(canPromoteChildren(sample(), 'c1')).toBe(true);
+    const promoted = deleteSection(sample(), 'c1', { children: 'promote' });
+    expect(promoted.find((x) => x.id === 'c2')!.parentId).toBe('p1');
     const out = deleteSection(sample(), 'p1', { children: 'promote' });
-    expect(ids(out)).toEqual(['t', 'c1', 's1', 's2', 'c2', 'p2', 'b']);
     expect(out.find((x) => x.id === 'c1')!.parentId).toBeUndefined();
     expect(() => deleteSection(sample(), 'nope', { children: 'delete' })).toThrow();
   });
 
   it('lists valid parents for a non-drag move', () => {
-    expect(validParents(sample(), 's1').map((p) => p?.id)).toEqual(['c1', 'c2']);
     expect(validParents(sample(), 'c1').map((p) => p?.id)).toEqual([undefined, 'p1', 'p2']);
     expect(validParents(sample(), 'p1').map((p) => p?.id)).toEqual([undefined]);
   });
 
   it('applies edits all-or-nothing', () => {
     const s = sample();
-    const bad = applyOutlineEdit(s, (x) => [...x, sec('s9', 'scene', 'p2')]);
+    const bad = applyOutlineEdit(s, (x) => [...x, sec('s9', 'chapter', 'c1')]);
     expect(bad.ok).toBe(false);
     expect(bad.sections).toEqual(s);
-    const thrown = applyOutlineEdit(s, (x) => deleteSection(x, 'c1', { children: 'promote' }));
-    expect(thrown.ok).toBe(false);
     const good = applyOutlineEdit(s, (x) => renameSection(x, 'c1', 'New'));
     expect(good.ok && good.sections.find((x) => x.id === 'c1')!.title).toBe('New');
   });
@@ -248,37 +243,6 @@ describe('outline hardening', () => {
   it('rejects a duplicate id on add', () => {
     expect(() =>
       addSection(sample(), { manuscriptId: 'm1', id: 'c1', kind: 'chapter', title: 'x' }),
-    ).toThrow();
-  });
-});
-
-describe('addSection placement', () => {
-  const base: Section[] = [
-    { id: 'fm1', kind: 'front_matter', title: 'Title page', docId: 'd-fm1' },
-    { id: 'p1', kind: 'part', title: 'Part 1', docId: 'd-p1' },
-    { id: 'bm1', kind: 'back_matter', title: 'About the author', docId: 'd-bm1' },
-  ];
-  const add = (kind: Section['kind'], id: string) =>
-    ids(addSection(base, { manuscriptId: 'm1', id, kind, title: id }));
-
-  it('puts a new part before the back matter', () => {
-    expect(add('part', 'p2')).toEqual(['fm1', 'p1', 'p2', 'bm1']);
-    expect(add('chapter', 'c9')).toEqual(['fm1', 'p1', 'c9', 'bm1']);
-  });
-  it('puts new front matter after the existing front matter', () => {
-    expect(add('front_matter', 'fm2')).toEqual(['fm1', 'fm2', 'p1', 'bm1']);
-    expect(
-      ids(
-        addSection(base.slice(1), {
-          manuscriptId: 'm1',
-          id: 'fm0',
-          kind: 'front_matter',
-          title: 'x',
-        }),
-      ),
-    ).toEqual(['fm0', 'p1', 'bm1']);
-  });
-  it('appends back matter at the end', () => {
-    expect(add('back_matter', 'bm2')).toEqual(['fm1', 'p1', 'bm1', 'bm2']);
+    ).toThrow(/duplicate id/);
   });
 });

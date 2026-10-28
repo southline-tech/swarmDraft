@@ -9,7 +9,7 @@ import App from './App.vue';
 import { PRODUCT_NAME } from './lib/brand';
 import { storedFixture } from './stored-fixture.test-helper';
 import { openSession, sessionFromDocx } from './manuscript-session';
-import { docWordCount, sectionTreeDocs } from './status/wordcount';
+import { docWordCount } from './status/wordcount';
 
 enableAutoUnmount(afterEach);
 
@@ -192,7 +192,7 @@ describe('App', () => {
     expect(w.findAll('.row')).toHaveLength(0);
   });
 
-  it('shows the imported parts, chapters and scenes in the sidebar', async () => {
+  it('shows the imported parts and chapters in the sidebar', async () => {
     const { w, titles } = await withManuscript();
     const expected = importDocx(bytes(), { manuscriptId: 'm1' }).sections.map((s) => s.title);
     expect(titles()).toEqual(expected);
@@ -223,7 +223,7 @@ describe('App', () => {
     w.unmount();
   });
 
-  it.each(['part', 'chapter', 'scene', 'front_matter', 'back_matter'] as const)(
+  it.each(['part', 'chapter', 'front_matter', 'back_matter'] as const)(
     'a new %s from the navigator opens editable and takes typing (#42)',
     async (kind) => {
       const { w, session } = await withManuscript();
@@ -255,7 +255,7 @@ describe('App', () => {
     },
   );
 
-  it.each(['part', 'chapter', 'scene', 'front_matter', 'back_matter'] as const)(
+  it.each(['part', 'chapter', 'front_matter', 'back_matter'] as const)(
     'text typed in a new %s is saved, survives a restart, and switching away and back (#42)',
     async (kind) => {
       const backend = await import('./backend');
@@ -390,11 +390,11 @@ describe('App', () => {
     const { w, session } = await withManuscript();
     const warn = vi.spyOn(console, 'warn');
     const rows = readStructure(session.manuscript);
-    // The sample has scenes whose doc starts with a scene break.
     expect(
-      rows.some(
-        (r) => yDocToDoc(session.sections.get(r.docId)!).content?.[0]?.type === 'scene_break',
-      ),
+      rows.some((r) => {
+        const doc = yDocToDoc(session.sections.get(r.docId)!);
+        return doc.content?.some((b) => b.type === 'scene_break');
+      }),
     ).toBe(true);
     for (const r of rows) {
       await w.find(`[data-test="section-${r.id}"]`).trigger('click');
@@ -630,19 +630,13 @@ describe('App status bar on an imported manuscript', () => {
   const words = (session: ReturnType<typeof sessionFromDocx>, ids: string[]) =>
     ids.reduce((n, id) => n + docWordCount(session.sections.get(id)!), 0);
 
-  it('shows a chapter with scenes by title, counting the scenes too', async () => {
+  it('shows a chapter by title and counts words in its doc', async () => {
     const { w, session } = await withManuscript();
-    const outline = session.outline.value;
-    const ch = outline.find(
-      (s) => s.kind === 'chapter' && outline.some((c) => c.parentId === s.id),
-    )!;
+    const ch = session.outline.value.find((s) => s.kind === 'chapter')!;
     await w.find(`[data-test="section-${ch.id}"]`).trigger('click');
     await settle();
     expect(w.find('[data-test="status-chapter"]').text()).toBe(ch.title);
-    const tree = sectionTreeDocs(outline, ch.id, session.sections);
-    expect(tree.length).toBeGreaterThan(1);
-    const total = tree.reduce((n, d) => n + docWordCount(d), 0);
-    expect(total).toBeGreaterThan(docWordCount(session.sections.get(ch.docId)!));
+    const total = docWordCount(session.sections.get(ch.docId)!);
     expect(num(w, 'chapter-words')).toBe(total);
     w.unmount();
   });
@@ -762,17 +756,16 @@ describe('App saves typing to the section Y.Doc', () => {
     (w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }).editor;
   const chaptersOf = (session: ReturnType<typeof sessionFromDocx>) =>
     session.outline.value.filter((s) => s.kind === 'chapter');
-  /** The section the app opened (the first chapter's first scene for this fixture). */
   const openedOf = (w: ReturnType<typeof mount>, session: ReturnType<typeof sessionFromDocx>) => {
     const id = w.findComponent({ name: 'SectionNav' }).props('selectedId') as string;
     return session.outline.value.find((s) => s.id === id)!;
   };
 
-  it("opens on the first body text: the first chapter's first scene", async () => {
+  it('opens on the first chapter', async () => {
     const { w, session } = await withManuscript();
     const opened = openedOf(w, session);
-    expect(opened.kind).toBe('scene');
-    expect(opened.parentId).toBe(chaptersOf(session)[0]!.id);
+    expect(opened.kind).toBe('chapter');
+    expect(opened.id).toBe(chaptersOf(session)[0]!.id);
     w.unmount();
   });
 

@@ -74,9 +74,10 @@ function sample(): Uint8Array {
   });
 }
 
-const scene = (m: ImportedManuscript) => m.sections.find((s) => s.kind === 'scene')!.content;
+const chapterBody = (m: ImportedManuscript) =>
+  m.sections.find((s) => s.kind === 'chapter')!.content;
 const inlines = (m: ImportedManuscript) =>
-  scene(m).content.flatMap((b) => ('content' in b ? (b.content ?? []) : [])) as InlineNode[];
+  chapterBody(m).content.flatMap((b) => ('content' in b ? (b.content ?? []) : [])) as InlineNode[];
 
 describe('formatting, notes and dropped features', () => {
   const m = importDocx(sample(), { manuscriptId: 'm1' });
@@ -108,7 +109,7 @@ describe('formatting, notes and dropped features', () => {
   });
 
   it('exposes notes in the read view for MCP tools', () => {
-    const v = readView(scene(m));
+    const v = readView(chapterBody(m));
     expect(v.text).toContain('plain[^1][^e1]');
     expect(v.text).toContain('[image: A lighthouse]');
     expect(v.footnotes).toEqual([
@@ -119,7 +120,7 @@ describe('formatting, notes and dropped features', () => {
 
   it('replaces images with placeholders, flattens tables, lists headers/footers', () => {
     expect(inlines(m)).toContainEqual({ type: 'image', attrs: { alt: 'A lighthouse' } });
-    expect(readView(scene(m)).text).toContain('cell one\ncell two');
+    expect(readView(chapterBody(m)).text).toContain('cell one\ncell two');
     const warn = (code: string) =>
       m.report.items.filter((i) => i.code === code && i.level === 'warning');
     expect(warn('image')).toHaveLength(1);
@@ -140,7 +141,7 @@ describe('formatting, notes and dropped features', () => {
     ]);
     const added = inlines(m).find((n) => n.type === 'text' && n.text === ' added')!;
     expect(added.type === 'text' && added.marks?.length).toBe(2);
-    expect(yDocToDoc(docToYDoc(scene(m)))).toEqual(scene(m));
+    expect(yDocToDoc(docToYDoc(chapterBody(m)))).toEqual(chapterBody(m));
   });
 
   it('round-trips everything through export', () => {

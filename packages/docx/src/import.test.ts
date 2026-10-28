@@ -72,7 +72,7 @@ describe('mock-manuscript.docx vs EXPECTED.md', () => {
     ).toBe(true);
   });
 
-  it('detects parts, chapters, scene counts and break markers', () => {
+  it('detects parts, chapters, and in-chapter scene break markers', () => {
     expect(exp.parts).toHaveLength(3);
     const parts = blocks(m, 'part');
     expect(parts.map((p) => p.title)).toEqual(exp.parts.map((p) => p.title));
@@ -80,14 +80,16 @@ describe('mock-manuscript.docx vs EXPECTED.md', () => {
       const chapters = childrenOf(m, parts[i]!);
       expect(chapters.map((c) => c.title)).toEqual(ep.chapters.map((c) => c.title));
       ep.chapters.forEach((ec, j) => {
-        const scenes = childrenOf(m, chapters[j]!);
-        expect(scenes, ec.title).toHaveLength(ec.scenes);
-        const markers = scenes.slice(1).map((s) => {
-          const first = s.content.content[0];
-          return first?.type === 'scene_break' ? first.attrs.marker : '(missing)';
-        });
-        expect(markers, ec.title).toEqual(ec.breaks);
-        expect(scenes[0]!.content.content[0]?.type, ec.title).toBe('paragraph');
+        const ch = chapters[j]!;
+        const breaks = ch.content.content.filter((b) => b.type === 'scene_break');
+        expect(
+          breaks.map((b) => b.attrs.marker),
+          ec.title,
+        ).toEqual(ec.breaks);
+        expect(
+          ch.content.content.find((b) => b.type === 'paragraph'),
+          ec.title,
+        ).toBeTruthy();
       });
     });
     expect(blocks(m, 'chapter')).toHaveLength(12);
@@ -100,7 +102,7 @@ describe('mock-manuscript.docx vs EXPECTED.md', () => {
   });
 
   it('keeps inline formatting, block quotes, tracked changes, footnote and comment', () => {
-    const last = childrenOf(m, blocks(m, 'chapter')[11]!).at(-1)!;
+    const last = blocks(m, 'chapter')[11]!;
     const inl = allInline(last);
     const marked = (t: string, type: string) =>
       inl.some(
@@ -130,7 +132,7 @@ describe('mock-manuscript.docx vs EXPECTED.md', () => {
   it('keeps manual line breaks and strips typed indents', () => {
     const all = m.sections.flatMap(allInline);
     expect(all.some((n) => n.type === 'hard_break')).toBe(true);
-    for (const s of blocks(m, 'scene'))
+    for (const s of blocks(m, 'chapter'))
       for (const b of s.content.content)
         if (b.type === 'paragraph') expect(plainText(b.content)).not.toMatch(/^[\t ]/);
   });
@@ -161,7 +163,7 @@ describe('edge cases', () => {
     expect(blocks(m, 'chapter')).toHaveLength(1);
     expect(m.report.items.map((i) => i.code)).toContain('no_chapters');
     expect(
-      blocks(m, 'scene')[0]!.content.content.filter((b) => b.type === 'paragraph'),
+      blocks(m, 'chapter')[0]!.content.content.filter((b) => b.type === 'paragraph'),
     ).toHaveLength(3);
   });
 
@@ -204,8 +206,10 @@ describe('edge cases', () => {
         'Unmapped character style "Glow"',
       ]),
     );
-    expect(text(blocks(m, 'scene')[0]!)).toBe('Hello & welcome');
-    const p = blocks(m, 'scene')[0]!.content.content[0] as { content: InlineNode[] };
+    expect(text(blocks(m, 'chapter')[0]!)).toContain('Hello & welcome');
+    const p = blocks(m, 'chapter')[0]!.content.content.find((b) => b.type === 'paragraph') as {
+      content: InlineNode[];
+    };
     expect(p.content[0]).toMatchObject({ marks: [{ type: 'underline' }] });
   });
 });
@@ -245,7 +249,7 @@ describe('.docx round trip', () => {
 
   it('exported doc converts to Yjs and back', () => {
     const a = load('mock-manuscript.docx');
-    const s = a.sections.find((x) => x.kind === 'scene')!;
+    const s = a.sections.find((x) => x.kind === 'chapter' && x.content.content.length > 2)!;
     expect(yDocToDoc(docToYDoc(s.content))).toEqual(s.content);
   });
 });
