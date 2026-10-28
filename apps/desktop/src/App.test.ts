@@ -1744,7 +1744,7 @@ describe('home screen', () => {
 });
 
 describe('App UI shells (Part of #36)', () => {
-  it('shows the breadcrumb, per-section word counts, and a no-op New chapter row', async () => {
+  it('shows the breadcrumb, per-section word counts, and adds a chapter from New chapter (#52)', async () => {
     const { w, session } = await withManuscript();
     const outline = readStructure(session.manuscript);
     const chapter = outline.find((s) => s.kind === 'chapter')!;
@@ -1760,15 +1760,18 @@ describe('App UI shells (Part of #36)', () => {
         .find(`[data-test="section-${chapter.id}"] [data-test="word-count"]`)
         .attributes('aria-label'),
     ).toBe(`${words} words`);
-    const svs = [session.manuscript, ...session.sections.values()].map((d) =>
-      Y.encodeStateVector(d),
-    );
+    const chaptersBefore = outline.filter((s) => s.kind === 'chapter').length;
     await w.find('[data-test="new-chapter"]').trigger('click');
     await settle();
-    expect(readStructure(session.manuscript)).toEqual(outline);
-    expect(
-      [session.manuscript, ...session.sections.values()].map((d) => Y.encodeStateVector(d)),
-    ).toEqual(svs);
+    const input = w.find('[data-test="rename-input"]');
+    expect(input.exists()).toBe(true);
+    await input.setValue('Added chapter');
+    await input.trigger('keydown.enter');
+    await settle();
+    const next = readStructure(session.manuscript);
+    expect(next.filter((s) => s.kind === 'chapter').length).toBe(chaptersBefore + 1);
+    expect(next.some((s) => s.title === 'Added chapter')).toBe(true);
+    expect(session.sections.has(next.find((s) => s.title === 'Added chapter')!.docId)).toBe(true);
     w.unmount();
   });
 
