@@ -402,7 +402,7 @@ pub fn run() {
                     if e.kind() == std::io::ErrorKind::AddrInUse {
                         migration_notices.push(migrate::MigrationNotice::new(
                             migrate::NoticeKind::Warn,
-                            mcp::PORT_IN_USE_MESSAGE,
+                            &mcp::port_in_use_user_message(mcp::DEFAULT_PORT),
                         ));
                     }
                     Err(e.to_string())
