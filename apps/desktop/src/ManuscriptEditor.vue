@@ -72,6 +72,8 @@ const props = defineProps<{
   content?: JSONContent;
   /** No editing (e.g. the session is closed); edits would be dropped. */
   readonly?: boolean;
+  /** Toolbar/read-only copy when `readonly` is set by the parent (e.g. RAD-237 restore lock). */
+  readOnlyReason?: string;
   /** Whether the parent's chapter navigator is showing; reflected on the toolbar's Chapters button. */
   navigatorOpen?: boolean;
   /** Status bar (RAD-256): the open chapter's title, when known. */
@@ -574,7 +576,9 @@ const LABELS: Record<ReviewItem['type'], string> = {
           :editor="editor"
           :review-open="reviewOpen"
           :navigator-open="props.navigatorOpen"
-          :read-only-reason="loadError ? 'document failed to load' : undefined"
+          :read-only-reason="
+            loadError ? 'document failed to load' : props.readOnlyReason || undefined
+          "
           :find-enabled="true"
           @toggle-navigator="emit('toggle-navigator')"
           @toggle-review="reviewOpen = !reviewOpen"
