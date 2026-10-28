@@ -6,14 +6,16 @@
 import { markRaw, shallowRef, type ShallowRef } from 'vue';
 import * as Y from 'yjs';
 import type { Section } from '@coauthor/schema';
-import { normalizeOutline, type OutlineIssue } from '@coauthor/editor';
+import { coalesceLegacySceneSections, normalizeOutline, type OutlineIssue } from '@coauthor/editor';
 import {
+  docToYDoc,
   importDocx,
   importedToYDocs,
   META_FIELD,
   observeStructure,
   readStructure,
   writeStructure,
+  yDocToDoc,
   type ImportReport,
   type ImportedManuscript,
 } from '@coauthor/docx';
@@ -38,6 +40,8 @@ export interface ManuscriptSession {
   report: ImportReport | null;
   /** Problems repaired when the stored outline was opened (already saved back). */
   repairs: OutlineIssue[];
+  /** Chapter docs rewritten by legacy scene merge; persisted when opening from storage. */
+  legacySceneMerge?: { docIds: string[] };
   /**
    * Save an outline edit (add, rename, reorder, move, delete). For a stored manuscript it is
    * written to the database first and rejects (changing nothing) if that fails.
@@ -396,22 +400,31 @@ export function sessionFromStored(
 ): ManuscriptSession {
   const manuscript = new Y.Doc();
   manuscript.getMap(META_FIELD).set('title', stored.manuscript.title);
-  writeStructure(
-    manuscript,
-    stored.sections.map((s) => ({
-      id: s.id,
-      kind: s.kind as Section['kind'],
-      title: s.title,
-      docId: s.docId,
-      ...(s.parentId ? { parentId: s.parentId } : {}),
-    })),
-  );
+  const outlineRows: Section[] = stored.sections.map((s) => ({
+    id: s.id,
+    kind: s.kind as Section['kind'],
+    title: s.title,
+    docId: s.docId,
+    ...(s.parentId ? { parentId: s.parentId } : {}),
+  }));
   const sections = new Map<string, Y.Doc>();
+  const docNodes = new Map<string, ReturnType<typeof yDocToDoc>>();
   for (const s of stored.sections) {
     const doc = new Y.Doc();
     Y.applyUpdate(doc, Uint8Array.from(s.state), LOAD_ORIGIN);
     sections.set(s.docId, doc);
+    docNodes.set(s.docId, yDocToDoc(doc));
   }
+  const coalesced = coalesceLegacySceneSections(outlineRows, docNodes);
+  let legacySceneMerge: { docIds: string[] } | undefined;
+  if (coalesced.changed) {
+    legacySceneMerge = { docIds: coalesced.updatedDocIds };
+    for (const [docId, node] of coalesced.docs) {
+      sections.set(docId, markRaw(docToYDoc(node)));
+    }
+    for (const docId of coalesced.removedDocIds) sections.delete(docId);
+  }
+  writeStructure(manuscript, coalesced.sections);
   const session = openSession(
     stored.manuscript.id,
     stored.manuscript.title,
@@ -421,6 +434,7 @@ export function sessionFromStored(
     persist,
     saveOutline,
   );
+  if (legacySceneMerge) session.legacySceneMerge = legacySceneMerge;
   if (!live || stored.updatesCursor === undefined) return session;
   // Follow writes made elsewhere until the session closes. `sections` is the session's own map,
   // so docs added to it later are followed too.
@@ -450,7 +464,7 @@ export function openStored(
   persistHooks?: Pick<SectionPersister, 'onError' | 'onSaved'>,
 ): ManuscriptSession {
   const id = stored.manuscript.id;
-  return sessionFromStored(
+  const session = sessionFromStored(
     stored,
     report,
     {
@@ -460,6 +474,25 @@ export function openStored(
     (next) => saveOutline(id, next),
     (after) => pollUpdates(id, after),
   );
+  const merge = session.legacySceneMerge;
+  if (merge) {
+    void (async () => {
+      try {
+        await saveOutline(id, session.outline.value);
+        for (const docId of merge.docIds) {
+          const sec = session.outline.value.find((s) => s.docId === docId);
+          const doc = session.sections.get(docId);
+          if (sec && doc && !session.closed) {
+            await saveSectionUpdate(id, sec.id, Y.encodeStateAsUpdate(doc));
+          }
+        }
+        delete session.legacySceneMerge;
+      } catch (err) {
+        console.error('Legacy scene merge could not be saved', err);
+      }
+    })();
+  }
+  return session;
 }
 
 /**
