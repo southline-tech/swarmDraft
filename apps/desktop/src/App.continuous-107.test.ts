@@ -8,6 +8,8 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { readStructure } from '@coauthor/docx';
 import { PRODUCT_NAME } from './lib/brand';
 import { sessionFromDocx } from './manuscript-session';
+import { sectionsInReadingOrder } from './manuscript-reading-order';
+import { docWordCount } from './status/wordcount';
 
 const setTitle = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock('@tauri-apps/api/core', async (importOriginal) => ({
@@ -109,6 +111,35 @@ describe('continuous manuscript (#107)', () => {
     );
     await settle();
     expect(w.get(`[data-test="section-${target.id}"]`).classes()).toContain('selected');
+    w.unmount();
+  });
+
+  it('renders each section ProseMirror text from its Y.Doc', async () => {
+    const { w, session } = await withManuscript();
+    await settle();
+    for (const sec of sectionsInReadingOrder(session.outline.value)) {
+      const doc = session.sections.get(sec.docId);
+      if (!doc) continue;
+      const words = docWordCount(doc);
+      if (words < 2) continue;
+      const pm = w.find(`[data-section-anchor="${sec.id}"] .ProseMirror`);
+      expect(pm.exists(), sec.title).toBe(true);
+      expect(pm.text().replace(/\s+/g, ' ').trim().length, sec.title).toBeGreaterThan(20);
+      if (sec.kind === 'chapter') {
+        expect(pm.findAll('p').length, sec.title).toBeGreaterThan(0);
+      }
+    }
+    w.unmount();
+  });
+
+  it('keeps the review panel in a fixed rail outside the scroll column', async () => {
+    const { w } = await withManuscript();
+    await settle();
+    const scroll = w.get('[data-test="continuous-manuscript"]').element;
+    const rail = document.getElementById('continuous-review-rail');
+    expect(rail).toBeTruthy();
+    expect(scroll.contains(rail!)).toBe(false);
+    expect(rail!.querySelector('[data-test="review"]')).toBeTruthy();
     w.unmount();
   });
 
