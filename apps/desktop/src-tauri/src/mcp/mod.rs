@@ -14,6 +14,7 @@
 //! - Agents may read, comment and suggest. Accepting or rejecting a suggestion is human-only
 //!   and is never exposed as an MCP tool.
 
+mod port_holder;
 mod tools;
 pub use tools::PARAGRAPH_STYLES;
 
@@ -336,12 +337,30 @@ pub fn router(store: Store, cfg: McpConfig) -> axum::Router {
     router_with_stats(store, cfg).0
 }
 
-/// Shown when the MCP port is taken, most likely by a pre-rename coAuthor still running (both
-/// apps default to the same port, and agents would otherwise keep writing into the old data).
-pub const PORT_IN_USE_MESSAGE: &str = "Your bots can't connect because the old coAuthor app is still open. Close it, then restart swarmDraft.";
+/// When another program holds the MCP port and it is not the legacy desktop app.
+pub const PORT_IN_USE_GENERIC_MESSAGE: &str =
+    "Your bots can't connect because another program is already using the bot connection. Close that program, then restart swarmDraft.";
+
+/// When the pre-rename coAuthor app still holds the shared MCP port.
+pub const PORT_IN_USE_LEGACY_COAUTHOR_MESSAGE: &str =
+    "Your bots can't connect because the old coAuthor app is still open. Close it, then restart swarmDraft.";
+
+/// User-visible text for a taken MCP port (legacy name kept for callers that only need one string).
+/// User-visible port-busy text from a legacy-coAuthor detection result (also used in tests).
+pub fn port_in_use_user_message_if_legacy(legacy_coauthor: bool) -> String {
+    if legacy_coauthor {
+        PORT_IN_USE_LEGACY_COAUTHOR_MESSAGE.to_string()
+    } else {
+        PORT_IN_USE_GENERIC_MESSAGE.to_string()
+    }
+}
+
+pub fn port_in_use_user_message(port: u16) -> String {
+    port_in_use_user_message_if_legacy(port_holder::legacy_coauthor_holds_port(DEFAULT_HOST, port))
+}
 
 /// Bind the MCP port on loopback synchronously, so startup can tell the user right away when
-/// another process (an old coAuthor) already holds it.
+/// another process already holds it.
 pub fn bind(port: u16) -> std::io::Result<std::net::TcpListener> {
     match std::net::TcpListener::bind((DEFAULT_HOST, port)) {
         Ok(l) => {
@@ -353,7 +372,7 @@ pub fn bind(port: u16) -> std::io::Result<std::net::TcpListener> {
             eprintln!("swarmDraft: MCP port {port} on {DEFAULT_HOST} is in use: {e}");
             Err(std::io::Error::new(
                 std::io::ErrorKind::AddrInUse,
-                PORT_IN_USE_MESSAGE,
+                port_in_use_user_message(port),
             ))
         }
         Err(e) => Err(e),

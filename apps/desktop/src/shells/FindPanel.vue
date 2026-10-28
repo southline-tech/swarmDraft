@@ -66,6 +66,7 @@ onMounted(() => nextTick(() => input.value?.focus()));
         placeholder="Find"
         @input="current = 0"
         @keydown.enter.prevent="step($event.shiftKey ? -1 : 1)"
+        @keydown.esc.stop="emit('close')"
       />
       <span class="sh-count" role="status" data-test="find-count">{{ label }}</span>
       <button type="button" class="sh-tbtn sh-icon" aria-label="Previous match" @click="step(-1)">
