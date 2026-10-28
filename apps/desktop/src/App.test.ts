@@ -48,6 +48,16 @@ async function openSettings(w: ReturnType<typeof mount>) {
   }
 }
 
+/** DOM typing path; honours read-only (see ManuscriptEditor.test.ts). */
+async function typeThroughDom(editor: import('@tiptap/core').Editor, text: string) {
+  let node: Node | null = editor.view.dom;
+  while (node && node.nodeType !== Node.TEXT_NODE) node = node.firstChild;
+  if (!node) throw new Error('no text node to type into');
+  (node as Text).data += text;
+  (editor.view as unknown as { domObserver: { flush(): void } }).domObserver.flush();
+  await flushPromises();
+}
+
 describe('App', () => {
   it('saves an imported .docx to the backend before opening it', async () => {
     const backend = await import('./backend');
@@ -739,6 +749,10 @@ describe('App status bar on an imported manuscript', () => {
     await settle();
     await vi.waitFor(() => expect(w.find('[data-test="save-error"]').exists()).toBe(false));
     await vi.waitFor(() => expect(w.find('[data-test="status-save"]').text()).toBe('Saved'));
+    const next = sessionFromDocx(bytes(), 'm-other');
+    (w.vm as unknown as { open: (s: typeof next) => void }).open(next);
+    await settle();
+    expect(w.find('[data-test="status-save"]').text()).toBe('');
     w.unmount();
   });
 });
@@ -840,7 +854,7 @@ describe('restore confirmation', () => {
   it('keeps the editor read-only while restore_backup runs (RAD-237)', async () => {
     const backend = await import('./backend');
     let release!: () => void;
-    const gate = new Promise<{ tokensRevoked: number }>((resolve) => {
+    const gate = new Promise<{ tokensRevoked: number } | null>((resolve) => {
       release = () => resolve({ tokensRevoked: 0 });
     });
     vi.mocked(backend.restoreBackup).mockImplementationOnce(() => gate);
@@ -856,11 +870,45 @@ describe('restore confirmation', () => {
     await w.find('[data-test="restore-pick"]').trigger('click');
     await w.find('[data-test="restore-confirm-yes"]').trigger('click');
     await vi.waitFor(() => expect(editor.isEditable).toBe(false));
+    const before = editor.state.doc;
+    expect(editor.view.dom.getAttribute('contenteditable')).toBe('false');
+    expect(w.find('[data-test="tb-bold"]').attributes('title')).toBe(
+      'Read-only: restore in progress',
+    );
+    await typeThroughDom(editor, 'Blocked during restore');
+    expect(editor.state.doc.eq(before)).toBe(true);
+    expect(editor.getText()).not.toContain('Blocked during restore');
     release();
     await flushPromises();
     await vi.waitFor(() =>
       expect(w.find('[data-test="backup-status"]').text()).toContain('Restored'),
     );
+    w.unmount();
+  });
+
+  it('returns the editor to editable when restore is cancelled with a book open (RAD-237)', async () => {
+    const backend = await import('./backend');
+    let release!: () => void;
+    const gate = new Promise<null>((resolve) => {
+      release = () => resolve(null);
+    });
+    vi.mocked(backend.restoreBackup).mockImplementationOnce(() => gate);
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    await vi.waitFor(() => expect(w.find('.tiptap').exists()).toBe(true));
+    const editor = (
+      w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+    ).editor;
+    await openSettings(w);
+    await w.find('[data-test="restore-pick"]').trigger('click');
+    await w.find('[data-test="restore-confirm-yes"]').trigger('click');
+    await vi.waitFor(() => expect(editor.isEditable).toBe(false));
+    release();
+    await flushPromises();
+    await vi.waitFor(() => expect(editor.isEditable).toBe(true));
+    expect(editor.view.dom.getAttribute('contenteditable')).not.toBe('false');
+    expect(w.find('.tiptap').exists()).toBe(true);
     w.unmount();
   });
 

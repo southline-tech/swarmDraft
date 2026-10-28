@@ -354,6 +354,7 @@ function open(next: ManuscriptSession) {
   // A toast from an earlier book must never describe this one; callers re-show it on success.
   dismissToast();
   saveFailure.value = saveSucceeded();
+  saveStatusShown.value = false;
   // A manuscript is open again, so an earlier "please restart" or open failure no longer holds.
   fatalError.value = '';
   openError.value = '';
