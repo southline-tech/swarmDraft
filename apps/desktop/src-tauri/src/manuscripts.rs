@@ -28,6 +28,9 @@ const NUMBERING_STYLES: [&str; 4] = [
     "number_only",
 ];
 
+/// Book-wide default (#111): Chapter 1 / Part I in the editor.
+pub const DEFAULT_NUMBERING_STYLE: &str = "chapter_arabic";
+
 fn row_manuscript(r: &rusqlite::Row<'_>) -> rusqlite::Result<Manuscript> {
     Ok(Manuscript {
         id: r.get(0)?,
@@ -221,8 +224,11 @@ impl Store {
         let id = new_id();
         self.with_conn(|c| {
             c.execute(
-                &format!("INSERT INTO manuscripts (id, title, created_at) VALUES (?1, ?2, {NOW})"),
-                params![id, title],
+                &format!(
+                    "INSERT INTO manuscripts (id, title, created_at, numbering_style) \
+                     VALUES (?1, ?2, {NOW}, ?3)"
+                ),
+                params![id, title, DEFAULT_NUMBERING_STYLE],
             )?;
             Ok(c.query_row(
                 &format!("SELECT {MANUSCRIPT_COLS} FROM manuscripts WHERE id = ?1"),
@@ -487,8 +493,11 @@ impl Store {
         self.with_conn(|c| {
             let tx = c.unchecked_transaction()?;
             tx.execute(
-                &format!("INSERT INTO manuscripts (id, title, created_at) VALUES (?1, ?2, {NOW})"),
-                params![manuscript_id, title],
+                &format!(
+                    "INSERT INTO manuscripts (id, title, created_at, numbering_style) \
+                     VALUES (?1, ?2, {NOW}, ?3)"
+                ),
+                params![manuscript_id, title, DEFAULT_NUMBERING_STYLE],
             )?;
             let mut out = Vec::with_capacity(sections.len());
             // Importer ids are only unique within one import, so every section gets a new
@@ -952,6 +961,14 @@ pub fn state_vector(doc: &Doc) -> StateVector {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn new_manuscript_uses_chapter_arabic_numbering() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = Store::open(tmp.path()).unwrap();
+        let m = s.create_manuscript("Sample Manuscript").unwrap();
+        assert_eq!(m.numbering_style, DEFAULT_NUMBERING_STYLE);
+    }
 
     #[test]
     fn import_section_json_validates_before_saving() {

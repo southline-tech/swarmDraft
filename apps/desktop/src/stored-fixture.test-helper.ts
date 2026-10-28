@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import * as Y from 'yjs';
 import { docToYDoc, importDocx } from '@coauthor/docx';
+import { mockOutlineDisplayTitle } from '../../../fixtures/manuscripts/docx-import/outline-display-titles';
 import type { StoredManuscript } from './backend';
 
 const fixture = resolve(
@@ -26,7 +27,7 @@ export function storedFixture(): StoredManuscript {
       kind: s.kind,
       parentId: s.parentId ? dbId.get(s.parentId)! : null,
       position: i,
-      title: s.title,
+      title: mockOutlineDisplayTitle(s.title),
       docId: `manuscript/db-m/section/sec${i}`,
       state: Array.from(Y.encodeStateAsUpdate(docToYDoc(s.content))),
     })),

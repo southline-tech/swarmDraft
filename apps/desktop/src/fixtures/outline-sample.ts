@@ -14,9 +14,9 @@ export function sampleOutline(): Section[] {
       ...(parentId ? { parentId } : {}),
     }));
   add('title', 'front_matter', 'Title page');
-  add('part-1', 'part', 'Part One');
-  add('ch-1', 'chapter', 'Chapter 1', 'part-1');
-  add('ch-2', 'chapter', 'Chapter 2', 'part-1');
+  add('part-1', 'part', 'Opening arc');
+  add('ch-1', 'chapter', 'Harbor dawn', 'part-1');
+  add('ch-2', 'chapter', 'After the bell', 'part-1');
   add('about', 'back_matter', 'About the author');
   return s;
 }
