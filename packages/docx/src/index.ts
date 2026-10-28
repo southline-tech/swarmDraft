@@ -27,6 +27,9 @@ export {
   importedToYDocs,
   STRUCTURE_FIELD,
   META_FIELD,
+  META_NUMBERING_STYLE,
   STRUCTURE_ORIGIN,
+  readNumberingStyle,
+  writeNumberingStyle,
   type ManuscriptYDocs,
 } from './structure';

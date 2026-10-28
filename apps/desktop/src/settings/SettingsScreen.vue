@@ -4,7 +4,7 @@
  * so backup status, the restore banner and a shown agent key survive switching sections, just
  * like the single panel this replaces.
  */
-import { DEFAULT_TRIM, TRIM_SIZES } from '@coauthor/schema';
+import { DEFAULT_TRIM, NUMBERING_STYLES, TRIM_SIZES, type NumberingStyle } from '@coauthor/schema';
 import { nextTick, onMounted, ref } from 'vue';
 import AgentsSettings from '../AgentsSettings.vue';
 import type { AppInfo } from '../backend';
@@ -17,11 +17,20 @@ import { applyTheme, loadTheme, saveTheme, type Theme } from './prefs';
 import { previewsEnabled } from './previews';
 import './settings.css';
 
+const STYLE_LABELS: Record<NumberingStyle, string> = {
+  chapter_arabic: 'Chapter 1',
+  chapter_words: 'Chapter One',
+  chapter_upper: 'ONE',
+  number_only: '1 only',
+};
+
 defineProps<{
   info: AppInfo | null;
   backupStatus: string;
   confirmingRestore: boolean;
   tokensNotice: number | null;
+  bookOpen?: boolean;
+  numberingStyle?: NumberingStyle;
 }>();
 const emit = defineEmits<{
   close: [];
@@ -31,6 +40,7 @@ const emit = defineEmits<{
   confirmRestore: [];
   cancelRestore: [];
   dismissNotice: [];
+  numberingStyle: [style: NumberingStyle];
 }>();
 
 const SECTIONS = [
@@ -107,6 +117,37 @@ onMounted(() => root.value?.focus());
           <div v-show="section === 'general'" data-test="settings-general">
             <h1 class="st-h1">General</h1>
             <p class="st-muted st-sub">Basic details about this copy of {{ PRODUCT_NAME }}.</p>
+            <section
+              v-if="bookOpen && numberingStyle"
+              class="st-card"
+              aria-labelledby="st-numbering"
+              data-test="numbering-style"
+            >
+              <h2 id="st-numbering" class="st-h2">Chapter &amp; part numbers</h2>
+              <p class="st-muted st-desc">
+                One style for the whole book. Numbers update when you reorder sections; they are not
+                stored in the text.
+              </p>
+              <label class="st-row" for="numbering-style-select">
+                <span class="st-row__k">Display style</span>
+                <select
+                  id="numbering-style-select"
+                  class="st-inp"
+                  data-test="numbering-style-select"
+                  :value="numberingStyle"
+                  @change="
+                    emit(
+                      'numberingStyle',
+                      ($event.target as HTMLSelectElement).value as NumberingStyle,
+                    )
+                  "
+                >
+                  <option v-for="s in NUMBERING_STYLES" :key="s" :value="s">
+                    {{ STYLE_LABELS[s] }}
+                  </option>
+                </select>
+              </label>
+            </section>
             <section class="st-card" aria-labelledby="st-newbooks">
               <h2 id="st-newbooks" class="st-h2">New books</h2>
               <div class="st-row">

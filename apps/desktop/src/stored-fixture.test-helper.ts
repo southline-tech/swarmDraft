@@ -14,7 +14,12 @@ export function storedFixture(): StoredManuscript {
   const imported = importDocx(new Uint8Array(readFileSync(fixture)), { manuscriptId: 'x' });
   const dbId = new Map(imported.sections.map((s, i) => [s.id, `sec${i}`]));
   return {
-    manuscript: { id: 'db-m', title: imported.title, createdAt: '' },
+    manuscript: {
+      id: 'db-m',
+      title: imported.title,
+      createdAt: '',
+      numberingStyle: 'chapter_words',
+    },
     sections: imported.sections.map((s, i) => ({
       id: `sec${i}`,
       manuscriptId: 'db-m',

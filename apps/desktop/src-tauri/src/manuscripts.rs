@@ -18,7 +18,26 @@ pub struct Manuscript {
     pub id: String,
     pub title: String,
     pub created_at: String,
+    pub numbering_style: String,
 }
+
+const NUMBERING_STYLES: [&str; 4] = [
+    "chapter_arabic",
+    "chapter_words",
+    "chapter_upper",
+    "number_only",
+];
+
+fn row_manuscript(r: &rusqlite::Row<'_>) -> rusqlite::Result<Manuscript> {
+    Ok(Manuscript {
+        id: r.get(0)?,
+        title: r.get(1)?,
+        created_at: r.get(2)?,
+        numbering_style: r.get(3)?,
+    })
+}
+
+const MANUSCRIPT_COLS: &str = "id, title, created_at, numbering_style";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -206,15 +225,9 @@ impl Store {
                 params![id, title],
             )?;
             Ok(c.query_row(
-                "SELECT id, title, created_at FROM manuscripts WHERE id = ?1",
+                &format!("SELECT {MANUSCRIPT_COLS} FROM manuscripts WHERE id = ?1"),
                 [&id],
-                |r| {
-                    Ok(Manuscript {
-                        id: r.get(0)?,
-                        title: r.get(1)?,
-                        created_at: r.get(2)?,
-                    })
-                },
+                row_manuscript,
             )?)
         })
     }
@@ -222,15 +235,11 @@ impl Store {
     pub fn list_manuscripts(&self) -> Result<Vec<Manuscript>, StorageError> {
         self.with_conn(|c| {
             let mut st =
-                c.prepare("SELECT id, title, created_at FROM manuscripts ORDER BY created_at, id")?;
+                c.prepare(&format!(
+                    "SELECT {MANUSCRIPT_COLS} FROM manuscripts ORDER BY created_at, id"
+                ))?;
             let rows = st
-                .query_map([], |r| {
-                    Ok(Manuscript {
-                        id: r.get(0)?,
-                        title: r.get(1)?,
-                        created_at: r.get(2)?,
-                    })
-                })?
+                .query_map([], row_manuscript)?
                 .collect::<Result<_, _>>()?;
             Ok(rows)
         })
@@ -239,18 +248,38 @@ impl Store {
     pub fn get_manuscript(&self, id: &str) -> Result<Manuscript, StorageError> {
         self.with_conn(|c| {
             c.query_row(
-                "SELECT id, title, created_at FROM manuscripts WHERE id = ?1",
+                &format!("SELECT {MANUSCRIPT_COLS} FROM manuscripts WHERE id = ?1"),
                 [id],
-                |r| {
-                    Ok(Manuscript {
-                        id: r.get(0)?,
-                        title: r.get(1)?,
-                        created_at: r.get(2)?,
-                    })
-                },
+                row_manuscript,
             )
             .optional()?
             .ok_or_else(|| StorageError::NotFound(format!("manuscript {id}")))
+        })
+    }
+
+    pub fn set_numbering_style(
+        &self,
+        manuscript_id: &str,
+        style: &str,
+    ) -> Result<Manuscript, StorageError> {
+        if !NUMBERING_STYLES.contains(&style) {
+            return Err(StorageError::Invalid(format!(
+                "unknown numbering style: {style}"
+            )));
+        }
+        self.with_conn(|c| {
+            let n = c.execute(
+                "UPDATE manuscripts SET numbering_style = ?2 WHERE id = ?1",
+                params![manuscript_id, style],
+            )?;
+            if n == 0 {
+                return Err(StorageError::NotFound(format!("manuscript {manuscript_id}")));
+            }
+            Ok(c.query_row(
+                &format!("SELECT {MANUSCRIPT_COLS} FROM manuscripts WHERE id = ?1"),
+                [manuscript_id],
+                row_manuscript,
+            )?)
         })
     }
 
@@ -489,15 +518,9 @@ impl Store {
                 )?);
             }
             let m = tx.query_row(
-                "SELECT id, title, created_at FROM manuscripts WHERE id = ?1",
+                &format!("SELECT {MANUSCRIPT_COLS} FROM manuscripts WHERE id = ?1"),
                 [&manuscript_id],
-                |r| {
-                    Ok(Manuscript {
-                        id: r.get(0)?,
-                        title: r.get(1)?,
-                        created_at: r.get(2)?,
-                    })
-                },
+                row_manuscript,
             )?;
             tx.commit()?;
             Ok((m, out))

@@ -7,6 +7,7 @@ import { Plugin } from '@tiptap/pm/state';
 import { manuscriptExtensions } from './extensions';
 
 export * from './outline';
+export * from './section-numbering';
 export * from './content';
 export * from './extensions';
 export * from './collab';

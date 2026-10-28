@@ -108,6 +108,8 @@ const MIGRATIONS: &[&str] = &[
         payload TEXT NOT NULL,
         ts TEXT NOT NULL
      );",
+    "ALTER TABLE manuscripts ADD COLUMN numbering_style TEXT NOT NULL DEFAULT 'chapter_words' \
+     CHECK (numbering_style IN ('chapter_arabic','chapter_words','chapter_upper','number_only'));",
 ];
 
 /// How long a statement waits on a locked database before failing.
