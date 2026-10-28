@@ -1145,7 +1145,7 @@ describe('restore confirmation', () => {
       'Restored. A copy of your book from just before the restore is in the backups folder.',
     );
     const notice = wrapper.find('[data-test="tokens-revoked-notice"]');
-    expect(notice.text()).toContain('revoked all 2 agent token');
+    expect(notice.text()).toContain('turned off all 2 agent key(s)');
     await wrapper.find('[data-test="tokens-notice-dismiss"]').trigger('click');
     expect(wrapper.find('[data-test="tokens-revoked-notice"]').exists()).toBe(false);
   });
@@ -1166,8 +1166,8 @@ describe('tokens-revoked notice', () => {
     await restoreOnce(wrapper);
     const notice = wrapper.find('[data-test="tokens-revoked-notice"]');
     expect(notice.exists()).toBe(true);
-    expect(notice.attributes('role')).toBe('status');
-    expect(notice.text()).toContain('revoked all 2 agent token');
+    expect(notice.element.parentElement?.getAttribute('role')).toBe('status');
+    expect(notice.text()).toContain('turned off all 2 agent key(s)');
     expect(notice.text()).toContain('agents are kept');
     await wrapper.find('[data-test="tokens-notice-dismiss"]').trigger('click');
     expect(wrapper.find('[data-test="tokens-revoked-notice"]').exists()).toBe(false);
@@ -1212,7 +1212,8 @@ describe('backup dialogs', () => {
     await wrapper.find('[data-test="restore-pick"]').trigger('click');
     await wrapper.find('[data-test="restore-confirm-yes"]').trigger('click');
     await flushPromises();
-    expect(wrapper.find('[data-test="backup-status"]').exists()).toBe(false);
+    // #99: the status live region stays mounted; nothing is announced in it.
+    expect(wrapper.get('[data-test="backup-status"]').text()).toBe('');
     expect(wrapper.find('[data-test="tokens-revoked-notice"]').exists()).toBe(false);
   });
 

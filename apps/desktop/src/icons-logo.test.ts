@@ -29,6 +29,9 @@ const SWEPT = [
   './comments/CommentsPanel.vue',
   './AppLogo.vue',
   './icons/AppIcon.vue',
+  './settings/SettingsScreen.vue',
+  './settings/NameColorSection.vue',
+  './settings/BackupsSection.vue',
 ];
 
 describe('design tokens only', () => {
@@ -48,6 +51,13 @@ describe('design tokens only', () => {
     expect(rule).toContain('var(--ct-selected-bg)');
     expect(rule).toContain('var(--ct-text)');
   });
+});
+
+it('settings.css (#99) uses only --ct-* tokens that exist and no hard-coded colors', () => {
+  const css = read('./settings/settings.css');
+  expect(css.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []).toEqual([]);
+  const used = [...css.matchAll(/var\((--[\w-]+)/g)].map((m) => m[1] ?? '');
+  expect(used.filter((v) => !v.startsWith('--ct-') || !defined.has(v))).toEqual([]);
 });
 
 describe('logo', () => {

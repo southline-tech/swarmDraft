@@ -170,9 +170,18 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-27 · #97 · a forced-open outline left 320px page + 104px notes in a 368px desk · even a forced outline yields when page + margin notes can't fit; reopen when the panel closes or notes hide; never clip a note
 - 2026-10-27 · #97 · focus mode cleared the writer's hand-opened outline · focus-mode layouts must not reset outline choices; the outline comes back as the writer left it
 - 2026-10-27 · #97 · margin note cards touched the review panel border · notes keep --ct-space-4 to the review panel like the page; shrink the page toward 320px, then auto-close the outline (320 + 2×24 + 104 + 16)
+- 2026-10-27 · #99 · splitting Settings into sections could unmount live regions and break tests that type into restore-path right after opening · switch sections with v-show, keep every section and live region mounted; test that only one is visible
+- 2026-10-27 · #99 · Escape in the restore confirm would also close Settings behind it · a nested modal stops Escape propagation, traps Tab and returns focus to its opener
+- 2026-10-27 · #99 · writer copy said "token" · UI says "key", code keeps "token"; a test scans rendered text for "token"
+- 2026-10-27 · #99 · swatch colors went through a local --c custom property and failed the token sweep · per-item colors go inline via :style; never add non --ct-* vars
+- 2026-10-27 · #99 · theme/profile read back from localStorage unchecked · validate stored prefs and fall back to defaults; tests seed broken data
 - 2026-10-27 · #101 · an auto-closed outline only came back when the review panel closed, so hiding the margin notes at 1152–1280px left it closed for good · every auto-close names the condition that lifts it and reopens when that condition clears (unless the writer chose by hand); test that toggling the cause flips state exactly once each way
 - 2026-10-27 · #101 · at 1024px with notes showing, Chapters opened and instantly re-closed the outline, so the click did nothing visible · when a control can't act, don't open-then-revert: keep its state (aria-expanded=false) and say why in the existing polite toast region, with an action that makes room
 - 2026-10-27 · #101 · deleting the `notesHidden` guard in the editor still passed every test, because the App tests only checked the prop, never the rendered notes · for a prop that hides UI, assert the DOM element is gone and the emitted layout reflects it, at the component that renders it
 - 2026-10-27 · #101 · the no-restart toast test advanced past 8s in one jump, so it couldn't tell "closes at 8s" from "closes later" · test a timer boundary on both sides (still visible at T−1ms, gone at T) after the event that must not reset it
 - 2026-10-27 · #101 · the cue's clearTimeout-on-unmount had no test · spy on setTimeout/clearTimeout and assert the exact timer id is cleared on unmount
 - 2026-10-27 · #100 · save-a-copy skipped the busy lock and wasn't modal · every file-writing dialog takes the shared lock and a parent window
+- 2026-10-27 · #102 · restore confirm had the danger button first · PM: Cancel first, danger second, focus starts on Cancel; a test asserts the button order
+- 2026-10-27 · #102 · the startup theme was applied inline in main.ts with no test · put boot logic in an exported function (bootTheme) and test both the stored value and the ?theme= override
+- 2026-10-27 · #102 · loadProfile's typeof-string name check had no test, so String(p.name) would have let "[object Object]" through · seed non-string JSON in tests for every stored-value guard
+- 2026-10-27 · #102 · the PR body's test counts (447) didn't match the log (462) after merging main · regenerate the checks log and revert table from the pushed head and copy counts from that run
