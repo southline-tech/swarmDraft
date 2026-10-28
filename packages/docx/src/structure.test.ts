@@ -25,7 +25,7 @@ const s = (id: string, kind: Section['kind'], title: string, parentId?: string):
 });
 
 describe('manuscript structure', () => {
-  it('import writes the real parts/chapters/scenes in reading order', () => {
+  it('import writes the real parts and chapters in reading order', () => {
     const m = mock();
     const { manuscript, sections } = importedToYDocs(m);
     const outline = readStructure(manuscript);
@@ -38,7 +38,6 @@ describe('manuscript structure', () => {
       'Part Three: The Twelfth Boat',
     ]);
     expect(outline.filter((x) => x.kind === 'chapter')).toHaveLength(12);
-    expect(outline.some((x) => x.kind === 'scene')).toBe(true);
     expect(manuscript.getMap('meta').get('title')).toBe(m.title);
     for (const sec of m.sections) expect(yDocToDoc(sections.get(sec.docId)!)).toEqual(sec.content);
   });

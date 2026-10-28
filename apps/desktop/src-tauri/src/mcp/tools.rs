@@ -268,7 +268,7 @@ impl CoauthorMcp {
     }
 
     #[tool(
-        description = "List a manuscript's sections (front matter, parts, chapters, scenes, back matter) in order, with word counts."
+        description = "List a manuscript's sections (front matter, parts, chapters, back matter) in order, with word counts."
     )]
     async fn list_chapters(
         &self,

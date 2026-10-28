@@ -84,7 +84,7 @@ describe('Rust <-> TS Yjs round trip', () => {
     expect(JSON.parse(readFileSync(dir('sections.json'), 'utf8'))).toEqual(
       JSON.parse(JSON.stringify(secs)),
     );
-    expect(secs.length).toBeGreaterThanOrEqual(53);
+    expect(secs.length).toBeGreaterThanOrEqual(22);
   });
 
   it('opens every Rust-encoded section in the editor unchanged', async () => {
