@@ -14,7 +14,7 @@ import {
 } from './backend';
 import SettingsScreen from './settings/SettingsScreen.vue';
 import { authorName, refreshAgents, reloadOnFocus } from './agent-names';
-import ManuscriptEditor from './ManuscriptEditor.vue';
+import ContinuousManuscript from './ContinuousManuscript.vue';
 import SectionNav from './SectionNav.vue';
 import {
   toastPlacement,
@@ -39,6 +39,8 @@ import ShellsPreview from './shells/ShellsPreview.vue';
 import AppToast from './shells/AppToast.vue';
 import { applyThemeParam, readPreview } from './shells/preview';
 import { flushOnClose } from './close-flush';
+import { isTauri } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { resetCollabSlots } from './author-colors';
 import { docWordCount, outlineDocs, sectionTreeDocs } from './status/wordcount';
 import {
@@ -51,11 +53,12 @@ import {
 const info = ref<AppInfo | null>(null);
 const session = shallowRef<ManuscriptSession | null>(null);
 const selectedId = ref<string>();
-const editorPane = ref<InstanceType<typeof ManuscriptEditor> | null>(null);
-/** Outline row clicked (#36): once that section's editor is showing, put the cursor in its body. */
+const editorPane = ref<InstanceType<typeof ContinuousManuscript> | null>(null);
+/** Outline row clicked (#36): scroll to the section and put the caret in its body (#107). */
 async function focusEditor(id: string) {
+  selectedId.value = id;
   await nextTick();
-  if (selectedId.value === id) editorPane.value?.focusBody();
+  editorPane.value?.focusSection(id);
 }
 /** Notices from startup recovery after an interrupted restore; kept until dismissed. */
 const recoveryNotices = ref<RecoveryNotice[]>([]);
@@ -330,6 +333,14 @@ onBeforeUnmount(() => {
   closeQuietly(session.value);
 });
 
+function syncWindowTitle(title: string) {
+  document.title = title;
+  if (isTauri())
+    void getCurrentWindow()
+      .setTitle(title)
+      .catch((e) => console.error(e));
+}
+
 /** Close the open manuscript, if any, and clear the selection. */
 function closeSession() {
   // Storage was replaced: drop pending edits rather than write them into the restored data.
@@ -338,6 +349,7 @@ function closeSession() {
   saveStatusShown.value = false;
   selectedId.value = undefined;
   choosingBook.value = false;
+  syncWindowTitle(PRODUCT_NAME);
 }
 
 /** Open an imported manuscript (exposed for tests and the Tauri open-file flow). */
@@ -362,6 +374,7 @@ function open(next: ManuscriptSession) {
   markWelcomed();
   choosingBook.value = false;
   session.value = next;
+  syncWindowTitle(next.title || PRODUCT_NAME);
   const rows = next.outline.value;
   selectedId.value = rows.find((s) => s.kind === 'chapter')?.id;
 }
@@ -477,10 +490,6 @@ async function importFile(file: File) {
 const selected = computed(() =>
   session.value?.outline.value.find((s) => s.id === selectedId.value),
 );
-const selectedDoc = computed(() =>
-  selected.value ? session.value?.sections.get(selected.value.docId) : undefined,
-);
-
 /** Per-section word counts for the outline (#52): read-only, recounted after edits settle. */
 const wordCounts = shallowRef<Record<string, number>>({});
 let countTimer: ReturnType<typeof setTimeout> | undefined;
@@ -524,17 +533,6 @@ const focusMode = ref(false);
 /** #96: the writer opened the outline by hand while the review panel shows. */
 const outlineForced = computed(() => outlineAuto.manual.value && navigatorOpen.value);
 
-/** Title-bar breadcrumb (#52): "Book — Chapter N · Title". */
-const breadcrumb = computed(() => {
-  const s = session.value;
-  const sel = selected.value;
-  if (!s || !sel || choosingBook.value) return '';
-  const chapters = s.outline.value.filter((x) => x.kind === 'chapter');
-  const n = chapters.findIndex((c) => c.id === sel.id);
-  const where = n >= 0 ? `Chapter ${n + 1} · ` : '';
-  return `${where}${sel.title || 'Untitled'}`;
-});
-
 const NUMBER_WORDS = [
   'One',
   'Two',
@@ -567,7 +565,7 @@ const chapterLabel = computed(() => {
   return n ? `Chapter ${NUMBER_WORDS[n - 1] ?? n}` : '';
 });
 
-defineExpose({ open });
+defineExpose({ open, closeSession });
 </script>
 
 <template>
@@ -580,7 +578,6 @@ defineExpose({ open });
           session && !choosingBook ? session.title : PRODUCT_NAME
         }}</span>
       </span>
-      <span v-if="breadcrumb" class="topbar__crumb" data-test="breadcrumb">— {{ breadcrumb }}</span>
       <details class="topbar__menu" data-test="app-menu">
         <summary class="topbar__icon" aria-label="Book menu" title="Book menu">⋯</summary>
         <div
@@ -744,24 +741,30 @@ defineExpose({ open });
         @select="selectedId = $event"
         @activate="focusEditor"
       />
-      <ManuscriptEditor
-        v-if="selectedDoc"
+      <ContinuousManuscript
         ref="editorPane"
-        :key="`${selected!.docId}#${reloads}`"
-        :doc="selectedDoc"
+        :outline="session.outline.value"
+        :sections="session.sections"
+        :selected-id="selectedId"
+        :reload-token="reloads"
         :readonly="session.closed || restoreInProgress"
         :read-only-reason="restoreInProgress ? 'restore in progress' : undefined"
         :navigator-open="navigatorOpen"
-        :chapter-title="selected!.title"
+        :chapter-title="selected?.title"
         :chapter-label="chapterLabel"
         :book-docs="outlineDocs(session.outline.value, session.sections)"
-        :chapter-docs="sectionTreeDocs(session.outline.value, selectedId, session.sections)"
+        :chapter-docs="
+          selectedId
+            ? sectionTreeDocs(session.outline.value, selectedId, session.sections)
+            : undefined
+        "
         :save-state="saveStatus"
         :author-labels="authorName"
         toolbar-target="#toolbar-row"
         external-load-error
         :outline-forced="outlineForced"
         :notes-hidden="notesHidden"
+        @update:selected-id="selectedId = $event"
         @load-error="editorLoadError = $event"
         @reload="reloadSection"
         @toggle-navigator="outlineAuto.toggleByHand()"

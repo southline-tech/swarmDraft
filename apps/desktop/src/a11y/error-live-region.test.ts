@@ -1,6 +1,7 @@
-import { defineComponent, h } from 'vue';
 import { describe, expect, it } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
+import * as Y from 'yjs';
+import { FRAGMENT_NAME, readStructure } from '@coauthor/docx';
 import { sessionFromDocx } from '../manuscript-session';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -20,21 +21,7 @@ const settle = async () => {
 
 describe('assertive error live regions at the parent level (#79)', () => {
   it('App: load-error region exists before the error and keeps its node through error, clear and remount', async () => {
-    // Stand-in editor that reports a load error the way ManuscriptEditor does.
-    let report: (m: string) => void = () => {};
-    const StubEditor = defineComponent({
-      props: { externalLoadError: Boolean },
-      emits: ['load-error', 'reload'],
-      setup(_, { emit, expose }) {
-        report = (m) => emit('load-error', m);
-        expose({ focusBody: () => {} });
-        return () => h('div', { 'data-test': 'stub-editor' });
-      },
-    });
-    const w = mount(App, {
-      attachTo: document.body,
-      global: { stubs: { ManuscriptEditor: StubEditor } },
-    });
+    const w = mount(App, { attachTo: document.body });
     const region = () => w.get('[data-test="load-error-region"]');
     // Present (and empty) before any book or editor exists.
     expect(region().attributes('aria-live')).toBe('assertive');
@@ -48,22 +35,27 @@ describe('assertive error live regions at the parent level (#79)', () => {
         resolve(__dirname, '../../../../fixtures/manuscripts/docx-import/mock-manuscript.docx'),
       ),
     );
-    (w.vm as unknown as { open: (s: unknown) => void }).open(sessionFromDocx(bytes, 'm1'));
+    const session = sessionFromDocx(bytes, 'm1');
+    const [, bad] = readStructure(session.manuscript).filter((s) => s.kind === 'chapter');
+    session.sections
+      .get(bad!.docId)!
+      .getXmlFragment(FRAGMENT_NAME)
+      .insert(0, [new Y.XmlElement('synthetic_unknown_node')]);
+    (w.vm as unknown as { open: (s: unknown) => void }).open(session);
     await settle();
-    expect(w.find('[data-test="stub-editor"]').exists()).toBe(true);
     expect(region().element).toBe(node);
 
-    report('Unknown node type: table');
+    await w.get(`[data-test="section-${bad!.id}"]`).trigger('click');
     await settle();
     expect(region().element).toBe(node);
     expect(region().text()).toContain('open read-only');
     expect(region().text()).not.toContain('Unknown node type');
 
-    // Reload clears the error and remounts the editor; the region node survives.
+    // Reload remounts the section; the region node survives and the error returns for bad content.
     await w.get('[data-test="reload"]').trigger('click');
     await settle();
     expect(region().element).toBe(node);
-    expect(region().text()).toBe('');
+    expect(region().text()).toContain('open read-only');
     w.unmount();
   });
 

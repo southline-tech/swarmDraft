@@ -23,6 +23,50 @@ const settle = async () => {
   await flushPromises();
 };
 
+function leadEditor(w: ReturnType<typeof mount>) {
+  return w.find('[data-test="lead-editor"]').findComponent({ name: 'ManuscriptEditor' });
+}
+
+function hasContinuousManuscript(w: ReturnType<typeof mount>) {
+  return w.find('[data-test="continuous-manuscript"]').exists();
+}
+
+function editorSurface(w: ReturnType<typeof mount>) {
+  return hasContinuousManuscript(w)
+    ? w.find('[data-test="lead-editor"] .tiptap')
+    : w.find('.tiptap');
+}
+
+function proseFind(w: ReturnType<typeof mount>) {
+  return hasContinuousManuscript(w)
+    ? w.find('[data-test="lead-editor"] .ProseMirror')
+    : w.find('.ProseMirror');
+}
+
+function proseDom(w: ReturnType<typeof mount>): HTMLElement {
+  return (
+    hasContinuousManuscript(w)
+      ? w.get('[data-test="lead-editor"] .ProseMirror').element
+      : w.get('.ProseMirror').element
+  ) as HTMLElement;
+}
+
+function leadFocusModeOn(w: ReturnType<typeof mount>) {
+  return w.find('[data-test="lead-editor"] [data-focus-mode]').exists();
+}
+
+function leadFocusModeOff(w: ReturnType<typeof mount>) {
+  return !leadFocusModeOn(w);
+}
+
+function leadTiptapEditor(w: ReturnType<typeof mount>) {
+  return (
+    editorSurface(w).element as unknown as {
+      editor: import('@tiptap/core').Editor;
+    }
+  ).editor;
+}
+
 async function withManuscript() {
   const w = mount(App, { attachTo: document.body });
   await flushPromises();
@@ -89,7 +133,7 @@ describe('App', () => {
     for (const s of stored.sections) {
       expect(w.find(`[data-test="section-${s.id}"]`).exists()).toBe(true);
     }
-    expect(w.find('.ProseMirror').attributes('contenteditable')).toBe('true');
+    expect(proseFind(w).attributes('contenteditable')).toBe('true');
     w.unmount();
   });
 
@@ -129,9 +173,7 @@ describe('App', () => {
     await chooseFile(first);
     const chapter = first.findAll('.row').length;
     expect(chapter).toBeGreaterThan(0);
-    const editor = (
-      first.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
-    ).editor;
+    const editor = leadTiptapEditor(first);
     editor.commands.insertContentAt(1, 'TYPED ');
     await settle();
     first.unmount(); // closing flushes pending edits
@@ -152,17 +194,17 @@ describe('App', () => {
     const w = mount(App, { attachTo: document.body });
     await settle();
     expect(w.findAll('.row').length).toBe(chapter);
-    expect(w.find('.ProseMirror').text()).toContain('TYPED ');
+    expect(proseFind(w).text()).toContain('TYPED ');
     w.unmount();
     vi.mocked(backend.saveSectionUpdate).mockReset();
   });
 
   it("makes a closed session's editor read-only", async () => {
     const { w, session } = await withManuscript();
-    expect(w.find('.tiptap').attributes('contenteditable')).toBe('true');
+    expect(editorSurface(w).attributes('contenteditable')).toBe('true');
     await session.close();
     await settle();
-    expect(w.find('.tiptap').attributes('contenteditable')).toBe('false');
+    expect(editorSurface(w).attributes('contenteditable')).toBe('false');
     w.unmount();
   });
 
@@ -198,7 +240,7 @@ describe('App', () => {
     expect(titles()).toEqual(expected);
     expect(titles()).toContain('Part Two: Salt and Lamplight');
     expect(titles()).toContain('Chapter 4: The Ledger');
-    expect(w.find('.ProseMirror').exists()).toBe(true);
+    expect(proseFind(w).exists()).toBe(true);
     w.unmount();
   });
 
@@ -241,7 +283,7 @@ describe('App', () => {
       await new Promise((r) => setTimeout(r, 0));
       expect(w.find('[data-test="load-error"]').exists()).toBe(false);
       const editor = (
-        w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+        editorSurface(w).element as unknown as { editor: import('@tiptap/core').Editor }
       ).editor;
       expect(editor.isEditable).toBe(true);
       editor.view.dispatch(editor.state.tr.insertText('Synthetic typing'));
@@ -272,8 +314,7 @@ describe('App', () => {
         expect(m).toBe(stored.manuscript.id);
         outline = next;
       });
-      const editorOf = (w: ReturnType<typeof mount>) =>
-        (w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }).editor;
+      const editorOf = (w: ReturnType<typeof mount>) => leadTiptapEditor(w);
       const first = mount(App, { attachTo: document.body });
       await flushPromises();
       await chooseFile(first);
@@ -325,15 +366,15 @@ describe('App', () => {
       await settle();
       await new Promise((r) => setTimeout(r, 0));
       expect(w.find('[data-test="load-error"]').exists()).toBe(false);
-      expect(w.find('.tiptap').text()).toContain(text);
+      expect(editorSurface(w).text()).toContain(text);
       // Switch to another section and back.
       await w.find(`[data-test="section-${chapter.id}"]`).trigger('click');
       await settle();
-      expect(w.find('.tiptap').text()).not.toContain(text);
+      expect(editorSurface(w).text()).not.toContain(text);
       await w.find(`[data-test="section-${added.id}"]`).trigger('click');
       await settle();
       await new Promise((r) => setTimeout(r, 0));
-      expect(w.find('.tiptap').text()).toContain(text);
+      expect(editorSurface(w).text()).toContain(text);
       expect(editorOf(w).isEditable).toBe(true);
       w.unmount();
       vi.mocked(backend.saveSectionUpdate).mockReset().mockResolvedValue(undefined);
@@ -343,8 +384,7 @@ describe('App', () => {
 
   it('clicking an outline row focuses the editor in the body, not the heading (#36)', async () => {
     const { w, session } = await withManuscript();
-    const editorOf = () =>
-      (w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }).editor;
+    const editorOf = () => leadTiptapEditor(w);
     const chapters = readStructure(session.manuscript).filter((s) => s.kind === 'chapter');
     const warn = vi.spyOn(console, 'warn');
     const stateBefore = new Map(
@@ -408,10 +448,9 @@ describe('App', () => {
 
   it('keeps typed text and the same editor across a navigator close/open', async () => {
     const { w } = await withManuscript();
-    const editorUid = w.findComponent({ name: 'ManuscriptEditor' }).vm.$.uid;
-    const pm = w.find('.ProseMirror').element;
-    const editorOf = () =>
-      (w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }).editor;
+    const editorUid = leadEditor(w).vm.$.uid;
+    const pm = proseFind(w).element;
+    const editorOf = () => leadTiptapEditor(w);
     const editor = editorOf();
     editor.commands.insertContentAt(1, 'NAVKEEP ');
     await flushPromises();
@@ -419,9 +458,9 @@ describe('App', () => {
     await nav.trigger('click');
     await nav.trigger('click');
     await flushPromises();
-    expect(w.find('.ProseMirror').text()).toContain('NAVKEEP ');
-    expect(w.findComponent({ name: 'ManuscriptEditor' }).vm.$.uid).toBe(editorUid);
-    expect(w.find('.ProseMirror').element).toBe(pm);
+    expect(proseFind(w).text()).toContain('NAVKEEP ');
+    expect(leadEditor(w).vm.$.uid).toBe(editorUid);
+    expect(proseFind(w).element).toBe(pm);
     expect(editorOf()).toBe(editor);
     w.unmount();
   });
@@ -477,9 +516,7 @@ describe('App', () => {
     expect(readStructure(session.manuscript).some((s) => s.id === selected)).toBe(true);
     // The editor shows the fallback section's own doc.
     const fallback = readStructure(session.manuscript).find((s) => s.id === selected)!;
-    expect(w.findComponent({ name: 'ManuscriptEditor' }).props('doc')).toStrictEqual(
-      session.sections.get(fallback.docId),
-    );
+    expect(leadEditor(w).props('doc')).toStrictEqual(session.sections.get(fallback.docId));
     w.unmount();
   });
 
@@ -592,7 +629,7 @@ describe('App keyboard and placement on an imported manuscript', () => {
     await settle();
     await w.find(`[data-test="section-${fresh}"]`).trigger('click');
     await settle();
-    expect(w.find('.tiptap').text()).toContain('second copy text');
+    expect(editorSurface(w).text()).toContain('second copy text');
     w.unmount();
   });
 });
@@ -623,8 +660,7 @@ describe('App open-file input', () => {
 });
 
 describe('App status bar on an imported manuscript', () => {
-  const editorOf = (w: ReturnType<typeof mount>) =>
-    (w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }).editor;
+  const editorOf = (w: ReturnType<typeof mount>) => leadTiptapEditor(w);
   const num = (w: ReturnType<typeof mount>, t: string) =>
     Number(w.find(`[data-test="status-${t}"]`).text().replace(/[^\d]/g, ''));
   const words = (session: ReturnType<typeof sessionFromDocx>, ids: string[]) =>
@@ -666,7 +702,7 @@ describe('App status bar on an imported manuscript', () => {
     await settle();
     await w.find(`[data-test="section-${first!.id}"]`).trigger('click');
     await settle();
-    expect(w.find('.tiptap').text()).toContain('Countme alsome');
+    expect(editorSurface(w).text()).toContain('Countme alsome');
     expect(num(w, 'book-words')).toBe(book + 2);
     w.unmount();
   });
@@ -690,7 +726,7 @@ describe('App status bar on an imported manuscript', () => {
     await session.save(outline.filter((s) => s.id !== gone.id));
     await settle();
     expect(num(w, 'book-words')).toBe(book - goneWords);
-    expect(w.find('.tiptap').exists()).toBe(true);
+    expect(editorSurface(w).exists()).toBe(true);
     // The deleted doc is no longer watched: editing it changes nothing.
     goneDoc.getXmlFragment('prosemirror').insert(0, [new Y.XmlElement('paragraph')]);
     await new Promise((r) => setTimeout(r, 400));
@@ -728,7 +764,7 @@ describe('App status bar on an imported manuscript', () => {
     await flushPromises();
     await chooseFile(w);
     vi.mocked(backend.saveSectionUpdate).mockRejectedValue('disk full');
-    await vi.waitFor(() => expect(w.find('.tiptap').exists()).toBe(true));
+    await vi.waitFor(() => expect(editorSurface(w).exists()).toBe(true));
     editorOf(w).commands.insertContentAt(1, 'Unsaved ');
     await settle();
     await vi.waitFor(() =>
@@ -752,8 +788,7 @@ describe('App status bar on an imported manuscript', () => {
 });
 
 describe('App saves typing to the section Y.Doc', () => {
-  const editorOf = (w: ReturnType<typeof mount>) =>
-    (w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }).editor;
+  const editorOf = (w: ReturnType<typeof mount>) => leadTiptapEditor(w);
   const chaptersOf = (session: ReturnType<typeof sessionFromDocx>) =>
     session.outline.value.filter((s) => s.kind === 'chapter');
   const openedOf = (w: ReturnType<typeof mount>, session: ReturnType<typeof sessionFromDocx>) => {
@@ -775,9 +810,9 @@ describe('App saves typing to the section Y.Doc', () => {
     await settle();
     const docId = openedOf(w, session).docId;
     expect(JSON.stringify(yDocToDoc(session.sections.get(docId)!))).toContain('TYPEDONE');
-    w.findComponent({ name: 'ManuscriptEditor' }).vm.$emit('reload');
+    leadEditor(w).vm.$emit('reload');
     await settle();
-    expect(w.find('.tiptap').text()).toContain('TYPEDONE');
+    expect(editorSurface(w).text()).toContain('TYPEDONE');
     w.unmount();
   });
 
@@ -789,10 +824,10 @@ describe('App saves typing to the section Y.Doc', () => {
     await settle();
     await w.find(`[data-test="section-${second!.id}"]`).trigger('click');
     await settle();
-    expect(w.find('.tiptap').text()).not.toContain('TYPEDTWO');
+    expect(editorSurface(w).text()).not.toContain('TYPEDTWO');
     await w.find(`[data-test="section-${first!.id}"]`).trigger('click');
     await settle();
-    expect(w.find('.tiptap').text()).toContain('TYPEDTWO');
+    expect(editorSurface(w).text()).toContain('TYPEDTWO');
     w.unmount();
   });
 });
@@ -822,9 +857,9 @@ describe('save-failure banner', () => {
     await flushPromises();
     await chooseFile(w);
     vi.mocked(backend.saveSectionUpdate).mockRejectedValue('io: database is locked');
-    await vi.waitFor(() => expect(w.find('.tiptap').exists()).toBe(true));
+    await vi.waitFor(() => expect(editorSurface(w).exists()).toBe(true));
     const editor = (
-      w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+      editorSurface(w).element as unknown as { editor: import('@tiptap/core').Editor }
     ).editor;
     editor.commands.insertContentAt(1, 'ONLYINMEMORY ');
     await vi.waitFor(() => expect(w.find('[data-test="save-copy"]').exists()).toBe(true));
@@ -854,9 +889,9 @@ describe('restore confirmation', () => {
     const w = mount(App, { attachTo: document.body });
     await flushPromises();
     await chooseFile(w);
-    await vi.waitFor(() => expect(w.find('.tiptap').exists()).toBe(true));
+    await vi.waitFor(() => expect(editorSurface(w).exists()).toBe(true));
     const editor = (
-      w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+      editorSurface(w).element as unknown as { editor: import('@tiptap/core').Editor }
     ).editor;
     expect(editor.isEditable).toBe(true);
     await openSettings(w);
@@ -889,9 +924,9 @@ describe('restore confirmation', () => {
     const w = mount(App, { attachTo: document.body });
     await flushPromises();
     await chooseFile(w);
-    await vi.waitFor(() => expect(w.find('.tiptap').exists()).toBe(true));
+    await vi.waitFor(() => expect(editorSurface(w).exists()).toBe(true));
     const editor = (
-      w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+      editorSurface(w).element as unknown as { editor: import('@tiptap/core').Editor }
     ).editor;
     await openSettings(w);
     await w.find('[data-test="restore-pick"]').trigger('click');
@@ -901,7 +936,7 @@ describe('restore confirmation', () => {
     await flushPromises();
     await vi.waitFor(() => expect(editor.isEditable).toBe(true));
     expect(editor.view.dom.getAttribute('contenteditable')).not.toBe('false');
-    expect(w.find('.tiptap').exists()).toBe(true);
+    expect(editorSurface(w).exists()).toBe(true);
     w.unmount();
   });
 
@@ -918,7 +953,7 @@ describe('restore confirmation', () => {
     await chooseFile(w);
     const editor = await vi.waitFor(() => {
       const e = (
-        w.find('.tiptap').element as unknown as { editor?: import('@tiptap/core').Editor } | null
+        editorSurface(w).element as unknown as { editor?: import('@tiptap/core').Editor } | null
       )?.editor;
       if (!e) throw new Error('editor not mounted yet');
       return e;
@@ -929,7 +964,7 @@ describe('restore confirmation', () => {
     await w.find('[data-test="restore-confirm-yes"]').trigger('click');
     await flushPromises();
     expect(order).toEqual(['save', 'restore']);
-    expect(w.find('.tiptap').exists()).toBe(false);
+    expect(editorSurface(w).exists()).toBe(false);
     await new Promise((r) => setTimeout(r, 700));
     expect(order).toEqual(['save', 'restore']);
     w.unmount();
@@ -950,7 +985,7 @@ describe('restore confirmation', () => {
     });
     const editor = await vi.waitFor(() => {
       const e = (
-        w.find('.tiptap').element as unknown as { editor?: import('@tiptap/core').Editor } | null
+        editorSurface(w).element as unknown as { editor?: import('@tiptap/core').Editor } | null
       )?.editor;
       if (!e) throw new Error('editor not mounted yet');
       return e;
@@ -981,7 +1016,7 @@ describe('restore confirmation', () => {
     vi.mocked(backend.saveSectionUpdate).mockRejectedValue(new Error('database is locked'));
     const editor = await vi.waitFor(() => {
       const e = (
-        w.find('.tiptap').element as unknown as { editor?: import('@tiptap/core').Editor } | null
+        editorSurface(w).element as unknown as { editor?: import('@tiptap/core').Editor } | null
       )?.editor;
       if (!e) throw new Error('editor not mounted yet');
       return e;
@@ -1008,7 +1043,7 @@ describe('restore confirmation', () => {
     vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(storedFixture());
     const w = mount(App, { attachTo: document.body });
     await settle();
-    expect(w.find('.tiptap').exists()).toBe(true);
+    expect(editorSurface(w).exists()).toBe(true);
     vi.mocked(backend.persistImport).mockRejectedValueOnce('database is locked');
     vi.mocked(backend.openLatestManuscript).mockReset().mockRejectedValue('database is locked');
     const picked = chooseFile(w);
@@ -1019,7 +1054,7 @@ describe('restore confirmation', () => {
     expect(w.find('[data-test="fatal-error"]').text()).toBe(
       `Couldn't reopen the manuscript. Please restart ${PRODUCT_NAME}.`,
     );
-    expect(w.find('.tiptap').exists()).toBe(false);
+    expect(editorSurface(w).exists()).toBe(false);
     expect(w.find('[contenteditable="true"]').exists()).toBe(false);
     w.unmount();
     vi.useRealTimers();
@@ -1089,7 +1124,7 @@ describe('restore confirmation', () => {
     const w = mount(App, { attachTo: document.body });
     await settle();
     await new Promise((r) => setTimeout(r, 0));
-    const ed = w.findComponent({ name: 'ManuscriptEditor' }).vm as unknown as {
+    const ed = leadEditor(w).vm as unknown as {
       $: {
         setupState: {
           editor: {
@@ -1117,7 +1152,7 @@ describe('restore confirmation', () => {
     vi.mocked(backend.saveSectionUpdate).mockRejectedValue(new Error('database is locked'));
     const editor = await vi.waitFor(() => {
       const e = (
-        w.find('.tiptap').element as unknown as { editor?: import('@tiptap/core').Editor } | null
+        editorSurface(w).element as unknown as { editor?: import('@tiptap/core').Editor } | null
       )?.editor;
       if (!e) throw new Error('editor not mounted yet');
       return e;
@@ -1129,7 +1164,7 @@ describe('restore confirmation', () => {
     expect(w.find('[data-test="open-error"]').text()).toBe(
       "Couldn't open synthetic.docx: some edits in the current manuscript aren't saved yet",
     );
-    expect(w.find('.tiptap').text()).toContain('UNSAVED ');
+    expect(editorSurface(w).text()).toContain('UNSAVED ');
     // Saves recover: the retry clears the banner, and now the import goes through.
     vi.mocked(backend.saveSectionUpdate).mockReset();
     vi.mocked(backend.saveSectionUpdate).mockResolvedValue(undefined);
@@ -1151,7 +1186,7 @@ describe('restore confirmation', () => {
     vi.mocked(backend.saveSectionUpdate).mockRejectedValue(new Error('database is locked'));
     const editor = await vi.waitFor(() => {
       const e = (
-        w.find('.tiptap').element as unknown as { editor?: import('@tiptap/core').Editor } | null
+        editorSurface(w).element as unknown as { editor?: import('@tiptap/core').Editor } | null
       )?.editor;
       if (!e) throw new Error('editor not mounted yet');
       return e;
@@ -1177,7 +1212,7 @@ describe('restore confirmation', () => {
     await chooseFile(w);
     const editor = await vi.waitFor(() => {
       const e = (
-        w.find('.tiptap').element as unknown as { editor?: import('@tiptap/core').Editor } | null
+        editorSurface(w).element as unknown as { editor?: import('@tiptap/core').Editor } | null
       )?.editor;
       if (!e) throw new Error('editor not mounted yet');
       return e;
@@ -1192,7 +1227,7 @@ describe('restore confirmation', () => {
     expect(w.text()).toContain("aren't saved yet");
     expect(w.find('[data-test="save-error"]').text()).toContain("aren't saved yet");
     expect(w.text()).not.toContain('database is locked');
-    expect(w.find('.tiptap').exists()).toBe(true); // the session (and its edits) stays open
+    expect(editorSurface(w).exists()).toBe(true); // the session (and its edits) stays open
     vi.mocked(backend.saveSectionUpdate).mockReset();
     vi.mocked(backend.saveSectionUpdate).mockResolvedValue(undefined);
     w.unmount();
@@ -1503,11 +1538,11 @@ describe('restore closes the open manuscript', () => {
 
   it('drops the pre-restore session and editor, and ignores later edits to the old docs', async () => {
     const { w, session } = await withManuscript();
-    expect(w.find('.tiptap').exists()).toBe(true);
+    expect(editorSurface(w).exists()).toBe(true);
     const before = session.outline.value;
     await restore(w);
     expect(w.find('[data-test="no-manuscript"]').exists()).toBe(true);
-    expect(w.find('.tiptap').exists()).toBe(false);
+    expect(editorSurface(w).exists()).toBe(false);
     expect(w.findAll('.row')).toHaveLength(0);
 
     // The old docs keep changing (e.g. a late peer update); nothing reaches the UI or the session.
@@ -1519,7 +1554,7 @@ describe('restore closes the open manuscript', () => {
     await settle();
     expect(session.outline.value).toBe(before);
     expect(w.text()).not.toContain('Stale write');
-    expect(w.find('.tiptap').exists()).toBe(false);
+    expect(editorSurface(w).exists()).toBe(false);
     w.unmount();
   });
 
@@ -1532,7 +1567,7 @@ describe('restore closes the open manuscript', () => {
       "The restore didn't finish. Please try again.",
     );
     expect(w.find('[data-test="no-manuscript"]').exists()).toBe(false);
-    expect(w.find('.tiptap').exists()).toBe(true);
+    expect(editorSurface(w).exists()).toBe(true);
     w.unmount();
   });
 
@@ -1545,7 +1580,7 @@ describe('restore closes the open manuscript', () => {
     expect(w.find('[data-test="backup-status"]').text()).toBe(
       "The restore didn't finish, so swarmDraft closed your book to keep it safe. A copy from just before the restore is in the backups folder.",
     );
-    expect(w.find('.tiptap').exists()).toBe(false);
+    expect(editorSurface(w).exists()).toBe(false);
     log.mockRestore();
     w.unmount();
   });
@@ -1556,7 +1591,7 @@ describe('restore closes the open manuscript', () => {
     vi.mocked(backend.restoreBackup).mockRejectedValueOnce('restore-failed');
     const { w } = await withManuscript();
     await restore(w);
-    expect(w.find('.tiptap').exists()).toBe(true);
+    expect(editorSurface(w).exists()).toBe(true);
     log.mockRestore();
     w.unmount();
   });
@@ -1643,7 +1678,7 @@ describe('home screen', () => {
     expect(persist).not.toHaveBeenCalled();
     expect(session.closed).toBe(false);
     await w.find('[data-test="open-cancel"]').trigger('click');
-    expect(w.find('.tiptap').exists()).toBe(true);
+    expect(editorSurface(w).exists()).toBe(true);
     w.unmount();
   });
 
@@ -1707,7 +1742,7 @@ describe('home screen', () => {
     const { w, session } = await withManuscript();
     persist.mockClear();
     const file = new File(['x'], 'other.docx');
-    for (const target of [w.find('.tiptap').element, w.find('.topbar').element]) {
+    for (const target of [editorSurface(w).element, w.find('.topbar').element]) {
       for (const type of ['dragover', 'drop']) {
         const ev = new Event(type, { bubbles: true, cancelable: true });
         Object.defineProperty(ev, 'dataTransfer', { value: { files: [file] } });
@@ -1718,7 +1753,7 @@ describe('home screen', () => {
     await settle();
     expect(persist).not.toHaveBeenCalled();
     expect(session.closed).toBe(false);
-    expect(w.find('.tiptap').exists()).toBe(true);
+    expect(editorSurface(w).exists()).toBe(true);
     w.unmount();
   });
 
@@ -1737,14 +1772,15 @@ describe('home screen', () => {
 });
 
 describe('App UI shells (Part of #36)', () => {
-  it('shows the breadcrumb, per-section word counts, and adds a chapter from New chapter (#52)', async () => {
+  it('shows the book title only in the top bar, per-section word counts, and New chapter (#52 / #107)', async () => {
     const { w, session } = await withManuscript();
+    expect(w.find('[data-test="breadcrumb"]').exists()).toBe(false);
+    expect(w.find('.topbar__name').text()).toBe(session.title);
+    expect(w.find('[data-test="continuous-manuscript"]').exists()).toBe(true);
     const outline = readStructure(session.manuscript);
     const chapter = outline.find((s) => s.kind === 'chapter')!;
     await w.find(`[data-test="section-${chapter.id}"]`).trigger('click');
     await settle();
-    expect(w.find('[data-test="breadcrumb"]').text()).toContain(chapter.title);
-    expect(w.find('[data-test="breadcrumb"]').text()).toMatch(/Chapter 1 ·/);
     const counts = w.findAll('[data-test="word-count"]');
     expect(counts).toHaveLength(outline.length);
     const words = docWordCount(session.sections.get(chapter.docId)!);
@@ -1861,7 +1897,7 @@ describe('full-width toolbar (#84)', () => {
     w.get('[data-test="tb-bold"]').element.dispatchEvent(ev);
     await settle();
     expect(pd).toHaveBeenCalledTimes(1);
-    expect(w.find('[data-focus-mode]').exists()).toBe(true);
+    expect(leadFocusModeOn(w)).toBe(true);
     w.unmount();
   });
 });
@@ -1874,11 +1910,11 @@ describe('focus mode started from the toolbar (#87 QA)', () => {
     const { w } = await withManuscript();
     await w.get('[data-test="focus-mode"]').trigger('click');
     await settle();
-    expect(w.find('[data-focus-mode]').exists()).toBe(true);
+    expect(leadFocusModeOn(w)).toBe(true);
     expect(document.activeElement?.closest('.ProseMirror')).not.toBeNull();
     key(document.activeElement!, { key: 'F', ctrlKey: true, shiftKey: true });
     await settle();
-    expect(w.find('[data-focus-mode]').exists()).toBe(false);
+    expect(leadFocusModeOff(w)).toBe(true);
     w.unmount();
   });
 
@@ -1891,7 +1927,7 @@ describe('focus mode started from the toolbar (#87 QA)', () => {
       expect(document.activeElement).toBe(document.body);
       key(document.body, init);
       await settle();
-      expect(w.find('[data-focus-mode]').exists()).toBe(false);
+      expect(leadFocusModeOff(w)).toBe(true);
     }
     w.unmount();
   });
@@ -1902,7 +1938,7 @@ describe('context menu in focus mode (#87 QA)', () => {
     const { w } = await withManuscript();
     await w.get('[data-test="focus-mode"]').trigger('click');
     await settle();
-    await w.get('.ProseMirror').trigger('contextmenu', { clientX: 50, clientY: 50 });
+    await proseFind(w).trigger('contextmenu', { clientX: 50, clientY: 50 });
     await settle();
     (document.activeElement as HTMLElement | null)?.blur();
     document.body.dispatchEvent(
@@ -1910,14 +1946,14 @@ describe('context menu in focus mode (#87 QA)', () => {
     );
     await settle();
     expect(w.find('[data-test="context-menu"]').exists()).toBe(false);
-    expect(w.find('[data-focus-mode]').exists()).toBe(true);
+    expect(leadFocusModeOn(w)).toBe(true);
   });
 
   it('Escape with the menu open closes only the menu and stays in focus mode', async () => {
     const { w } = await withManuscript();
     await w.get('[data-test="focus-mode"]').trigger('click');
     await settle();
-    await w.get('.ProseMirror').trigger('contextmenu', { clientX: 50, clientY: 50 });
+    await proseFind(w).trigger('contextmenu', { clientX: 50, clientY: 50 });
     await settle();
     const menu = w.get('[data-test="context-menu"]');
     const target = (menu.element.querySelector('[role=menuitem]') as HTMLElement) ?? menu.element;
@@ -1926,13 +1962,13 @@ describe('context menu in focus mode (#87 QA)', () => {
     );
     await settle();
     expect(w.find('[data-test="context-menu"]').exists()).toBe(false);
-    expect(w.find('[data-focus-mode]').exists()).toBe(true);
+    expect(leadFocusModeOn(w)).toBe(true);
     // With the menu closed, Escape exits focus mode as before.
     document.body.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
     );
     await settle();
-    expect(w.find('[data-focus-mode]').exists()).toBe(false);
+    expect(leadFocusModeOff(w)).toBe(true);
   });
 });
 
@@ -1942,21 +1978,20 @@ describe('Find in focus mode (#94)', () => {
   const enterFocus = async (w: ReturnType<typeof mount>) => {
     await w.get('[data-test="focus-mode"]').trigger('click');
     await settle();
-    expect(w.find('[data-focus-mode]').exists()).toBe(true);
+    expect(leadFocusModeOn(w)).toBe(true);
   };
   const find = (w: ReturnType<typeof mount>) => w.find('[data-test="find-panel"]').exists();
-  const focused = (w: ReturnType<typeof mount>) => w.find('[data-focus-mode]').exists();
+  const focused = (w: ReturnType<typeof mount>) => leadFocusModeOn(w);
 
   const openFindFromPage = async (w: ReturnType<typeof mount>) => {
     await enterFocus(w);
-    const pm = w.get('.ProseMirror').element as HTMLElement;
+    const pm = proseDom(w);
     pm.focus();
     key(pm, { key: 'f', ctrlKey: true });
     await settle();
     expect(document.activeElement).toBe(w.get('[data-test="find-input"]').element);
   };
-  const focusInPage = (w: ReturnType<typeof mount>) =>
-    w.get('.ProseMirror').element.contains(document.activeElement);
+  const focusInPage = (w: ReturnType<typeof mount>) => proseDom(w).contains(document.activeElement);
 
   it('Escape in the find input returns focus to the page (focus mode)', async () => {
     const { w } = await withManuscript();
@@ -1979,7 +2014,7 @@ describe('Find in focus mode (#94)', () => {
   it('Ctrl+F from the page opens Find in focus mode and keeps focus mode on', async () => {
     const { w } = await withManuscript();
     await enterFocus(w);
-    key(w.get('.ProseMirror').element, { key: 'f', ctrlKey: true });
+    key(proseDom(w), { key: 'f', ctrlKey: true });
     await settle();
     expect(find(w)).toBe(true);
     expect(focused(w)).toBe(true);
@@ -1998,7 +2033,7 @@ describe('Find in focus mode (#94)', () => {
   it('Escape closes Find first; a later Escape exits focus mode; Find does not pop up after', async () => {
     const { w } = await withManuscript();
     await enterFocus(w);
-    key(w.get('.ProseMirror').element, { key: 'f', ctrlKey: true });
+    key(proseDom(w), { key: 'f', ctrlKey: true });
     await settle();
     key(w.get('[data-test="find-input"]').element, { key: 'Escape' });
     await settle();
@@ -2013,9 +2048,9 @@ describe('Find in focus mode (#94)', () => {
   it('Escape with Find open and focus back in the page closes Find, not focus mode', async () => {
     const { w } = await withManuscript();
     await enterFocus(w);
-    key(w.get('.ProseMirror').element, { key: 'f', ctrlKey: true });
+    key(proseDom(w), { key: 'f', ctrlKey: true });
     await settle();
-    key(w.get('.ProseMirror').element, { key: 'Escape' });
+    key(proseDom(w), { key: 'Escape' });
     await settle();
     expect(find(w)).toBe(false);
     expect(focused(w)).toBe(true);
@@ -2024,7 +2059,7 @@ describe('Find in focus mode (#94)', () => {
   it('Escape with Find open and focus on the body closes Find, not focus mode', async () => {
     const { w } = await withManuscript();
     await enterFocus(w);
-    key(w.get('.ProseMirror').element, { key: 'f', ctrlKey: true });
+    key(proseDom(w), { key: 'f', ctrlKey: true });
     await settle();
     (document.activeElement as HTMLElement | null)?.blur();
     key(document.body, { key: 'Escape' });
@@ -2220,7 +2255,7 @@ describe('App outline auto-collapse on a narrow desk (#92)', () => {
   it('closes the outline when the editor reports a too-narrow desk, reopens on review close', async () => {
     const { w } = await withManuscript();
     const sidebar = () => w.findComponent({ name: 'SectionNav' });
-    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    const ed = () => leadEditor(w);
     expect(sidebar().isVisible()).toBe(true);
     ed().vm.$emit('layout', layout(true, 300));
     await settle();
@@ -2235,7 +2270,7 @@ describe('App outline auto-collapse on a narrow desk (#92)', () => {
 
   it('keeps the open-book toast centred on the desk, clear of the review panel (#93)', async () => {
     const { w } = await withManuscript();
-    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    const ed = () => leadEditor(w);
     // 1024px window, outline auto-closed: desk 16..688, review panel from 688.
     ed().vm.$emit('layout', { ...layout(true, 672), deskLeft: 16 });
     await settle();
@@ -2247,7 +2282,7 @@ describe('App outline auto-collapse on a narrow desk (#92)', () => {
 
   it('marks the outline forced only while the writer holds it open with the panel shown (#96)', async () => {
     const { w } = await withManuscript();
-    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    const ed = () => leadEditor(w);
     const desk = () => w.get('[data-test="desk"]');
     ed().vm.$emit('layout', layout(true, 300));
     await settle();
@@ -2265,7 +2300,7 @@ describe('App outline auto-collapse on a narrow desk (#92)', () => {
   it('a forced outline stays open and forced across focus mode (#97)', async () => {
     const { w } = await withManuscript();
     const sidebar = () => w.findComponent({ name: 'SectionNav' });
-    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    const ed = () => leadEditor(w);
     ed().vm.$emit('layout', layout(true, 300));
     await settle();
     await w.find('[data-test="tb-navigator"]').trigger('click'); // force it open
@@ -2283,7 +2318,7 @@ describe('App outline auto-collapse on a narrow desk (#92)', () => {
 
   it('the editor marks its focus-mode layout so the App keeps the forced outline (#97)', async () => {
     const { w } = await withManuscript();
-    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    const ed = () => leadEditor(w);
     await w.find('[data-test="focus-mode"]').trigger('click');
     await settle();
     const emitted = (ed().emitted('layout') ?? []) as [{ focusMode?: boolean }][];
@@ -2293,7 +2328,7 @@ describe('App outline auto-collapse on a narrow desk (#92)', () => {
 
   it('the forced state does not drop while focus mode is on (#97)', async () => {
     const { w } = await withManuscript();
-    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    const ed = () => leadEditor(w);
     ed().vm.$emit('layout', layout(true, 300));
     await settle();
     await w.find('[data-test="tb-navigator"]').trigger('click');
@@ -2306,7 +2341,7 @@ describe('App outline auto-collapse on a narrow desk (#92)', () => {
   it("the writer's own Chapters toggle wins over the auto reopen", async () => {
     const { w } = await withManuscript();
     const sidebar = () => w.findComponent({ name: 'SectionNav' });
-    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    const ed = () => leadEditor(w);
     const chapters = w.find('[data-test="tb-navigator"]');
     ed().vm.$emit('layout', layout(true, 300));
     await settle();
@@ -2331,7 +2366,7 @@ describe('App outline vs margin notes (#98)', () => {
   it('reopens the auto-closed outline when the notes hide, not when the writer closed it', async () => {
     const { w } = await withManuscript();
     const sidebar = () => w.findComponent({ name: 'SectionNav' });
-    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    const ed = () => leadEditor(w);
     ed().vm.$emit('layout', L(496, false));
     ed().vm.$emit('layout', L(496, true));
     await settle();
@@ -2353,7 +2388,7 @@ describe('App outline vs margin notes (#98)', () => {
   it('Chapters with no room shows the polite cue in the toast region; Hide notes opens the outline', async () => {
     const { w } = await withManuscript();
     const sidebar = () => w.findComponent({ name: 'SectionNav' });
-    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    const ed = () => leadEditor(w);
     const chapters = () => w.find('[data-test="tb-navigator"]');
     ed().vm.$emit('layout', L(368, false));
     ed().vm.$emit('layout', L(368, true)); // 1024px: notes appear, outline auto-closes
@@ -2391,7 +2426,7 @@ describe('App outline vs margin notes (#98)', () => {
 
   it('a layout change closes the cue', async () => {
     const { w } = await withManuscript();
-    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    const ed = () => leadEditor(w);
     ed().vm.$emit('layout', L(368, true));
     ed().vm.$emit('layout', L(672, true));
     await settle();
@@ -2406,7 +2441,7 @@ describe('App outline vs margin notes (#98)', () => {
 
   it('the cue closes after the usual timeout, and a second click while it shows does not restart it', async () => {
     const { w } = await withManuscript();
-    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    const ed = () => leadEditor(w);
     ed().vm.$emit('layout', L(368, true));
     ed().vm.$emit('layout', L(672, true));
     await settle();
@@ -2432,7 +2467,7 @@ describe('App outline vs margin notes (#98)', () => {
 
   it('unmounting while the cue shows clears its timer', async () => {
     const { w } = await withManuscript();
-    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    const ed = () => leadEditor(w);
     ed().vm.$emit('layout', L(368, true));
     ed().vm.$emit('layout', L(672, true));
     await settle();
@@ -2454,7 +2489,7 @@ describe('App outline vs margin notes (#98)', () => {
 
   it('Hide notes removes the margin notes and reports marginNotes:false; they return after the panel closes', async () => {
     const { w } = await withManuscript();
-    const ed = () => w.findComponent({ name: 'ManuscriptEditor' });
+    const ed = () => leadEditor(w);
     const st = (ed().vm as unknown as { $: { setupState: { review: unknown[] } } }).$.setupState;
     st.review = [
       { id: 'q1', type: 'insertion', author: 'Bot', text: 'x', from: 1, to: 3, quote: 'ab' },

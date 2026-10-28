@@ -53,6 +53,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: apps/desktop/src-tauri
+          cache-targets: x86_64-pc-windows-gnu
       - name: Placeholder frontend dist (generate_context! needs it)
         run: mkdir -p apps/desktop/dist && echo '<!doctype html>' > apps/desktop/dist/index.html
       - run: cargo fmt --check
@@ -60,4 +61,11 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
         working-directory: apps/desktop/src-tauri
       - run: cargo test --locked
+        working-directory: apps/desktop/src-tauri
+
+      # Compile cfg(windows) on Linux so Windows-only paths are type-checked (#127).
+      - name: mingw (Windows cross-check)
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
+      - run: rustup target add x86_64-pc-windows-gnu
+      - run: cargo check --locked --target x86_64-pc-windows-gnu
         working-directory: apps/desktop/src-tauri
