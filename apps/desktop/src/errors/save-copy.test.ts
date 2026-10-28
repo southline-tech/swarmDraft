@@ -75,6 +75,14 @@ describe('comments in the copy', () => {
 });
 
 describe('saveCopy', () => {
+  it('reports busy, not a failure, when the backend lock is held (#100)', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const r = await saveCopy(session(), { save: async () => Promise.reject('busy') });
+    expect(r).toEqual({ status: 'busy' });
+    expect(log).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+
   it('sends only the title and bytes; the backend picks the path', async () => {
     const save = vi.fn<(title: string, bytes: Uint8Array) => Promise<string | null>>(
       async () => 'D:\\Copies\\book.docx',

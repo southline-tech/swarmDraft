@@ -33,6 +33,7 @@ import {
   SECTION_LOAD_ERROR_COPY,
 } from './errors/map-error';
 import { saveCopy } from './errors/save-copy';
+import { BUSY_NOTICE } from './errors/busy';
 import { PRODUCT_NAME } from './lib/brand';
 import ShellsPreview from './shells/ShellsPreview.vue';
 import AppToast from './shells/AppToast.vue';
@@ -257,8 +258,6 @@ onMounted(async () => {
 });
 
 const backupStatus = ref('');
-const BUSY_NOTICE =
-  'A backup or restore is already running. Wait for it to finish, then try again.';
 /** Plain notices for the restore codes from the backend (#83, #86); anything else is generic. */
 const RESTORE_NOTICES: Record<string, string> = {
   'not-a-backup': "That file isn't a backup. Nothing was changed.",

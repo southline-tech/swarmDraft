@@ -6,6 +6,7 @@
 import { ref } from 'vue';
 import type { SaveFailureState } from './map-error';
 import type { SaveCopyResult } from './save-copy';
+import { BUSY_NOTICE } from './busy';
 
 const props = defineProps<{
   state: SaveFailureState;
@@ -22,12 +23,13 @@ async function onSaveCopy() {
   result.value = '';
   try {
     const r = await props.saveCopy();
-    resultFailed.value = r.status === 'failed';
+    resultFailed.value = r.status === 'failed' || r.status === 'busy';
     if (r.status === 'saved')
       result.value =
         `Copy saved to ${r.path}.` +
         (r.commentsLeftOut > 0 ? " Comments aren't included in the copy." : '');
     else if (r.status === 'failed') result.value = `${r.error.title}. ${r.error.message}`;
+    else if (r.status === 'busy') result.value = BUSY_NOTICE;
   } finally {
     busy.value = false;
   }

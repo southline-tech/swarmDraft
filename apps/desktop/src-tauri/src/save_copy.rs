@@ -120,8 +120,14 @@ pub fn check_write_dest(
     Ok(real)
 }
 
-/// Write `bytes` to `dest` atomically after [`check_dest`].
-pub fn write_copy(data_dirs: &[PathBuf], dest: &Path, bytes: &[u8]) -> std::io::Result<PathBuf> {
+/// Write `bytes` to `dest` atomically after [`check_dest`]. Needs the shared
+/// [`crate::backup::OpLock`] guard, so a copy never runs alongside a backup or restore (#100).
+pub fn write_copy(
+    _held: &crate::backup::OpGuard<'_>,
+    data_dirs: &[PathBuf],
+    dest: &Path,
+    bytes: &[u8],
+) -> std::io::Result<PathBuf> {
     write_copy_with(data_dirs, dest, bytes, |f, b| f.write_all(b))
 }
 
@@ -170,6 +176,124 @@ pub fn default_file_name(title: &str) -> String {
 mod tests {
     use super::*;
 
+    use crate::backup::{OpGuard, OpLock, BUSY};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    fn held() -> OpGuard<'static> {
+        Box::leak(Box::new(OpLock::default()))
+            .try_acquire()
+            .unwrap()
+    }
+
+    const WAIT: Duration = Duration::from_secs(10);
+
+    /// The `save_manuscript_copy` command body, from lib.rs source.
+    fn command_body() -> &'static str {
+        let src = include_str!("lib.rs");
+        let at = src
+            .find("async fn save_manuscript_copy(")
+            .expect("command exists");
+        let body = &src[at..];
+        &body[..body.find("\nfn ").unwrap_or(body.len())]
+    }
+
+    /// #100: writing a copy needs the shared op-lock guard; there is no unlocked entry point.
+    #[test]
+    fn write_copy_requires_the_op_lock_guard() {
+        let src = include_str!("save_copy.rs");
+        let src = &src[..src.find("#[cfg(test)]").unwrap()];
+        let sig = &src[src.find("pub fn write_copy(").unwrap()..];
+        let sig = &sig[..sig.find(')').unwrap()];
+        assert!(
+            sig.contains("_held: &crate::backup::OpGuard<'_>"),
+            "write_copy must take the guard: {sig}"
+        );
+        assert_eq!(src.matches("pub fn write_copy").count(), 1);
+        assert!(
+            !src.contains("pub fn write_copy_with"),
+            "unlocked writer stays private"
+        );
+        // The command passes the guard it took, not a fresh one.
+        assert!(command_body().contains("save_copy::write_copy(&held,"));
+    }
+
+    /// #100: the lock is taken before the save dialog opens, and the dialog is parented.
+    #[test]
+    fn save_copy_command_locks_before_a_parented_dialog() {
+        let body = command_body();
+        let sig = &body[..body.find('{').unwrap()];
+        assert!(sig.contains("window: tauri::Window"), "{sig}");
+        let lock = body
+            .find("app.state::<backup::OpLock>()")
+            .expect("uses the shared lock");
+        let acquire = body.find("try_acquire()").expect("takes the op lock");
+        let dialog = body.find(".dialog()").expect("opens a dialog");
+        assert!(lock < acquire && acquire < dialog, "lock before the dialog");
+        assert!(body.contains(".set_parent(&window)"));
+        assert!(
+            body.find(".set_parent(&window)").unwrap() < body.find("blocking_save_file()").unwrap()
+        );
+        assert!(
+            body.contains("map_err(str::to_string)?"),
+            "busy is returned as-is"
+        );
+    }
+
+    /// Runs `f` on a thread with a timeout so a deadlock fails instead of hanging CI.
+    fn on_thread<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(f());
+        });
+        rx.recv_timeout(WAIT).expect("thread finished in time")
+    }
+
+    /// #100: while a backup or restore holds the lock, Save a copy is busy.
+    #[test]
+    fn save_copy_is_busy_while_a_backup_or_restore_runs() {
+        let lock: &'static OpLock = Box::leak(Box::new(OpLock::default()));
+        let (held_tx, held_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel::<()>();
+        let first = std::thread::spawn(move || {
+            let _g = lock.try_acquire().unwrap(); // the backup / restore
+            held_tx.send(()).unwrap();
+            let _ = done_rx.recv_timeout(WAIT);
+        });
+        held_rx.recv_timeout(WAIT).expect("backup took the lock");
+        let copy = on_thread(move || lock.try_acquire().err());
+        assert_eq!(copy, Some(BUSY));
+        done_tx.send(()).unwrap();
+        first.join().unwrap();
+        // Once it finishes, the copy goes ahead and writes.
+        let out = tempfile::tempdir().unwrap();
+        let dest = out.path().join("b.docx");
+        let g = lock.try_acquire().expect("released");
+        write_copy(&g, &[], &dest, b"x").unwrap();
+    }
+
+    /// #100: while Save a copy holds the lock (dialog open or writing), backup and restore are busy.
+    #[test]
+    fn backup_and_restore_are_busy_while_save_copy_runs() {
+        let lock: &'static OpLock = Box::leak(Box::new(OpLock::default()));
+        let (held_tx, held_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel::<()>();
+        let out = tempfile::tempdir().unwrap();
+        let dest = out.path().join("b.docx");
+        let copy = std::thread::spawn(move || {
+            let g = lock.try_acquire().unwrap();
+            held_tx.send(()).unwrap();
+            let _ = done_rx.recv_timeout(WAIT); // dialog open
+            write_copy(&g, &[], &dest, b"x").map(|_| ())
+        });
+        held_rx.recv_timeout(WAIT).expect("copy took the lock");
+        let others = on_thread(move || (lock.try_acquire().err(), lock.try_acquire().err()));
+        assert_eq!(others, (Some(BUSY), Some(BUSY)));
+        done_tx.send(()).unwrap();
+        copy.join().unwrap().unwrap();
+        assert!(lock.try_acquire().is_ok(), "released after the write");
+    }
+
     fn dirs(d: &tempfile::TempDir) -> Vec<PathBuf> {
         vec![d.path().to_path_buf()]
     }
@@ -190,7 +314,7 @@ mod tests {
         let data = tempfile::tempdir().unwrap();
         let out = tempfile::tempdir().unwrap();
         let dest = out.path().join("book.docx");
-        write_copy(&dirs(&data), &dest, b"hello").unwrap();
+        write_copy(&held(), &dirs(&data), &dest, b"hello").unwrap();
         assert_eq!(std::fs::read(&dest).unwrap(), b"hello");
         assert_eq!(std::fs::read_dir(out.path()).unwrap().count(), 1);
     }
@@ -201,7 +325,7 @@ mod tests {
         let out = tempfile::tempdir().unwrap();
         let dest = out.path().join("book.docx");
         std::fs::write(&dest, b"old").unwrap();
-        write_copy(&dirs(&data), &dest, b"new").unwrap();
+        write_copy(&held(), &dirs(&data), &dest, b"new").unwrap();
         assert_eq!(std::fs::read(&dest).unwrap(), b"new");
     }
 
@@ -230,7 +354,7 @@ mod tests {
         let data = tempfile::tempdir().unwrap();
         let db = data.path().join("coauthor.docx");
         std::fs::write(&db, b"db").unwrap();
-        let err = write_copy(&dirs(&data), &db, b"x").unwrap_err();
+        let err = write_copy(&held(), &dirs(&data), &db, b"x").unwrap_err();
         assert_eq!(err.kind(), ErrorKind::PermissionDenied);
         assert_eq!(std::fs::read(&db).unwrap(), b"db");
     }
@@ -243,7 +367,7 @@ mod tests {
         std::fs::write(&target, b"keep").unwrap();
         let link = out.path().join("link.docx");
         std::os::unix::fs::symlink(&target, &link).unwrap();
-        let err = write_copy(&[], &link, b"x").unwrap_err();
+        let err = write_copy(&held(), &[], &link, b"x").unwrap_err();
         assert_eq!(err.kind(), ErrorKind::PermissionDenied);
         assert_eq!(std::fs::read(&target).unwrap(), b"keep");
     }
@@ -328,15 +452,18 @@ mod tests {
         let data = tempfile::tempdir().unwrap();
         let out = tempfile::tempdir().unwrap();
         let missing = out.path().join("missing-folder").join("book.docx");
-        assert!(write_copy(&dirs(&data), &missing, b"x").is_err());
+        assert!(write_copy(&held(), &dirs(&data), &missing, b"x").is_err());
         assert!(!missing.exists());
-        assert!(write_copy(&dirs(&data), Path::new("book.docx"), b"x").is_err());
+        assert!(write_copy(&held(), &dirs(&data), Path::new("book.docx"), b"x").is_err());
         for name in ["book.exe", "book.docx.bat", "book", "book.DOCX.lnk"] {
             let p = out.path().join(name);
-            assert!(write_copy(&dirs(&data), &p, b"x").is_err(), "{name}");
+            assert!(
+                write_copy(&held(), &dirs(&data), &p, b"x").is_err(),
+                "{name}"
+            );
             assert!(!p.exists());
         }
-        assert!(write_copy(&dirs(&data), &out.path().join("Book.DOCX"), b"x").is_ok());
+        assert!(write_copy(&held(), &dirs(&data), &out.path().join("Book.DOCX"), b"x").is_ok());
     }
 
     #[test]
