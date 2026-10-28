@@ -61,7 +61,7 @@ export function formatReport(report: ImportReport): string {
     `- Front matter sections: ${s.frontMatter}`,
     `- Parts: ${s.parts}`,
     `- Chapters: ${s.chapters}`,
-    `- Scenes: ${s.scenes} (scene breaks: ${s.sceneBreaks})`,
+    `- Scene breaks: ${s.sceneBreaks}`,
     `- Back matter sections: ${s.backMatter}`,
     `- Footnotes: ${s.footnotes}, comments: ${s.comments}, tracked changes: ${s.suggestions}`,
     '',

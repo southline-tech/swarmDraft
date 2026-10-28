@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import AppIcon from './icons/AppIcon.vue';
 /**
- * Parts / chapters / scenes navigation (RAD-214). Shows the outline as an indented tree; select a
+ * Parts / chapters navigation (RAD-214). Shows the outline as an indented tree; select a
  * section to open it, add sections, rename (double-click, F2 or Rename), reorder (arrow buttons,
  * Alt+↑/↓ or drag), move into another part/chapter (Move to… or drag) and delete (with a
  * confirmation that says what happens to the sections inside).
@@ -49,10 +49,9 @@ const KIND_LABELS: Record<SectionKind, string> = {
   front_matter: 'Front matter',
   part: 'Part',
   chapter: 'Chapter',
-  scene: 'Scene',
   back_matter: 'Back matter',
 };
-const ADD_KINDS: SectionKind[] = ['part', 'chapter', 'scene', 'front_matter', 'back_matter'];
+const ADD_KINDS: SectionKind[] = ['part', 'chapter', 'front_matter', 'back_matter'];
 
 const loadIssues = computed(() => normalizeOutline(props.sections).issues);
 const list = computed(() => normalizeOutline(props.sections).sections);

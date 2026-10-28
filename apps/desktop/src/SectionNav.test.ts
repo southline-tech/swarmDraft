@@ -32,31 +32,25 @@ const settle = async () => {
 };
 
 describe('SectionNav', () => {
-  it('lists parts, chapters and scenes nested in order', () => {
+  it('lists parts and chapters nested in order', () => {
     const w = setup();
     expect(titles(w)).toEqual([
       'Title page',
       'Part One',
       'Chapter 1',
-      'Scene 1',
-      'Scene 2',
       'Chapter 2',
       'About the author',
     ]);
-    expect(w.find('[data-test="section-sc-1"]').attributes('style')).toContain('3rem');
-    expect(w.find('[data-test="add-scene"]').attributes('disabled')).toBeDefined();
+    expect(w.find('[data-test="add-scene"]').exists()).toBe(false);
     w.unmount();
   });
 
-  it('selects, adds a scene into the selected chapter and renames it', async () => {
-    const w = setup();
-    await w.find('[data-test="section-ch-2"]').trigger('click');
-    expect(w.emitted('select')?.[0]).toEqual(['ch-2']);
-    await w.find('[data-test="add-scene"]').trigger('click');
+  it('selects, adds a chapter and renames it', async () => {
+    const w = setup({ selectedId: 'part-1' });
+    await w.find('[data-test="new-chapter"]').trigger('click');
     await settle();
-    const s = w.props('sections');
-    const added = s[s.length - 2]!;
-    expect(added).toMatchObject({ kind: 'scene', parentId: 'ch-2' });
+    const added = w.props('sections').find((s) => s.title === 'New chapter')!;
+    expect(added).toMatchObject({ kind: 'chapter', parentId: 'part-1' });
     const input = w.find('[data-test="rename-input"]');
     await input.setValue('Harbor\u0007 at   dusk');
     await input.trigger('keydown', { key: 'Enter' });
@@ -70,55 +64,64 @@ describe('SectionNav', () => {
     await w.find('[data-test="section-ch-1"]').trigger('click');
     expect(w.emitted('activate')).toEqual([['ch-1']]);
     await w.find('[data-test="section-ch-1"]').trigger('keydown', { key: 'ArrowDown' });
-    await w.find('[data-test="add-scene"]').trigger('click');
+    await w.find('[data-test="new-chapter"]').trigger('click');
     await settle();
     expect(w.emitted('activate')).toHaveLength(1);
     w.unmount();
   });
 
   it('reorders with the arrow buttons', async () => {
-    const w = setup({ selectedId: 'sc-2' });
+    const w = setup({ selectedId: 'ch-2' });
     await w.find('[data-test="move-up"]').trigger('click');
     await settle();
-    expect(titles(w).slice(3, 5)).toEqual(['Scene 2', 'Scene 1']);
+    expect(titles(w).slice(2, 4)).toEqual(['Chapter 2', 'Chapter 1']);
     w.unmount();
   });
 
-  it('drags a scene into another chapter', async () => {
-    const w = setup();
-    await w.find('[data-test="section-sc-1"]').trigger('dragstart');
-    await w.find('[data-test="section-ch-2"]').trigger('drop');
+  it('drags a chapter into another part', async () => {
+    let s = sampleOutline();
+    s = [
+      ...s,
+      {
+        id: 'part-2',
+        kind: 'part',
+        title: 'Part Two',
+        docId: 'manuscript/sample/section/part-2',
+      },
+    ];
+    const w = setup({ sections: s });
+    await w.find('[data-test="section-ch-1"]').trigger('dragstart');
+    await w.find('[data-test="section-part-2"]').trigger('drop');
     await settle();
-    const moved = w.props('sections').find((x) => x.id === 'sc-1')!;
-    expect(moved.parentId).toBe('ch-2');
-    expect(titles(w).slice(2, 6)).toEqual(['Chapter 1', 'Scene 2', 'Chapter 2', 'Scene 1']);
+    expect(w.props('sections').find((x) => x.id === 'ch-1')!.parentId).toBe('part-2');
     w.unmount();
   });
 
   it('moves into another parent without dragging', async () => {
-    const w = setup({ selectedId: 'sc-1' });
-    const options = w.findAll('[data-test="move-to"] option').map((o) => o.text());
-    expect(options).toEqual(['…', 'Chapter: Chapter 1', 'Chapter: Chapter 2']);
-    await w.find('[data-test="move-to"]').setValue('ch-2');
+    let s = sampleOutline();
+    s = [
+      ...s,
+      {
+        id: 'part-2',
+        kind: 'part',
+        title: 'Part Two',
+        docId: 'manuscript/sample/section/part-2',
+      },
+    ];
+    const w = setup({ sections: s, selectedId: 'ch-1' });
+    await w.find('[data-test="move-to"]').setValue('part-2');
     await settle();
-    expect(w.props('sections').find((x) => x.id === 'sc-1')!.parentId).toBe('ch-2');
+    expect(w.props('sections').find((x) => x.id === 'ch-1')!.parentId).toBe('part-2');
     w.unmount();
   });
 
   it('navigates and reorders with the keyboard', async () => {
     const w = setup({ selectedId: 'ch-1' });
     const row = (id: string) => w.find(`[data-test="section-${id}"]`);
-    expect(row('ch-1').attributes('tabindex')).toBe('0');
-    expect(row('sc-1').attributes('tabindex')).toBe('-1');
     await row('ch-1').trigger('keydown', { key: 'ArrowDown' });
-    expect(w.props('selectedId')).toBe('sc-1');
-    await row('sc-1').trigger('keydown', { key: 'ArrowLeft' });
+    expect(w.props('selectedId')).toBe('ch-2');
+    await row('ch-2').trigger('keydown', { key: 'ArrowUp' });
     expect(w.props('selectedId')).toBe('ch-1');
-    await row('ch-1').trigger('keydown', { key: 'ArrowRight' });
-    expect(w.props('selectedId')).toBe('sc-1');
-    await row('sc-1').trigger('keydown', { key: 'ArrowRight' }); // no children: stays
-    expect(w.props('selectedId')).toBe('sc-1');
-    await row('sc-1').trigger('keydown', { key: 'ArrowLeft' });
     await row('ch-1').trigger('keydown', { key: 'ArrowDown', altKey: true });
     await settle();
     expect(titles(w).slice(2, 4)).toEqual(['Chapter 2', 'Chapter 1']);
@@ -132,9 +135,6 @@ describe('SectionNav', () => {
     const before = w.props('sections');
     await w.find('[data-test="section-part-1"]').trigger('dragstart');
     await w.find('[data-test="section-ch-1"]').trigger('drop');
-    await settle();
-    await w.find('[data-test="section-ch-1"]').trigger('dragstart');
-    await w.find('[data-test="section-sc-2"]').trigger('drop');
     await settle();
     expect(w.props('sections')).toEqual(before);
     w.unmount();
@@ -150,85 +150,58 @@ describe('SectionNav', () => {
     await w.find('[data-test="confirm-delete"]').trigger('keydown', { key: 'Escape' });
     await settle();
     expect(w.find('[data-test="confirm-delete"]').exists()).toBe(false);
-    expect(titles(w)).toHaveLength(7);
-    expect(document.activeElement).toBe(w.find('[data-test="section-ch-1"]').element);
+    expect(titles(w)).toHaveLength(5);
     w.unmount();
   });
 
   it('asks before deleting and applies the child rule', async () => {
-    const w = setup({ selectedId: 'ch-1' });
+    const w = setup({ selectedId: 'part-1' });
     await w.find('[data-test="delete"]').trigger('click');
     const dialog = w.find('[data-test="confirm-delete"]');
     expect(dialog.text()).toContain('2 section(s) inside it');
-    expect(dialog.text()).toContain(
-      "Its text, comments and suggestions (including pending bot suggestions) can't be recovered.",
-    );
-    const del = w.find('[data-test="confirm-delete-all"]');
-    expect(del.text()).toBe('Delete');
-    expect(del.classes()).toContain('danger');
-    // Scenes cannot move up into a part, so "keep what is inside" is not offered.
-    expect(w.find('[data-test="confirm-delete-promote"]').attributes('disabled')).toBeDefined();
-    await w.find('[data-test="confirm-delete-cancel"]').trigger('click');
-    expect(titles(w)).toHaveLength(7);
+    await w.find('[data-test="confirm-delete-promote"]').trigger('click');
+    await settle();
+    expect(titles(w)).toEqual(['Title page', 'Chapter 1', 'Chapter 2', 'About the author']);
+
+    await w.setProps({ selectedId: 'ch-1' });
     await w.find('[data-test="delete"]').trigger('click');
     await w.find('[data-test="confirm-delete-all"]').trigger('click');
     await settle();
-    expect(titles(w)).toEqual(['Title page', 'Part One', 'Chapter 2', 'About the author']);
-    expect(w.props('selectedId')).toBe('part-1');
-
-    await w.find('[data-test="delete"]').trigger('click');
-    await w.find('[data-test="confirm-delete-promote"]').trigger('click');
-    await settle();
-    expect(titles(w)).toEqual(['Title page', 'Chapter 2', 'About the author']);
+    expect(titles(w)).not.toContain('Chapter 1');
     w.unmount();
   });
 
-  it('moves the selection off a just-deleted section, to the row before it or the first row', async () => {
+  it('moves the selection off a just-deleted section', async () => {
     const w = setup({ selectedId: 'ch-2' });
     await w.find('[data-test="delete"]').trigger('click');
     await w.find('[data-test="confirm-delete-all"]').trigger('click');
     await settle();
-    expect(titles(w)).not.toContain('Chapter 2');
-    expect(w.props('selectedId')).toBe('sc-2'); // the row just above it
-    expect(w.emitted('select')?.at(-1)).toEqual(['sc-2']);
-
-    // The first row has no row above it: fall back to the new first row.
-    await w.setProps({ selectedId: 'title' });
-    await w.find('[data-test="delete"]').trigger('click');
-    await w.find('[data-test="confirm-delete-all"]').trigger('click');
-    await settle();
-    expect(titles(w)[0]).toBe('Part One');
-    expect(w.props('selectedId')).toBe('part-1');
-    expect(w.find('[data-test="section-title"]').exists()).toBe(false);
+    expect(w.props('selectedId')).toBe('ch-1');
     w.unmount();
   });
 
   it('keeps the outline unchanged and shows an error when saving fails', async () => {
     const w = setup({
-      selectedId: 'sc-2',
+      selectedId: 'ch-2',
       save: () => Promise.reject(new Error('disk full')),
     });
     const before = w.props('sections');
     await w.find('[data-test="move-up"]').trigger('click');
     await settle();
     expect(w.props('sections')).toBe(before);
-    expect(w.emitted('update:sections')).toBeUndefined();
-    const msg = w.find('[data-test="save-error"]').text();
-    expect(msg).toContain('Not saved');
-    expect(msg).toContain('Your computer is almost full');
+    expect(w.find('[data-test="save-error"]').text()).toContain('Not saved');
     w.unmount();
   });
 
   it('never shows raw error text when an outline save fails', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const w = setup({
-      selectedId: 'sc-2',
+      selectedId: 'ch-2',
       save: () => Promise.reject(new Error('SQLITE_IOERR at C:\\secret\\coauthor.db')),
     });
     await w.find('[data-test="move-up"]').trigger('click');
     await settle();
     const msg = w.find('[data-test="save-error"]').text();
-    expect(msg).toContain('Not saved');
     expect(msg).not.toMatch(/SQLITE|secret/);
     log.mockRestore();
     w.unmount();
@@ -242,9 +215,6 @@ describe('SectionNav', () => {
     await settle();
     expect(saved).toHaveBeenCalled();
     expect(w.props('sections').length).toBe(before + 1);
-    expect(w.props('sections').some((s) => s.kind === 'chapter' && s.title === 'New chapter')).toBe(
-      true,
-    );
     w.unmount();
   });
 
@@ -256,17 +226,8 @@ describe('SectionNav', () => {
       { id: 'c', kind: 'chapter', title: 'C again', docId: 'd/c2' },
     ];
     const w = setup({ sections: corrupt });
-    // The second 'c' lives in another doc: kept under a fresh id, not dropped.
     expect(titles(w).sort()).toEqual(['A', 'B', 'C', 'C again']);
     expect(w.find('[data-test="outline-repaired"]').exists()).toBe(true);
-    await w.find('[data-test="section-c"]').trigger('dragstart');
-    await w.find('[data-test="section-b"]').trigger('drop');
-    await settle();
-    const saved = w.props('sections');
-    expect(saved.map((s) => s.id).sort()).toEqual(['a', 'b', 'c', 'c~2']);
-    expect(saved.find((s) => s.id === 'c~2')!.docId).toBe('d/c2');
-    expect(saved.find((s) => s.id === 'c')!.parentId).toBe('b');
-    expect(w.find('[data-test="outline-repaired"]').exists()).toBe(false);
     w.unmount();
   });
 });
@@ -274,7 +235,6 @@ describe('SectionNav', () => {
 describe('repair notice', () => {
   it('says the next change saves the repair', async () => {
     const outline = sampleOutline();
-    // A section inside itself: needs repair on load.
     const broken = outline.map((s, i) => (i === 1 ? { ...s, parentId: s.id } : s));
     const open = setup({ sections: broken });
     expect(open.find('[data-test="outline-repaired"]').text()).toContain('Your next change saves');

@@ -362,14 +362,8 @@ function open(next: ManuscriptSession) {
   markWelcomed();
   choosingBook.value = false;
   session.value = next;
-  // Open where the prose starts: an imported chapter's doc often holds only its heading and the
-  // text lives in its scenes, so prefer the first chapter's first scene (#25 QA: typing right
-  // after opening went into the heading).
   const rows = next.outline.value;
-  const chapter = rows.find((s) => s.kind === 'chapter');
-  selectedId.value = chapter
-    ? (rows.find((s) => s.kind === 'scene' && s.parentId === chapter.id) ?? chapter).id
-    : undefined;
+  selectedId.value = rows.find((s) => s.kind === 'chapter')?.id;
 }
 
 /**

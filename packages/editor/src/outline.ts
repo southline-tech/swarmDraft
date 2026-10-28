@@ -1,21 +1,20 @@
 /**
- * Manuscript outline (RAD-214): the ordered, nested list of sections. Parts hold chapters,
- * chapters hold scenes; front and back matter sit at the top level. Every function is pure and
- * returns a new flat `Section[]` in reading order, so the list can be stored as-is.
+ * Manuscript outline (RAD-214): the ordered, nested list of sections. Parts hold chapters;
+ * front and back matter sit at the top level. Every function is pure and returns a new flat
+ * `Section[]` in reading order, so the list can be stored as-is.
  */
-import { sectionDocId, type Section, type SectionKind } from '@coauthor/schema';
+import { isSectionKind, sectionDocId, type Section, type SectionKind } from '@coauthor/schema';
 
 export type OutlineNode = Section & { children: OutlineNode[] };
 
 /** Which kinds may contain which. A missing entry means "top level only". */
 const PARENT_KINDS: Partial<Record<SectionKind, readonly SectionKind[]>> = {
   chapter: ['part'],
-  scene: ['chapter'],
 };
 
 export function canNest(child: SectionKind, parent: SectionKind | undefined): boolean {
   const allowed = PARENT_KINDS[child];
-  if (parent === undefined) return child !== 'scene';
+  if (parent === undefined) return true;
   return allowed?.includes(parent) ?? false;
 }
 
@@ -76,7 +75,19 @@ export function normalizeOutline(sections: readonly Section[]): {
   const issues: OutlineIssue[] = [];
   const docOf = new Map<string, string>();
   const list: Section[] = [];
-  for (const s of sections) {
+  for (const raw of sections) {
+    // Legacy outline rows (no customer data): a scene becomes a sibling chapter under the same part.
+    let s = raw;
+    if ((raw.kind as string) === 'scene') {
+      const parentChapter = raw.parentId ? sections.find((x) => x.id === raw.parentId) : undefined;
+      s = { ...raw, kind: 'chapter' };
+      if (parentChapter?.parentId) s = { ...s, parentId: parentChapter.parentId };
+      else delete (s as { parentId?: string }).parentId;
+    }
+    if (!isSectionKind(s.kind)) {
+      issues.push({ id: s.id, problem: 'invalid-nesting' });
+      continue;
+    }
     let id = s.id;
     if (docOf.has(id)) {
       issues.push({ id, problem: 'duplicate-id' });
@@ -234,7 +245,7 @@ export function descendantsOf(sections: readonly Section[], id: string): Section
 
 /**
  * Whether `id`'s direct children can move up to its parent when it is deleted (e.g. a chapter's
- * scenes cannot go to the top level).
+ * direct children cannot go to the top level).
  */
 export function canPromoteChildren(sections: readonly Section[], id: string): boolean {
   const s = sections.find((x) => x.id === id);

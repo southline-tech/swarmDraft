@@ -52,7 +52,7 @@ const MIGRATIONS: &[&str] = &[
      CREATE TABLE sections (
         id TEXT PRIMARY KEY,
         manuscript_id TEXT NOT NULL REFERENCES manuscripts(id),
-        kind TEXT NOT NULL CHECK (kind IN ('front_matter','part','chapter','scene','back_matter')),
+        kind TEXT NOT NULL CHECK (kind IN ('front_matter','part','chapter','back_matter')),
         parent_id TEXT REFERENCES sections(id),
         position INTEGER NOT NULL,
         title TEXT NOT NULL,

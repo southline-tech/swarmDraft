@@ -156,7 +156,6 @@ export function exportDocx(m: ImportedManuscript): Uint8Array {
     const prev = m.sections[i - 1];
     if (
       i > 0 &&
-      s.kind !== 'scene' &&
       !(
         s.kind === 'chapter' &&
         prev?.kind === 'part' &&

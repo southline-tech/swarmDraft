@@ -16,8 +16,6 @@ export function sampleOutline(): Section[] {
   add('title', 'front_matter', 'Title page');
   add('part-1', 'part', 'Part One');
   add('ch-1', 'chapter', 'Chapter 1', 'part-1');
-  add('sc-1', 'scene', 'Scene 1', 'ch-1');
-  add('sc-2', 'scene', 'Scene 2', 'ch-1');
   add('ch-2', 'chapter', 'Chapter 2', 'part-1');
   add('about', 'back_matter', 'About the author');
   return s;
