@@ -36,7 +36,7 @@ Built from review, design and QA findings on PRs #1–#46. Most common first. Ti
 - [ ] Colors, spacing and radii use `var(--ct-*)` tokens from `docs/design-system.md`; no hex values, no undefined vars (e.g. `--color-muted`). _Why: most common Designer finding._
 - [ ] Checked in **light and dark** themes; text and selected states meet WCAG AA contrast. _Why: dark-mode highlights and selected rows have failed._
 - [ ] Layout checked at a narrow window (≈900px) and short window (500px), and zoom 50–200%: nothing clipped, all panels scroll to the end.
-- [ ] Matches the Designer's mockup/spec copy exactly (button text, confirm wording, order).
+- [ ] UI copy and layout match the issue (and linked mockup when the issue has one); otherwise match `docs/design-system.md` patterns. _Why: design review is checklist + review bot, not a separate Designer gate on every PR._
 
 ## 5. Focus, keyboard and accessibility (≈16 PRs)
 
@@ -72,7 +72,7 @@ Built from review, design and QA findings on PRs #1–#46. Most common first. Ti
 
 ## Review learnings
 
-Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/Designer: when a new kind of finding shows up a second time, promote it into a checklist item above.
+Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
 
 Format: `YYYY-MM-DD · #PR · finding · rule`
 
