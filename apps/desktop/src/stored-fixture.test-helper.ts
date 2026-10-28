@@ -18,7 +18,7 @@ export function storedFixture(): StoredManuscript {
       id: 'db-m',
       title: imported.title,
       createdAt: '',
-      numberingStyle: 'chapter_words',
+      numberingStyle: 'chapter_arabic',
     },
     sections: imported.sections.map((s, i) => ({
       id: `sec${i}`,

@@ -4,7 +4,8 @@
  * so backup status, the restore banner and a shown agent key survive switching sections, just
  * like the single panel this replaces.
  */
-import { DEFAULT_TRIM, NUMBERING_STYLES, TRIM_SIZES, type NumberingStyle } from '@coauthor/schema';
+import { DEFAULT_TRIM, TRIM_SIZES, type NumberingStyle } from '@coauthor/schema';
+import { NUMBERING_STYLE_LABELS, NUMBERING_STYLES } from '../numbering-style-labels';
 import { nextTick, onMounted, ref } from 'vue';
 import AgentsSettings from '../AgentsSettings.vue';
 import type { AppInfo } from '../backend';
@@ -16,13 +17,6 @@ import { trapTab } from './focus-trap';
 import { applyTheme, loadTheme, saveTheme, type Theme } from './prefs';
 import { previewsEnabled } from './previews';
 import './settings.css';
-
-const STYLE_LABELS: Record<NumberingStyle, string> = {
-  chapter_arabic: 'Chapter 1',
-  chapter_words: 'Chapter One',
-  chapter_upper: 'ONE',
-  number_only: '1 only',
-};
 
 defineProps<{
   info: AppInfo | null;
@@ -143,7 +137,7 @@ onMounted(() => root.value?.focus());
                   "
                 >
                   <option v-for="s in NUMBERING_STYLES" :key="s" :value="s">
-                    {{ STYLE_LABELS[s] }}
+                    {{ NUMBERING_STYLE_LABELS[s] }}
                   </option>
                 </select>
               </label>

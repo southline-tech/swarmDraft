@@ -16,6 +16,7 @@ describe('sectionNumberLabel', () => {
 
   it('numbers parts separately', () => {
     expect(sectionNumberLabel('part', 2, 'chapter_words')).toBe('Part Two');
+    expect(sectionNumberLabel('part', 2, 'chapter_arabic')).toBe('Part II');
   });
 });
 
@@ -35,7 +36,7 @@ describe('sectionNumberLabels', () => {
 
     const labels = sectionNumberLabels(s, 'chapter_arabic');
     expect(labels.get('f')).toBeUndefined();
-    expect(labels.get('p')).toBe('Part 1');
+    expect(labels.get('p')).toBe('Part I');
     expect(labels.get('c1')).toBe('Chapter 1');
     expect(labels.get('c2')).toBe('Chapter 2');
     expect(labels.get('b')).toBeUndefined();

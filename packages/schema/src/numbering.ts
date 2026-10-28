@@ -7,8 +7,8 @@ export const NUMBERING_STYLES = [
 ] as const;
 export type NumberingStyle = (typeof NUMBERING_STYLES)[number];
 
-/** Provisional default until Brett confirms on #111; matches pre-#111 UI (Chapter One, …). */
-export const DEFAULT_NUMBERING_STYLE: NumberingStyle = 'chapter_words';
+/** Book-wide default (#111): arabic chapters with roman part labels in the editor. */
+export const DEFAULT_NUMBERING_STYLE: NumberingStyle = 'chapter_arabic';
 
 export function isNumberingStyle(value: string): value is NumberingStyle {
   return (NUMBERING_STYLES as readonly string[]).includes(value);

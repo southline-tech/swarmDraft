@@ -721,8 +721,10 @@ defineExpose({ open, closeSession });
         :selected-id="selectedId"
         :save="session.save"
         :word-counts="wordCounts"
+        :numbering-style="session.numberingStyle.value"
         @select="selectedId = $event"
         @activate="focusEditor"
+        @numbering-style="onNumberingStyle"
       />
       <ContinuousManuscript
         ref="editorPane"

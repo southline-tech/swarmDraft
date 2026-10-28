@@ -33,6 +33,22 @@ function word(n: number): string {
   return WORDS[n - 1] ?? String(n);
 }
 
+/** Uppercase roman numerals for part labels (Part I, Part II, …). */
+function toRoman(n: number): string {
+  if (n < 1) return '';
+  const vals = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1];
+  const syms = ['M', 'CM', 'D', 'CD', 'C', 'XC', 'L', 'XL', 'X', 'IX', 'V', 'IV', 'I'];
+  let out = '';
+  let rest = n;
+  for (let i = 0; i < vals.length; i++) {
+    while (rest >= vals[i]!) {
+      out += syms[i];
+      rest -= vals[i]!;
+    }
+  }
+  return out;
+}
+
 function formatIndex(n: number, style: NumberingStyle): string {
   switch (style) {
     case 'chapter_arabic':
@@ -58,7 +74,7 @@ export function sectionNumberLabel(
   const num = formatIndex(index, style);
   if (kind === 'part') {
     if (style === 'chapter_upper') return `Part ${word(index).toUpperCase()}`;
-    if (style === 'chapter_arabic' || style === 'number_only') return `Part ${index}`;
+    if (style === 'chapter_arabic' || style === 'number_only') return `Part ${toRoman(index)}`;
     return `Part ${word(index)}`;
   }
   switch (style) {

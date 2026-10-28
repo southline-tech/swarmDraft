@@ -10,7 +10,8 @@ import AppIcon from './icons/AppIcon.vue';
  * emitted once saving succeeded. A stored outline that needed repair on load is flagged.
  */
 import { computed, nextTick, ref, watch } from 'vue';
-import type { Section, SectionKind } from '@coauthor/schema';
+import type { NumberingStyle, Section, SectionKind } from '@coauthor/schema';
+import { NUMBERING_STYLE_LABELS, NUMBERING_STYLES } from './numbering-style-labels';
 import { formatCount } from './status/wordcount';
 import { errorLine } from './errors/map-error';
 import {
@@ -37,12 +38,15 @@ const props = defineProps<{
   save?: (next: Section[]) => void | Promise<void>;
   /** Words per section id, read-only (#52); omitted hides the count column. */
   wordCounts?: Record<string, number>;
+  /** Book-wide numbering display (#111); shown in the outline menu when set. */
+  numberingStyle?: NumberingStyle;
 }>();
 const emit = defineEmits<{
   'update:sections': [Section[]];
   select: [id: string];
   /** A row was clicked: the parent should move focus into that section's text (#36). */
   activate: [id: string];
+  numberingStyle: [style: NumberingStyle];
 }>();
 
 const KIND_LABELS: Record<SectionKind, string> = {
@@ -346,6 +350,21 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
     >
       <span aria-hidden="true">+</span> New chapter
     </button>
+    <label v-if="numberingStyle" class="numbering-style" data-test="outline-numbering-style">
+      <span class="numbering-style__label">Number display</span>
+      <select
+        data-test="outline-numbering-select"
+        :value="numberingStyle"
+        :disabled="busy"
+        @change="
+          emit('numberingStyle', ($event.target as HTMLSelectElement).value as NumberingStyle)
+        "
+      >
+        <option v-for="s in NUMBERING_STYLES" :key="s" :value="s">
+          {{ NUMBERING_STYLE_LABELS[s] }}
+        </option>
+      </select>
+    </label>
     <details class="add-more">
       <summary data-test="add-more">More sections…</summary>
       <div class="actions" role="toolbar" aria-label="Add section">
@@ -543,6 +562,24 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
 }
 .group .count {
   margin-left: auto;
+}
+.numbering-style {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-space-1);
+  margin: var(--ct-space-2) var(--ct-space-2) 0;
+  font-size: var(--ct-text-sm);
+}
+.numbering-style__label {
+  color: var(--ct-text-muted);
+}
+.numbering-style select {
+  font: inherit;
+  color: var(--ct-text);
+  background: var(--ct-surface);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-md);
+  padding: var(--ct-space-1) var(--ct-space-2);
 }
 .add-more summary {
   color: var(--ct-text-muted);
