@@ -234,10 +234,9 @@ impl Store {
 
     pub fn list_manuscripts(&self) -> Result<Vec<Manuscript>, StorageError> {
         self.with_conn(|c| {
-            let mut st =
-                c.prepare(&format!(
-                    "SELECT {MANUSCRIPT_COLS} FROM manuscripts ORDER BY created_at, id"
-                ))?;
+            let mut st = c.prepare(&format!(
+                "SELECT {MANUSCRIPT_COLS} FROM manuscripts ORDER BY created_at, id"
+            ))?;
             let rows = st
                 .query_map([], row_manuscript)?
                 .collect::<Result<_, _>>()?;
@@ -273,7 +272,9 @@ impl Store {
                 params![manuscript_id, style],
             )?;
             if n == 0 {
-                return Err(StorageError::NotFound(format!("manuscript {manuscript_id}")));
+                return Err(StorageError::NotFound(format!(
+                    "manuscript {manuscript_id}"
+                )));
             }
             Ok(c.query_row(
                 &format!("SELECT {MANUSCRIPT_COLS} FROM manuscripts WHERE id = ?1"),

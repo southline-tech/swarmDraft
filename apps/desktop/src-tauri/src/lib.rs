@@ -377,7 +377,10 @@ async fn manuscript_set_numbering_style(
     manuscript_id: String,
     style: String,
 ) -> Result<manuscripts::Manuscript, String> {
-    blocking(&store, move |s| s.set_numbering_style(&manuscript_id, &style)).await
+    blocking(&store, move |s| {
+        s.set_numbering_style(&manuscript_id, &style)
+    })
+    .await
 }
 
 /// Where the MCP server is listening, or why it is not.

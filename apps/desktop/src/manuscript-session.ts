@@ -414,10 +414,7 @@ export function sessionFromStored(
 ): ManuscriptSession {
   const manuscript = new Y.Doc();
   manuscript.getMap(META_FIELD).set('title', stored.manuscript.title);
-  writeNumberingStyle(
-    manuscript,
-    parseNumberingStyle(stored.manuscript.numberingStyle),
-  );
+  writeNumberingStyle(manuscript, parseNumberingStyle(stored.manuscript.numberingStyle));
   writeStructure(
     manuscript,
     stored.sections.map((s) => ({

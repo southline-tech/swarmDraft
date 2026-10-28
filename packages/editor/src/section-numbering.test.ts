@@ -39,7 +39,6 @@ describe('sectionNumberLabels', () => {
     expect(labels.get('c1')).toBe('Chapter 1');
     expect(labels.get('c2')).toBe('Chapter 2');
     expect(labels.get('b')).toBeUndefined();
-
   });
 
   it('renumbers chapters when outline order changes', () => {
