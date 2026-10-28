@@ -3,7 +3,7 @@ description: coAuthor coding standards and PR flow
 alwaysApply: true
 ---
 
-Read `AGENTS.md` (project map, commands, PR flow) and `docs/review-checklist.md` (self-review checklist) before coding and before asking for review.
+Read `AGENTS.md` (project map, commands, PR flow) and `docs/review-checklist.md` (self-review checklist + **Ready gate**) before coding and before asking for review.
 
 Top rules:
 
@@ -15,6 +15,6 @@ Top rules:
 6. Focus: dialogs trap/return focus, Esc closes; shortcuts inert in inputs; no dead controls or fake shortcut hints.
 7. Agent tokens never logged or returned and re-checked inside each write's transaction; names render as text in `<bdi dir=auto>`; normalize names (strip invisibles, NFKC, fold) in the backend.
 8. No swallowed errors; surface save failures.
-9. Before review: merge main; run lint, format:check, typecheck, test, build, clippy, cargo test; self-check against the issue, `docs/design-system.md`, and the checklist. Use the review bot on the diff; `Closes #N` for small fixes, `Part of #N` for epics. No stacked PRs.
-10. For every review, design or QA finding, add a line to "Review learnings" in `docs/review-checklist.md` (`YYYY-MM-DD · #PR · finding · rule`) in the same PR before asking for re-review.
+9. **Ready gate (before “ready for review / re-review”):** merge latest `main`; run full lint/format/typecheck/test/build/clippy/cargo test; read issue body **and all issue comments**; tick every AC in the PR with evidence; match linked mockups or N/A; check open PRs for same-file overlap; fill `.github/PULL_REQUEST_TEMPLATE.md` sections; run review bot on the diff. `Closes #N` only when all ACs done; `Part of #N` for epics. No stacked PRs.
+10. **One fix pass per review:** address all PM/Designer/review-bot findings in one push; add a Review learnings line per finding in `docs/review-checklist.md` before re-review.
 11. No competitor product names, parity lists or competitive analysis anywhere in code, docs, commits, branch names, issues or PRs.

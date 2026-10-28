@@ -70,6 +70,18 @@ Built from review, design and QA findings on PRs #1–#46. Most common first. Ti
 - [ ] No competitor names, parity lists or competitive analysis in code, docs, commits, branch names, issues or PRs.
 - [ ] No hard-coded personal data.
 
+## Ready gate (before every “ready for review / re-review”)
+
+Run this consolidated pass in order; do not hand off until every line that applies is checked.
+
+- [ ] Latest `main` merged or rebased; full command suite green on the commit you push.
+- [ ] Linked issue body **and all issue comments** read; PM/Designer decisions copied into the PR (“Decisions applied”).
+- [ ] Each acceptance criterion ticked in the PR with evidence (test file/name, behavior asserted, or manual step).
+- [ ] Mockup links on the issue or comments opened and matched (frame ids listed), or “N/A”.
+- [ ] Open PR file overlap checked; rebase or call out shared paths with other open PRs.
+- [ ] Review bot run on the PR diff; findings either fixed or explicitly deferred with reason (prefer fix).
+- [ ] After any review round: **one push** fixes all findings + Review learnings lines; then re-run checks before re-review.
+
 ## Review learnings
 
 Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
@@ -117,6 +129,9 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-28 · #127 · cfg(windows) never built on Linux CI · add mingw + `cargo check --target x86_64-pc-windows-gnu` on the existing job; cache the extra target
 - 2026-10-28 · #107 · continuous view put review/status inside the scroll stack · teleported chrome to a fixed rail beside the scroll column (height/layout of stacked sections deferred to PM)
 - 2026-10-28 · #128 · #107 PM review · outline row needs `:hover`; add tests for scroll/focus/title; arrow keys should `activate` like click; document perf in `docs/perf-107.md`
+- 2026-10-28 · #129 · #111 first pass · shipped wrong default and incomplete setting placement · read issue comments before coding; defaults and UI placement in comments are binding AC
+- 2026-10-28 · #130 · overlapped #129 on `ContinuousManuscript.vue` · before ready, list open PRs on shared files and rebase onto main to avoid surprise conflict loops
+- 2026-10-28 · #133 · Wave 1 PM loops · “ready” means AC checklist + issue comments + mockups + open-PR overlap in one gate (see Ready gate above)
 - 2026-10-28 · #107 · continuous view mounts many editors; tests must scope to lead slice · use `[data-test="lead-editor"]` helpers, not first `.tiptap` in the DOM
 - 2026-10-26 · #71 · user-facing notices said 'database' and 'port 7337' · user-visible text stays plain for writers; technical details go to logs
 - 2026-10-26 · #71 · a read-only SQLite open of the old db after a crash created -shm in the old folder · never open the source db with SQLite in a folder you must not touch; copy db + -wal byte for byte to staging and snapshot from the copy; prove it with tests that hash names, bytes and mtimes before and after

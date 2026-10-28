@@ -35,14 +35,18 @@ All of these must pass before review. Report test counts per package in the PR.
 ## PR flow
 
 1. Branch off latest `main`. One issue (or a batch of small related fixes) per PR. **No stacked PRs.**
-2. Before asking for review:
-   - merge `main` in and resolve conflicts;
-   - run every command above;
-   - self-check against the issue's acceptance criteria, `docs/design-system.md` (UI), any mockup link on the issue, and `docs/review-checklist.md`.
-3. PR body: what changed, how it was tested, which checklist items apply. Use `Closes #N` for a small fix that finishes an issue, `Part of #N` for an epic or partial work.
+2. **Ready gate** — do not mark a PR ready for review or re-review until every step passes (details mirror `docs/review-checklist.md` § Ready gate):
+   - Merge or rebase onto latest `main`; run every command in **Commands** above; report test counts from the pushed head.
+   - Read the linked issue body **and all issue comments** (and PM/Designer notes on the PR). Treat comment decisions as binding AC (defaults, copy, placement, mockup calls).
+   - Self-check **every** acceptance criterion; tick each in the PR body with pass evidence (test name, manual step, or quote). Do not mark ready if any AC is open or only partly met.
+   - For each behavior AC, name the test that proves it through real wiring; confirm new tests fail with the fix reverted (see checklist §3).
+   - If the issue or comments link mockup frames, compare before coding and again before ready; list frame ids checked (or N/A).
+   - List **open PRs** that touch the same files (`gh pr list` + diff paths). Rebase or note coordination if overlap exists (e.g. continuous view / outline).
+   - UI: `docs/design-system.md`; tick applicable items in `docs/review-checklist.md`.
+3. **PR body:** use the skeleton in `.github/PULL_REQUEST_TEMPLATE.md` (summary, AC checklist, issue-comment decisions, mockups, tests, open-PR overlap). `Closes #N` only when every issue AC is done; `Part of #N` for epics or partial work.
 4. **Review:** run the automated review bot on the PR diff; fix findings and re-run until clear. Human reviewer optional for tricky areas. Routine UI PRs do **not** wait on a separate Designer pass — treat `docs/design-system.md` plus issue copy as the design spec. Epic **release gates** (e.g. #34 installer sign-off) may still need PM/author QA before shipping a build.
-5. **Every review, design or QA finding → add a lessons-learned line** to the "Review learnings" section of `docs/review-checklist.md` in the same PR, before asking for re-review (format: `YYYY-MM-DD · #PR · finding · rule`).
-6. Fix, re-run all checks, push. Re-review covers only what changed since the last cleared commit.
+5. **One consolidated fix pass per review:** when PM, Designer, or the review bot leaves findings, fix **all** of them in one push (plus a Review learnings line per finding) before asking for re-review; do not drip-feed.
+6. Re-run all checks after fixes. Re-review covers only what changed since the last cleared commit.
 7. After review bot clear and CI green, hand off for merge. Implementors never merge.
 
 ## Product rules that are never negotiable
