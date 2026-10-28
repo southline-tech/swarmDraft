@@ -6,7 +6,6 @@ import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { readStructure } from '@coauthor/docx';
-import { sectionsInReadingOrder } from './manuscript-reading-order';
 import { PRODUCT_NAME } from './lib/brand';
 import { sessionFromDocx } from './manuscript-session';
 
