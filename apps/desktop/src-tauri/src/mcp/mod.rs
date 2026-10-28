@@ -346,12 +346,17 @@ pub const PORT_IN_USE_LEGACY_COAUTHOR_MESSAGE: &str =
     "Your bots can't connect because the old coAuthor app is still open. Close it, then restart swarmDraft.";
 
 /// User-visible text for a taken MCP port (legacy name kept for callers that only need one string).
-pub fn port_in_use_user_message(port: u16) -> String {
-    if port_holder::legacy_coauthor_holds_port(DEFAULT_HOST, port) {
+/// User-visible port-busy text from a legacy-coAuthor detection result (also used in tests).
+pub fn port_in_use_user_message_if_legacy(legacy_coauthor: bool) -> String {
+    if legacy_coauthor {
         PORT_IN_USE_LEGACY_COAUTHOR_MESSAGE.to_string()
     } else {
         PORT_IN_USE_GENERIC_MESSAGE.to_string()
     }
+}
+
+pub fn port_in_use_user_message(port: u16) -> String {
+    port_in_use_user_message_if_legacy(port_holder::legacy_coauthor_holds_port(DEFAULT_HOST, port))
 }
 
 /// Bind the MCP port on loopback synchronously, so startup can tell the user right away when

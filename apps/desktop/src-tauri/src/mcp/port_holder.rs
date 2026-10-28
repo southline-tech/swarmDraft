@@ -112,13 +112,10 @@ fn process_image_name(pid: u32) -> Option<String> {
 
 #[cfg(windows)]
 fn port_listener_pids(host: &str, port: u16) -> Vec<u32> {
-    let output = Command::new("netstat")
-        .args(["-ano", "-p", "tcp"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return Vec::new();
-    }
+    let output = match Command::new("netstat").args(["-ano", "-p", "tcp"]).output() {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
     let text = String::from_utf8_lossy(&output.stdout);
     let suffix = format!(":{port}");
     let mut pids = Vec::new();
