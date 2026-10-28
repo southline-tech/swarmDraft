@@ -112,6 +112,17 @@ describe('continuous manuscript (#107)', () => {
     w.unmount();
   });
 
+  it('keeps the review panel in a fixed rail outside the scroll column', async () => {
+    const { w } = await withManuscript();
+    await settle();
+    const scroll = w.get('[data-test="continuous-manuscript"]').element;
+    const rail = document.getElementById('continuous-review-rail');
+    expect(rail).toBeTruthy();
+    expect(scroll.contains(rail!)).toBe(false);
+    expect(rail!.querySelector('[data-test="review"]')).toBeTruthy();
+    w.unmount();
+  });
+
   it('syncs the window title to the book name on open and product name on close', async () => {
     const { w, session } = await withManuscript();
     expect(document.title).toBe(session.title);

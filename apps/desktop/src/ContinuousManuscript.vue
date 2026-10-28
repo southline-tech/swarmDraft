@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
  * One scrollable manuscript (#107): every section's doc is visible in reading order. The active
- * section owns the shared toolbar and status bar; scroll-spy keeps the outline selection in sync.
+ * section owns the shared toolbar, review rail, and status bar; scroll-spy keeps the outline in sync.
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import type { Section } from '@coauthor/schema';
 import type * as Y from 'yjs';
 import ManuscriptEditor from './ManuscriptEditor.vue';
@@ -12,6 +12,9 @@ import type { SaveState } from './status/StatusBar.vue';
 import type { EditorLayout } from './desk/outline-auto-collapse';
 import type { AgentName } from './agent-names';
 import type { DecisionRecord } from '@coauthor/editor';
+
+const REVIEW_RAIL = '#continuous-review-rail';
+const STATUS_RAIL = '#continuous-status-rail';
 
 const props = defineProps<{
   outline: Section[];
@@ -46,6 +49,10 @@ const emit = defineEmits<{
 const ordered = computed(() => sectionsInReadingOrder(props.outline));
 const scrollRoot = shallowRef<HTMLElement | null>(null);
 const editors = shallowRef(new Map<string, InstanceType<typeof ManuscriptEditor>>());
+const chromeLayout = ref<EditorLayout | null>(null);
+const reviewRailShown = computed(
+  () => chromeLayout.value?.reviewShown && !chromeLayout.value?.focusMode,
+);
 let spyFromScroll = false;
 let observer: IntersectionObserver | undefined;
 
@@ -79,6 +86,11 @@ function scrollToSection(id: string) {
   if (!root) return;
   const el = root.querySelector(`[data-section-anchor="${id}"]`);
   el?.scrollIntoView({ block: 'start', behavior: 'auto' });
+}
+
+function onLeadLayout(layout: EditorLayout) {
+  chromeLayout.value = layout;
+  emit('layout', layout);
 }
 
 watch(
@@ -125,48 +137,82 @@ onBeforeUnmount(() => observer?.disconnect());
 </script>
 
 <template>
-  <div
-    ref="scrollRoot"
-    class="continuous-manuscript min-h-0 overflow-auto"
-    data-test="continuous-manuscript"
-  >
+  <div class="continuous-root min-h-0 flex h-full flex-col" data-test="continuous-root">
     <div
-      v-for="sec in ordered"
-      :key="`${sec.docId}#${reloadToken}`"
-      :data-section-anchor="sec.id"
-      :data-test="sec.id === selectedId ? 'lead-editor' : 'continuous-section'"
-      class="continuous-section"
+      class="continuous-layout min-h-0 flex-1"
+      :class="{ 'continuous-layout--solo': !reviewRailShown }"
     >
-      <ManuscriptEditor
-        v-if="sections.get(sec.docId)"
-        :ref="(el) => setEditorRef(sec.id, el)"
-        :doc="sections.get(sec.docId)"
-        :readonly="readonly"
-        :read-only-reason="readOnlyReason"
-        :navigator-open="navigatorOpen"
-        :slice-mode="sec.id !== selectedId"
-        :toolbar-target="sec.id === selectedId ? toolbarTarget : undefined"
-        :chapter-title="sec.id === selectedId ? chapterTitle : undefined"
-        :chapter-label="sec.id === selectedId ? chapterLabel : undefined"
-        :book-docs="sec.id === selectedId ? bookDocs : undefined"
-        :chapter-docs="sec.id === selectedId ? chapterDocs : undefined"
-        :save-state="sec.id === selectedId ? saveState : undefined"
-        :author-labels="authorLabels"
-        :external-load-error="externalLoadError"
-        :outline-forced="outlineForced"
-        :notes-hidden="notesHidden"
-        @reload="emit('reload')"
-        @toggle-navigator="emit('toggle-navigator')"
-        @decisions="emit('decisions', $event)"
-        @focus-mode="emit('focus-mode', $event)"
-        @load-error="(msg) => sec.id === selectedId && emit('load-error', msg)"
-        @layout="(layout) => sec.id === selectedId && emit('layout', layout)"
+      <div
+        ref="scrollRoot"
+        class="continuous-manuscript min-h-0 overflow-auto"
+        data-test="continuous-manuscript"
+      >
+        <div
+          v-for="sec in ordered"
+          :key="`${sec.docId}#${reloadToken}`"
+          :data-section-anchor="sec.id"
+          :data-test="sec.id === selectedId ? 'lead-editor' : 'continuous-section'"
+          class="continuous-section"
+        >
+          <ManuscriptEditor
+            v-if="sections.get(sec.docId)"
+            :ref="(el) => setEditorRef(sec.id, el)"
+            :doc="sections.get(sec.docId)"
+            :readonly="readonly"
+            :read-only-reason="readOnlyReason"
+            :navigator-open="navigatorOpen"
+            continuous-stack
+            :slice-mode="sec.id !== selectedId"
+            :toolbar-target="sec.id === selectedId ? toolbarTarget : undefined"
+            :review-target="sec.id === selectedId ? REVIEW_RAIL : undefined"
+            :status-target="sec.id === selectedId ? STATUS_RAIL : undefined"
+            :chapter-title="sec.id === selectedId ? chapterTitle : undefined"
+            :chapter-label="sec.id === selectedId ? chapterLabel : undefined"
+            :book-docs="sec.id === selectedId ? bookDocs : undefined"
+            :chapter-docs="sec.id === selectedId ? chapterDocs : undefined"
+            :save-state="sec.id === selectedId ? saveState : undefined"
+            :author-labels="authorLabels"
+            :external-load-error="externalLoadError"
+            :outline-forced="outlineForced"
+            :notes-hidden="notesHidden"
+            @reload="emit('reload')"
+            @toggle-navigator="emit('toggle-navigator')"
+            @decisions="emit('decisions', $event)"
+            @focus-mode="emit('focus-mode', $event)"
+            @load-error="(msg) => sec.id === selectedId && emit('load-error', msg)"
+            @layout="(layout) => sec.id === selectedId && onLeadLayout(layout)"
+          />
+        </div>
+      </div>
+      <div
+        id="continuous-review-rail"
+        class="continuous-review-rail min-h-0"
+        data-test="continuous-review-rail"
       />
     </div>
+    <div
+      id="continuous-status-rail"
+      class="continuous-status-rail"
+      data-test="continuous-status-rail"
+    />
   </div>
 </template>
 
 <style scoped>
+.continuous-layout {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  min-height: 0;
+}
+.continuous-layout--solo {
+  grid-template-columns: 1fr;
+}
+.continuous-review-rail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
 .continuous-section + .continuous-section {
   border-top: 1px solid var(--ct-border-subtle);
 }

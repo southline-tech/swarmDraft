@@ -104,6 +104,12 @@ const props = defineProps<{
   notesHidden?: boolean;
   /** One continuous manuscript (#107): body-only slice; chrome lives on the active section. */
   sliceMode?: boolean;
+  /** Stacked in the continuous scroll (#107): never fill the scrollport height. */
+  continuousStack?: boolean;
+  /** Parent-hosted review column (outside the scroll area). */
+  reviewTarget?: string;
+  /** Parent-hosted status bar (outside the scroll area). */
+  statusTarget?: string;
 }>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
@@ -555,7 +561,11 @@ const LABELS: Record<ReviewItem['type'], string> = {
   <div
     ref="root"
     class="manuscript-editor"
-    :class="{ 'focus-mode': focusMode, 'manuscript-editor--slice': sliceMode }"
+    :class="{
+      'focus-mode': focusMode,
+      'manuscript-editor--slice': sliceMode,
+      'manuscript-editor--stacked': continuousStack,
+    }"
     :data-focus-mode="focusMode || undefined"
     @keydown="onShellKey"
   >
@@ -630,7 +640,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
         </EditorToolbar>
       </div>
     </Teleport>
-    <div class="body" :class="{ 'no-review': !reviewOpen || focusMode }">
+    <div class="body" :class="{ 'no-review': !reviewOpen || focusMode || !!reviewTarget }">
       <!-- Auto margins (not justify-center) keep a zoomed page that is wider than the desk
            reachable: it centers when it fits and scrolls from its left edge when it does not. -->
       <div
@@ -676,60 +686,68 @@ const LABELS: Record<ReviewItem['type'], string> = {
           </div>
         </div>
       </div>
-      <div
-        v-if="reviewOpen && !focusMode && !sliceMode"
-        class="review"
-        :class="{ 'review--collapsed': collapsed }"
-        data-test="review"
+      <Teleport
+        :to="reviewTarget || 'body'"
+        :disabled="!reviewTarget || sliceMode || !reviewOpen || focusMode"
+        defer
       >
-        <ReviewPanel
-          :items="suggestions"
-          :load-failed="!!loadError"
-          :filter="filter"
-          :current-key="currentKey"
-          :collapsed="collapsed"
-          :busy="!editor?.isEditable"
-          :labels="props.authorLabels ?? authorName"
-          @show-only="(a: string) => (filter = new Set([a]))"
-          @show-all="filter = null"
-          @select="select"
-          @prev="move(-1)"
-          @next="move(1)"
-          @decide-one="decideOne"
-          @decide-visible="decideVisible"
-          @toggle-collapsed="collapsed = !collapsed"
-        />
-        <EmptyState
-          v-if="!collapsed && !comments.length && !loadError"
-          class="comments-empty"
-          data-test="comments-empty"
-          icon="comment"
-          title="No comments yet"
-          text="Select some text and choose Comment to leave yourself a note."
-        />
-        <section v-else-if="!collapsed && comments.length" class="comments" aria-label="Comments">
-          <h3>Comments</h3>
-          <ul>
-            <li v-for="r in comments" :key="r.id" data-test="review-item">
-              <strong>{{ LABELS[r.type] }}</strong>
-              <span v-if="r.author" class="muted agent-label" data-test="review-author">
-                <template v-for="n in [authorName(r.author)]" :key="n.name"
-                  >·
-                  <bdi class="agent-name" dir="auto" data-test="agent-name" :title="n.name">{{
-                    n.name
-                  }}</bdi
-                  ><span v-if="n.agent" class="agent-tag" data-test="agent-tag">Bot</span>
-                  <template v-if="n.note"
-                    >{{ ' '
-                    }}<span class="agent-note" data-test="agent-note">{{ n.note }}</span></template
-                  ></template
-                ></span
-              >
-              <q>{{ r.text }}</q>
-            </li>
-          </ul>
-        </section>
-      </div>
+        <div
+          v-if="reviewOpen && !focusMode && !sliceMode"
+          class="review"
+          :class="{ 'review--collapsed': collapsed }"
+          data-test="review"
+        >
+          <ReviewPanel
+            :items="suggestions"
+            :load-failed="!!loadError"
+            :filter="filter"
+            :current-key="currentKey"
+            :collapsed="collapsed"
+            :busy="!editor?.isEditable"
+            :labels="props.authorLabels ?? authorName"
+            @show-only="(a: string) => (filter = new Set([a]))"
+            @show-all="filter = null"
+            @select="select"
+            @prev="move(-1)"
+            @next="move(1)"
+            @decide-one="decideOne"
+            @decide-visible="decideVisible"
+            @toggle-collapsed="collapsed = !collapsed"
+          />
+          <EmptyState
+            v-if="!collapsed && !comments.length && !loadError"
+            class="comments-empty"
+            data-test="comments-empty"
+            icon="comment"
+            title="No comments yet"
+            text="Select some text and choose Comment to leave yourself a note."
+          />
+          <section v-else-if="!collapsed && comments.length" class="comments" aria-label="Comments">
+            <h3>Comments</h3>
+            <ul>
+              <li v-for="r in comments" :key="r.id" data-test="review-item">
+                <strong>{{ LABELS[r.type] }}</strong>
+                <span v-if="r.author" class="muted agent-label" data-test="review-author">
+                  <template v-for="n in [authorName(r.author)]" :key="n.name"
+                    >·
+                    <bdi class="agent-name" dir="auto" data-test="agent-name" :title="n.name">{{
+                      n.name
+                    }}</bdi
+                    ><span v-if="n.agent" class="agent-tag" data-test="agent-tag">Bot</span>
+                    <template v-if="n.note"
+                      >{{ ' '
+                      }}<span class="agent-note" data-test="agent-note">{{
+                        n.note
+                      }}</span></template
+                    ></template
+                  ></span
+                >
+                <q>{{ r.text }}</q>
+              </li>
+            </ul>
+          </section>
+        </div>
+      </Teleport>
     </div>
     <ContextMenu v-if="menuAt" :x="menuAt.x" :y="menuAt.y" @close="menuAt = null" />
     <div
@@ -757,19 +775,25 @@ const LABELS: Record<ReviewItem['type'], string> = {
         {{ (chapterWords ?? 0).toLocaleString('en-US') }} words
       </div>
     </template>
-    <StatusBar
-      v-if="!focusMode && !sliceMode"
-      v-model:zoom="zoom"
-      :chapter-title="chapterTitle"
-      :chapter-words="chapterWords"
-      :selection-words="selectionWords"
-      :book-words="bookWords"
-      :save-state="saveState"
+    <Teleport
+      :to="statusTarget || 'body'"
+      :disabled="!statusTarget || sliceMode || focusMode"
+      defer
     >
-      <span v-if="tracking" class="sh-status-track" data-test="status-tracking"
-        >Tracking changes</span
+      <StatusBar
+        v-if="!focusMode && !sliceMode"
+        v-model:zoom="zoom"
+        :chapter-title="chapterTitle"
+        :chapter-words="chapterWords"
+        :selection-words="selectionWords"
+        :book-words="bookWords"
+        :save-state="saveState"
       >
-    </StatusBar>
+        <span v-if="tracking" class="sh-status-track" data-test="status-tracking"
+          >Tracking changes</span
+        >
+      </StatusBar>
+    </Teleport>
   </div>
 </template>
 
@@ -788,8 +812,12 @@ const LABELS: Record<ReviewItem['type'], string> = {
   height: 100%;
   min-height: 0;
 }
-.manuscript-editor--slice {
+.manuscript-editor--slice,
+.manuscript-editor--stacked {
   height: auto;
+}
+.manuscript-editor--stacked .body {
+  flex: none;
 }
 .manuscript-editor--slice .page-sheet {
   margin-top: var(--ct-space-4);
@@ -921,7 +949,16 @@ const LABELS: Record<ReviewItem['type'], string> = {
   min-height: 0;
   background: var(--ct-surface);
 }
+.continuous-review-rail .review {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--ct-surface);
+}
 .manuscript-editor .review > :first-child {
+  flex: 1;
+}
+.continuous-review-rail .review > :first-child {
   flex: 1;
 }
 /* #90: the open review column has a fixed width (400px; 320px below 1200px), so its contents
@@ -933,7 +970,18 @@ const LABELS: Record<ReviewItem['type'], string> = {
   width: var(--ct-panel-w);
   min-width: var(--ct-panel-w-narrow);
 }
+.continuous-review-rail .review:not(.review--collapsed) {
+  box-sizing: border-box;
+  width: var(--ct-panel-w);
+  min-width: var(--ct-panel-w-narrow);
+  height: 100%;
+}
 .manuscript-editor .review:not(.review--collapsed) > * {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+.continuous-review-rail .review:not(.review--collapsed) > * {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
@@ -942,11 +990,16 @@ const LABELS: Record<ReviewItem['type'], string> = {
   .manuscript-editor .review:not(.review--collapsed) {
     width: var(--ct-panel-w-narrow);
   }
+  .continuous-review-rail .review:not(.review--collapsed) {
+    width: var(--ct-panel-w-narrow);
+  }
 }
-.manuscript-editor .comments-empty {
+.manuscript-editor .comments-empty,
+.continuous-review-rail .comments-empty {
   margin-top: var(--ct-space-4);
 }
-.manuscript-editor .comments {
+.manuscript-editor .comments,
+.continuous-review-rail .comments {
   width: 300px;
   box-sizing: border-box;
   padding: var(--ct-space-3);
