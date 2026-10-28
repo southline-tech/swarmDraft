@@ -816,8 +816,17 @@ const LABELS: Record<ReviewItem['type'], string> = {
 .manuscript-editor--stacked {
   height: auto;
 }
+/* Continuous manuscript (107): scrollport is the outer column; never trap prose in the desk. */
 .manuscript-editor--stacked .body {
   flex: none;
+  min-height: auto;
+}
+.manuscript-editor--stacked .body > .desk {
+  min-height: auto;
+  overflow: visible;
+}
+.manuscript-editor--stacked .page-sheet {
+  min-height: unset;
 }
 .manuscript-editor--slice .page-sheet {
   margin-top: var(--ct-space-4);
