@@ -59,14 +59,15 @@ describe('SectionNav', () => {
     w.unmount();
   });
 
-  it('a row click asks to focus the editor; keyboard moves and renaming do not', async () => {
+  it('a row click and arrow moves ask to focus the editor; New chapter does not', async () => {
     const w = setup();
     await w.find('[data-test="section-ch-1"]').trigger('click');
     expect(w.emitted('activate')).toEqual([['ch-1']]);
     await w.find('[data-test="section-ch-1"]').trigger('keydown', { key: 'ArrowDown' });
+    expect(w.emitted('activate')).toEqual([['ch-1'], ['ch-2']]);
     await w.find('[data-test="new-chapter"]').trigger('click');
     await settle();
-    expect(w.emitted('activate')).toHaveLength(1);
+    expect(w.emitted('activate')).toHaveLength(2);
     w.unmount();
   });
 

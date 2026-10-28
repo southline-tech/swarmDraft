@@ -565,7 +565,7 @@ const chapterLabel = computed(() => {
   return n ? `Chapter ${NUMBER_WORDS[n - 1] ?? n}` : '';
 });
 
-defineExpose({ open });
+defineExpose({ open, closeSession });
 </script>
 
 <template>

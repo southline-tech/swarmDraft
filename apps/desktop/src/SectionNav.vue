@@ -237,7 +237,7 @@ function onKey(e: KeyboardEvent, row: Row) {
   const go = (j: number) => {
     const id = ids[Math.max(0, Math.min(ids.length - 1, j))];
     if (id) {
-      select(id);
+      activate(id);
       focusRow(id);
     }
   };
@@ -486,6 +486,9 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
   align-items: baseline;
   padding: 0.2rem 0.5rem;
   cursor: pointer;
+}
+.row:hover {
+  background: var(--ct-selected-bg);
 }
 .row.selected {
   background: var(--ct-selected-bg);
