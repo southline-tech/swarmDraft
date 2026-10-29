@@ -51,6 +51,18 @@ describe('design tokens only', () => {
     expect(rule).toContain('var(--ct-selected-bg)');
     expect(rule).toContain('var(--ct-text)');
   });
+
+  it('outline hover uses a subtler token than the selected row (#47)', () => {
+    const css = styles(read('./SectionNav.vue'));
+    const hover =
+      css.match(/\.row:hover:not\(\.selected\)\s*\{([^}]*)\}/)?.[1] ??
+      css.match(/\.row:hover\s*\{([^}]*)\}/)?.[1] ??
+      '';
+    const selected = css.match(/\.row\.selected\s*\{([^}]*)\}/)?.[1] ?? '';
+    expect(hover).toContain('var(--ct-hover-bg)');
+    expect(selected).toContain('var(--ct-selected-bg)');
+    expect(hover).not.toEqual(selected);
+  });
 });
 
 it('settings.css (#99) uses only --ct-* tokens that exist and no hard-coded colors', () => {

@@ -344,7 +344,6 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
   font-family: var(--ct-font-ui);
   font-size: var(--ct-text-sm);
   min-height: 0;
-  overflow: auto;
 }
 .review-panel {
   width: 400px;
@@ -354,6 +353,7 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
   flex-direction: column;
   gap: var(--ct-space-3);
   position: relative;
+  overflow: visible;
 }
 .review-rail {
   width: 40px;
@@ -363,6 +363,7 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
   align-items: center;
   gap: var(--ct-space-2);
   padding-top: var(--ct-space-2);
+  overflow: auto;
 }
 .head {
   display: flex;

@@ -273,3 +273,14 @@ export async function saveOutline(
 export async function saveManuscriptCopy(title: string, bytes: Uint8Array): Promise<string | null> {
   return invoke<string | null>('save_manuscript_copy', { title, bytes: Array.from(bytes) });
 }
+
+/** Open comments and saved agent names for the active section's review sidebar (#47). */
+export interface SectionReviewMeta {
+  comments: import('@coauthor/editor').CommentRow[];
+  authorSavedNames: Record<string, string>;
+}
+
+export async function sectionReviewMeta(sectionId: string): Promise<SectionReviewMeta> {
+  if (!isTauri()) return { comments: [], authorSavedNames: {} };
+  return invoke<SectionReviewMeta>('section_review_meta', { sectionId });
+}

@@ -16,7 +16,7 @@ import {
   type StoredManuscriptRow,
 } from './backend';
 import SettingsScreen from './settings/SettingsScreen.vue';
-import { authorName, refreshAgents, reloadOnFocus } from './agent-names';
+import { markAuthorLabel, refreshAgents, reloadOnFocus } from './agent-names';
 import ContinuousManuscript from './ContinuousManuscript.vue';
 import SectionNav from './SectionNav.vue';
 import {
@@ -957,7 +957,7 @@ defineExpose({ open, closeSession });
             : undefined
         "
         :save-state="saveStatus"
-        :author-labels="authorName"
+        :author-labels="markAuthorLabel"
         toolbar-target="#toolbar-row"
         external-load-error
         :outline-forced="outlineForced"
