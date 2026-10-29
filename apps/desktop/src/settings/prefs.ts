@@ -8,6 +8,8 @@ import { applyThemeParam } from '../shells/preview';
 export type Theme = 'light' | 'dark';
 export const THEME_KEY = 'swarmdraft.theme';
 export const PROFILE_KEY = 'swarmdraft.profile';
+export const TRACKING_KEY = 'swarmdraft.trackChanges';
+export const TRACK_PROMPT_SEEN_KEY = 'swarmdraft.trackPromptSeen';
 
 type Store = Pick<Storage, 'getItem' | 'setItem'> | undefined;
 
@@ -73,6 +75,74 @@ export function saveProfile(p: Profile, storage: Store = globalThis.localStorage
     name: p.name.trim().slice(0, 64) || DEFAULT_PROFILE.name,
     color: validColor(p.color) ? p.color : DEFAULT_PROFILE.color,
   };
-  storage?.setItem(PROFILE_KEY, JSON.stringify(kept));
+  try {
+    storage?.setItem(PROFILE_KEY, JSON.stringify(kept));
+  } catch {
+    // Storage unavailable: caller still gets the normalized profile for this session.
+  }
   return kept;
+}
+
+export function hasStoredProfile(storage: Store = globalThis.localStorage): boolean {
+  try {
+    return storage?.getItem(PROFILE_KEY) != null;
+  } catch {
+    return false;
+  }
+}
+
+export function loadTracking(storage: Store = globalThis.localStorage): boolean {
+  try {
+    return storage?.getItem(TRACKING_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function saveTracking(on: boolean, storage: Store = globalThis.localStorage): void {
+  try {
+    storage?.setItem(TRACKING_KEY, on ? '1' : '0');
+  } catch {
+    // Session-only when storage is unavailable.
+  }
+}
+
+export function loadTrackPromptSeen(storage: Store = globalThis.localStorage): boolean {
+  try {
+    return storage?.getItem(TRACK_PROMPT_SEEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function saveTrackPromptSeen(storage: Store = globalThis.localStorage): void {
+  try {
+    storage?.setItem(TRACK_PROMPT_SEEN_KEY, '1');
+  } catch {
+    // Session-only when storage is unavailable.
+  }
+}
+
+/** Trim and cap a writer display name for profile seeding (#57). */
+export function normalizeWriterName(raw: string, fallback = DEFAULT_PROFILE.name): string {
+  const name = raw.trim().slice(0, 64);
+  return name || fallback;
+}
+
+/** Best-effort computer display name when seeding profile (no OS IPC in #57). */
+export function computerDisplayName(override?: string, fallback = DEFAULT_PROFILE.name): string {
+  if (override?.trim()) return normalizeWriterName(override, fallback);
+  return fallback;
+}
+
+/** Seed profile on first track-changes enable when nothing is stored yet. */
+export function seedProfileForTracking(
+  computerName: string | undefined,
+  storage: Store = globalThis.localStorage,
+): Profile {
+  if (hasStoredProfile(storage)) return loadProfile(storage);
+  return saveProfile(
+    { name: computerDisplayName(computerName), color: DEFAULT_PROFILE.color },
+    storage,
+  );
 }

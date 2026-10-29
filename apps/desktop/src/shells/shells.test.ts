@@ -6,6 +6,7 @@ import ManuscriptEditor from '../ManuscriptEditor.vue';
 import ContextMenu from './ContextMenu.vue';
 import type { ContextMenuAction } from './context-menu';
 import { SAMPLE_DOC } from '../fixtures/sample';
+import { loadTracking, PROFILE_KEY, TRACK_PROMPT_SEEN_KEY, TRACKING_KEY } from '../settings/prefs';
 
 /** Each UI shell opens and renders, and using it leaves the manuscript and its Y.Doc untouched. */
 async function mounted() {
@@ -213,7 +214,10 @@ describe('UI shells (Part of #36)', () => {
     w.unmount();
   });
 
-  it('track changes toggle is visual state only', async () => {
+  it('track changes toggle persists and shows first-time prompt (#57)', async () => {
+    localStorage.removeItem(TRACKING_KEY);
+    localStorage.removeItem(TRACK_PROMPT_SEEN_KEY);
+    localStorage.removeItem(PROFILE_KEY);
     const { w, unchanged } = await mounted();
     const t = w.find('[data-test="track-changes"]');
     expect(t.attributes('aria-pressed')).toBe('false');
@@ -221,8 +225,11 @@ describe('UI shells (Part of #36)', () => {
     expect(t.attributes('aria-pressed')).toBe('true');
     expect(t.text()).toContain('On');
     expect(w.find('[data-test="status-tracking"]').exists()).toBe(true);
-    // The read-only Open/Resolved tabs were superseded by the real review panel (#44).
+    expect(w.find('[data-test="name-prompt"]').exists()).toBe(true);
     expect(w.findAll('[data-test="margin-note"]').length).toBeGreaterThan(0);
+    await w.get('[data-test="name-prompt-ok"]').trigger('click');
+    expect(w.find('[data-test="name-prompt"]').exists()).toBe(false);
+    expect(loadTracking()).toBe(true);
     unchanged();
     w.unmount();
   });
