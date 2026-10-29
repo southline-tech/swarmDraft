@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import type { Section } from '@coauthor/schema';
@@ -35,6 +36,21 @@ function ctxEl(testId: string) {
   const el = document.body.querySelector(`[data-test="${testId}"]`);
   expect(el, testId).toBeTruthy();
   return el as HTMLElement;
+}
+function mockRowRect(w: W, id: string, top: number, height: number) {
+  const target = w.get(`[data-test="section-${id}"]`).element as HTMLElement;
+  vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({
+    top,
+    height,
+    bottom: top + height,
+    left: 0,
+    right: 200,
+    width: 200,
+    x: 0,
+    y: top,
+    toJSON: () => ({}),
+  } as DOMRect);
+  return target;
 }
 async function openCtx(w: W, id: string) {
   await w.find(`[data-test="section-${id}"]`).trigger('contextmenu', { clientX: 80, clientY: 120 });
@@ -186,8 +202,10 @@ describe('SectionNav', () => {
       },
     ];
     const w = setup({ sections: s });
+    mockRowRect(w, 'part-2', 200, 40);
     await w.find('[data-test="section-ch-1"]').trigger('dragstart');
-    await w.find('[data-test="section-part-2"]').trigger('drop');
+    await w.find('[data-test="section-part-2"]').trigger('dragover', { clientY: 220 });
+    await w.find('[data-test="section-part-2"]').trigger('drop', { clientY: 220 });
     await settle();
     expect(w.props('sections').find((x) => x.id === 'ch-1')!.parentId).toBe('part-2');
     w.unmount();
@@ -335,26 +353,17 @@ describe('SectionNav', () => {
   });
 
   it('styles the drop indicator as a 2px accent line (#108)', () => {
-    const sfc = readFileSync(new URL('./SectionNav.vue', import.meta.url), 'utf8');
+    const sfc = readFileSync(resolve(__dirname, 'SectionNav.vue'), 'utf8');
     const css = sfc.slice(sfc.indexOf('<style'));
     expect(css).toMatch(/\.drop-line[\s\S]*height:\s*2px/);
     expect(css).toContain('background: var(--ct-accent)');
+    expect(css).toContain('.row--drop-into');
+    expect(css).toMatch(/inset 0 0 0 2px var\(--ct-accent\)/);
   });
 
   it('shows an accent drop line while dragging over a row (#108)', async () => {
     const w = setup();
-    const target = w.get('[data-test="section-ch-2"]').element as HTMLElement;
-    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({
-      top: 80,
-      height: 40,
-      bottom: 120,
-      left: 0,
-      right: 200,
-      width: 200,
-      x: 0,
-      y: 80,
-      toJSON: () => ({}),
-    } as DOMRect);
+    mockRowRect(w, 'ch-2', 80, 40);
     await w.find('[data-test="section-ch-1"]').trigger('dragstart');
     await w.find('[data-test="section-ch-2"]').trigger('dragover', { clientY: 85 });
     await settle();
@@ -362,27 +371,82 @@ describe('SectionNav', () => {
     w.unmount();
   });
 
+  it('shows an accent line after the row in the lower half (#108)', async () => {
+    const w = setup();
+    mockRowRect(w, 'ch-1', 60, 40);
+    await w.find('[data-test="section-ch-2"]').trigger('dragstart');
+    await w.find('[data-test="section-ch-1"]').trigger('dragover', { clientY: 95 });
+    await settle();
+    expect(w.find('[data-test="drop-line-after"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('shows an into-part inset while dragging over a part row (#108)', async () => {
+    const w = setup();
+    mockRowRect(w, 'part-1', 40, 40);
+    await w.find('[data-test="section-ch-1"]').trigger('dragstart');
+    await w.find('[data-test="section-part-1"]').trigger('dragover', { clientY: 60 });
+    await settle();
+    expect(w.find('[data-test="section-part-1"]').classes()).toContain('row--drop-into');
+    w.unmount();
+  });
+
   it('drops before the target when the pointer is in the upper half (#108)', async () => {
     const w = setup();
-    const target = w.get('[data-test="section-ch-1"]').element as HTMLElement;
-    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({
-      top: 60,
-      height: 40,
-      bottom: 100,
-      left: 0,
-      right: 200,
-      width: 200,
-      x: 0,
-      y: 60,
-      toJSON: () => ({}),
-    } as DOMRect);
+    mockRowRect(w, 'ch-1', 60, 40);
     await w.find('[data-test="section-ch-2"]').trigger('dragstart');
     await w.find('[data-test="section-ch-1"]').trigger('dragover', { clientY: 65 });
     await settle();
     expect(w.find('[data-test="drop-line-before"]').exists()).toBe(true);
-    await w.find('[data-test="section-ch-1"]').trigger('drop');
+    await w.find('[data-test="section-ch-1"]').trigger('drop', { clientY: 65 });
     await settle();
     expect(titles(w).slice(2, 4)).toEqual(['After the bell', 'Harbor dawn']);
+    w.unmount();
+  });
+
+  it('clears the undo banner when the outline changes after a delete', async () => {
+    const w = setup({ selectedId: 'ch-2' });
+    await openCtx(w, 'ch-2');
+    await ctxClick(w, 'outline-ctx-delete');
+    await w.find('[data-test="confirm-delete-all"]').trigger('click');
+    await settle();
+    expect(w.find('[data-test="outline-undo-delete-btn"]').exists()).toBe(true);
+    await openCtx(w, 'ch-1');
+    await ctxClick(w, 'outline-ctx-rename');
+    await w.find('[data-test="rename-input"]').setValue('Renamed chapter');
+    await w.find('[data-test="rename-input"]').trigger('keydown', { key: 'Enter' });
+    await settle();
+    expect(w.find('[data-test="outline-undo-delete-btn"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('drops after a part row as a sibling, not under the next chapter (#108)', async () => {
+    let s = sampleOutline();
+    s = [
+      ...s,
+      {
+        id: 'part-2',
+        kind: 'part',
+        title: 'Part Two',
+        docId: 'manuscript/sample/section/part-2',
+      },
+    ];
+    const w = setup({ sections: s });
+    mockRowRect(w, 'part-1', 40, 40);
+    await w.find('[data-test="section-part-2"]').trigger('dragstart');
+    await w.find('[data-test="section-part-1"]').trigger('dragover', { clientY: 75 });
+    await settle();
+    expect(w.find('[data-test="drop-line-after"]').exists()).toBe(true);
+    await w.find('[data-test="section-part-1"]').trigger('drop', { clientY: 75 });
+    await settle();
+    expect(titles(w)).toEqual([
+      'Title page',
+      'Opening arc',
+      'Harbor dawn',
+      'After the bell',
+      'Part Two',
+      'About the author',
+    ]);
     w.unmount();
   });
 });

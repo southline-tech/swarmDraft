@@ -142,6 +142,7 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-29 · #104 · PR Genie · book menu must not close on Recent toggle; dismiss after recent pick; hide Ctrl+N while importing; no global shortcuts in shell preview
 - 2026-10-29 · #108 · Designer review · outline context menu icons + `aria-disabled` move rows like #137; trash icon in danger color
 - 2026-10-29 · #108 · PR Genie · undo delete must rehydrate evicted section Y.Docs; keep undo banner until restore save succeeds
+- 2026-10-29 · #108 · review bot · flat-list “after” on a part row must skip descendants; recompute drop edge on drop; clear undo banner on any other outline edit · use tree walk in `dropTargetFor`, pass DragEvent into `onDrop`, `preserveUndoBanner` only for delete/undo commits
 - 2026-10-26 · #71 · user-facing notices said 'database' and 'port 7337' · user-visible text stays plain for writers; technical details go to logs
 - 2026-10-26 · #71 · a read-only SQLite open of the old db after a crash created -shm in the old folder · never open the source db with SQLite in a folder you must not touch; copy db + -wal byte for byte to staging and snapshot from the copy; prove it with tests that hash names, bytes and mtimes before and after
 - 2026-10-26 · #71 · the snapshot test still passed with the fix replaced by a raw copy · before handoff, revert each fix, confirm its test fails, then restore

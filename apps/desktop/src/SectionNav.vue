@@ -81,8 +81,12 @@ const saveError = ref<string>();
 const busy = ref(false);
 
 /** Run one edit as a transaction: validate, save, then emit; on any failure nothing changes. */
-async function commit(edit: (s: Section[]) => Section[]): Promise<Section[] | undefined> {
+async function commit(
+  edit: (s: Section[]) => Section[],
+  opts?: { preserveUndoBanner?: boolean },
+): Promise<Section[] | undefined> {
   if (busy.value) return undefined;
+  if (!opts?.preserveUndoBanner) undoSections.value = null;
   const result = applyOutlineEdit(list.value, edit);
   if (!result.ok) {
     saveError.value = result.error.message;
@@ -169,7 +173,7 @@ const undoSections = ref<Section[] | null>(null);
 async function undoDelete() {
   const snap = undoSections.value;
   if (!snap) return;
-  const next = await commit(() => snap.map((x) => ({ ...x })));
+  const next = await commit(() => snap.map((x) => ({ ...x })), { preserveUndoBanner: true });
   if (next) undoSections.value = null;
 }
 
@@ -292,7 +296,9 @@ async function confirmDelete(children: 'delete' | 'promote') {
   if (!id) return;
   undoSections.value = list.value.map((x) => ({ ...x }));
   const rowsNow = rows.value.map((r) => r.section.id);
-  const next = await commit((s) => deleteSection(s, id, { children }));
+  const next = await commit((s) => deleteSection(s, id, { children }), {
+    preserveUndoBanner: true,
+  });
   if (next) {
     const i = rowsNow.indexOf(id);
     const fallback = next.find((s) => s.id === rowsNow[i - 1]) ?? next[0];
@@ -341,25 +347,38 @@ function onDragLeave(e: DragEvent, row: Row) {
 function dropTargetFor(target: Section, edge: DropEdge) {
   if (edge === 'into') return { parentId: target.id };
   if (edge === 'before') return { beforeId: target.id };
-  const idx = list.value.findIndex((x) => x.id === target.id);
-  const next = list.value[idx + 1];
-  if (next && next.parentId === target.parentId) return { beforeId: next.id };
+  const flat = rows.value;
+  const i = flat.findIndex((r) => r.section.id === target.id);
+  if (i < 0) return { parentId: target.parentId };
+  const depth = flat[i]!.depth;
+  let j = i + 1;
+  while (j < flat.length && flat[j]!.depth > depth) j += 1;
+  if (j < flat.length) return { beforeId: flat[j]!.section.id };
   return { parentId: target.parentId };
 }
-async function onDrop(target: Section) {
+async function onDrop(e: DragEvent, target: Section, row: Row) {
   const id = dragId.value;
   const hint = dropHint.value;
-  dragId.value = undefined;
-  dropHint.value = null;
   const dragged = byId(id);
   if (!id || !dragged || id === target.id) return;
   const edge =
-    hint?.targetId === target.id
+    dropEdgeFor(e, row) ??
+    (hint?.targetId === target.id
       ? hint.edge
       : canNest(dragged.kind, target.kind)
         ? 'into'
-        : 'before';
-  await commit((s) => dropSection(s, id, dropTargetFor(target, edge)));
+        : 'before');
+  const next = await commit((s) => {
+    const moved = dropSection(s, id, dropTargetFor(target, edge));
+    if (sectionIdOrder(moved) === sectionIdOrder(s)) {
+      throw new Error('That move is not allowed here.');
+    }
+    return moved;
+  });
+  if (next) {
+    dragId.value = undefined;
+    dropHint.value = null;
+  }
 }
 
 // Keyboard: roving focus over the visible rows.
@@ -473,7 +492,7 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
         @dragend="onDragEnd"
         @dragover="onDragOver($event, row)"
         @dragleave="onDragLeave($event, row)"
-        @drop.prevent="onDrop(row.section)"
+        @drop.prevent="onDrop($event, row.section, row)"
         @click="activate(row.section.id)"
         @contextmenu="onRowContextMenu($event, row.section.id)"
         @dblclick="startRename(row.section.id, row.section.title)"
