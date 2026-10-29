@@ -189,12 +189,13 @@
   padding: 28px 32px 24px;
   font-family: var(--ct-font-ui);
 }
+.sh-sheet__head {
+  gap: 12px;
+}
 .sh-sheet h2 {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
-  display: flex;
-  align-items: center;
 }
 .sh-sheet .sh-subt {
   color: var(--ct-text-muted);
@@ -351,7 +352,24 @@
   color: var(--ct-text);
   font-weight: 500;
 }
-.sh-status-track::before {
+.sh-status-track--muted {
+  color: var(--ct-text-muted);
+  font-weight: 400;
+}
+.sh-status-track-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  line-height: 1.25;
+}
+.sh-status-track-as {
+  color: var(--ct-text-muted);
+  font-weight: 400;
+}
+.sh-status-track-hint {
+  color: var(--ct-text-muted);
+}
+.sh-status-track--on::before {
   content: '';
   width: 8px;
   height: 8px;

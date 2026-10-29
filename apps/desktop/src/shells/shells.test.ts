@@ -6,6 +6,10 @@ import ManuscriptEditor from '../ManuscriptEditor.vue';
 import ContextMenu from './ContextMenu.vue';
 import type { ContextMenuAction } from './context-menu';
 import { SAMPLE_DOC } from '../fixtures/sample';
+import { loadTracking, PROFILE_KEY, TRACK_PROMPT_SEEN_KEY, TRACKING_KEY } from '../settings/prefs';
+import { REVIEW_SHORTCUTS } from '../review/review-state';
+import { SHORTCUTS } from '../toolbar/toolbar';
+import { MANUSCRIPT_SHORTCUTS } from './app-shortcuts';
 
 /** Each UI shell opens and renders, and using it leaves the manuscript and its Y.Doc untouched. */
 async function mounted() {
@@ -200,12 +204,24 @@ describe('UI shells (Part of #36)', () => {
     w.unmount();
   });
 
+  it('opens from the menu button with shared shortcut chord', async () => {
+    const { w, unchanged } = await mounted();
+    await w.find('[data-test="shortcuts-open"]').trigger('click');
+    expect(w.find('[data-test="shortcuts-sheet"]').exists()).toBe(true);
+    unchanged();
+    w.unmount();
+  });
+
   it('keyboard shortcuts sheet opens with Ctrl+/ and closes on Esc', async () => {
     const { w, unchanged } = await mounted();
     await w.find('.manuscript-editor').trigger('keydown', { key: '/', ctrlKey: true });
     const sheet = w.find('[data-test="shortcuts-sheet"]');
     expect(sheet.exists()).toBe(true);
     expect(sheet.text()).toContain('Keyboard shortcuts');
+    expect(sheet.text()).toContain('Bold');
+    expect(sheet.text()).toContain(SHORTCUTS.bold.split('+')[1]);
+    expect(sheet.text()).toContain(MANUSCRIPT_SHORTCUTS.find.split('+')[1]);
+    expect(sheet.text()).toContain(REVIEW_SHORTCUTS.accept.split('+').slice(-1)[0]!);
     expect(document.activeElement?.getAttribute('data-test')).toBe('shortcuts-close');
     await sheet.trigger('keydown', { key: 'Escape' });
     expect(w.find('[data-test="shortcuts-sheet"]').exists()).toBe(false);
@@ -213,16 +229,49 @@ describe('UI shells (Part of #36)', () => {
     w.unmount();
   });
 
-  it('track changes toggle is visual state only', async () => {
+  it('does not run editor shortcuts while the shortcuts sheet is open', async () => {
+    const { w } = await mounted();
+    await w.find('[data-test="shortcuts-open"]').trigger('click');
+    await w.find('[data-test="shortcuts-sheet"]').trigger('keydown', {
+      key: 'f',
+      ctrlKey: true,
+    });
+    expect(w.find('[data-test="find-panel"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('applies heading style from Ctrl+Alt+1 on the editor shell (#56)', async () => {
+    const ydoc = docToYDoc(SAMPLE_DOC as never);
+    const w = mount(ManuscriptEditor, { props: { doc: ydoc }, attachTo: document.body });
+    await flushPromises();
+    const editor = (
+      w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+    ).editor;
+    editor.commands.setTextSelection(1);
+    await w
+      .find('.manuscript-editor')
+      .trigger('keydown', { key: '1', ctrlKey: true, altKey: true });
+    expect(editor.isActive('heading')).toBe(true);
+    w.unmount();
+  });
+
+  it('track changes toggle persists and shows first-time prompt (#57)', async () => {
+    localStorage.removeItem(TRACKING_KEY);
+    localStorage.removeItem(TRACK_PROMPT_SEEN_KEY);
+    localStorage.removeItem(PROFILE_KEY);
     const { w, unchanged } = await mounted();
     const t = w.find('[data-test="track-changes"]');
     expect(t.attributes('aria-pressed')).toBe('false');
     await t.trigger('click');
     expect(t.attributes('aria-pressed')).toBe('true');
-    expect(t.text()).toContain('On');
+    expect(t.text()).toContain('Track changes · On');
     expect(w.find('[data-test="status-tracking"]').exists()).toBe(true);
-    // The read-only Open/Resolved tabs were superseded by the real review panel (#44).
+    expect(w.find('[data-test="status-tracking-as"]').exists()).toBe(true);
+    expect(w.find('[data-test="name-prompt"]').exists()).toBe(true);
     expect(w.findAll('[data-test="margin-note"]').length).toBeGreaterThan(0);
+    await w.get('[data-test="name-prompt-ok"]').trigger('click');
+    expect(w.find('[data-test="name-prompt"]').exists()).toBe(false);
+    expect(loadTracking()).toBe(true);
     unchanged();
     w.unmount();
   });

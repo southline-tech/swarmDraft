@@ -5,6 +5,8 @@ export interface AppInfo {
   version: string;
   dataDir: string;
   schemaVersion: number;
+  /** OS account name for track-changes profile seeding (#57); present in the desktop app. */
+  computerName?: string;
 }
 
 /** Ask the Rust side for basic app info; returns null in a plain browser (pnpm dev:web). */

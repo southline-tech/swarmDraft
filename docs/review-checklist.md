@@ -228,3 +228,6 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-28 · #52 · New chapter row was a disabled shell · wire it to the same add flow as More sections and test outline + session doc creation
 - 2026-10-29 · #80 · Designer review (#150) · ob6 card sizes (560 / 44 / 48 / xl / 10px bar); opening error in assertive `data-test="opening-error"` wrapper, not on ErrorCard
 - 2026-10-29 · #80 · Designer/PM review (#150) · cold reopen ob6 title from `listManuscripts`, never PRODUCT_NAME; Try again re-runs stored `OpeningRetry`
+- 2026-10-29 · #57 · Designer review (#149) · off toggle must not show "· Off"; status bar needs tc1 off line and tc2 "Your changes show as …" with default hint when on
+- 2026-10-29 · #57 · Designer review (#149) · tc3 NamePrompt uses role=status with focus on open, Esc close, focus return to the track toggle
+- 2026-10-29 · #57 · PM review (#149) · "We used your computer's name" only when `app_info.computerName` is wired through App → editor; alternate copy in browser/tests

@@ -48,10 +48,25 @@ import ContextMenu from './shells/ContextMenu.vue';
 import {
   contextMenuDisabled,
   runContextMenuAction,
+  contextMenuActionForKey,
   type ContextMenuAction,
 } from './shells/context-menu';
 import { caretStyle } from './toolbar/toolbar';
 import ShortcutsSheet from './shells/ShortcutsSheet.vue';
+import NamePrompt from './shells/NamePrompt.vue';
+import NameColorSection from './settings/NameColorSection.vue';
+import { SWATCHES, swatchVar } from './shells/colors';
+import {
+  DEFAULT_PROFILE,
+  loadProfile,
+  loadTrackPromptSeen,
+  loadTracking,
+  saveTrackPromptSeen,
+  saveTracking,
+  seedProfileForTracking,
+  type Profile,
+} from './settings/prefs';
+import { ariaKeyshortcuts, MANUSCRIPT_SHORTCUTS } from './shells/app-shortcuts';
 import './shells/shells.css';
 import {
   collaborativeEditorOptions,
@@ -121,6 +136,10 @@ const props = defineProps<{
   reviewTarget?: string;
   /** Parent-hosted status bar (outside the scroll area). */
   statusTarget?: string;
+  /** Optional localStorage for tests (#57). */
+  storage?: Pick<Storage, 'getItem' | 'setItem'>;
+  /** Override computer display name when seeding profile on first track enable (#57). */
+  computerName?: string;
 }>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
@@ -147,8 +166,46 @@ const findFocusReplace = shallowRef(false);
 const menuAt = shallowRef<{ x: number; y: number } | null>(null);
 const shortcutsOpen = shallowRef(false);
 const focusMode = shallowRef(false);
-/** Track changes toggle (tc1/tc2): visual state only until suggestion mode is wired. */
-const tracking = shallowRef(false);
+const prefStore = () => props.storage ?? globalThis.localStorage;
+/** Track changes (#57): persisted on/off; first enable may show the tc3 name prompt. */
+const tracking = shallowRef(loadTracking(prefStore()));
+watch(tracking, (on) => saveTracking(on, prefStore()));
+const writerProfile = shallowRef<Profile>(loadProfile(prefStore()));
+const namePromptOpen = shallowRef(false);
+const nameColorPromptOpen = shallowRef(false);
+const profileColorName = computed(
+  () => SWATCHES.find((s) => s.id === writerProfile.value.color)?.name ?? 'Green',
+);
+const suggesterStyle = computed(() =>
+  tracking.value ? { '--ct-suggester': swatchVar(writerProfile.value.color) } : undefined,
+);
+const trackUsingDefaultName = computed(() => writerProfile.value.name === DEFAULT_PROFILE.name);
+const trackSeedFromComputer = computed(() => Boolean(props.computerName?.trim()));
+const trackToggleBtn = useTemplateRef<HTMLButtonElement>('trackToggleBtn');
+function dismissNamePrompt() {
+  namePromptOpen.value = false;
+  saveTrackPromptSeen(prefStore());
+}
+function toggleTrackChanges() {
+  if (tracking.value) {
+    tracking.value = false;
+    namePromptOpen.value = false;
+    nameColorPromptOpen.value = false;
+    return;
+  }
+  tracking.value = true;
+  writerProfile.value = seedProfileForTracking(props.computerName, prefStore());
+  if (!loadTrackPromptSeen(prefStore())) namePromptOpen.value = true;
+}
+function onNamePromptChange() {
+  namePromptOpen.value = false;
+  nameColorPromptOpen.value = true;
+}
+function onNameColorPromptClose() {
+  nameColorPromptOpen.value = false;
+  writerProfile.value = loadProfile(prefStore());
+  if (tracking.value && !loadTrackPromptSeen(prefStore())) dismissNamePrompt();
+}
 watch(focusMode, (on) => {
   emit('focus-mode', on);
   // #87 QA: focus mode hides the toolbar, so a toolbar button that started it would drop focus
@@ -164,6 +221,7 @@ const rootEl = useTemplateRef<HTMLElement>('root');
     the editor root already reach onShellKey, so they are skipped here to avoid a double toggle. */
 function onWindowKey(e: KeyboardEvent) {
   if (e.defaultPrevented) return;
+  if (shortcutsOpen.value) return;
   if (e.target instanceof Node && rootEl.value?.contains(e.target)) return;
   if (isField(e.target)) return;
   const mod = e.ctrlKey || e.metaKey;
@@ -193,6 +251,7 @@ function onWindowKey(e: KeyboardEvent) {
 const isField = (t: EventTarget | null) =>
   t instanceof HTMLElement && !!t.closest('input, textarea, select');
 function onShellKey(e: KeyboardEvent) {
+  if (shortcutsOpen.value) return;
   if (isField(e.target)) return;
   const mod = e.ctrlKey || e.metaKey;
   if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
@@ -215,6 +274,12 @@ function onShellKey(e: KeyboardEvent) {
     closeFind();
   } else if (e.key === 'Escape' && focusMode.value && !shortcutsOpen.value) {
     focusMode.value = false;
+  } else {
+    const ctx = contextMenuActionForKey(e);
+    if (ctx) {
+      e.preventDefault();
+      void runEditorContextAction(ctx);
+    }
   }
 }
 /** Close Find and put focus back in the page, so Escape and the focus-mode keys keep working. */
@@ -239,6 +304,9 @@ const menuActiveStyle = computed((): ContextMenuAction | undefined => {
 });
 async function onContextMenuSelect(action: ContextMenuAction) {
   menuAt.value = null;
+  await runEditorContextAction(action);
+}
+async function runEditorContextAction(action: ContextMenuAction) {
   const e = editor.value;
   if (!e || e.isDestroyed) return;
   if (action === 'ask-bot') {
@@ -365,6 +433,7 @@ const decideVisible = (d: Decision, keys: readonly string[]) =>
   );
 
 function onKeydown(ev: KeyboardEvent) {
+  if (shortcutsOpen.value) return;
   const action = reviewActionFor(ev);
   if (!action) return;
   if (action !== 'toggle') {
@@ -657,17 +726,18 @@ const LABELS: Record<ReviewItem['type'], string> = {
         >
           <template #end>
             <button
+              ref="trackToggleBtn"
               type="button"
               class="sh-track"
               data-test="track-changes"
               :aria-pressed="tracking"
-              title="Track changes (preview: not recording yet)"
-              @click="tracking = !tracking"
+              :title="tracking ? 'Track changes on' : 'Track changes off'"
+              @click="toggleTrackChanges"
             >
               <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
                 <path d="M3 13l1-3.5L11 2.5l2.5 2.5L6.5 12z" />
               </svg>
-              Track changes · {{ tracking ? 'On' : 'Off' }}
+              Track changes<template v-if="tracking"> · On</template>
             </button>
           </template>
           <template #menu>
@@ -676,8 +746,8 @@ const LABELS: Record<ReviewItem['type'], string> = {
               class="sh-tbtn sh-icon"
               data-test="shortcuts-open"
               aria-label="Keyboard shortcuts"
-              title="Keyboard shortcuts (Ctrl+/)"
-              aria-keyshortcuts="Control+/"
+              :title="`Keyboard shortcuts (${MANUSCRIPT_SHORTCUTS.shortcutsSheet})`"
+              :aria-keyshortcuts="ariaKeyshortcuts(MANUSCRIPT_SHORTCUTS.shortcutsSheet)"
               @click="shortcutsOpen = true"
             >
               ?
@@ -686,8 +756,8 @@ const LABELS: Record<ReviewItem['type'], string> = {
               type="button"
               class="sh-tbtn"
               data-test="focus-mode"
-              title="Focus mode (Ctrl+Shift+F)"
-              aria-keyshortcuts="Control+Shift+F"
+              :title="`Focus mode (${MANUSCRIPT_SHORTCUTS.focusMode})`"
+              :aria-keyshortcuts="ariaKeyshortcuts(MANUSCRIPT_SHORTCUTS.focusMode)"
               @click="focusMode = true"
             >
               Focus
@@ -711,6 +781,25 @@ const LABELS: Record<ReviewItem['type'], string> = {
           :focus-replace="findFocusReplace"
           @close="closeFind"
         />
+        <div v-if="namePromptOpen && !sliceMode" class="me-track-prompt" data-test="track-prompt">
+          <NamePrompt
+            :name="writerProfile.name"
+            :color-name="profileColorName"
+            :color="swatchVar(writerProfile.color)"
+            :used-computer-name="trackSeedFromComputer"
+            :return-focus="trackToggleBtn ?? undefined"
+            @ok="dismissNamePrompt"
+            @close="dismissNamePrompt"
+            @change="onNamePromptChange"
+          />
+        </div>
+        <div
+          v-if="nameColorPromptOpen && !sliceMode"
+          class="me-track-prompt me-track-prompt--wide"
+          data-test="track-name-color"
+        >
+          <NameColorSection :storage="prefStore()" @close="onNameColorPromptClose" />
+        </div>
         <div
           :class="{ 'page-sheet--narrow': pageNarrow }"
           class="page-sheet box-border mx-auto mt-8 mb-8 h-fit min-h-216 flex-none bg-paper p-18 text-text shadow-2"
@@ -723,6 +812,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
           <EditorContent
             :editor="editor"
             class="page"
+            :style="suggesterStyle"
             data-suggester
             @contextmenu.prevent="openMenu"
           />
@@ -861,9 +951,25 @@ const LABELS: Record<ReviewItem['type'], string> = {
         :book-words="bookWords"
         :save-state="saveState"
       >
-        <span v-if="tracking" class="sh-status-track" data-test="status-tracking"
-          >Tracking changes</span
-        >
+        <div class="sh-status-track-wrap">
+          <span
+            v-if="!tracking"
+            class="sh-status-track sh-status-track--muted"
+            data-test="status-tracking-off"
+            >Track changes is off</span
+          >
+          <template v-else>
+            <span class="sh-status-track sh-status-track--on" data-test="status-tracking"
+              >Tracking changes</span
+            >
+            <span class="sh-status-track-as" data-test="status-tracking-as">
+              Your changes show as <bdi dir="auto">{{ writerProfile.name }}</bdi
+              ><span v-if="trackUsingDefaultName" class="sh-status-track-hint">
+                (default name)</span
+              >
+            </span>
+          </template>
+        </div>
       </StatusBar>
     </Teleport>
   </div>
@@ -1111,5 +1217,23 @@ const LABELS: Record<ReviewItem['type'], string> = {
 }
 .manuscript-editor .muted {
   color: var(--ct-text-muted);
+}
+.manuscript-editor .desk {
+  position: relative;
+}
+.me-track-prompt {
+  position: absolute;
+  top: var(--ct-space-4);
+  right: var(--ct-space-4);
+  z-index: 25;
+  max-width: min(440px, calc(100% - var(--ct-space-8)));
+}
+.me-track-prompt--wide {
+  max-width: min(520px, calc(100% - var(--ct-space-8)));
+  padding: var(--ct-space-4);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-lg);
+  background: var(--ct-surface-raised);
+  box-shadow: var(--ct-elevation-3);
 }
 </style>
