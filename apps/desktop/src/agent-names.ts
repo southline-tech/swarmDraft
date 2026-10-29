@@ -8,6 +8,7 @@
 import { shallowRef } from 'vue';
 import { isTauri } from '@tauri-apps/api/core';
 import { agentsApi, type Agent } from './backend';
+import { pinPrimaryAgent } from './author-colors';
 
 export const AGENT_PREFIX = 'agent:';
 export const REMOVED_AGENT = 'Removed agent';
@@ -22,6 +23,8 @@ let reloadSeq = 0;
 
 const apply = (list: readonly Agent[]) => {
   agentDirectory.value = new Map(list.map((a) => [a.id, a]));
+  const primary = list.find((a) => a.primary && !a.revokedAt);
+  pinPrimaryAgent(primary?.id ?? null);
 };
 
 /** Set the list directly (e.g. from AgentsSettings); any reload already in flight is dropped. */

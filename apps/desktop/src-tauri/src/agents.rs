@@ -31,6 +31,8 @@ pub struct Agent {
     pub color: String,
     pub created_at: String,
     pub revoked_at: Option<String>,
+    /// Built-in P1 bot; at most one row is primary. Drives a fixed collab-1 color by agent id.
+    pub primary: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -123,8 +125,11 @@ fn row_agent(r: &rusqlite::Row) -> rusqlite::Result<Agent> {
         color: r.get(2)?,
         created_at: r.get(3)?,
         revoked_at: r.get(4)?,
+        primary: r.get::<_, i64>(5)? != 0,
     })
 }
+
+const AGENT_COLS: &str = "id, name, color, created_at, revoked_at, is_primary";
 
 fn row_token(r: &rusqlite::Row) -> rusqlite::Result<TokenInfo> {
     let scopes: String = r.get(3)?;
@@ -223,14 +228,19 @@ impl Store {
                     "an agent named \"{name}\" already exists; choose another name"
                 )));
             }
+            let make_primary = name_key(name) == name_key(DEFAULT_AGENT_NAME);
+            if make_primary {
+                c.execute("UPDATE agents SET is_primary = 0 WHERE is_primary = 1", [])?;
+            }
             c.execute(
                 &format!(
-                    "INSERT INTO agents (id, name, color, created_at) VALUES (?1, ?2, ?3, {NOW})"
+                    "INSERT INTO agents (id, name, color, created_at, is_primary)
+                     VALUES (?1, ?2, ?3, {NOW}, ?4)"
                 ),
-                params![id, name, color],
+                params![id, name, color, i64::from(make_primary)],
             )?;
             Ok(c.query_row(
-                "SELECT id, name, color, created_at, revoked_at FROM agents WHERE id = ?1",
+                &format!("SELECT {AGENT_COLS} FROM agents WHERE id = ?1"),
                 [&id],
                 row_agent,
             )?)
@@ -239,11 +249,24 @@ impl Store {
 
     pub fn list_agents(&self) -> Result<Vec<Agent>, StorageError> {
         self.with_conn(|c| {
-            let mut st = c.prepare(
-                "SELECT id, name, color, created_at, revoked_at FROM agents ORDER BY created_at, id",
-            )?;
+            let mut st = c.prepare(&format!(
+                "SELECT {AGENT_COLS} FROM agents ORDER BY created_at, id"
+            ))?;
             let rows = st.query_map([], row_agent)?.collect::<Result<_, _>>()?;
             Ok(rows)
+        })
+    }
+
+    /// Active primary agent id, if any. Revoked primaries are ignored.
+    pub fn primary_agent_id(&self) -> Result<Option<String>, StorageError> {
+        self.with_conn(|c| {
+            c.query_row(
+                "SELECT id FROM agents WHERE is_primary = 1 AND revoked_at IS NULL LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(StorageError::from)
         })
     }
 
@@ -617,5 +640,35 @@ mod tests {
         let a2 = s.create_token(&a.id, None).unwrap().token;
         assert_ne!(a1, a2);
         assert_eq!(a1.len(), TOKEN_PREFIX.len() + 43);
+    }
+
+    #[test]
+    fn default_agent_name_is_primary_and_at_most_one() {
+        let (_t, s) = store();
+        let helper = s.create_agent("Line Editor", "#3366ff").unwrap();
+        assert!(!helper.primary);
+        assert!(s.primary_agent_id().unwrap().is_none());
+
+        let grok = s.create_agent(DEFAULT_AGENT_NAME, "#3366ff").unwrap();
+        assert!(grok.primary);
+        assert_eq!(
+            s.primary_agent_id().unwrap().as_deref(),
+            Some(grok.id.as_str())
+        );
+        assert_eq!(
+            s.list_agents()
+                .unwrap()
+                .iter()
+                .filter(|a| a.primary)
+                .count(),
+            1
+        );
+
+        let other = s.create_agent("Copy Bot", "#112233").unwrap();
+        assert!(!other.primary);
+        assert_eq!(
+            s.primary_agent_id().unwrap().as_deref(),
+            Some(grok.id.as_str())
+        );
     }
 }

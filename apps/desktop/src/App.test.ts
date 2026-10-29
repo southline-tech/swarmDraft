@@ -990,7 +990,11 @@ describe('App saves typing to the section Y.Doc', () => {
 
 vi.mock('./backend', async (orig) => ({
   ...(await orig<typeof import('./backend')>()),
-  agentsApi: { list: vi.fn(async () => []), tokens: vi.fn(async () => []) },
+  agentsApi: {
+    list: vi.fn(async () => []),
+    primaryId: vi.fn(async () => null),
+    tokens: vi.fn(async () => []),
+  },
   getAppInfo: vi.fn(async () => ({
     version: '0.1.0',
     dataDir: '/tmp/x',

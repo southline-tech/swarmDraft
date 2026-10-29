@@ -22,6 +22,8 @@ export interface Agent {
   color: string;
   createdAt: string;
   revokedAt: string | null;
+  /** Built-in P1 bot; at most one agent is primary (#76). */
+  primary: boolean;
 }
 
 export const AGENT_SCOPES = ['read', 'comment', 'suggest'] as const;
@@ -45,6 +47,8 @@ export interface NewToken {
 
 export const agentsApi = {
   list: () => invoke<Agent[]>('agents_list'),
+  /** Active primary agent id, if any; revoked primaries are omitted. */
+  primaryId: () => invoke<string | null>('agents_primary_id'),
   create: (name: string, color: string) => invoke<Agent>('agent_create', { name, color }),
   revoke: (agentId: string) => invoke<void>('agent_revoke', { agentId }),
   tokens: (agentId: string) => invoke<TokenInfo[]>('agent_tokens_list', { agentId }),
@@ -53,6 +57,9 @@ export const agentsApi = {
   revokeToken: (tokenId: string) => invoke<void>('agent_token_revoke', { tokenId }),
 };
 export type AgentsApi = typeof agentsApi;
+
+/** Typed getter for the pinned P1 bot id (#76). */
+export const getPrimaryAgentId = () => agentsApi.primaryId();
 
 export interface BackupManifest {
   format: string;

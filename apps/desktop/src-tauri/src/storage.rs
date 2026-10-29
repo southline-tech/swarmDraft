@@ -112,6 +112,13 @@ const MIGRATIONS: &[&str] = &[
      CHECK (numbering_style IN ('chapter_arabic','chapter_words','chapter_upper','number_only'));",
     // #111: rows that picked up the provisional column default before INSERT was fixed.
     "UPDATE manuscripts SET numbering_style = 'chapter_arabic' WHERE numbering_style = 'chapter_words';",
+    // #76: stable primary-agent flag (P1 bot keeps collab-1 by id, not display name).
+    "ALTER TABLE agents ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0 CHECK (is_primary IN (0, 1));
+     CREATE UNIQUE INDEX agents_one_primary ON agents(is_primary) WHERE is_primary = 1;
+     UPDATE agents SET is_primary = 1 WHERE id = (
+         SELECT id FROM agents WHERE revoked_at IS NULL AND lower(trim(name)) = 'grok bot'
+         ORDER BY created_at, id LIMIT 1
+     );",
 ];
 
 /// How long a statement waits on a locked database before failing.
@@ -314,5 +321,35 @@ mod tests {
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
         assert_eq!(v, MIGRATIONS.len() as i64);
+    }
+
+    #[test]
+    fn primary_flag_migration_backfills_grok_bot() {
+        use crate::agents::DEFAULT_AGENT_NAME;
+        let tmp = tempfile::tempdir().unwrap();
+        {
+            let mut conn = Connection::open(tmp.path().join("coauthor.db")).unwrap();
+            migrate_with(&mut conn, &MIGRATIONS[..MIGRATIONS.len() - 1]).unwrap();
+            conn.execute(
+                "INSERT INTO agents (id, name, color, created_at) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params!["a1", "Line Editor", "#3366ff", "2026-01-01T00:00:00Z"],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO agents (id, name, color, created_at) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params!["a2", DEFAULT_AGENT_NAME, "#3366ff", "2026-01-02T00:00:00Z"],
+            )
+            .unwrap();
+        }
+        let s = Store::open(tmp.path()).unwrap();
+        assert_eq!(s.schema_version().unwrap(), MIGRATIONS.len() as i64);
+        let grok = s
+            .list_agents()
+            .unwrap()
+            .into_iter()
+            .find(|a| a.id == "a2")
+            .unwrap();
+        assert!(grok.primary);
+        assert_eq!(s.primary_agent_id().unwrap().as_deref(), Some("a2"));
     }
 }

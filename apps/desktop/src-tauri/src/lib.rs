@@ -63,6 +63,11 @@ fn agents_list(store: tauri::State<'_, storage::Store>) -> Result<Vec<agents::Ag
 }
 
 #[tauri::command]
+fn agents_primary_id(store: tauri::State<'_, storage::Store>) -> Result<Option<String>, String> {
+    store.primary_agent_id().map_err(err)
+}
+
+#[tauri::command]
 fn agent_create(
     store: tauri::State<'_, storage::Store>,
     name: String,
@@ -598,6 +603,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_info,
             agents_list,
+            agents_primary_id,
             agent_create,
             agent_revoke,
             agent_tokens_list,

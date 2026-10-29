@@ -16,6 +16,7 @@ const agent = (id: string, name: string): Agent => ({
   color: '#3366ff',
   createdAt: '2026-10-26T00:00:00Z',
   revokedAt: null,
+  primary: false,
 });
 
 const read = (p: string) =>
