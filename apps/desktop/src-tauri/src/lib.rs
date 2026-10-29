@@ -14,6 +14,7 @@ pub mod content;
 pub mod manuscripts;
 pub mod mcp;
 pub mod migrate;
+pub mod opening_progress;
 pub mod save_copy;
 pub mod storage;
 
@@ -322,13 +323,18 @@ async fn blocking<T: Send + 'static>(
 /// one transaction, so it is visible to the MCP server right away and survives a restart.
 #[tauri::command]
 async fn manuscript_import_json(
+    app: tauri::AppHandle,
     store: tauri::State<'_, storage::Store>,
     title: String,
     sections: Vec<manuscripts::ImportSection>,
 ) -> Result<manuscripts::StoredManuscript, String> {
+    let app = app.clone();
     blocking(&store, move |s| {
-        let (m, _) = s.import_manuscript(&title, &sections)?;
-        s.load_manuscript(&m.id)
+        let mut emit = move |stage: &str, percent: u8, title: &str, chapters_found: u32| {
+            opening_progress::emit(&app, stage, percent, title, chapters_found);
+        };
+        let (m, _) = s.import_manuscript_with_progress(&title, &sections, Some(&mut emit))?;
+        s.load_manuscript_with_progress(&m.id, Some(&mut emit))
     })
     .await
 }
@@ -336,17 +342,33 @@ async fn manuscript_import_json(
 /// The most recently created manuscript, if any.
 #[tauri::command]
 async fn manuscript_open_latest(
+    app: tauri::AppHandle,
     store: tauri::State<'_, storage::Store>,
 ) -> Result<Option<manuscripts::StoredManuscript>, String> {
-    blocking(&store, |s| s.latest_manuscript()).await
+    let app = app.clone();
+    blocking(&store, move |s| {
+        let mut emit = move |stage: &str, percent: u8, title: &str, chapters_found: u32| {
+            opening_progress::emit(&app, stage, percent, title, chapters_found);
+        };
+        s.latest_manuscript_with_progress(Some(&mut emit))
+    })
+    .await
 }
 
 #[tauri::command]
 async fn manuscript_load(
+    app: tauri::AppHandle,
     store: tauri::State<'_, storage::Store>,
     manuscript_id: String,
 ) -> Result<manuscripts::StoredManuscript, String> {
-    blocking(&store, move |s| s.load_manuscript(&manuscript_id)).await
+    let app = app.clone();
+    blocking(&store, move |s| {
+        let mut emit = move |stage: &str, percent: u8, title: &str, chapters_found: u32| {
+            opening_progress::emit(&app, stage, percent, title, chapters_found);
+        };
+        s.load_manuscript_with_progress(&manuscript_id, Some(&mut emit))
+    })
+    .await
 }
 
 /// Save the whole outline of a stored manuscript (rename, reorder, move, add, delete).

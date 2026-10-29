@@ -10,7 +10,9 @@ import {
   dismissMigrationNotices,
   listManuscripts,
   loadManuscript,
+  listenOpeningProgress,
   type AppInfo,
+  type OpeningProgressEvent,
   type RecoveryNotice,
   type MigrationNotice,
   type StoredManuscriptRow,
@@ -31,16 +33,28 @@ import SaveFailureBanner from './errors/SaveFailureBanner.vue';
 import MigrationNoticeBanner from './migration/MigrationNoticeBanner.vue';
 import {
   errorLine,
+  mapError,
   saveFailed,
   saveSucceeded,
   SAVE_OK,
   SECTION_LOAD_ERROR_COPY,
+  type MappedError,
 } from './errors/map-error';
 import { saveCopy } from './errors/save-copy';
 import { BUSY_NOTICE } from './errors/busy';
 import { PRODUCT_NAME } from './lib/brand';
 import ShellsPreview from './shells/ShellsPreview.vue';
 import AppToast from './shells/AppToast.vue';
+import OpeningProgress from './shells/OpeningProgress.vue';
+import ErrorCard from './shells/ErrorCard.vue';
+import {
+  OPENING_REVEAL_MS,
+  errorCardIcon,
+  openingStateFromEvent,
+  titleFromDocxName,
+  type OpeningRetry,
+  type OpeningUiState,
+} from './errors/opening-flow';
 import './shells/shells.css';
 import { applyThemeParam, readPreview } from './shells/preview';
 import { CLOSE_FLUSH_TIMEOUT_MS, confirmQuit, flushOnClose, flushWithTimeout } from './close-flush';
@@ -99,6 +113,82 @@ const openError = ref('');
 const fatalError = ref('');
 const REOPEN_BACKOFF_MS = [250, 500, 1000];
 const importing = ref(false);
+/** ob6: backend-driven opening progress; revealed only after a short delay (#80). */
+const opening = ref<OpeningUiState | null>(null);
+const openingVisible = ref(false);
+const openingError = ref<MappedError | null>(null);
+const openingRetry = ref<OpeningRetry | null>(null);
+let openingRevealTimer: ReturnType<typeof setTimeout> | undefined;
+let stopOpeningProgress = () => {};
+function onOpeningProgress(event: OpeningProgressEvent) {
+  if (!opening.value) return;
+  opening.value = openingStateFromEvent(opening.value, event);
+}
+function startOpening(title: string) {
+  clearTimeout(openingRevealTimer);
+  openingVisible.value = false;
+  openingError.value = null;
+  opening.value = { title, found: 0, progress: 0 };
+  openingRevealTimer = setTimeout(() => {
+    if (opening.value) openingVisible.value = true;
+  }, OPENING_REVEAL_MS);
+}
+function finishOpening() {
+  clearTimeout(openingRevealTimer);
+  openingVisible.value = false;
+  opening.value = null;
+  openingError.value = null;
+  openingRetry.value = null;
+}
+function failOpening(err: unknown, context: 'open' | 'import') {
+  clearTimeout(openingRevealTimer);
+  openingVisible.value = false;
+  opening.value = null;
+  openingError.value = mapError(err, context);
+}
+function onOpeningErrorAction() {
+  const err = openingError.value;
+  if (!err) return;
+  if (err.action === 'choose-another-file') {
+    openingError.value = null;
+    openingRetry.value = null;
+    chooseFile();
+    return;
+  }
+  if (err.action === 'try-again') {
+    openingError.value = null;
+    void runOpeningRetry();
+    return;
+  }
+  openingError.value = null;
+}
+
+async function runOpeningRetry() {
+  const retry = openingRetry.value;
+  if (!retry) {
+    chooseFile();
+    return;
+  }
+  if (retry.kind === 'reopen-latest') {
+    startOpening(retry.title);
+    try {
+      const latest = await reopenLatest(persistHooks);
+      if (latest && !session.value) {
+        finishOpening();
+        open(latest);
+      } else finishOpening();
+    } catch (e) {
+      console.error('Reopen retry failed', e);
+      failOpening(e, 'open');
+    }
+    return;
+  }
+  if (retry.kind === 'open-manuscript') {
+    await openRecentBook(retry.id);
+    return;
+  }
+  if (retry.kind === 'import') await importBytes(retry.name, retry.bytes);
+}
 /** Save-failure banner state (#62, ob9): shown while edits are unsaved; cleared once a save
  * succeeds. Edits are never dropped. Raw error text only goes to the console. */
 const saveFailure = ref({ ...SAVE_OK });
@@ -247,24 +337,32 @@ let openingRecent = false;
 async function openRecentBook(id: string) {
   if (openingRecent || session.value?.id === id) return;
   openingRecent = true;
+  const title = recentBooks.value.find((m) => m.id === id)?.title || 'your book';
+  openingRetry.value = { kind: 'open-manuscript', id, title };
+  startOpening(title);
   try {
     try {
       await session.value?.flush();
     } catch (e) {
       console.error('Flush before open failed', e);
+      finishOpening();
       openError.value = `Couldn't switch books: ${errorLine(e, 'save')}`;
       return;
     }
     openError.value = '';
     const stored = await loadManuscript(id);
     if (!stored) {
-      openError.value = "That book couldn't be opened. Please try again.";
+      failOpening('not found: manuscript', 'open');
       return;
     }
     const next = openStored(stored, null, persistHooks);
+    finishOpening();
     open(next);
     showOpenToast(next);
     closeBookMenu();
+  } catch (e) {
+    console.error('Open recent failed', e);
+    failOpening(e, 'open');
   } finally {
     openingRecent = false;
   }
@@ -349,6 +447,7 @@ onBeforeUnmount(() => {
   stopAppMenuKeys();
 });
 onMounted(async () => {
+  stopOpeningProgress = await listenOpeningProgress(onOpeningProgress);
   info.value = await getAppInfo();
   if (info.value) {
     try {
@@ -365,10 +464,24 @@ onMounted(async () => {
       recoveryNotices.value = [];
     }
     try {
+      let reopenTitle = 'your book';
+      try {
+        const books = await listManuscripts();
+        const t = books[0]?.title?.trim();
+        if (t) reopenTitle = t;
+      } catch (e) {
+        console.error('List manuscripts before reopen failed', e);
+      }
+      openingRetry.value = { kind: 'reopen-latest', title: reopenTitle };
+      startOpening(reopenTitle);
       const latest = await reopenLatest(persistHooks);
-      if (latest && !session.value) open(latest);
+      if (latest && !session.value) {
+        finishOpening();
+        open(latest);
+      } else finishOpening();
     } catch (err) {
       console.error('Reopen failed', err);
+      finishOpening();
       openError.value = `Couldn't reopen the last manuscript. ${errorLine(err, 'open')}`;
     }
   }
@@ -437,6 +550,8 @@ async function onRestore(): Promise<void> {
 }
 onBeforeUnmount(() => {
   stopCloseFlush();
+  stopOpeningProgress();
+  clearTimeout(openingRevealTimer);
   closeQuietly(session.value);
 });
 
@@ -477,6 +592,7 @@ function open(next: ManuscriptSession) {
   // A manuscript is open again, so an earlier "please restart" or open failure no longer holds.
   fatalError.value = '';
   openError.value = '';
+  openingError.value = null;
   // Anyone with a book open is past first run: never flash the welcome at them.
   markWelcomed();
   choosingBook.value = false;
@@ -551,30 +667,23 @@ async function onFile(e: Event) {
 const NOT_WORD_FILE = "That file isn't a Word manuscript. Please choose a Word file.";
 const isWordFile = (f: File) => f.name.toLowerCase().endsWith('.docx');
 
-async function importFile(file: File) {
+async function importBytes(fileName: string, bytes: Uint8Array) {
   if (importing.value) return;
-  if (!isWordFile(file)) {
-    openError.value = NOT_WORD_FILE;
-    return;
-  }
   openError.value = '';
+  openingRetry.value = { kind: 'import', name: fileName, bytes: bytes.slice() };
+  startOpening(titleFromDocxName(fileName));
   importing.value = true;
   try {
-    const bytes = new Uint8Array(await file.arrayBuffer());
     const current = session.value;
     try {
       const next = await importAndOpen(bytes, persistHooks, current);
+      finishOpening();
       open(next);
       showOpenToast(next);
     } catch (err) {
-      // The current manuscript was closed but the import failed: never leave the closed session
-      // on screen; reopen the newest stored manuscript (the import, if it was written).
-      // A refused close keeps the current manuscript on screen: keep following agent writes.
       if (current && !current.closed && session.value === current) current.resumeLive?.();
       if (current?.closed) {
         const back = await reopenAfterFailure();
-        // The newest manuscript is not the one we closed, so the import was saved and is now
-        // open: the import worked and there is nothing to report.
         if (back && back.id !== current.id) {
           showOpenToast(back);
           return;
@@ -585,13 +694,40 @@ async function importFile(file: File) {
   } catch (err) {
     console.error('Import failed', err);
     dismissToast();
-    openError.value =
-      err instanceof UnsavedEditsError
-        ? `Couldn't open ${file.name}: some edits in the current manuscript aren't saved yet`
-        : `Couldn't open ${file.name}. ${errorLine(err, 'import')}`;
+    if (err instanceof UnsavedEditsError) {
+      finishOpening();
+      openingRetry.value = null;
+      openError.value = `Couldn't open ${fileName}: some edits in the current manuscript aren't saved yet`;
+    } else {
+      failOpening(err, 'import');
+      if (session.value && !choosingBook.value) {
+        openError.value = `Couldn't open ${fileName}. ${errorLine(err, 'import')}`;
+      }
+    }
   } finally {
     importing.value = false;
   }
+}
+
+async function importFile(file: File) {
+  if (importing.value) return;
+  if (!isWordFile(file)) {
+    openError.value = NOT_WORD_FILE;
+    return;
+  }
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(await file.arrayBuffer());
+  } catch (err) {
+    console.error('Import failed', err);
+    dismissToast();
+    failOpening(err, 'import');
+    if (session.value && !choosingBook.value) {
+      openError.value = `Couldn't open ${file.name}. ${errorLine(err, 'import')}`;
+    }
+    return;
+  }
+  await importBytes(file.name, bytes);
 }
 
 const selected = computed(() =>
@@ -901,7 +1037,7 @@ defineExpose({ open, closeSession });
       />
     </div>
     <HomeScreen
-      v-if="!session || choosingBook"
+      v-if="(!session || choosingBook) && !openingVisible && !openingError"
       ref="home"
       data-test="no-manuscript"
       :step="welcomed ? 'open' : 'welcome'"
@@ -912,6 +1048,28 @@ defineExpose({ open, closeSession });
       @choose="chooseFile"
       @drop-file="importFile"
     />
+    <div
+      v-if="(!session || choosingBook) && (openingVisible || openingError)"
+      class="opening-shell"
+      data-test="opening-shell"
+    >
+      <OpeningProgress
+        v-if="openingVisible && opening"
+        :title="opening.title"
+        :found="opening.found"
+        :progress="opening.progress"
+      />
+      <div v-else-if="openingError" role="alert" aria-live="assertive" data-test="opening-error">
+        <ErrorCard
+          :icon="errorCardIcon(openingError.code)"
+          :tone="openingError.tone"
+          :title="openingError.title"
+          :text="openingError.message"
+          :action="openingError.actionLabel"
+          @action="onOpeningErrorAction"
+        />
+      </div>
+    </div>
     <!-- #84: full-width toolbar row under the title bar; the side panels start below it. -->
     <div
       v-if="session && !choosingBook"
@@ -982,6 +1140,13 @@ defineExpose({ open, closeSession });
   left: 50%;
   z-index: 40;
   transform: translateX(-50%);
+}
+.opening-shell {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ct-space-8);
 }
 body {
   margin: 0;

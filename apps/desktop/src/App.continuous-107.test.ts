@@ -27,6 +27,7 @@ vi.mock('./backend', async (importOriginal) => {
     getRecoveryNotices: async () => [],
     getMigrationNotices: async () => [],
     openLatestManuscript: async () => null,
+    listenOpeningProgress: async () => () => {},
   };
 });
 vi.mock('./close-flush', () => ({

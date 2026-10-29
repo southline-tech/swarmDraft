@@ -1,4 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 export interface AppInfo {
   version: string;
@@ -148,6 +149,25 @@ export interface StoredManuscriptRow {
   title: string;
   createdAt: string;
   numberingStyle: string;
+}
+
+/** Progress while the backend imports or loads a manuscript (#80, ob6). */
+export interface OpeningProgressEvent {
+  stage: string;
+  /** Whole-number percent, 0–100. */
+  percent: number;
+  title: string;
+  chaptersFound: number;
+}
+
+export const OPENING_PROGRESS_EVENT = 'opening-progress';
+
+/** Subscribe to backend opening progress; no-op in a plain browser. */
+export async function listenOpeningProgress(
+  onEvent: (event: OpeningProgressEvent) => void,
+): Promise<UnlistenFn> {
+  if (!isTauri()) return () => {};
+  return listen<OpeningProgressEvent>(OPENING_PROGRESS_EVENT, (e) => onEvent(e.payload));
 }
 
 /** A stored section plus its full Yjs state (v1 update from an empty doc). */
