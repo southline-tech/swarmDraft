@@ -25,29 +25,6 @@ export interface BuildCopyDeps {
 
 const defaultBuildDeps: BuildCopyDeps = { loadComments: manuscriptOpenComments };
 
-/** Collect distinct `comment_anchor` ids under a ProseMirror JSON tree. */
-function collectAnchorIds(node: unknown, ids: Set<string>): void {
-  if (Array.isArray(node)) {
-    for (const n of node) collectAnchorIds(n, ids);
-    return;
-  }
-  if (!node || typeof node !== 'object') return;
-  const o = node as Record<string, unknown>;
-  if (Array.isArray(o.marks)) {
-    for (const m of o.marks) {
-      if (
-        m &&
-        typeof m === 'object' &&
-        (m as { type?: string }).type === 'comment_anchor' &&
-        (m as { attrs?: { id?: unknown } }).attrs?.id != null
-      ) {
-        ids.add(String((m as { attrs: { id: unknown } }).attrs.id));
-      }
-    }
-  }
-  for (const v of Object.values(o)) collectAnchorIds(v, ids);
-}
-
 /** Drop `comment_anchor` marks whose id is not in `keep` (resolved / orphan threads). */
 function stripCommentAnchors(node: unknown, keep: Set<string>): unknown {
   if (Array.isArray(node)) return node.map((n) => stripCommentAnchors(n, keep));
