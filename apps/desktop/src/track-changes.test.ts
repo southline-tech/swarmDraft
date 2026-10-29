@@ -252,7 +252,10 @@ describe('Human track changes (#126)', () => {
     await flushPromises();
     const afterEdit = yDocToDoc(ydoc);
     w.unmount();
-    const { w: w2, editor: again } = await mountedEditor({ storage: s, content: afterEdit as never });
+    const { w: w2, editor: again } = await mountedEditor({
+      storage: s,
+      content: afterEdit as never,
+    });
     expect(listSuggestions(again.getJSON() as never).some((i) => i.author === 'Export')).toBe(true);
     w2.unmount();
     const ydoc2 = docToYDoc(afterEdit as never);
