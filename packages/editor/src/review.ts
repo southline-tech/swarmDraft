@@ -11,6 +11,37 @@ import {
 import { isBindingTransaction } from './ysource';
 import { REVIEW_MARKS, SUGGESTION_MARKS, type ReviewMarkType } from './content';
 
+let humanTrackActive: (() => boolean) | null = null;
+let humanTrackAuthor: (() => string) | null = null;
+
+/** Wired by HumanTrackChanges when the editor starts. */
+export function registerHumanTrack(active: () => boolean, author: () => string): () => void {
+  humanTrackActive = active;
+  humanTrackAuthor = author;
+  return () => {
+    if (humanTrackActive === active) humanTrackActive = null;
+    if (humanTrackAuthor === author) humanTrackAuthor = null;
+  };
+}
+
+export function humanTrackState(): { active: boolean; author: string } {
+  return { active: humanTrackActive?.() ?? false, author: humanTrackAuthor?.() ?? '' };
+}
+
+export function caretExtendsOwnInsert(doc: PMNode, pos: number, author: string): boolean {
+  if (!author) return false;
+  const $pos = doc.resolve(pos);
+  const marks = [
+    ...($pos.nodeBefore?.marks ?? []),
+    ...($pos.nodeAfter?.marks ?? []),
+    ...$pos.marks(),
+  ];
+  return marks.some(
+    (m) =>
+      m.type.name === 'suggestion_insert' && String(m.attrs.author ?? '').trim() === author.trim(),
+  );
+}
+
 /**
  * Comments and tracked changes are read-only in the editor: they come from collaborators and
  * agents and are resolved elsewhere. The guard rejects any transaction that adds or removes a
@@ -30,6 +61,8 @@ const isReview = (m: PMMark) => (REVIEW_MARKS as readonly string[]).includes(m.t
 const isSuggestion = (m: PMMark) => (SUGGESTION_MARKS as readonly string[]).includes(m.type.name);
 
 function touchesSuggestion(doc: PMNode, from: number, to: number): boolean {
+  const track = humanTrackState();
+  if (track.active && from === to && caretExtendsOwnInsert(doc, from, track.author)) return false;
   if (from < to) {
     let hit = false;
     doc.nodesBetween(from, to, (n) => {

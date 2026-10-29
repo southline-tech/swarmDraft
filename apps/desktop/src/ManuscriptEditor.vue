@@ -73,6 +73,7 @@ import {
   AuthorLabels,
   AuthorSuggestionColors,
   FindHighlight,
+  HumanTrackChanges,
   collectReviewItems,
   listSuggestions,
   refreshAuthorLabels,
@@ -624,6 +625,10 @@ onBeforeUnmount(() => emit('load-error', ''));
 let cursorTimer: ReturnType<typeof setTimeout> | undefined;
 const options: Partial<EditorOptions> = {
   extensions: [
+    HumanTrackChanges.configure({
+      active: () => tracking.value,
+      author: () => writerProfile.value.name,
+    }),
     AuthorLabels.configure({ label: authorLabel }),
     AuthorSuggestionColors.configure({ colorFor: collabColor }),
     FindHighlight,

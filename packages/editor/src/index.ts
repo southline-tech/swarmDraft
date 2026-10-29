@@ -86,3 +86,4 @@ export * from './comments';
 export * from './author-labels';
 export * from './author-suggestion-colors';
 export * from './find-replace';
+export * from './human-track';

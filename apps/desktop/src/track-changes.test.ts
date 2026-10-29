@@ -1,6 +1,8 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
-import { docToYDoc } from '@coauthor/docx';
+import { docToYDoc, yDocToDoc } from '@coauthor/docx';
+import { listSuggestions } from '@coauthor/editor';
+import { applyReviewDecision } from './review/apply';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import { SAMPLE_DOC } from './fixtures/sample';
 import {
@@ -24,15 +26,21 @@ function store(init: Record<string, string> = {}) {
 }
 
 async function mountedEditor(
-  opts: { storage?: ReturnType<typeof store>; computerName?: string } = {},
+  opts: {
+    storage?: ReturnType<typeof store>;
+    computerName?: string;
+    content?: typeof SAMPLE_DOC;
+  } = {},
 ) {
-  const ydoc = docToYDoc(SAMPLE_DOC as never);
+  const ydoc = docToYDoc((opts.content ?? SAMPLE_DOC) as never);
   const w = mount(ManuscriptEditor, {
     props: { doc: ydoc, storage: opts.storage, computerName: opts.computerName },
     attachTo: document.body,
   });
   await flushPromises();
-  return { w, ydoc };
+  const editor = (w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor })
+    .editor;
+  return { w, ydoc, editor };
 }
 
 describe('Track changes toggle (#57)', () => {
@@ -139,5 +147,115 @@ describe('Track changes toggle (#57)', () => {
     expect(w.get('[data-test="track-changes"]').attributes('aria-pressed')).toBe('true');
     expect(w.find('[data-test="name-prompt"]').exists()).toBe(false);
     w.unmount();
+  });
+});
+
+const PLAIN = {
+  type: 'doc',
+  content: [
+    {
+      type: 'paragraph',
+      attrs: { style: 'body' },
+      content: [{ type: 'text', text: 'Hello world.' }],
+    },
+  ],
+} as const;
+
+describe('Human track changes (#126)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  function trackingStore(name = 'Writer') {
+    return store({
+      [TRACKING_KEY]: '1',
+      [TRACK_PROMPT_SEEN_KEY]: '1',
+      [PROFILE_KEY]: JSON.stringify({ name, color: 3 }),
+    });
+  }
+
+  it('records insert, delete, and replace under the writer profile', async () => {
+    const { w, editor } = await mountedEditor({
+      storage: trackingStore('Kim'),
+      content: PLAIN as never,
+    });
+    editor.view.dispatch(editor.state.tr.insertText('!', editor.state.doc.content.size - 1));
+    await flushPromises();
+    let items = listSuggestions(editor.getJSON() as never);
+    expect(items).toEqual([
+      expect.objectContaining({ author: 'Kim', kind: 'suggestion_insert', text: '!' }),
+    ]);
+    editor.commands.setTextSelection({ from: 7, to: 12 });
+    editor.view.dispatch(editor.state.tr.deleteSelection());
+    await flushPromises();
+    expect(
+      listSuggestions(editor.getJSON() as never).some((i) => i.kind === 'suggestion_delete'),
+    ).toBe(true);
+    editor.commands.setTextSelection({ from: 1, to: 6 });
+    editor.commands.insertContent('Howdy');
+    await flushPromises();
+    items = listSuggestions(editor.getJSON() as never).filter((i) => i.author === 'Kim');
+    const ids = new Set(items.map((i) => i.id));
+    expect(ids.size).toBeGreaterThan(1);
+    expect(w.find('[data-test="agent-name"]').text()).toContain('Kim');
+    w.unmount();
+  });
+
+  it('lists human suggestions in the review panel and author filter', async () => {
+    const { w, editor } = await mountedEditor({
+      storage: trackingStore('Alex'),
+      content: PLAIN as never,
+    });
+    editor.view.dispatch(editor.state.tr.insertText('?', 1));
+    await flushPromises();
+    expect(w.findAll('[data-test="item"]').length).toBeGreaterThan(0);
+    expect(w.find('[data-test="item"] [data-test="agent-name"]').text()).toContain('Alex');
+    await w.get('[data-test="filter-toggle"]').trigger('click');
+    expect(w.find('[data-test="filter-option"] .name').text()).toContain('Alex');
+    w.unmount();
+  });
+
+  it('accept, bulk reject, and undo on human suggestions', async () => {
+    const { w, editor } = await mountedEditor({
+      storage: trackingStore(),
+      content: PLAIN as never,
+    });
+    editor.view.dispatch(editor.state.tr.insertText(' tail', editor.state.doc.content.size - 1));
+    await flushPromises();
+    expect(listSuggestions(editor.getJSON() as never)).toHaveLength(1);
+    expect(editor.commands.undo()).toBe(true);
+    await flushPromises();
+    expect(listSuggestions(editor.getJSON() as never)).toHaveLength(0);
+    editor.view.dispatch(editor.state.tr.insertText(' kept', editor.state.doc.content.size - 1));
+    await flushPromises();
+    const id = listSuggestions(editor.getJSON() as never)[0]!.id;
+    applyReviewDecision(editor.view, {
+      targets: [{ kind: 'suggestion_insert', id }],
+      decision: 'accept',
+    });
+    await flushPromises();
+    expect(listSuggestions(editor.getJSON() as never)).toHaveLength(0);
+    editor.view.dispatch(editor.state.tr.insertText('!', editor.state.doc.content.size - 1));
+    await flushPromises();
+    expect(listSuggestions(editor.getJSON() as never)).toHaveLength(1);
+    await w.get('[data-test="reject-all"]').trigger('click');
+    await w.get('[data-test="confirm-yes"]').trigger('click');
+    await flushPromises();
+    expect(listSuggestions(editor.getJSON() as never)).toHaveLength(0);
+    w.unmount();
+  });
+
+  it('persists tracked suggestions across remount and Y.Doc round-trip', async () => {
+    const s = trackingStore('Export');
+    const { w, ydoc, editor } = await mountedEditor({ storage: s, content: PLAIN as never });
+    editor.view.dispatch(editor.state.tr.insertText('x', 1));
+    await flushPromises();
+    const afterEdit = yDocToDoc(ydoc);
+    w.unmount();
+    const { w: w2, editor: again } = await mountedEditor({ storage: s, content: afterEdit as never });
+    expect(listSuggestions(again.getJSON() as never).some((i) => i.author === 'Export')).toBe(true);
+    w2.unmount();
+    const ydoc2 = docToYDoc(afterEdit as never);
+    expect(listSuggestions(yDocToDoc(ydoc2)).some((i) => i.author === 'Export')).toBe(true);
   });
 });
