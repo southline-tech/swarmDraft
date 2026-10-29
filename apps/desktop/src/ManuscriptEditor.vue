@@ -756,7 +756,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
               class="sh-track"
               data-test="track-changes"
               :aria-pressed="tracking"
-              :title="tracking ? 'Track changes on' : 'Track changes off'"
+              :title="tracking ? 'Recording changes on' : 'Recording changes off'"
               @click="toggleTrackChanges"
             >
               <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
@@ -979,7 +979,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
           >
           <template v-else>
             <span class="sh-status-track sh-status-track--on" data-test="status-tracking"
-              >Tracking changes</span
+              >Recording changes</span
             >
             <span class="sh-status-track-as" data-test="status-tracking-as">
               Your changes show as <bdi dir="auto">{{ writerProfile.name }}</bdi

@@ -192,11 +192,12 @@ describe('Human track changes (#126)', () => {
       listSuggestions(editor.getJSON() as never).some((i) => i.kind === 'suggestion_delete'),
     ).toBe(true);
     editor.commands.setTextSelection({ from: 1, to: 6 });
-    editor.commands.insertContent('Howdy');
+    editor.view.dispatch(editor.state.tr.insertText('Howdy'));
     await flushPromises();
     items = listSuggestions(editor.getJSON() as never).filter((i) => i.author === 'Kim');
-    const ids = new Set(items.map((i) => i.id));
-    expect(ids.size).toBeGreaterThan(1);
+    const howdy = items.find((i) => i.kind === 'suggestion_insert' && i.text === 'Howdy');
+    expect(howdy).toBeDefined();
+    expect(items.some((i) => i.kind === 'suggestion_delete' && i.id === howdy!.id)).toBe(true);
     expect(w.find('[data-test="agent-name"]').text()).toContain('Kim');
     w.unmount();
   });

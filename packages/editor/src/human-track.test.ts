@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { Editor, type JSONContent } from '@tiptap/core';
-import { docToYDoc, yDocToDoc } from '@coauthor/docx';
+import {
+  docToYDoc,
+  exportDocx,
+  importDocx,
+  yDocToDoc,
+  type ImportedManuscript,
+} from '@coauthor/docx';
+import type { DocNode } from '@coauthor/schema';
 import {
   HumanTrackChanges,
   listSuggestions,
@@ -17,6 +24,29 @@ const plainDoc: JSONContent = {
       attrs: { style: 'body' },
       content: [{ type: 'text', text: 'Alpha line.' }],
     },
+  ],
+};
+
+const styledDoc: JSONContent = {
+  type: 'doc',
+  content: [
+    {
+      type: 'paragraph',
+      attrs: { style: 'body' },
+      content: [
+        { type: 'text', text: 'See ' },
+        { type: 'text', text: 'bold', marks: [{ type: 'bold' }] },
+        { type: 'text', text: ' word.' },
+      ],
+    },
+  ],
+};
+
+const twoParaDoc: JSONContent = {
+  type: 'doc',
+  content: [
+    { type: 'paragraph', attrs: { style: 'body' }, content: [{ type: 'text', text: 'First.' }] },
+    { type: 'paragraph', attrs: { style: 'body' }, content: [{ type: 'text', text: 'Second.' }] },
   ],
 };
 
@@ -38,6 +68,38 @@ function editor(content: JSONContent = plainDoc, tracking = true) {
 const editors: Editor[] = [];
 afterEach(() => editors.splice(0).forEach((e) => e.destroy()));
 
+function manuscriptFromDoc(doc: DocNode): ImportedManuscript {
+  return {
+    title: 'Fixture',
+    sections: [
+      {
+        id: 'ch1',
+        kind: 'chapter',
+        title: 'Chapter',
+        docId: 'm:ch1',
+        content: doc,
+      },
+    ],
+    comments: [],
+    report: {
+      items: [],
+      summary: {
+        frontMatter: 0,
+        parts: 0,
+        chapters: 1,
+        scenes: 0,
+        sceneBreaks: 0,
+        backMatter: 0,
+        footnotes: 0,
+        comments: 0,
+        suggestions: 0,
+        paragraphs: 1,
+      },
+    },
+    warnings: [],
+  };
+}
+
 describe('human track changes (#126)', () => {
   it('records an insert as a suggestion under the writer name', () => {
     const e = editor();
@@ -55,6 +117,37 @@ describe('human track changes (#126)', () => {
     e.destroy();
   });
 
+  it('merges continuous typing into one suggestion id', () => {
+    const e = editor();
+    editors.push(e);
+    for (const ch of 'hello') {
+      e.view.dispatch(e.state.tr.insertText(ch, e.state.doc.content.size - 1));
+    }
+    const items = listSuggestions(e.getJSON() as never).filter(
+      (i) => i.kind === 'suggestion_insert',
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0]?.text).toBe('hello');
+    expect(new Set(items.map((i) => i.id)).size).toBe(1);
+    e.destroy();
+  });
+
+  it('does not share human track state across editors', () => {
+    const eOn = editor(plainDoc, true);
+    const eOff = editor(plainDoc, false);
+    editors.push(eOn, eOff);
+    for (const ch of 'hi') {
+      eOn.view.dispatch(eOn.state.tr.insertText(ch, eOn.state.doc.content.size - 1));
+    }
+    expect(
+      listSuggestions(eOn.getJSON() as never).filter((i) => i.kind === 'suggestion_insert'),
+    ).toEqual([expect.objectContaining({ text: 'hi' })]);
+    eOff.view.dispatch(eOff.state.tr.insertText('x', eOff.state.doc.content.size - 1));
+    expect(listSuggestions(eOff.getJSON() as never)).toHaveLength(0);
+    eOn.destroy();
+    eOff.destroy();
+  });
+
   it('records a delete as suggestion_delete without removing text', () => {
     const e = editor();
     editors.push(e);
@@ -64,6 +157,66 @@ describe('human track changes (#126)', () => {
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ kind: 'suggestion_delete', author: WRITER, text: 'Alpha' });
     expect(e.state.doc.textContent).toBe('Alpha line.');
+    e.destroy();
+  });
+
+  it('removes own pending insert instead of striking it', () => {
+    const e = editor();
+    editors.push(e);
+    const at = e.state.doc.content.size - 1;
+    e.view.dispatch(e.state.tr.insertText('note', at));
+    expect(listSuggestions(e.getJSON() as never)).toHaveLength(1);
+    const insId = listSuggestions(e.getJSON() as never)[0]!.id;
+    let delFrom = 0;
+    let delTo = 0;
+    e.state.doc.descendants((node, pos) => {
+      if (!node.isText) return;
+      if (
+        !node.marks.some((m) => m.type.name === 'suggestion_insert' && String(m.attrs.id) === insId)
+      ) {
+        return;
+      }
+      delFrom = pos;
+      delTo = pos + node.text!.length;
+    });
+    expect(delTo).toBeGreaterThan(delFrom);
+    expect(e.state.doc.textBetween(delFrom, delTo)).toBe('note');
+    e.view.dispatch(e.state.tr.delete(delFrom, delTo));
+    expect(listSuggestions(e.getJSON() as never)).toHaveLength(0);
+    expect(e.state.doc.textContent).not.toContain('note');
+    e.destroy();
+  });
+
+  it('preserves inline marks on a tracked delete', () => {
+    const e = editor(styledDoc);
+    editors.push(e);
+    e.commands.setTextSelection({ from: 5, to: 9 });
+    e.view.dispatch(e.state.tr.deleteSelection());
+    const json = e.getJSON() as DocNode;
+    const para = json.content[0];
+    expect(para?.type).toBe('paragraph');
+    const inlines = para && para.type === 'paragraph' ? (para.content ?? []) : [];
+    const bold = inlines.find((n) => n.type === 'text' && n.text === 'bold');
+    expect(
+      bold && bold.type === 'text' && bold.marks?.some((m) => m.type === 'suggestion_delete'),
+    ).toBe(true);
+    expect(bold && bold.type === 'text' && bold.marks?.some((m) => m.type === 'bold')).toBe(true);
+    e.destroy();
+  });
+
+  it('preserves paragraph structure on a cross-paragraph delete', () => {
+    const e = editor(twoParaDoc);
+    editors.push(e);
+    const firstEnd = e.state.doc.child(0).nodeSize + 1;
+    const secondStart = firstEnd + 1;
+    e.commands.setTextSelection({ from: firstEnd - 2, to: secondStart + 3 });
+    e.view.dispatch(e.state.tr.deleteSelection());
+    expect((e.getJSON() as DocNode).content).toHaveLength(2);
+    const delText = listSuggestions(e.getJSON() as never)
+      .filter((i) => i.kind === 'suggestion_delete')
+      .map((i) => i.text)
+      .join('');
+    expect(delText.length).toBeGreaterThan(2);
     e.destroy();
   });
 
@@ -117,6 +270,22 @@ describe('human track changes (#126)', () => {
     e.view.dispatch(e.state.tr.insertText('!', 1));
     const exported = yDocToDoc(ydoc);
     expect(listSuggestions(exported).some((s) => s.author === WRITER)).toBe(true);
+    e.destroy();
+  });
+
+  it('exports human suggestion_insert in docx', () => {
+    const e = editor();
+    editors.push(e);
+    e.view.dispatch(e.state.tr.insertText(' export', e.state.doc.content.size - 1));
+    const doc = e.getJSON() as DocNode;
+    const bytes = exportDocx(manuscriptFromDoc(doc));
+    const back = importDocx(bytes);
+    const human = listSuggestions(back.sections[0]!.content as never).filter(
+      (s) => s.author === WRITER,
+    );
+    expect(human.some((s) => s.kind === 'suggestion_insert' && s.text.includes('export'))).toBe(
+      true,
+    );
     e.destroy();
   });
 });
