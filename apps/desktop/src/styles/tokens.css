@@ -63,7 +63,7 @@
   --ct-leading-tight: 1.25;
   --ct-leading-ui: 1.45;
   --ct-leading-body: 1.6;
-  --ct-measure-page: 66ch;
+  --ct-measure-page: 70ch;
 
   /* Spacing (4px base) */
   --ct-space-0: 0;
@@ -82,8 +82,7 @@
   --ct-panel-w: 400px;
   --ct-panel-w-narrow: 320px;
 
-  /* Page column (#92): fluid between the min and full 6x9 width, with side gutters on the desk */
-  --ct-page-w: 576px;
+  /* Page column (#92, #105): fills the desk minus gutters; text measure capped separately */
   --ct-page-min-w: 440px;
   /* Floor while the writer forces the outline open on a narrow desk (#96) */
   --ct-page-forced-min-w: 320px;

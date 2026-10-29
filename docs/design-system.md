@@ -4,7 +4,7 @@ Tokens live as CSS custom properties in `apps/desktop/src/styles/tokens.css` and
 
 ## Type
 
-- **Manuscript:** Literata (`--ct-font-manuscript`) 400, 400 italic, 700. Body `--ct-text-page` (18px), `--ct-leading-body` 1.6, measure `--ct-measure-page` 66ch.
+- **Manuscript:** Literata (`--ct-font-manuscript`) 400, 400 italic, 700. Body `--ct-text-page` (18px), `--ct-leading-body` 1.6, measure `--ct-measure-page` 70ch.
 - **UI:** Inter (`--ct-font-ui`) 400 / 500 / 600.
 - **Scale:** modular 1.2 ratio: `xs .694` · `sm .833` · `md 1` · `lg 1.2` · `xl 1.44` · `2xl 1.728` · `3xl 2.074` rem.
 - Fonts ship as local woff2 Latin subsets with their OFL licenses in `apps/desktop/src/styles/fonts/literata/` and `fonts/inter/` (each with `OFL.txt`, sourced from the `@fontsource/literata` and `@fontsource/inter` npm packages, v5.3.0). No network font loading. Add a weight only when a token uses it.
