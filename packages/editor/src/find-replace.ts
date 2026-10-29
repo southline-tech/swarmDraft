@@ -51,25 +51,13 @@ function searchablePieces(block: PMNode, blockPos: number): { start: number; tex
   return pieces;
 }
 
-function mapJoinedIndex(pieces: { start: number; text: string }[], index: number): number {
-  let rem = index;
-  for (const p of pieces) {
-    if (rem <= p.text.length) return p.start + rem;
-    rem -= p.text.length;
-  }
-  const last = pieces.at(-1);
-  return last ? last.start + last.text.length : 0;
-}
-
 function matchesInBlock(block: PMNode, blockPos: number, re: RegExp): FindMatch[] {
   const pieces = searchablePieces(block, blockPos);
-  if (!pieces.length) return [];
-  const joined = pieces.map((p) => p.text).join('');
   const out: FindMatch[] = [];
-  for (const m of joined.matchAll(re)) {
-    const from = mapJoinedIndex(pieces, m.index!);
-    const to = mapJoinedIndex(pieces, m.index! + m[0].length);
-    out.push({ from, to });
+  for (const p of pieces) {
+    for (const m of p.text.matchAll(re)) {
+      out.push({ from: p.start + m.index!, to: p.start + m.index! + m[0].length });
+    }
   }
   return out;
 }
@@ -165,7 +153,9 @@ export function replaceFindMatches(
       tr.replaceWith(from, to, replacementText(editor, from, replacement));
     }
   }
+  const before = editor.state.doc;
   editor.view.dispatch(tr);
+  if (editor.state.doc.eq(before)) return activeIndex;
 
   const next = listFindMatches(editor.state.doc, query, opts);
   if (!next.length) return 0;

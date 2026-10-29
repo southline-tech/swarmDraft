@@ -40,6 +40,35 @@ describe('find-replace', () => {
     e.destroy();
   });
 
+  it('does not match across a suggestion between two plain runs', () => {
+    const e = boundEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'test' },
+            {
+              type: 'text',
+              text: 'X',
+              marks: [
+                {
+                  type: 'suggestion_insert',
+                  attrs: { id: 's1', author: 'a1', ts: '2026-10-25T00:00:00Z' },
+                },
+              ],
+            },
+            { type: 'text', text: 'test' },
+          ],
+        },
+      ],
+    });
+    expect(
+      listFindMatches(e.state.doc, 'sttest', { matchCase: false, wholeWord: false }),
+    ).toHaveLength(0);
+    e.destroy();
+  });
+
   it('skips text inside suggestion marks', () => {
     const e = boundEditor({
       type: 'doc',
