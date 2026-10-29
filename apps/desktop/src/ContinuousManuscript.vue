@@ -6,7 +6,9 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import type { Section } from '@coauthor/schema';
 import type * as Y from 'yjs';
+import type { CommentRow } from '@coauthor/editor';
 import ManuscriptEditor from './ManuscriptEditor.vue';
+import { sectionReviewMeta } from './backend';
 import { sectionsInReadingOrder } from './manuscript-reading-order';
 import type { SaveState } from './status/StatusBar.vue';
 import type { EditorLayout } from './desk/outline-auto-collapse';
@@ -35,6 +37,30 @@ const props = defineProps<{
   outlineForced?: boolean;
   notesHidden?: boolean;
 }>();
+
+const commentRows = shallowRef<readonly CommentRow[]>([]);
+const authorSavedNames = shallowRef<Readonly<Record<string, string>>>({});
+
+watch(
+  () => props.selectedId,
+  async (sectionId) => {
+    if (!sectionId) {
+      commentRows.value = [];
+      authorSavedNames.value = {};
+      return;
+    }
+    try {
+      const meta = await sectionReviewMeta(sectionId);
+      commentRows.value = meta.comments;
+      authorSavedNames.value = meta.authorSavedNames;
+    } catch (err) {
+      console.error('Could not load review sidebar metadata', err);
+      commentRows.value = [];
+      authorSavedNames.value = {};
+    }
+  },
+  { immediate: true },
+);
 
 const emit = defineEmits<{
   'update:selectedId': [id: string];
@@ -172,6 +198,8 @@ onBeforeUnmount(() => observer?.disconnect());
             :chapter-docs="sec.id === selectedId ? chapterDocs : undefined"
             :save-state="sec.id === selectedId ? saveState : undefined"
             :author-labels="authorLabels"
+            :comment-rows="sec.id === selectedId ? commentRows : []"
+            :author-saved-names="sec.id === selectedId ? authorSavedNames : undefined"
             :external-load-error="externalLoadError"
             :outline-forced="outlineForced"
             :notes-hidden="notesHidden"

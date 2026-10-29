@@ -133,5 +133,17 @@ export function authorName(author: string | undefined | null): AgentName {
   return id === undefined ? { name: stripBidi(author) } : agentName(id);
 }
 
+/** Review UI: resolve an mark author id with optional saved display names (e.g. from comments/suggestions rows). */
+export function markAuthorLabel(
+  author: string,
+  savedNames?: Readonly<Record<string, string>>,
+): AgentName {
+  const id = agentIdOf(author);
+  const saved =
+    savedNames?.[author] ??
+    (id ? (savedNames?.[id] ?? savedNames?.[`${AGENT_PREFIX}${id}`]) : undefined);
+  return id ? agentName(id, saved) : authorName(author);
+}
+
 /** Plain-text label for a review mark's `author` attr. */
 export const authorLabel = (author: string | undefined | null) => joinName(authorName(author));

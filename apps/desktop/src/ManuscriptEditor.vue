@@ -26,7 +26,7 @@ import type * as Y from 'yjs';
 import EditorToolbar from './toolbar/EditorToolbar.vue';
 import StatusBar, { type SaveState } from './status/StatusBar.vue';
 import { countWords, watchBookWords } from './status/wordcount';
-import { agentDirectory, authorLabel, authorName, type AgentName } from './agent-names';
+import { agentDirectory, authorLabel, markAuthorLabel, type AgentName } from './agent-names';
 import { loadZoom, saveZoom } from './desk/zoom';
 import ReviewPanel from './review/ReviewPanel.vue';
 import EmptyState from './shells/EmptyState.vue';
@@ -65,8 +65,10 @@ import {
   type ReviewItem,
   type SuggestionItem,
   type SuggestionTarget,
+  type CommentRow,
 } from '@coauthor/editor';
 import { applyReviewDecision } from './review/apply';
+import { commentRowLabel, primaryCommentByThread } from './review/review-sidebar';
 import { SECTION_LOAD_ERROR_COPY } from './errors/map-error';
 import type { DocNode } from '@coauthor/schema';
 import { useDeferredValue } from './a11y/deferred';
@@ -95,6 +97,10 @@ const props = defineProps<{
   saveState?: SaveState;
   /** Display name for a raw author id in the review panel (decisions still key on the id). */
   authorLabels?: (author: string) => AgentName;
+  /** Saved author display names keyed by mark author (`agent:<id>`) or bare agent id (#47). */
+  authorSavedNames?: Readonly<Record<string, string>>;
+  /** Comment rows for this section; used to label comment lines in the review sidebar (#47). */
+  commentRows?: readonly CommentRow[];
   /** Where the toolbar renders (#84): the parent's full-width row above the side panels. Without
    *  it the toolbar stays inline above the editor body. */
   toolbarTarget?: string;
@@ -240,6 +246,20 @@ watch(zoom, (z) => saveZoom(z));
 
 const review = shallowRef<ReviewItem[]>([]);
 const comments = computed(() => review.value.filter((r) => r.type === 'comment_anchor'));
+const commentByThread = computed(() => primaryCommentByThread(props.commentRows ?? []));
+const labelAuthor = (author: string) => {
+  const resolved = markAuthorLabel(author, props.authorSavedNames);
+  if (!props.authorLabels) return resolved;
+  const custom = props.authorLabels(author);
+  if (resolved.note && !custom.note) return resolved;
+  return custom;
+};
+const commentAuthor = (item: ReviewItem): AgentName | null => {
+  const row = commentByThread.value.get(item.id);
+  if (row) return commentRowLabel(row);
+  if (item.author) return labelAuthor(item.author);
+  return null;
+};
 
 /** Review step-through (RAD-258). Suggestions in document order, keyed on raw author id. */
 const suggestions = shallowRef<SuggestionItem[]>([]);
@@ -703,7 +723,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
             data-test="margin-note"
           >
             <b
-              ><bdi dir="auto">{{ r.author ? authorName(r.author).name : 'Suggestion' }}</bdi></b
+              ><bdi dir="auto">{{ r.author ? labelAuthor(r.author).name : 'Suggestion' }}</bdi></b
             >
             Suggested, not applied. Review to accept.
           </div>
@@ -727,7 +747,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
             :current-key="currentKey"
             :collapsed="collapsed"
             :busy="!editor?.isEditable"
-            :labels="props.authorLabels ?? authorName"
+            :labels="labelAuthor"
             @show-only="(a: string) => (filter = new Set([a]))"
             @show-all="filter = null"
             @select="select"
@@ -749,23 +769,26 @@ const LABELS: Record<ReviewItem['type'], string> = {
             <h3>Comments</h3>
             <ul>
               <li v-for="r in comments" :key="r.id" data-test="review-item">
-                <strong>{{ LABELS[r.type] }}</strong>
-                <span v-if="r.author" class="muted agent-label" data-test="review-author">
-                  <template v-for="n in [authorName(r.author)]" :key="n.name"
-                    >·
-                    <bdi class="agent-name" dir="auto" data-test="agent-name" :title="n.name">{{
-                      n.name
-                    }}</bdi
-                    ><span v-if="n.agent" class="agent-tag" data-test="agent-tag">Bot</span>
-                    <template v-if="n.note"
-                      >{{ ' '
-                      }}<span class="agent-note" data-test="agent-note">{{
-                        n.note
-                      }}</span></template
-                    ></template
-                  ></span
-                >
-                <q>{{ r.text }}</q>
+                <div class="review-comment-head">
+                  <strong>{{ LABELS[r.type] }}</strong>
+                  <span
+                    v-if="commentAuthor(r)"
+                    class="agent-label review-comment-author"
+                    data-test="review-author"
+                  >
+                    <template v-for="n in [commentAuthor(r)!]" :key="n.name">
+                      ·
+                      <bdi class="agent-name" dir="auto" data-test="agent-name" :title="n.name">{{
+                        n.name
+                      }}</bdi>
+                      <span v-if="n.agent" class="agent-tag" data-test="agent-tag">Bot</span>
+                      <template v-if="n.note">
+                        {{ ' ' }}<span class="agent-note" data-test="agent-note">{{ n.note }}</span>
+                      </template>
+                    </template>
+                  </span>
+                </div>
+                <q class="review-comment-quote">{{ r.text }}</q>
               </li>
             </ul>
           </section>
@@ -976,19 +999,23 @@ const LABELS: Record<ReviewItem['type'], string> = {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  flex: 1;
+  overflow-y: auto;
   background: var(--ct-surface);
 }
 .continuous-review-rail .review {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  flex: 1;
+  overflow-y: auto;
   background: var(--ct-surface);
 }
 .manuscript-editor .review > :first-child {
-  flex: 1;
+  flex: none;
 }
 .continuous-review-rail .review > :first-child {
-  flex: 1;
+  flex: none;
 }
 /* #90: the open review column has a fixed width (400px; 320px below 1200px), so its contents
    (e.g. the comments empty state) can't widen it over the page. The desk keeps the rest and
@@ -1029,13 +1056,29 @@ const LABELS: Record<ReviewItem['type'], string> = {
 }
 .manuscript-editor .comments,
 .continuous-review-rail .comments {
-  width: 300px;
+  width: 100%;
+  max-width: 100%;
   box-sizing: border-box;
   padding: var(--ct-space-3);
   border-left: 1px solid var(--ct-border);
   border-top: 1px solid var(--ct-border);
   font-family: var(--ct-font-ui);
   font-size: var(--ct-text-sm);
+  flex: none;
+}
+.review-comment-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--ct-space-1);
+}
+.review-comment-author {
+  color: var(--ct-text);
+}
+.review-comment-quote {
+  display: block;
+  margin: var(--ct-space-2) 0 0;
+  quotes: none;
 }
 .manuscript-editor .comments ul {
   padding-left: var(--ct-space-4);

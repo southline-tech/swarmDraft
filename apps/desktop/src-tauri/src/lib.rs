@@ -403,6 +403,66 @@ fn mcp_status(status: tauri::State<'_, std::sync::Mutex<McpStatus>>) -> McpStatu
     status.lock().expect("status poisoned").clone()
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewCommentRow {
+    id: String,
+    thread_id: String,
+    body: String,
+    author_kind: String,
+    author_id: String,
+    author_name: String,
+    created_at: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SectionReviewMeta {
+    comments: Vec<ReviewCommentRow>,
+    author_saved_names: std::collections::HashMap<String, String>,
+}
+
+fn review_comment_row(c: manuscripts::Comment) -> ReviewCommentRow {
+    ReviewCommentRow {
+        thread_id: c.thread_id.clone().unwrap_or_else(|| c.id.clone()),
+        id: c.id,
+        body: c.body,
+        author_kind: c.author.kind,
+        author_id: c.author.id,
+        author_name: c.author.name,
+        created_at: c.created_at,
+    }
+}
+
+/// Open comments and saved agent display names for the review sidebar (#47).
+#[tauri::command]
+async fn section_review_meta(
+    store: tauri::State<'_, storage::Store>,
+    section_id: String,
+) -> Result<SectionReviewMeta, String> {
+    blocking(&store, move |s| {
+        let comments = s.open_comments(&section_id)?;
+        let suggestions = s.open_suggestions(&section_id)?;
+        let mut author_saved_names = std::collections::HashMap::new();
+        for sug in &suggestions {
+            if sug.author.kind == "agent" {
+                author_saved_names
+                    .insert(format!("agent:{}", sug.author.id), sug.author.name.clone());
+            }
+        }
+        for c in &comments {
+            if c.author.kind == "agent" {
+                author_saved_names.insert(format!("agent:{}", c.author.id), c.author.name.clone());
+            }
+        }
+        Ok(SectionReviewMeta {
+            comments: comments.into_iter().map(review_comment_row).collect(),
+            author_saved_names,
+        })
+    })
+    .await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -481,6 +541,7 @@ pub fn run() {
             manuscript_save_outline,
             manuscript_updates_since,
             manuscript_set_numbering_style,
+            section_review_meta,
             mcp_status,
             save_manuscript_copy
         ])

@@ -19,6 +19,7 @@ import {
   agentLabel,
   agentName,
   authorLabel,
+  markAuthorLabel,
   refreshAgents,
   reloadOnFocus,
   resetAgentReloads,
@@ -155,6 +156,15 @@ describe('agent display names (RAD-263)', () => {
     const heads = p.findAll('[data-test=item] .who').map((h) => h.text());
     expect(heads[0]).toContain('Draft Helper');
     expect(heads[1]).toContain(REMOVED_AGENT);
+    const withSaved = mount(ReviewPanel, {
+      props: {
+        items,
+        labels: (a) => markAuthorLabel(a, { 'agent:gone': 'Old Name' }),
+      },
+    });
+    const savedHead = withSaved.findAll('[data-test=item] .who')[1]!;
+    expect(savedHead.find('[data-test=agent-name]').text()).toBe('Old Name');
+    expect(savedHead.find('[data-test=agent-note]').text()).toBe('(removed)');
     setAgents([{ ...agent('a1', 'Draft Helper'), revokedAt: 't' }]);
     await flushPromises();
     const revoked = p.find('[data-test=item] .who [data-test=agent-note]');

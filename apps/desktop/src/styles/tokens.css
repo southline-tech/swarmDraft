@@ -108,6 +108,7 @@
   --ct-text-muted: #6b6157; /* 5.7:1 on paper */
   --ct-accent: #2f5da8;
   --ct-accent-contrast: #ffffff;
+  --ct-hover-bg: #ece8e2;
   --ct-selected-bg: #e4ecf8;
   --ct-danger: #b3261e;
   --ct-danger-bg: #fbe9e7;
@@ -154,6 +155,7 @@
   --ct-text-muted: #a69c90;
   --ct-accent: #8db2f2;
   --ct-accent-contrast: #141210;
+  --ct-hover-bg: #2a2622;
   --ct-selected-bg: #25324a;
   --ct-danger: #f2a39c;
   --ct-danger-bg: #3a1f1c;

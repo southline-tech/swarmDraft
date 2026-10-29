@@ -738,6 +738,10 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
 </template>
 
 <style scoped>
+.section-nav {
+  color: var(--ct-text);
+  background: var(--ct-surface);
+}
 .move-to-part {
   position: relative;
 }
@@ -802,12 +806,15 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
 .row--drop-into {
   box-shadow: inset 0 0 0 2px var(--ct-accent);
 }
-.row:hover {
-  background: var(--ct-selected-bg);
+.row:hover:not(.selected) {
+  background: var(--ct-hover-bg);
 }
 .row.selected {
   background: var(--ct-selected-bg);
   color: var(--ct-text);
+}
+.row.selected .count {
+  color: var(--ct-text-muted);
 }
 .row .title {
   flex: 1;
