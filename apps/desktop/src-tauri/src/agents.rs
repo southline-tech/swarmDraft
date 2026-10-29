@@ -228,10 +228,15 @@ impl Store {
                     "an agent named \"{name}\" already exists; choose another name"
                 )));
             }
-            let make_primary = name_key(name) == name_key(DEFAULT_AGENT_NAME);
-            if make_primary {
-                c.execute("UPDATE agents SET is_primary = 0 WHERE is_primary = 1", [])?;
-            }
+            let has_primary = c
+                .query_row(
+                    "SELECT 1 FROM agents WHERE is_primary = 1 AND revoked_at IS NULL LIMIT 1",
+                    [],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some();
+            let make_primary = !has_primary && name_key(name) == name_key(DEFAULT_AGENT_NAME);
             c.execute(
                 &format!(
                     "INSERT INTO agents (id, name, color, created_at, is_primary)
@@ -670,5 +675,34 @@ mod tests {
             s.primary_agent_id().unwrap().as_deref(),
             Some(grok.id.as_str())
         );
+    }
+
+    #[test]
+    fn renamed_primary_stays_primary_when_new_default_name_agent_is_created() {
+        let (_t, s) = store();
+        let grok = s.create_agent(DEFAULT_AGENT_NAME, "#3366ff").unwrap();
+        assert!(grok.primary);
+        s.with_conn(|c| {
+            c.execute(
+                "UPDATE agents SET name = ?1 WHERE id = ?2",
+                params!["Renamed Bot", grok.id],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        let impostor = s.create_agent(DEFAULT_AGENT_NAME, "#112233").unwrap();
+        assert!(!impostor.primary);
+        assert_eq!(
+            s.primary_agent_id().unwrap().as_deref(),
+            Some(grok.id.as_str())
+        );
+        let grok_row = s
+            .list_agents()
+            .unwrap()
+            .into_iter()
+            .find(|a| a.id == grok.id)
+            .unwrap();
+        assert!(grok_row.primary);
+        assert_eq!(grok_row.name, "Renamed Bot");
     }
 }

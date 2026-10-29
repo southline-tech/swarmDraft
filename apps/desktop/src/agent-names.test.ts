@@ -99,6 +99,15 @@ describe('agent display names (RAD-263)', () => {
     expect(collabSlotOf('agent:x2')).toBe(2);
   });
 
+  it('keeps collab-1 on the renamed primary when a new Grok Bot is not primary (#76)', () => {
+    setAgents([
+      { ...agent('p1', 'Renamed Bot'), primary: true },
+      { ...agent('new1', 'Grok Bot'), primary: false },
+    ]);
+    expect(collabSlotOf('agent:p1')).toBe(1);
+    expect(collabSlotOf('agent:new1')).toBe(2);
+  });
+
   it('keeps the last list when a reload fails', async () => {
     setAgents([agent('a1', 'Draft Helper')]);
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});

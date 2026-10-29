@@ -231,3 +231,4 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-29 · #57 · Designer review (#149) · off toggle must not show "· Off"; status bar needs tc1 off line and tc2 "Your changes show as …" with default hint when on
 - 2026-10-29 · #57 · Designer review (#149) · tc3 NamePrompt uses role=status with focus on open, Esc close, focus return to the track toggle
 - 2026-10-29 · #57 · PM review (#149) · "We used your computer's name" only when `app_info.computerName` is wired through App → editor; alternate copy in browser/tests
+- 2026-10-29 · #76 · PM review (#151) · `create_agent` cleared primary when a new agent matched the default display name · assign primary only when no active primary row exists; never clear primary in `create_agent`
