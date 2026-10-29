@@ -11,6 +11,7 @@ export {
   coalesceLegacySceneSections,
   docWordCount as sectionDocWordCount,
 } from './legacy-scene-merge';
+export * from './section-numbering';
 export * from './content';
 export * from './extensions';
 export * from './collab';

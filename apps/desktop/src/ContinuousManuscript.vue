@@ -25,7 +25,7 @@ const props = defineProps<{
   readOnlyReason?: string;
   navigatorOpen?: boolean;
   chapterTitle?: string;
-  chapterLabel?: string;
+  sectionLabels?: ReadonlyMap<string, string>;
   bookDocs?: readonly Y.Doc[];
   chapterDocs?: Y.Doc[];
   saveState?: SaveState;
@@ -166,7 +166,7 @@ onBeforeUnmount(() => observer?.disconnect());
             :review-target="sec.id === selectedId ? REVIEW_RAIL : undefined"
             :status-target="sec.id === selectedId ? STATUS_RAIL : undefined"
             :chapter-title="sec.id === selectedId ? chapterTitle : undefined"
-            :chapter-label="sec.id === selectedId ? chapterLabel : undefined"
+            :chapter-label="sectionLabels?.get(sec.id)"
             :book-docs="sec.id === selectedId ? bookDocs : undefined"
             :chapter-docs="sec.id === selectedId ? chapterDocs : undefined"
             :save-state="sec.id === selectedId ? saveState : undefined"

@@ -18,7 +18,29 @@ pub struct Manuscript {
     pub id: String,
     pub title: String,
     pub created_at: String,
+    pub numbering_style: String,
 }
+
+const NUMBERING_STYLES: [&str; 4] = [
+    "chapter_arabic",
+    "chapter_words",
+    "chapter_upper",
+    "number_only",
+];
+
+/// Book-wide default (#111): Chapter 1 / Part I in the editor.
+pub const DEFAULT_NUMBERING_STYLE: &str = "chapter_arabic";
+
+fn row_manuscript(r: &rusqlite::Row<'_>) -> rusqlite::Result<Manuscript> {
+    Ok(Manuscript {
+        id: r.get(0)?,
+        title: r.get(1)?,
+        created_at: r.get(2)?,
+        numbering_style: r.get(3)?,
+    })
+}
+
+const MANUSCRIPT_COLS: &str = "id, title, created_at, numbering_style";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -202,35 +224,27 @@ impl Store {
         let id = new_id();
         self.with_conn(|c| {
             c.execute(
-                &format!("INSERT INTO manuscripts (id, title, created_at) VALUES (?1, ?2, {NOW})"),
-                params![id, title],
+                &format!(
+                    "INSERT INTO manuscripts (id, title, created_at, numbering_style) \
+                     VALUES (?1, ?2, {NOW}, ?3)"
+                ),
+                params![id, title, DEFAULT_NUMBERING_STYLE],
             )?;
             Ok(c.query_row(
-                "SELECT id, title, created_at FROM manuscripts WHERE id = ?1",
+                &format!("SELECT {MANUSCRIPT_COLS} FROM manuscripts WHERE id = ?1"),
                 [&id],
-                |r| {
-                    Ok(Manuscript {
-                        id: r.get(0)?,
-                        title: r.get(1)?,
-                        created_at: r.get(2)?,
-                    })
-                },
+                row_manuscript,
             )?)
         })
     }
 
     pub fn list_manuscripts(&self) -> Result<Vec<Manuscript>, StorageError> {
         self.with_conn(|c| {
-            let mut st =
-                c.prepare("SELECT id, title, created_at FROM manuscripts ORDER BY created_at, id")?;
+            let mut st = c.prepare(&format!(
+                "SELECT {MANUSCRIPT_COLS} FROM manuscripts ORDER BY created_at, id"
+            ))?;
             let rows = st
-                .query_map([], |r| {
-                    Ok(Manuscript {
-                        id: r.get(0)?,
-                        title: r.get(1)?,
-                        created_at: r.get(2)?,
-                    })
-                })?
+                .query_map([], row_manuscript)?
                 .collect::<Result<_, _>>()?;
             Ok(rows)
         })
@@ -239,18 +253,40 @@ impl Store {
     pub fn get_manuscript(&self, id: &str) -> Result<Manuscript, StorageError> {
         self.with_conn(|c| {
             c.query_row(
-                "SELECT id, title, created_at FROM manuscripts WHERE id = ?1",
+                &format!("SELECT {MANUSCRIPT_COLS} FROM manuscripts WHERE id = ?1"),
                 [id],
-                |r| {
-                    Ok(Manuscript {
-                        id: r.get(0)?,
-                        title: r.get(1)?,
-                        created_at: r.get(2)?,
-                    })
-                },
+                row_manuscript,
             )
             .optional()?
             .ok_or_else(|| StorageError::NotFound(format!("manuscript {id}")))
+        })
+    }
+
+    pub fn set_numbering_style(
+        &self,
+        manuscript_id: &str,
+        style: &str,
+    ) -> Result<Manuscript, StorageError> {
+        if !NUMBERING_STYLES.contains(&style) {
+            return Err(StorageError::Invalid(format!(
+                "unknown numbering style: {style}"
+            )));
+        }
+        self.with_conn(|c| {
+            let n = c.execute(
+                "UPDATE manuscripts SET numbering_style = ?2 WHERE id = ?1",
+                params![manuscript_id, style],
+            )?;
+            if n == 0 {
+                return Err(StorageError::NotFound(format!(
+                    "manuscript {manuscript_id}"
+                )));
+            }
+            Ok(c.query_row(
+                &format!("SELECT {MANUSCRIPT_COLS} FROM manuscripts WHERE id = ?1"),
+                [manuscript_id],
+                row_manuscript,
+            )?)
         })
     }
 
@@ -457,8 +493,11 @@ impl Store {
         self.with_conn(|c| {
             let tx = c.unchecked_transaction()?;
             tx.execute(
-                &format!("INSERT INTO manuscripts (id, title, created_at) VALUES (?1, ?2, {NOW})"),
-                params![manuscript_id, title],
+                &format!(
+                    "INSERT INTO manuscripts (id, title, created_at, numbering_style) \
+                     VALUES (?1, ?2, {NOW}, ?3)"
+                ),
+                params![manuscript_id, title, DEFAULT_NUMBERING_STYLE],
             )?;
             let mut out = Vec::with_capacity(sections.len());
             // Importer ids are only unique within one import, so every section gets a new
@@ -489,15 +528,9 @@ impl Store {
                 )?);
             }
             let m = tx.query_row(
-                "SELECT id, title, created_at FROM manuscripts WHERE id = ?1",
+                &format!("SELECT {MANUSCRIPT_COLS} FROM manuscripts WHERE id = ?1"),
                 [&manuscript_id],
-                |r| {
-                    Ok(Manuscript {
-                        id: r.get(0)?,
-                        title: r.get(1)?,
-                        created_at: r.get(2)?,
-                    })
-                },
+                row_manuscript,
             )?;
             tx.commit()?;
             Ok((m, out))
@@ -928,6 +961,14 @@ pub fn state_vector(doc: &Doc) -> StateVector {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn new_manuscript_uses_chapter_arabic_numbering() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = Store::open(tmp.path()).unwrap();
+        let m = s.create_manuscript("Sample Manuscript").unwrap();
+        assert_eq!(m.numbering_style, DEFAULT_NUMBERING_STYLE);
+    }
 
     #[test]
     fn import_section_json_validates_before_saving() {

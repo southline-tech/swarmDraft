@@ -1,5 +1,11 @@
 # EXPECTED — mock-manuscript.docx (ground truth for RAD-218 import tests)
 
+## Outline display titles (#111)
+
+Import tests assert **Word heading text** in each section’s `title` (mixed markers below). Desktop
+stored fixtures and the sample outline use **display titles** from
+`outline-display-titles.ts` (optional names only; chapter/part numbers come from numbering style).
+
 ## Front matter (in order, separated by page breaks)
 
 1. Title page: "THE LANTERNS OF HOLLOW REACH" / "A Novel" / author "Rowan Ashby Vale" (direct formatting, not Title style)

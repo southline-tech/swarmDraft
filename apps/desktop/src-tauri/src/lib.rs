@@ -371,6 +371,18 @@ async fn manuscripts_list(
     blocking(&store, |s| s.list_manuscripts()).await
 }
 
+#[tauri::command]
+async fn manuscript_set_numbering_style(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+    style: String,
+) -> Result<manuscripts::Manuscript, String> {
+    blocking(&store, move |s| {
+        s.set_numbering_style(&manuscript_id, &style)
+    })
+    .await
+}
+
 /// Where the MCP server is listening, or why it is not.
 #[derive(Clone, serde::Serialize)]
 pub struct McpStatus {
@@ -459,6 +471,7 @@ pub fn run() {
             section_apply_update,
             manuscript_save_outline,
             manuscript_updates_since,
+            manuscript_set_numbering_style,
             mcp_status,
             save_manuscript_copy
         ])

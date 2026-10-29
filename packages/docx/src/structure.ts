@@ -7,13 +7,29 @@
  * `writeStructure`, which applies the whole new outline in one Yjs transaction.
  */
 import * as Y from 'yjs';
-import { isSectionKind, type Section } from '@coauthor/schema';
+import {
+  DEFAULT_NUMBERING_STYLE,
+  isNumberingStyle,
+  type NumberingStyle,
+  isSectionKind,
+  type Section,
+} from '@coauthor/schema';
 import type { ImportedManuscript } from './import';
 import { docToYDoc } from './ydoc';
 
 export const STRUCTURE_FIELD = 'structure';
 export const META_FIELD = 'meta';
 export const STRUCTURE_ORIGIN = 'coauthor:structure';
+export const META_NUMBERING_STYLE = 'numberingStyle';
+
+export function readNumberingStyle(doc: Y.Doc): NumberingStyle {
+  const v = doc.getMap(META_FIELD).get(META_NUMBERING_STYLE);
+  return typeof v === 'string' && isNumberingStyle(v) ? v : DEFAULT_NUMBERING_STYLE;
+}
+
+export function writeNumberingStyle(doc: Y.Doc, style: NumberingStyle): void {
+  doc.getMap(META_FIELD).set(META_NUMBERING_STYLE, style);
+}
 
 type Ref = Y.Map<unknown>;
 const structureOf = (doc: Y.Doc) => doc.getArray<Ref>(STRUCTURE_FIELD);

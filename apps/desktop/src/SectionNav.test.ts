@@ -36,9 +36,9 @@ describe('SectionNav', () => {
     const w = setup();
     expect(titles(w)).toEqual([
       'Title page',
-      'Part One',
-      'Chapter 1',
-      'Chapter 2',
+      'Opening arc',
+      'Harbor dawn',
+      'After the bell',
       'About the author',
     ]);
     expect(w.find('[data-test="add-scene"]').exists()).toBe(false);
@@ -75,7 +75,7 @@ describe('SectionNav', () => {
     const w = setup({ selectedId: 'ch-2' });
     await w.find('[data-test="move-up"]').trigger('click');
     await settle();
-    expect(titles(w).slice(2, 4)).toEqual(['Chapter 2', 'Chapter 1']);
+    expect(titles(w).slice(2, 4)).toEqual(['After the bell', 'Harbor dawn']);
     w.unmount();
   });
 
@@ -125,7 +125,7 @@ describe('SectionNav', () => {
     expect(w.props('selectedId')).toBe('ch-1');
     await row('ch-1').trigger('keydown', { key: 'ArrowDown', altKey: true });
     await settle();
-    expect(titles(w).slice(2, 4)).toEqual(['Chapter 2', 'Chapter 1']);
+    expect(titles(w).slice(2, 4)).toEqual(['After the bell', 'Harbor dawn']);
     await row('ch-1').trigger('keydown', { key: 'F2' });
     expect(w.find('[data-test="rename-input"]').exists()).toBe(true);
     w.unmount();
@@ -162,13 +162,13 @@ describe('SectionNav', () => {
     expect(dialog.text()).toContain('2 section(s) inside it');
     await w.find('[data-test="confirm-delete-promote"]').trigger('click');
     await settle();
-    expect(titles(w)).toEqual(['Title page', 'Chapter 1', 'Chapter 2', 'About the author']);
+    expect(titles(w)).toEqual(['Title page', 'Harbor dawn', 'After the bell', 'About the author']);
 
     await w.setProps({ selectedId: 'ch-1' });
     await w.find('[data-test="delete"]').trigger('click');
     await w.find('[data-test="confirm-delete-all"]').trigger('click');
     await settle();
-    expect(titles(w)).not.toContain('Chapter 1');
+    expect(titles(w)).not.toContain('Harbor dawn');
     w.unmount();
   });
 
