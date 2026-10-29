@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
@@ -170,5 +172,24 @@ describe('ContextMenu theme (#54)', () => {
       expect(w.get('.sh-menu').classes()).toContain('sh-menu');
       w.unmount();
     }
+  });
+
+  it('shows a check on the active paragraph style and sparkle on ask-bot', async () => {
+    const w = mount(ContextMenu, {
+      props: { x: 8, y: 8, activeStyle: 'heading', disabled: new Set<ContextMenuAction>() },
+      attachTo: document.body,
+    });
+    await w.find('[data-test="ctx-style"]').trigger('click');
+    const heading = w.get('[data-test="ctx-style-heading"]');
+    expect(heading.attributes('aria-checked')).toBe('true');
+    expect(heading.find('[data-icon="check"]').exists()).toBe(true);
+    expect(w.get('[data-test="ctx-ask-bot"]').find('[data-icon="sparkle"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('does not apply hover styling to disabled items', () => {
+    const css = readFileSync(fileURLToPath(new URL('shells.css', import.meta.url)), 'utf8');
+    expect(css).toMatch(/\.sh-mi\[aria-disabled='true'\]/);
+    expect(css).toMatch(/:hover:not\(\[aria-disabled='true'\]\)/);
   });
 });

@@ -532,6 +532,11 @@ onBeforeUnmount(() => {
 
 /** Focus mode (#56): hides the app chrome; local UI state only. */
 const focusMode = ref(false);
+/** Set when the writer chooses Ask bot from the editor menu (#54 wiring to App). */
+const askBotRequested = ref(false);
+function onAskBotFromEditor() {
+  askBotRequested.value = true;
+}
 /** #96: the writer opened the outline by hand while the review panel shows. */
 const outlineForced = computed(() => outlineAuto.manual.value && navigatorOpen.value);
 
@@ -604,6 +609,9 @@ defineExpose({ open, closeSession });
       @cancel-restore="confirmingRestore = false"
       @dismiss-notice="tokensNotice = null"
     />
+    <p v-if="askBotRequested" class="visually-hidden" data-test="ask-bot-requested" role="status">
+      Ask bot requested
+    </p>
     <div v-if="recoveryNotices.length" role="alert" data-test="recovery-notice">
       <p>
         A restore was interrupted. Some attachments may be missing. {{ PRODUCT_NAME }} didn't delete
@@ -755,6 +763,7 @@ defineExpose({ open, closeSession });
         @toggle-navigator="outlineAuto.toggleByHand()"
         @layout="onEditorLayout"
         @focus-mode="focusMode = $event"
+        @ask-bot="onAskBotFromEditor"
       />
     </div>
   </main>

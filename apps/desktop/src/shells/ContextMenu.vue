@@ -3,12 +3,15 @@
  * Editor context menu (wp4, #54). Keyboard: arrows, Enter/Space, Esc (stops propagation).
  */
 import { nextTick, onMounted, ref } from 'vue';
+import AppIcon from '../icons/AppIcon.vue';
 import type { ContextMenuAction } from './context-menu';
 
 const props = defineProps<{
   x: number;
   y: number;
   disabled?: ReadonlySet<ContextMenuAction>;
+  /** Current block paragraph style for the style submenu checkmarks. */
+  activeStyle?: ContextMenuAction;
 }>();
 const emit = defineEmits<{ close: []; select: [action: ContextMenuAction] }>();
 const root = ref<HTMLElement>();
@@ -25,9 +28,9 @@ const STYLES: { id: ContextMenuAction; label: string; keys: string }[] = [
   { id: 'block_quote', label: 'Block quote', keys: 'Ctrl+Alt+2' },
   { id: 'scene_break', label: 'Scene break', keys: '' },
 ];
-const AFTER: { id: ContextMenuAction; label: string; keys: string }[] = [
+const AFTER: { id: ContextMenuAction; label: string; keys: string; icon?: 'sparkle' }[] = [
   { id: 'comment', label: 'Add comment', keys: 'Ctrl+Alt+M' },
-  { id: 'ask-bot', label: 'Ask bot to suggest…', keys: 'Ctrl+Alt+S' },
+  { id: 'ask-bot', label: 'Ask bot to suggest…', keys: 'Ctrl+Alt+S', icon: 'sparkle' },
 ];
 
 function isDisabled(id: ContextMenuAction) {
@@ -120,14 +123,18 @@ onMounted(() => nextTick(() => root.value?.querySelector<HTMLElement>('[role=men
           v-for="st in STYLES"
           :key="st.id"
           type="button"
-          role="menuitem"
+          role="menuitemradio"
           tabindex="-1"
           class="sh-mi"
           :data-test="`ctx-style-${st.id}`"
           :data-action="st.id"
+          :aria-checked="activeStyle === st.id ? 'true' : 'false'"
           :aria-disabled="isDisabled(st.id) ? 'true' : undefined"
           @click="pick(st.id)"
         >
+          <span class="sh-mi-lead" aria-hidden="true">
+            <AppIcon v-if="activeStyle === st.id" name="check" class="sh-mi-check" />
+          </span>
           {{ st.label }}<span class="sh-k">{{ st.keys }}</span>
         </button>
       </div>
@@ -145,7 +152,26 @@ onMounted(() => nextTick(() => root.value?.querySelector<HTMLElement>('[role=men
       :aria-disabled="isDisabled(it.id) ? 'true' : undefined"
       @click="pick(it.id)"
     >
+      <span class="sh-mi-lead" aria-hidden="true">
+        <AppIcon v-if="it.icon" :name="it.icon" class="sh-mi-muted" />
+      </span>
       {{ it.label }}<span class="sh-k">{{ it.keys }}</span>
     </button>
   </div>
 </template>
+
+<style scoped>
+.sh-mi-lead {
+  display: inline-flex;
+  width: 16px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+.sh-mi-check {
+  color: var(--ct-accent);
+}
+.sh-mi-muted {
+  color: var(--ct-text-muted);
+}
+</style>

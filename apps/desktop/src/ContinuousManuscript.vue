@@ -44,6 +44,7 @@ const emit = defineEmits<{
   'focus-mode': [on: boolean];
   'load-error': [message: string];
   layout: [layout: EditorLayout];
+  'ask-bot': [];
 }>();
 
 const ordered = computed(() => sectionsInReadingOrder(props.outline));
@@ -180,6 +181,7 @@ onBeforeUnmount(() => observer?.disconnect());
             @focus-mode="emit('focus-mode', $event)"
             @load-error="(msg) => sec.id === selectedId && emit('load-error', msg)"
             @layout="(layout) => sec.id === selectedId && onLeadLayout(layout)"
+            @ask-bot="emit('ask-bot')"
           />
         </div>
       </div>

@@ -50,6 +50,7 @@ import {
   runContextMenuAction,
   type ContextMenuAction,
 } from './shells/context-menu';
+import { caretStyle } from './toolbar/toolbar';
 import ShortcutsSheet from './shells/ShortcutsSheet.vue';
 import './shells/shells.css';
 import {
@@ -210,6 +211,13 @@ function openMenu(e: MouseEvent) {
   };
 }
 const menuDisabled = computed(() => contextMenuDisabled(editor.value));
+const menuActiveStyle = computed((): ContextMenuAction | undefined => {
+  const e = editor.value;
+  if (!e || e.isDestroyed) return undefined;
+  const s = caretStyle(e);
+  if (s === 'body' || s === 'heading' || s === 'block_quote' || s === 'scene_break') return s;
+  return undefined;
+});
 async function onContextMenuSelect(action: ContextMenuAction) {
   menuAt.value = null;
   const e = editor.value;
@@ -769,6 +777,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
       :x="menuAt.x"
       :y="menuAt.y"
       :disabled="menuDisabled"
+      :active-style="menuActiveStyle"
       @select="onContextMenuSelect"
       @close="menuAt = null"
     />
