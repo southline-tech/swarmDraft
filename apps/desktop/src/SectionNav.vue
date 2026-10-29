@@ -811,12 +811,7 @@ const rovingTabKey = computed(() => {
           >
         </li>
       </template>
-      <li
-        v-if="frontNewOptions.length"
-        ref="frontNewMenuWrap"
-        role="none"
-        class="outline-new"
-      >
+      <li v-if="frontNewOptions.length" ref="frontNewMenuWrap" role="none" class="outline-new">
         <button
           type="button"
           class="outline-new__btn"
@@ -992,12 +987,7 @@ const rovingTabKey = computed(() => {
           >
         </li>
       </template>
-      <li
-        v-if="backNewOptions.length"
-        ref="backNewMenuWrap"
-        role="none"
-        class="outline-new"
-      >
+      <li v-if="backNewOptions.length" ref="backNewMenuWrap" role="none" class="outline-new">
         <button
           type="button"
           class="outline-new__btn"
