@@ -137,6 +137,14 @@ describe('SectionNav', () => {
     w.unmount();
   });
 
+  it('disables move up at the top with aria-disabled styling', async () => {
+    const w = setup({ selectedId: 'ch-1' });
+    await openCtx(w, 'ch-1');
+    const up = ctxEl('outline-ctx-move-up');
+    expect(up.getAttribute('aria-disabled')).toBe('true');
+    w.unmount();
+  });
+
   it('reorders from the context menu', async () => {
     const w = setup({ selectedId: 'ch-2' });
     await openCtx(w, 'ch-2');

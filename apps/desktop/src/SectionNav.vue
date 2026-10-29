@@ -13,6 +13,7 @@ import './shells/shells.css';
 import type { NumberingStyle, Section, SectionKind } from '@coauthor/schema';
 import { NUMBERING_STYLE_LABELS, NUMBERING_STYLES } from './numbering-style-labels';
 import { formatCount } from './status/wordcount';
+import AppIcon from './icons/AppIcon.vue';
 import { errorLine } from './errors/map-error';
 import {
   addSection,
@@ -185,6 +186,9 @@ function sectionIdOrder(sections: Section[]) {
 }
 function canMove(id: string, delta: -1 | 1) {
   return sectionIdOrder(moveSection(list.value, id, delta)) !== sectionIdOrder(list.value);
+}
+function moveBlocked(id: string, delta: -1 | 1) {
+  return busy.value || !canMove(id, delta);
 }
 
 const menuFor = ref<string>();
@@ -477,9 +481,12 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
           tabindex="-1"
           class="sh-mi"
           data-test="outline-ctx-rename"
-          :disabled="busy"
-          @click="menuRename(menuFor)"
+          :aria-disabled="busy ? 'true' : undefined"
+          @click="!busy && menuRename(menuFor)"
         >
+          <span class="sh-mi-lead" aria-hidden="true"
+            ><AppIcon name="pencil" class="outline-ctx-icon"
+          /></span>
           Rename<span class="sh-k">F2</span>
         </button>
         <button
@@ -488,9 +495,12 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
           tabindex="-1"
           class="sh-mi"
           data-test="outline-ctx-add"
-          :disabled="busy"
-          @click="addSiblingAfter(menuFor)"
+          :aria-disabled="busy ? 'true' : undefined"
+          @click="!busy && addSiblingAfter(menuFor)"
         >
+          <span class="sh-mi-lead" aria-hidden="true"
+            ><AppIcon name="plus" class="outline-ctx-icon"
+          /></span>
           Add
         </button>
         <div class="sh-sep" role="separator" />
@@ -500,9 +510,12 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
           tabindex="-1"
           class="sh-mi"
           data-test="outline-ctx-move-up"
-          :disabled="busy || !canMove(menuFor, -1)"
-          @click="menuMove(-1, menuFor)"
+          :aria-disabled="moveBlocked(menuFor, -1) ? 'true' : undefined"
+          @click="!moveBlocked(menuFor, -1) && menuMove(-1, menuFor)"
         >
+          <span class="sh-mi-lead" aria-hidden="true"
+            ><AppIcon name="arrow-up" class="outline-ctx-icon"
+          /></span>
           Move up
         </button>
         <button
@@ -511,9 +524,12 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
           tabindex="-1"
           class="sh-mi"
           data-test="outline-ctx-move-down"
-          :disabled="busy || !canMove(menuFor, 1)"
-          @click="menuMove(1, menuFor)"
+          :aria-disabled="moveBlocked(menuFor, 1) ? 'true' : undefined"
+          @click="!moveBlocked(menuFor, 1) && menuMove(1, menuFor)"
         >
+          <span class="sh-mi-lead" aria-hidden="true"
+            ><AppIcon name="arrow-down" class="outline-ctx-icon"
+          /></span>
           Move down
         </button>
         <div
@@ -530,10 +546,13 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
             aria-haspopup="menu"
             :aria-expanded="moveSubOpen"
             data-test="outline-ctx-move-to-part"
-            :disabled="busy || !partChoices.length"
-            @click="moveSubOpen = !moveSubOpen"
+            :aria-disabled="busy || !partChoices.length ? 'true' : undefined"
+            @click="!(busy || !partChoices.length) && (moveSubOpen = !moveSubOpen)"
             @keydown.right.prevent="moveSubOpen = true"
           >
+            <span class="sh-mi-lead" aria-hidden="true"
+              ><AppIcon name="folder" class="outline-ctx-icon"
+            /></span>
             Move to Part…<span class="sh-k">›</span>
           </button>
           <div
@@ -563,9 +582,12 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
           tabindex="-1"
           class="sh-mi danger"
           data-test="outline-ctx-delete"
-          :disabled="busy"
-          @click="menuDelete(menuFor)"
+          :aria-disabled="busy ? 'true' : undefined"
+          @click="!busy && menuDelete(menuFor)"
         >
+          <span class="sh-mi-lead" aria-hidden="true"
+            ><AppIcon name="trash" class="outline-ctx-icon outline-ctx-icon--danger"
+          /></span>
           Delete
         </button>
       </div>
@@ -627,11 +649,24 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
 .move-to-part {
   position: relative;
 }
+.sh-mi-lead {
+  display: inline-flex;
+  width: 16px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+.outline-ctx-icon {
+  color: var(--ct-text-muted);
+}
+.outline-ctx-icon--danger {
+  color: var(--ct-danger);
+}
 .sh-mi.danger {
   color: var(--ct-danger);
 }
-.sh-mi.danger:hover,
-.sh-mi.danger:focus {
+.sh-mi.danger:hover:not([aria-disabled='true']),
+.sh-mi.danger:focus:not([aria-disabled='true']) {
   background: var(--ct-danger-bg);
   color: var(--ct-danger);
 }
