@@ -363,12 +363,44 @@ function onRowContextMenu(e: MouseEvent, id: string) {
 }
 const frontNewMenuOpen = ref(false);
 const backNewMenuOpen = ref(false);
+const contentNewMenuOpen = ref(false);
 const frontNewMenuWrap = ref<HTMLElement>();
 const backNewMenuWrap = ref<HTMLElement>();
+const contentNewMenuWrap = ref<HTMLElement>();
+
+function lastPartInOutline(sections: Section[]) {
+  let last: Section | undefined;
+  for (const s of sections) {
+    if (!s.parentId && s.kind === 'part') last = s;
+  }
+  return last;
+}
+
+async function addContentSection(kind: 'chapter' | 'part') {
+  closeMenu();
+  closeNewMenus();
+  const beforeIds = new Set(list.value.map((x) => x.id));
+  const lastPart = lastPartInOutline(list.value);
+  const next = await commit((cur) =>
+    addSection(cur, {
+      manuscriptId: props.manuscriptId,
+      kind,
+      title: `New ${KIND_LABELS[kind].toLowerCase()}`,
+      ...(kind === 'chapter' && lastPart ? { parentId: lastPart.id } : {}),
+    }),
+  );
+  const created = next?.find((x) => !beforeIds.has(x.id));
+  if (created) {
+    undoSections.value = null;
+    select(created.id);
+    startRename(created.id, created.title);
+  }
+}
 
 function closeNewMenus() {
   frontNewMenuOpen.value = false;
   backNewMenuOpen.value = false;
+  contentNewMenuOpen.value = false;
 }
 function toggleFrontNewMenu() {
   const open = !frontNewMenuOpen.value;
@@ -387,6 +419,16 @@ function toggleBackNewMenu() {
   if (open) {
     void nextTick(() =>
       backNewMenuWrap.value?.querySelector<HTMLElement>('[role=menuitem]')?.focus(),
+    );
+  }
+}
+function toggleContentNewMenu() {
+  const open = !contentNewMenuOpen.value;
+  closeNewMenus();
+  contentNewMenuOpen.value = open;
+  if (open) {
+    void nextTick(() =>
+      contentNewMenuWrap.value?.querySelector<HTMLElement>('[role=menuitem]')?.focus(),
     );
   }
 }
@@ -409,6 +451,8 @@ function onPointerDownCapture(e: MouseEvent) {
   if (frontNewMenuOpen.value && !frontNewMenuWrap.value?.contains(t))
     frontNewMenuOpen.value = false;
   if (backNewMenuOpen.value && !backNewMenuWrap.value?.contains(t)) backNewMenuOpen.value = false;
+  if (contentNewMenuOpen.value && !contentNewMenuWrap.value?.contains(t))
+    contentNewMenuOpen.value = false;
 }
 onMounted(() => document.addEventListener('mousedown', onPointerDownCapture, true));
 onUnmounted(() => document.removeEventListener('mousedown', onPointerDownCapture, true));
@@ -909,6 +953,60 @@ const rovingTabKey = computed(() => {
           >
         </li>
       </template>
+      <li ref="contentNewMenuWrap" role="none" class="outline-new outline-new--split">
+        <div class="outline-new__split">
+          <button
+            type="button"
+            class="outline-new__btn outline-new__btn--main"
+            data-test="outline-new-content"
+            :disabled="busy"
+            @click="addContentSection('chapter')"
+          >
+            + New
+          </button>
+          <button
+            type="button"
+            class="outline-new__caret"
+            data-test="outline-new-content-split"
+            :aria-expanded="contentNewMenuOpen"
+            aria-haspopup="menu"
+            aria-label="Add chapter or part"
+            :disabled="busy"
+            @click="toggleContentNewMenu"
+          >
+            <span aria-hidden="true">▾</span>
+          </button>
+        </div>
+        <div
+          v-if="contentNewMenuOpen"
+          class="sh-menu outline-new__menu"
+          role="menu"
+          aria-label="Add content"
+          data-test="outline-new-menu-content"
+          @keydown="onNewMenuKey($event, contentNewMenuWrap, () => (contentNewMenuOpen = false))"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            tabindex="-1"
+            class="sh-mi"
+            data-test="outline-new-chapter"
+            @click="addContentSection('chapter')"
+          >
+            Chapter
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            tabindex="-1"
+            class="sh-mi"
+            data-test="outline-new-part"
+            @click="addContentSection('part')"
+          >
+            Part
+          </button>
+        </div>
+      </li>
       <li v-if="hasBackZone" role="none" class="group-row">
         <button
           type="button"
@@ -1379,6 +1477,47 @@ const rovingTabKey = computed(() => {
   z-index: 20;
   max-height: 12rem;
   overflow: auto;
+}
+.outline-new--split .outline-new__split {
+  display: flex;
+  width: 100%;
+}
+.outline-new__btn--main {
+  flex: 1;
+  border-radius: var(--ct-radius-md) 0 0 var(--ct-radius-md);
+}
+.outline-new__caret {
+  flex: none;
+  padding: 0.25rem 0.4rem;
+  border: 1px dashed var(--ct-border);
+  border-left: none;
+  border-radius: 0 var(--ct-radius-md) var(--ct-radius-md) 0;
+  background: none;
+  color: var(--ct-text-muted);
+  font: inherit;
+  font-size: var(--ct-text-sm);
+  cursor: pointer;
+}
+.outline-new__caret:hover:not(:disabled),
+.outline-new__caret:focus-visible:not(:disabled) {
+  background: var(--ct-selected-bg);
+  border-color: var(--ct-accent);
+  color: var(--ct-accent);
+  outline: var(--ct-focus-outline);
+  outline-offset: calc(var(--ct-focus-offset) * -1);
+}
+.outline-new__caret:disabled,
+.outline-new__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.outline-new--split .outline-new__btn--main:hover,
+.outline-new--split .outline-new__btn--main:focus-visible {
+  z-index: 1;
+}
+.outline-new--split .outline-new__caret:hover,
+.outline-new--split .outline-new__caret:focus-visible {
+  z-index: 1;
 }
 .count {
   margin-left: auto;
