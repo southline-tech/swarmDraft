@@ -840,6 +840,8 @@ vi.mock('./backend', async (orig) => ({
   getRecoveryNotices: vi.fn(async () => []),
   persistImport: vi.fn(async () => storedFixture()),
   openLatestManuscript: vi.fn(async () => null),
+  listManuscripts: vi.fn(async () => []),
+  loadManuscript: vi.fn(async () => null),
   saveSectionUpdate: vi.fn(async () => {}),
   saveOutline: vi.fn(async () => {}),
   dismissRecoveryNotices: vi.fn(async () => {}),
@@ -1668,7 +1670,8 @@ describe('home screen', () => {
     const persist = vi.mocked(backend.persistImport);
     const { w, session } = await withManuscript();
     persist.mockClear();
-    await w.find('[data-test="open-another"]').trigger('click');
+    await w.get('[data-test="app-menu-trigger"]').trigger('click');
+    await w.find('[data-test="app-menu-open"]').trigger('click');
     const bad = new File(['hello'], 'notes.txt');
     await w.find('[data-test="drop-zone"]').trigger('drop', { dataTransfer: { files: [bad] } });
     await settle();
@@ -1685,7 +1688,8 @@ describe('home screen', () => {
   it('opens a second manuscript from inside an open one', async () => {
     const { w } = await withManuscript();
     expect(w.find('[data-test="home"]').exists()).toBe(false);
-    await w.find('[data-test="open-another"]').trigger('click');
+    await w.get('[data-test="app-menu-trigger"]').trigger('click');
+    await w.find('[data-test="app-menu-open"]').trigger('click');
     expect(w.find('[data-test="home-open"]').exists()).toBe(true);
     await chooseFile(w);
     expect(w.find('[data-test="home"]').exists()).toBe(false);
@@ -2254,6 +2258,17 @@ describe('title bar book menu (#104)', () => {
     await settle();
     expect(menu.attributes('open')).toBeDefined();
     expect(w.find('[data-test="settings-open"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('lists New, Open, Recent, and Settings in the book menu (#104 PM)', async () => {
+    const w = mount(App);
+    await flushPromises();
+    await w.get('[data-test="app-menu-trigger"]').trigger('click');
+    await settle();
+    const labels = w.findAll('[data-test="app-menu"] [role=menuitem]').map((b) => b.text());
+    expect(labels).toEqual(expect.arrayContaining(['New', 'Open', 'Settings']));
+    expect(labels.some((l) => l.startsWith('Recent'))).toBe(true);
     w.unmount();
   });
 

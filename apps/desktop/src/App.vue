@@ -8,9 +8,12 @@ import {
   dismissRecoveryNotices,
   getMigrationNotices,
   dismissMigrationNotices,
+  listManuscripts,
+  loadManuscript,
   type AppInfo,
   type RecoveryNotice,
   type MigrationNotice,
+  type StoredManuscriptRow,
 } from './backend';
 import SettingsScreen from './settings/SettingsScreen.vue';
 import { authorName, refreshAgents, reloadOnFocus } from './agent-names';
@@ -39,7 +42,7 @@ import { PRODUCT_NAME } from './lib/brand';
 import ShellsPreview from './shells/ShellsPreview.vue';
 import AppToast from './shells/AppToast.vue';
 import { applyThemeParam, readPreview } from './shells/preview';
-import { flushOnClose } from './close-flush';
+import { CLOSE_FLUSH_TIMEOUT_MS, confirmQuit, flushOnClose, flushWithTimeout } from './close-flush';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { resetCollabSlots } from './author-colors';
@@ -48,6 +51,7 @@ import type { NumberingStyle } from '@coauthor/schema';
 import { docWordCount, outlineDocs, sectionTreeDocs } from './status/wordcount';
 import {
   importAndOpen,
+  openStored,
   reopenLatest,
   UnsavedEditsError,
   type ManuscriptSession,
@@ -214,6 +218,55 @@ function openPreview(id: 'all') {
   preview.value = id;
 }
 const settingsButton = ref<HTMLButtonElement | null>(null);
+const recentOpen = ref(false);
+const recentBooks = ref<StoredManuscriptRow[]>([]);
+async function refreshRecentBooks() {
+  try {
+    recentBooks.value = await listManuscripts();
+  } catch (e) {
+    console.error('List manuscripts failed', e);
+    recentBooks.value = [];
+  }
+}
+function onAppMenuToggle(e: Event) {
+  const open = (e.target as HTMLDetailsElement).open;
+  if (open) void refreshRecentBooks();
+  else recentOpen.value = false;
+}
+function openBookPicker() {
+  if (session.value) choosingBook.value = true;
+  else void getStarted();
+}
+async function openRecentBook(id: string) {
+  if (session.value?.id === id) return;
+  try {
+    await session.value?.flush();
+  } catch (e) {
+    console.error('Flush before open failed', e);
+    openError.value = `Couldn't switch books: ${errorLine(e, 'save')}`;
+    return;
+  }
+  openError.value = '';
+  const stored = await loadManuscript(id);
+  if (!stored) {
+    openError.value = "That book couldn't be opened. Please try again.";
+    return;
+  }
+  const next = openStored(stored, null, persistHooks);
+  open(next);
+  showOpenToast(next);
+}
+async function quitApp() {
+  if (!isTauri()) return;
+  const win = getCurrentWindow();
+  if (
+    (await flushWithTimeout(() => session.value?.flush() ?? Promise.resolve(), CLOSE_FLUSH_TIMEOUT_MS)) !==
+      'saved' &&
+    !(await confirmQuit())
+  )
+    return;
+  await win.destroy();
+}
 watch(settingsOpen, async (isOpen) => {
   await nextTick();
   // SettingsScreen moves focus into itself on mount; back to the button that opened it on close.
@@ -558,7 +611,7 @@ defineExpose({ open, closeSession });
   <ShellsPreview v-if="preview" class="shell" :initial="preview" @close="preview = null" />
   <main v-else class="shell">
     <header v-show="!focusMode" class="topbar">
-      <details class="topbar__menu" data-test="app-menu">
+      <details class="topbar__menu" data-test="app-menu" @toggle="onAppMenuToggle">
         <summary
           class="topbar__trigger"
           data-test="app-menu-trigger"
@@ -575,15 +628,62 @@ defineExpose({ open, closeSession });
           @click="($event.currentTarget as HTMLElement).closest('details')?.removeAttribute('open')"
         >
           <button
-            v-if="session && !choosingBook"
+            type="button"
+            class="topbar__button"
+            role="menuitem"
+            data-test="app-menu-new"
+            :disabled="importing"
+            @click="chooseFile"
+          >
+            New
+          </button>
+          <button
             type="button"
             class="topbar__button topbar__open"
             role="menuitem"
-            data-test="open-another"
-            @click="choosingBook = true"
+            data-test="app-menu-open"
+            @click="openBookPicker"
           >
-            Open another book
+            Open
           </button>
+          <div
+            class="topbar__recent"
+            @mouseenter="recentOpen = true"
+            @mouseleave="recentOpen = false"
+          >
+            <button
+              type="button"
+              class="topbar__button"
+              role="menuitem"
+              aria-haspopup="menu"
+              :aria-expanded="recentOpen"
+              data-test="app-menu-recent"
+              :disabled="!recentBooks.length"
+              @click="recentOpen = !recentOpen"
+            >
+              Recent<span class="topbar__submark">›</span>
+            </button>
+            <div
+              v-if="recentOpen && recentBooks.length"
+              class="topbar__menu-list topbar__submenu"
+              role="menu"
+              aria-label="Recent books"
+              @click.stop
+            >
+              <button
+                v-for="m in recentBooks"
+                :key="m.id"
+                type="button"
+                class="topbar__button"
+                role="menuitem"
+                :data-test="`app-menu-recent-${m.id}`"
+                @click="openRecentBook(m.id)"
+              >
+                {{ m.title || 'Untitled' }}
+              </button>
+            </div>
+          </div>
+          <div class="topbar__sep" role="separator" />
           <button
             ref="settingsButton"
             type="button"
@@ -594,6 +694,16 @@ defineExpose({ open, closeSession });
             @click="settingsOpen = !settingsOpen"
           >
             Settings
+          </button>
+          <button
+            v-if="isTauri()"
+            type="button"
+            class="topbar__button"
+            role="menuitem"
+            data-test="app-menu-quit"
+            @click="quitApp"
+          >
+            Quit
           </button>
         </div>
       </details>
@@ -889,6 +999,23 @@ body {
   border-radius: var(--ct-radius-md);
   background: var(--ct-surface);
   white-space: nowrap;
+}
+.topbar__recent {
+  position: relative;
+}
+.topbar__submenu {
+  top: 0;
+  left: 100%;
+  margin-left: var(--ct-space-1);
+}
+.topbar__submark {
+  margin-left: var(--ct-space-2);
+  color: var(--ct-text-muted);
+}
+.topbar__sep {
+  height: 1px;
+  margin: var(--ct-space-1) 0;
+  background: var(--ct-border);
 }
 .topbar__button {
   min-height: var(--ct-space-12);

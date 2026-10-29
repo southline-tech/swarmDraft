@@ -211,6 +211,22 @@ export async function openLatestManuscript(): Promise<StoredManuscript | null> {
   return invoke<StoredManuscript | null>('manuscript_open_latest');
 }
 
+/** All stored manuscripts, newest first; empty in a plain browser. */
+export async function listManuscripts(): Promise<StoredManuscriptRow[]> {
+  if (!isTauri()) return [];
+  return invoke<StoredManuscriptRow[]>('manuscripts_list');
+}
+
+/** Load one stored manuscript by id; null in a plain browser. */
+export async function loadManuscript(manuscriptId: string): Promise<StoredManuscript | null> {
+  if (!isTauri()) return null;
+  try {
+    return await invoke<StoredManuscript>('manuscript_load', { manuscriptId });
+  } catch {
+    return null;
+  }
+}
+
 /** Save an editor's Yjs update to a stored section (validated by the backend). */
 export async function saveSectionUpdate(
   manuscriptId: string,
