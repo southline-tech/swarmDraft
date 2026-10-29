@@ -60,6 +60,38 @@ describe('SectionNav', () => {
     w.unmount();
   });
 
+  it('Add inserts a sibling after the selection and starts rename', async () => {
+    const w = setup({ selectedId: 'ch-1' });
+    await openCtx(w, 'ch-1');
+    await ctxClick(w, 'outline-ctx-add');
+    expect(w.find('[data-test="rename-input"]').exists()).toBe(true);
+    await w.find('[data-test="rename-input"]').setValue('New chapter');
+    await w.find('[data-test="rename-input"]').trigger('keydown', { key: 'Enter' });
+    await settle();
+    expect(titles(w)).toEqual([
+      'Title page',
+      'Opening arc',
+      'Harbor dawn',
+      'New chapter',
+      'After the bell',
+      'About the author',
+    ]);
+    w.unmount();
+  });
+
+  it('undo restores a deleted section', async () => {
+    const w = setup({ selectedId: 'ch-2' });
+    await openCtx(w, 'ch-2');
+    await ctxClick(w, 'outline-ctx-delete');
+    await w.find('[data-test="confirm-delete-all"]').trigger('click');
+    await settle();
+    expect(titles(w)).not.toContain('After the bell');
+    await w.find('[data-test="outline-undo-delete-btn"]').trigger('click');
+    await settle();
+    expect(titles(w)).toContain('After the bell');
+    w.unmount();
+  });
+
   it('renames from the context menu', async () => {
     const w = setup({ selectedId: 'ch-1' });
     await openCtx(w, 'ch-1');

@@ -15,6 +15,7 @@ import { NUMBERING_STYLE_LABELS, NUMBERING_STYLES } from './numbering-style-labe
 import { formatCount } from './status/wordcount';
 import { errorLine } from './errors/map-error';
 import {
+  addSection,
   applyOutlineEdit,
   buildOutline,
   canNest,
@@ -121,6 +122,54 @@ async function commitRename() {
   editingId.value = undefined;
   if (draft.value !== byId(id)?.title) await commit((s) => renameSection(s, id, draft.value));
   focusRow(id);
+}
+
+/** Insert a sibling of the same kind immediately after `id`, then rename (#108 comment). */
+function siblingInsertAfter(id: string): { beforeId?: string; parentId?: string } | undefined {
+  const s = byId(id);
+  if (!s) return undefined;
+  const i = rows.value.findIndex((r) => r.section.id === id);
+  if (i < 0) return undefined;
+  const depth = rows.value[i]!.depth;
+  for (let j = i + 1; j < rows.value.length; j++) {
+    const r = rows.value[j]!;
+    if (r.depth < depth) break;
+    if (r.depth === depth && r.section.parentId === s.parentId) return { beforeId: r.section.id };
+  }
+  return s.parentId ? { parentId: s.parentId } : {};
+}
+
+async function addSiblingAfter(id: string) {
+  closeMenu();
+  const s = byId(id);
+  const where = siblingInsertAfter(id);
+  if (!s || !where) return;
+  const beforeIds = new Set(list.value.map((x) => x.id));
+  const next = await commit((cur) => {
+    let sections = addSection(cur, {
+      manuscriptId: props.manuscriptId,
+      kind: s.kind,
+      title: `New ${KIND_LABELS[s.kind].toLowerCase()}`,
+      ...(s.parentId ? { parentId: s.parentId } : {}),
+    });
+    const created = sections.find((x) => !beforeIds.has(x.id));
+    if (!created) return sections;
+    return dropSection(sections, created.id, where);
+  });
+  const created = next?.find((x) => !beforeIds.has(x.id));
+  if (created) {
+    undoSections.value = null;
+    select(created.id);
+    startRename(created.id, created.title);
+  }
+}
+
+const undoSections = ref<Section[] | null>(null);
+async function undoDelete() {
+  const snap = undoSections.value;
+  if (!snap) return;
+  undoSections.value = null;
+  await commit(() => snap.map((x) => ({ ...x })));
 }
 
 async function move(delta: -1 | 1, id = props.selectedId) {
@@ -237,13 +286,14 @@ async function confirmDelete(children: 'delete' | 'promote') {
   const id = confirmingDelete.value;
   confirmingDelete.value = undefined;
   if (!id) return;
+  undoSections.value = list.value.map((x) => ({ ...x }));
   const rowsNow = rows.value.map((r) => r.section.id);
   const next = await commit((s) => deleteSection(s, id, { children }));
   if (next) {
     const i = rowsNow.indexOf(id);
     const fallback = next.find((s) => s.id === rowsNow[i - 1]) ?? next[0];
     if (fallback) select(fallback.id);
-  }
+  } else undoSections.value = null;
 }
 
 const dragId = ref<string>();
@@ -432,6 +482,17 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
         >
           Rename<span class="sh-k">F2</span>
         </button>
+        <button
+          type="button"
+          role="menuitem"
+          tabindex="-1"
+          class="sh-mi"
+          data-test="outline-ctx-add"
+          :disabled="busy"
+          @click="addSiblingAfter(menuFor)"
+        >
+          Add
+        </button>
         <div class="sh-sep" role="separator" />
         <button
           type="button"
@@ -500,7 +561,7 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
           type="button"
           role="menuitem"
           tabindex="-1"
-          class="sh-mi"
+          class="sh-mi danger"
           data-test="outline-ctx-delete"
           :disabled="busy"
           @click="menuDelete(menuFor)"
@@ -523,8 +584,7 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
       <p>
         Delete this section<template v-if="deleteInfo.inside">
           and the {{ deleteInfo.inside }} section(s) inside it</template
-        >? Its text, comments and suggestions (including pending bot suggestions) can't be
-        recovered.
+        >? You can undo right after deleting.
       </p>
       <!-- Safest first; Cancel takes focus when the dialog opens. -->
       <button
@@ -554,12 +614,30 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
         Delete
       </button>
     </div>
+    <p v-if="undoSections" class="undo-delete" role="status" data-test="outline-undo-delete">
+      Section deleted.
+      <button type="button" class="sh-btn" data-test="outline-undo-delete-btn" @click="undoDelete">
+        Undo
+      </button>
+    </p>
   </nav>
 </template>
 
 <style scoped>
 .move-to-part {
   position: relative;
+}
+.sh-mi.danger {
+  color: var(--ct-danger);
+}
+.sh-mi.danger:hover,
+.sh-mi.danger:focus {
+  background: var(--ct-danger-bg);
+  color: var(--ct-danger);
+}
+.undo-delete {
+  margin: var(--ct-space-2) 0 0;
+  font-size: var(--ct-text-sm);
 }
 .confirm .danger {
   background: var(--ct-danger);
