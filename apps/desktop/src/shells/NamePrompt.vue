@@ -1,11 +1,38 @@
 <script setup lang="ts">
 /** tc3 (inline card, not a modal): first-time "your changes will show as …" prompt. Visual shell: emits only, stores nothing. */
-defineProps<{ name: string; colorName: string; color: string }>();
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+
+const props = defineProps<{
+  name: string;
+  colorName: string;
+  color: string;
+  /** When true, the seeded name came from the OS account (#57). */
+  usedComputerName?: boolean;
+  returnFocus?: HTMLElement;
+}>();
 const emit = defineEmits<{ ok: []; change: []; close: [] }>();
+const okBtn = ref<HTMLButtonElement>();
+const opener = document.activeElement as HTMLElement | null;
+
+function onKey(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    emit('close');
+  }
+}
+onMounted(() => nextTick(() => okBtn.value?.focus()));
+onBeforeUnmount(() => (props.returnFocus ?? opener)?.focus?.());
 </script>
 
 <template>
-  <section class="np" aria-labelledby="np-title" data-test="name-prompt">
+  <section
+    class="np"
+    role="status"
+    aria-labelledby="np-title"
+    data-test="name-prompt"
+    @keydown="onKey"
+  >
     <span class="np__av" :style="{ background: color }" aria-hidden="true">{{
       name.charAt(0)
     }}</span>
@@ -14,15 +41,19 @@ const emit = defineEmits<{ ok: []; change: []; close: [] }>();
         Your changes will show as <bdi dir="auto">{{ name }}</bdi
         >, in {{ colorName }}
       </h2>
-      <p class="np__text">
+      <p v-if="usedComputerName" class="np__text">
         We used your computer's name. You only see this once — you can change it any time in
         Settings.
+      </p>
+      <p v-else class="np__text">
+        You only see this once — you can change your name and color any time in Settings.
       </p>
       <p class="np__example">
         Example: <ins class="np__ins" :style="{ '--c': color }">and set down</ins>
       </p>
       <div class="np__actions">
         <button
+          ref="okBtn"
           type="button"
           class="sh-btn sh-btn--primary"
           data-test="name-prompt-ok"

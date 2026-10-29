@@ -107,7 +107,7 @@ describe('UI shells (Part of #36)', () => {
     const w = mount(ShellsPreview, { props: { initial: 'tc3' } });
     const card = w.find('[data-test="name-prompt"]');
     expect(card.exists()).toBe(true);
-    expect(card.attributes('role')).toBeUndefined();
+    expect(card.attributes('role')).toBe('status');
     expect(w.find('[role="dialog"]').exists()).toBe(false);
     expect(card.attributes('aria-labelledby')).toBe('np-title');
     w.unmount();

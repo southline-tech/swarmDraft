@@ -223,8 +223,9 @@ describe('UI shells (Part of #36)', () => {
     expect(t.attributes('aria-pressed')).toBe('false');
     await t.trigger('click');
     expect(t.attributes('aria-pressed')).toBe('true');
-    expect(t.text()).toContain('On');
+    expect(t.text()).toContain('Track changes · On');
     expect(w.find('[data-test="status-tracking"]').exists()).toBe(true);
+    expect(w.find('[data-test="status-tracking-as"]').exists()).toBe(true);
     expect(w.find('[data-test="name-prompt"]').exists()).toBe(true);
     expect(w.findAll('[data-test="margin-note"]').length).toBeGreaterThan(0);
     await w.get('[data-test="name-prompt-ok"]').trigger('click');

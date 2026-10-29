@@ -351,7 +351,24 @@
   color: var(--ct-text);
   font-weight: 500;
 }
-.sh-status-track::before {
+.sh-status-track--muted {
+  color: var(--ct-text-muted);
+  font-weight: 400;
+}
+.sh-status-track-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  line-height: 1.25;
+}
+.sh-status-track-as {
+  color: var(--ct-text-muted);
+  font-weight: 400;
+}
+.sh-status-track-hint {
+  color: var(--ct-text-muted);
+}
+.sh-status-track--on::before {
   content: '';
   width: 8px;
   height: 8px;

@@ -962,6 +962,7 @@ defineExpose({ open, closeSession });
         external-load-error
         :outline-forced="outlineForced"
         :notes-hidden="notesHidden"
+        :computer-name="info?.computerName"
         @update:selected-id="selectedId = $event"
         @load-error="editorLoadError = $event"
         @reload="reloadSection"

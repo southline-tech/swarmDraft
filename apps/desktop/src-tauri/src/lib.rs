@@ -26,6 +26,17 @@ struct AppInfo {
     version: String,
     data_dir: String,
     schema_version: i64,
+    /// OS account display name for seeding track-changes profile (#57).
+    computer_name: String,
+}
+
+fn os_user_display_name() -> String {
+    std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "Author".to_string())
 }
 
 #[tauri::command]
@@ -37,6 +48,7 @@ fn app_info(
         version: app.package_info().version.to_string(),
         data_dir: store.data_dir().display().to_string(),
         schema_version: store.schema_version().map_err(|e| e.to_string())?,
+        computer_name: os_user_display_name(),
     })
 }
 
@@ -590,4 +602,21 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running swarmDraft");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::os_user_display_name;
+
+    #[test]
+    fn os_user_display_name_trims_username_env() {
+        let saved = std::env::var("USERNAME").ok();
+        std::env::set_var("USERNAME", "  Pat  ");
+        assert_eq!(os_user_display_name(), "Pat");
+        if let Some(v) = saved {
+            std::env::set_var("USERNAME", v);
+        } else {
+            std::env::remove_var("USERNAME");
+        }
+    }
 }

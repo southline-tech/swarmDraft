@@ -226,3 +226,6 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-28 · #113 · read-only restore test used `isEditable` only · assert `contenteditable="false"`, toolbar read-only title, and `typeThroughDom` leaves the doc unchanged
 - 2026-10-28 · #113 · `saveStatusShown` survived `open()` on another book · reset it in `open()` and test the status line is empty until the next successful persist
 - 2026-10-28 · #52 · New chapter row was a disabled shell · wire it to the same add flow as More sections and test outline + session doc creation
+- 2026-10-29 · #57 · Designer review (#149) · off toggle must not show "· Off"; status bar needs tc1 off line and tc2 "Your changes show as …" with default hint when on
+- 2026-10-29 · #57 · Designer review (#149) · tc3 NamePrompt uses role=status with focus on open, Esc close, focus return to the track toggle
+- 2026-10-29 · #57 · PM review (#149) · "We used your computer's name" only when `app_info.computerName` is wired through App → editor; alternate copy in browser/tests

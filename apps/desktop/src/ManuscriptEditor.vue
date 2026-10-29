@@ -56,6 +56,7 @@ import NamePrompt from './shells/NamePrompt.vue';
 import NameColorSection from './settings/NameColorSection.vue';
 import { SWATCHES, swatchVar } from './shells/colors';
 import {
+  DEFAULT_PROFILE,
   loadProfile,
   loadTrackPromptSeen,
   loadTracking,
@@ -176,6 +177,9 @@ const profileColorName = computed(
 const suggesterStyle = computed(() =>
   tracking.value ? { '--ct-suggester': swatchVar(writerProfile.value.color) } : undefined,
 );
+const trackUsingDefaultName = computed(() => writerProfile.value.name === DEFAULT_PROFILE.name);
+const trackSeedFromComputer = computed(() => Boolean(props.computerName?.trim()));
+const trackToggleBtn = useTemplateRef<HTMLButtonElement>('trackToggleBtn');
 function dismissNamePrompt() {
   namePromptOpen.value = false;
   saveTrackPromptSeen(prefStore());
@@ -708,6 +712,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
         >
           <template #end>
             <button
+              ref="trackToggleBtn"
               type="button"
               class="sh-track"
               data-test="track-changes"
@@ -718,7 +723,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
               <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
                 <path d="M3 13l1-3.5L11 2.5l2.5 2.5L6.5 12z" />
               </svg>
-              Track changes · {{ tracking ? 'On' : 'Off' }}
+              Track changes<template v-if="tracking"> · On</template>
             </button>
           </template>
           <template #menu>
@@ -767,6 +772,8 @@ const LABELS: Record<ReviewItem['type'], string> = {
             :name="writerProfile.name"
             :color-name="profileColorName"
             :color="swatchVar(writerProfile.color)"
+            :used-computer-name="trackSeedFromComputer"
+            :return-focus="trackToggleBtn ?? undefined"
             @ok="dismissNamePrompt"
             @close="dismissNamePrompt"
             @change="onNamePromptChange"
@@ -930,9 +937,25 @@ const LABELS: Record<ReviewItem['type'], string> = {
         :book-words="bookWords"
         :save-state="saveState"
       >
-        <span v-if="tracking" class="sh-status-track" data-test="status-tracking"
-          >Tracking changes</span
-        >
+        <div class="sh-status-track-wrap">
+          <span
+            v-if="!tracking"
+            class="sh-status-track sh-status-track--muted"
+            data-test="status-tracking-off"
+            >Track changes is off</span
+          >
+          <template v-else>
+            <span class="sh-status-track sh-status-track--on" data-test="status-tracking"
+              >Tracking changes</span
+            >
+            <span class="sh-status-track-as" data-test="status-tracking-as">
+              Your changes show as <bdi dir="auto">{{ writerProfile.name }}</bdi
+              ><span v-if="trackUsingDefaultName" class="sh-status-track-hint">
+                (default name)</span
+              >
+            </span>
+          </template>
+        </div>
       </StatusBar>
     </Teleport>
   </div>
