@@ -1,58 +1,19 @@
 <script setup lang="ts">
 /**
- * Keyboard shortcuts sheet (wp7, #57). Reference only: lists the planned Windows shortcuts.
+ * Keyboard shortcuts sheet (wp7, #56). Lists Windows shortcuts from {@link SHORTCUT_SHEET_GROUPS}.
  * Takes focus, closes on Esc or the close button, and the opener gets focus back.
  */
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { MANUSCRIPT_SHORTCUTS, SHORTCUT_SHEET_GROUPS, shortcutParts } from './app-shortcuts';
 
 const emit = defineEmits<{ close: [] }>();
 const closeBtn = ref<HTMLButtonElement>();
 const opener = document.activeElement as HTMLElement | null;
 
-const GROUPS: { title: string; rows: [string, string[]][] }[] = [
-  {
-    title: 'Formatting',
-    rows: [
-      ['Bold', ['Ctrl', 'B']],
-      ['Italic', ['Ctrl', 'I']],
-      ['Underline', ['Ctrl', 'U']],
-      ['Heading', ['Ctrl', 'Alt', '1']],
-      ['Block quote', ['Ctrl', 'Alt', '2']],
-      ['Body text', ['Ctrl', 'Alt', '0']],
-    ],
-  },
-  {
-    title: 'Editing',
-    rows: [
-      ['Undo', ['Ctrl', 'Z']],
-      ['Redo', ['Ctrl', 'Y']],
-      ['Find', ['Ctrl', 'F']],
-      ['Replace', ['Ctrl', 'H']],
-      ['Save now', ['Ctrl', 'S']],
-      ['Add comment', ['Ctrl', 'Alt', 'M']],
-    ],
-  },
-  {
-    title: 'Review',
-    rows: [
-      ['Next change', ['Alt', 'Shift', '→']],
-      ['Previous change', ['Alt', 'Shift', '←']],
-      ['Accept change', ['Ctrl', 'Shift', 'Enter']],
-      ['Reject change', ['Ctrl', 'Shift', '⌫']],
-    ],
-  },
-  {
-    title: 'View',
-    rows: [
-      ['Focus mode', ['Ctrl', 'Shift', 'F']],
-      ['Exit focus mode', ['Esc']],
-      ['Toggle sidebars', ['Ctrl', '\\']],
-      ['Zoom in', ['Ctrl', '=']],
-      ['Zoom out', ['Ctrl', '-']],
-      ['Reset zoom', ['Ctrl', '0']],
-    ],
-  },
-];
+const GROUPS = SHORTCUT_SHEET_GROUPS.map((g) => ({
+  title: g.title,
+  rows: g.rows.map((r) => [r.label, shortcutParts(r.chord)] as [string, string[]]),
+}));
 function trap(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     e.preventDefault();
@@ -61,6 +22,8 @@ function trap(e: KeyboardEvent) {
   } else if (e.key === 'Tab') {
     e.preventDefault();
     closeBtn.value?.focus();
+  } else {
+    e.stopPropagation();
   }
 }
 onMounted(() => nextTick(() => closeBtn.value?.focus()));
@@ -91,7 +54,10 @@ onBeforeUnmount(() => opener?.focus?.());
           ×
         </button>
       </h2>
-      <p class="sh-subt">Windows conventions. Press Ctrl+/ any time to open this sheet.</p>
+      <p class="sh-subt">
+        Windows conventions. Press {{ MANUSCRIPT_SHORTCUTS.shortcutsSheet }} any time to open this
+        sheet.
+      </p>
       <div class="sh-cols">
         <section v-for="g in GROUPS" :key="g.title">
           <h3>{{ g.title }}</h3>
