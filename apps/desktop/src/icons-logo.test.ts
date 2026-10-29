@@ -87,10 +87,10 @@ describe('logo', () => {
     expect(w.find('[data-test="home-welcome"] div.home__mark').exists()).toBe(false);
   });
 
-  it('title bar shows the small logo next to the name', () => {
+  it('title bar shows the small logo in the menu trigger next to the hamburger', () => {
     const src = read('./App.vue');
     expect(src).toMatch(
-      /<header[^>]*class="topbar"[^>]*>[\s\S]*<AppLogo :size="24" \/>[\s\S]*<\/header>/,
+      /<summary[^>]*class="topbar__trigger"[^>]*>[\s\S]*<AppIcon name="menu"[\s\S]*<AppLogo :size="24" \/>[\s\S]*<\/summary>/,
     );
   });
 });

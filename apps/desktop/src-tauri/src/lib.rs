@@ -329,6 +329,14 @@ async fn manuscript_open_latest(
     blocking(&store, |s| s.latest_manuscript()).await
 }
 
+#[tauri::command]
+async fn manuscript_load(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+) -> Result<manuscripts::StoredManuscript, String> {
+    blocking(&store, move |s| s.load_manuscript(&manuscript_id)).await
+}
+
 /// Save the whole outline of a stored manuscript (rename, reorder, move, add, delete).
 #[tauri::command]
 async fn manuscript_save_outline(
@@ -468,6 +476,7 @@ pub fn run() {
             manuscript_import_json,
             manuscripts_list,
             manuscript_open_latest,
+            manuscript_load,
             section_apply_update,
             manuscript_save_outline,
             manuscript_updates_since,

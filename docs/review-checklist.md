@@ -136,6 +136,12 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-28 · #111 · numbering is computed from outline order, not stored in section titles · persist only `numbering_style` on the manuscript row; default `chapter_arabic` with roman part labels; style picker in outline and Settings
 - 2026-10-28 · #129 · PM re-review · SQLite ADD COLUMN default and INSERT must both use `chapter_arabic`; mock/sample outline titles live in `outline-display-titles.ts`; test Settings + outline picker and label recompute
 - 2026-10-29 · #54 · Designer review · style submenu needs checkmark + menuitemradio; ask-bot sparkle; disabled `.sh-mi` must not hover-highlight; forward `ask-bot` through ContinuousManuscript to App
+- 2026-10-29 · #104 · PM review · app menu must match issue comment (New, Open, Recent, Settings, Quit), not legacy Open another + Settings only · wire `manuscripts_list` / `manuscript_load` and list mockup frame ids in the PR
+- 2026-10-29 · #108 · PM review · Add sibling + post-delete undo are binding; drag 2px line stays Part-of until tracked; PR mockup section must list Drive frame links, not N/A
+- 2026-10-29 · #104 · Designer review · 16px leading icons + `.sh-k` shortcuts only when wired (Ctrl+N/O/,/Q); use `sh-mi` menu pattern
+- 2026-10-29 · #104 · PR Genie · book menu must not close on Recent toggle; dismiss after recent pick; hide Ctrl+N while importing; no global shortcuts in shell preview
+- 2026-10-29 · #108 · Designer review · outline context menu icons + `aria-disabled` move rows like #137; trash icon in danger color
+- 2026-10-29 · #108 · PR Genie · undo delete must rehydrate evicted section Y.Docs; keep undo banner until restore save succeeds
 - 2026-10-26 · #71 · user-facing notices said 'database' and 'port 7337' · user-visible text stays plain for writers; technical details go to logs
 - 2026-10-26 · #71 · a read-only SQLite open of the old db after a crash created -shm in the old folder · never open the source db with SQLite in a folder you must not touch; copy db + -wal byte for byte to staging and snapshot from the copy; prove it with tests that hash names, bytes and mtimes before and after
 - 2026-10-26 · #71 · the snapshot test still passed with the fix replaced by a raw copy · before handoff, revert each fix, confirm its test fails, then restore

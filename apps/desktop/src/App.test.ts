@@ -840,6 +840,8 @@ vi.mock('./backend', async (orig) => ({
   getRecoveryNotices: vi.fn(async () => []),
   persistImport: vi.fn(async () => storedFixture()),
   openLatestManuscript: vi.fn(async () => null),
+  listManuscripts: vi.fn(async () => []),
+  loadManuscript: vi.fn(async () => null),
   saveSectionUpdate: vi.fn(async () => {}),
   saveOutline: vi.fn(async () => {}),
   dismissRecoveryNotices: vi.fn(async () => {}),
@@ -1668,7 +1670,8 @@ describe('home screen', () => {
     const persist = vi.mocked(backend.persistImport);
     const { w, session } = await withManuscript();
     persist.mockClear();
-    await w.find('[data-test="open-another"]').trigger('click');
+    await w.get('[data-test="app-menu-trigger"]').trigger('click');
+    await w.find('[data-test="app-menu-open"]').trigger('click');
     const bad = new File(['hello'], 'notes.txt');
     await w.find('[data-test="drop-zone"]').trigger('drop', { dataTransfer: { files: [bad] } });
     await settle();
@@ -1685,7 +1688,8 @@ describe('home screen', () => {
   it('opens a second manuscript from inside an open one', async () => {
     const { w } = await withManuscript();
     expect(w.find('[data-test="home"]').exists()).toBe(false);
-    await w.find('[data-test="open-another"]').trigger('click');
+    await w.get('[data-test="app-menu-trigger"]').trigger('click');
+    await w.find('[data-test="app-menu-open"]').trigger('click');
     expect(w.find('[data-test="home-open"]').exists()).toBe(true);
     await chooseFile(w);
     expect(w.find('[data-test="home"]').exists()).toBe(false);
@@ -2216,6 +2220,102 @@ describe('book-open toast (ob7)', () => {
     expect(w.find('[data-test="toast"]').exists()).toBe(false);
     vi.useRealTimers();
     w.unmount();
+  });
+});
+
+describe('title bar book menu (#104)', () => {
+  const styles = () => {
+    const sfc = readFileSync(resolve(__dirname, 'App.vue'), 'utf8');
+    return [...sfc.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join('\n');
+  };
+
+  it('uses one hamburger+logo trigger with aria-haspopup and a 40px hit area', async () => {
+    const css = styles();
+    expect(css).toMatch(/\.topbar__trigger[^}]*min-height:\s*var\(--ct-space-10\)/);
+    expect(css).toMatch(/\.topbar__trigger[^}]*min-width:\s*var\(--ct-space-10\)/);
+    const w = mount(App);
+    await flushPromises();
+    expect(w.findAll('[data-test="app-menu"]')).toHaveLength(1);
+    expect(w.text()).not.toContain('⋯');
+    const trigger = w.get('[data-test="app-menu-trigger"]');
+    expect(trigger.attributes('aria-haspopup')).toBe('menu');
+    const hamburger = trigger.find('svg[data-icon="menu"]');
+    const logo = trigger.find('[data-test="app-logo"]');
+    expect(hamburger.exists()).toBe(true);
+    expect(logo.exists()).toBe(true);
+    expect(
+      hamburger.element.compareDocumentPosition(logo.element) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    w.unmount();
+  });
+
+  it('opens the book menu from the shared trigger (hamburger and logo)', async () => {
+    const w = mount(App);
+    await flushPromises();
+    const menu = w.get('[data-test="app-menu"]');
+    expect(menu.attributes('open')).toBeUndefined();
+    await w.get('[data-test="app-menu-trigger"]').trigger('click');
+    await settle();
+    expect(menu.attributes('open')).toBeDefined();
+    expect(w.find('[data-test="settings-open"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('lists New, Open, Recent, and Settings in the book menu (#104 PM)', async () => {
+    const w = mount(App);
+    await flushPromises();
+    await w.get('[data-test="app-menu-trigger"]').trigger('click');
+    await settle();
+    const labels = w.findAll('[data-test="app-menu"] [role=menuitem]').map((b) => b.text());
+    expect(labels.some((l) => l.startsWith('New') && l.includes('Ctrl+N'))).toBe(true);
+    expect(labels.some((l) => l.startsWith('Open') && l.includes('Ctrl+O'))).toBe(true);
+    expect(labels.some((l) => l.startsWith('Recent'))).toBe(true);
+    expect(labels.some((l) => l.startsWith('Settings') && l.includes('Ctrl+,'))).toBe(true);
+    expect(w.get('[data-test="app-menu-new"]').find('[data-icon="plus"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('binds Ctrl+O to open the book picker (#104 Designer)', async () => {
+    const { w } = await withManuscript();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', ctrlKey: true, bubbles: true }));
+    await settle();
+    expect(w.find('[data-test="home-open"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('Recent submenu toggles without closing the book menu; picking a book closes it (#104)', async () => {
+    const backend = await import('./backend');
+    const stored = storedFixture();
+    const other = {
+      ...stored,
+      manuscript: { ...stored.manuscript, id: 'other-book', title: 'Other' },
+    };
+    vi.mocked(backend.listManuscripts).mockResolvedValueOnce([
+      {
+        id: other.manuscript.id,
+        title: other.manuscript.title,
+        createdAt: '',
+        numberingStyle: 'chapter_arabic',
+      },
+    ]);
+    vi.mocked(backend.loadManuscript).mockResolvedValueOnce(other);
+    const { w } = await withManuscript();
+    const menu = w.get('[data-test="app-menu"]');
+    await w.get('[data-test="app-menu-trigger"]').trigger('click');
+    await settle();
+    await w.get('[data-test="app-menu-recent"]').trigger('click');
+    await settle();
+    expect(menu.attributes('open')).toBeDefined();
+    await w.get(`[data-test="app-menu-recent-${other.manuscript.id}"]`).trigger('click');
+    await settle();
+    expect(menu.attributes('open')).toBeUndefined();
+    w.unmount();
+  });
+
+  it('keeps the title bar draggable except the menu trigger (Windows)', () => {
+    const css = styles();
+    expect(css).toMatch(/\.topbar\s*\{[^}]*-webkit-app-region:\s*drag/);
+    expect(css).toMatch(/\.topbar__menu\s*\{[^}]*-webkit-app-region:\s*no-drag/);
   });
 });
 

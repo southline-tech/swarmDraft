@@ -8,9 +8,12 @@ import {
   dismissRecoveryNotices,
   getMigrationNotices,
   dismissMigrationNotices,
+  listManuscripts,
+  loadManuscript,
   type AppInfo,
   type RecoveryNotice,
   type MigrationNotice,
+  type StoredManuscriptRow,
 } from './backend';
 import SettingsScreen from './settings/SettingsScreen.vue';
 import { authorName, refreshAgents, reloadOnFocus } from './agent-names';
@@ -23,6 +26,7 @@ import {
 } from './desk/outline-auto-collapse';
 import HomeScreen from './HomeScreen.vue';
 import AppLogo from './AppLogo.vue';
+import AppIcon from './icons/AppIcon.vue';
 import SaveFailureBanner from './errors/SaveFailureBanner.vue';
 import MigrationNoticeBanner from './migration/MigrationNoticeBanner.vue';
 import {
@@ -37,8 +41,9 @@ import { BUSY_NOTICE } from './errors/busy';
 import { PRODUCT_NAME } from './lib/brand';
 import ShellsPreview from './shells/ShellsPreview.vue';
 import AppToast from './shells/AppToast.vue';
+import './shells/shells.css';
 import { applyThemeParam, readPreview } from './shells/preview';
-import { flushOnClose } from './close-flush';
+import { CLOSE_FLUSH_TIMEOUT_MS, confirmQuit, flushOnClose, flushWithTimeout } from './close-flush';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { resetCollabSlots } from './author-colors';
@@ -47,6 +52,7 @@ import type { NumberingStyle } from '@coauthor/schema';
 import { docWordCount, outlineDocs, sectionTreeDocs } from './status/wordcount';
 import {
   importAndOpen,
+  openStored,
   reopenLatest,
   UnsavedEditsError,
   type ManuscriptSession,
@@ -213,6 +219,69 @@ function openPreview(id: 'all') {
   preview.value = id;
 }
 const settingsButton = ref<HTMLButtonElement | null>(null);
+const recentOpen = ref(false);
+const recentBooks = ref<StoredManuscriptRow[]>([]);
+async function refreshRecentBooks() {
+  try {
+    recentBooks.value = await listManuscripts();
+  } catch (e) {
+    console.error('List manuscripts failed', e);
+    recentBooks.value = [];
+  }
+}
+const appMenu = ref<HTMLDetailsElement | null>(null);
+function closeBookMenu() {
+  appMenu.value?.removeAttribute('open');
+  recentOpen.value = false;
+}
+function onAppMenuToggle(e: Event) {
+  const open = (e.target as HTMLDetailsElement).open;
+  if (open) void refreshRecentBooks();
+  else recentOpen.value = false;
+}
+function openBookPicker() {
+  if (session.value) choosingBook.value = true;
+  else void getStarted();
+}
+let openingRecent = false;
+async function openRecentBook(id: string) {
+  if (openingRecent || session.value?.id === id) return;
+  openingRecent = true;
+  try {
+    try {
+      await session.value?.flush();
+    } catch (e) {
+      console.error('Flush before open failed', e);
+      openError.value = `Couldn't switch books: ${errorLine(e, 'save')}`;
+      return;
+    }
+    openError.value = '';
+    const stored = await loadManuscript(id);
+    if (!stored) {
+      openError.value = "That book couldn't be opened. Please try again.";
+      return;
+    }
+    const next = openStored(stored, null, persistHooks);
+    open(next);
+    showOpenToast(next);
+    closeBookMenu();
+  } finally {
+    openingRecent = false;
+  }
+}
+async function quitApp() {
+  if (!isTauri()) return;
+  const win = getCurrentWindow();
+  if (
+    (await flushWithTimeout(
+      () => session.value?.flush() ?? Promise.resolve(),
+      CLOSE_FLUSH_TIMEOUT_MS,
+    )) !== 'saved' &&
+    !(await confirmQuit())
+  )
+    return;
+  await win.destroy();
+}
 watch(settingsOpen, async (isOpen) => {
   await nextTick();
   // SettingsScreen moves focus into itself on mount; back to the button that opened it on close.
@@ -221,7 +290,40 @@ watch(settingsOpen, async (isOpen) => {
 const fileInput = ref<HTMLInputElement | null>(null);
 const chooseFile = () => fileInput.value?.click();
 
+/** Book-menu shortcuts wired in this build (#104 Designer). */
+const appMenuShortcuts = computed(() => ({
+  new: importing.value ? undefined : 'Ctrl+N',
+  open: 'Ctrl+O',
+  settings: 'Ctrl+,',
+  quit: isTauri() ? 'Ctrl+Q' : undefined,
+}));
+
+const menuField = (t: EventTarget | null) =>
+  t instanceof HTMLElement && !!t.closest('input, textarea, select, [contenteditable=true]');
+
+function onAppMenuKey(e: KeyboardEvent) {
+  if (preview.value) return;
+  if (menuField(e.target)) return;
+  const mod = e.ctrlKey || e.metaKey;
+  if (!mod || e.shiftKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === 'n' && !importing.value) {
+    e.preventDefault();
+    chooseFile();
+  } else if (k === 'o') {
+    e.preventDefault();
+    openBookPicker();
+  } else if (e.key === ',') {
+    e.preventDefault();
+    settingsOpen.value = !settingsOpen.value;
+  } else if (k === 'q' && isTauri()) {
+    e.preventDefault();
+    void quitApp();
+  }
+}
+
 let stopCloseFlush = () => {};
+let stopAppMenuKeys = () => {};
 /**
  * With Tauri's drag-drop off, the webview's default for a file dropped anywhere
  * is to navigate to it, unloading the app. Swallow that at window level; the
@@ -236,12 +338,15 @@ onMounted(() => {
   window.addEventListener('dragover', blockFileNavigation);
   window.addEventListener('drop', blockFileNavigation);
   window.addEventListener('focus', reloadAgents);
+  window.addEventListener('keydown', onAppMenuKey);
   void refreshAgents();
+  stopAppMenuKeys = () => window.removeEventListener('keydown', onAppMenuKey);
 });
 onBeforeUnmount(() => {
   window.removeEventListener('dragover', blockFileNavigation);
   window.removeEventListener('drop', blockFileNavigation);
   window.removeEventListener('focus', reloadAgents);
+  stopAppMenuKeys();
 });
 onMounted(async () => {
   info.value = await getAppInfo();
@@ -557,39 +662,139 @@ defineExpose({ open, closeSession });
   <ShellsPreview v-if="preview" class="shell" :initial="preview" @close="preview = null" />
   <main v-else class="shell">
     <header v-show="!focusMode" class="topbar">
+      <details ref="appMenu" class="topbar__menu" data-test="app-menu" @toggle="onAppMenuToggle">
+        <summary
+          class="topbar__trigger"
+          data-test="app-menu-trigger"
+          aria-label="Book menu"
+          title="Book menu"
+          aria-haspopup="menu"
+        >
+          <AppIcon name="menu" class="topbar__hamburger" />
+          <AppLogo :size="24" />
+        </summary>
+        <div class="topbar__menu-list sh-menu" role="menu">
+          <button
+            type="button"
+            class="sh-mi"
+            role="menuitem"
+            data-test="app-menu-new"
+            :aria-disabled="importing ? 'true' : undefined"
+            @click="
+              () => {
+                if (importing) return;
+                chooseFile();
+                closeBookMenu();
+              }
+            "
+          >
+            <span class="sh-mi-lead" aria-hidden="true"
+              ><AppIcon name="plus" class="app-menu-icon"
+            /></span>
+            New<span v-if="appMenuShortcuts.new" class="sh-k">{{ appMenuShortcuts.new }}</span>
+          </button>
+          <button
+            type="button"
+            class="sh-mi topbar__open"
+            role="menuitem"
+            data-test="app-menu-open"
+            @click="
+              () => {
+                openBookPicker();
+                closeBookMenu();
+              }
+            "
+          >
+            <span class="sh-mi-lead" aria-hidden="true"
+              ><AppIcon name="folder" class="app-menu-icon"
+            /></span>
+            Open<span class="sh-k">{{ appMenuShortcuts.open }}</span>
+          </button>
+          <div
+            class="topbar__recent"
+            @mouseenter="recentOpen = true"
+            @mouseleave="recentOpen = false"
+          >
+            <button
+              type="button"
+              class="sh-mi"
+              role="menuitem"
+              aria-haspopup="menu"
+              :aria-expanded="recentOpen"
+              data-test="app-menu-recent"
+              :aria-disabled="!recentBooks.length ? 'true' : undefined"
+              @click.stop="recentBooks.length && (recentOpen = !recentOpen)"
+            >
+              <span class="sh-mi-lead" aria-hidden="true"
+                ><AppIcon name="clock" class="app-menu-icon"
+              /></span>
+              Recent<span class="sh-k">›</span>
+            </button>
+            <div
+              v-if="recentOpen && recentBooks.length"
+              class="topbar__menu-list sh-menu sh-sub topbar__submenu"
+              role="menu"
+              aria-label="Recent books"
+              @click.stop
+            >
+              <button
+                v-for="m in recentBooks"
+                :key="m.id"
+                type="button"
+                class="sh-mi"
+                role="menuitem"
+                :data-test="`app-menu-recent-${m.id}`"
+                @click="openRecentBook(m.id)"
+              >
+                {{ m.title || 'Untitled' }}
+              </button>
+            </div>
+          </div>
+          <div class="sh-sep" role="separator" />
+          <button
+            ref="settingsButton"
+            type="button"
+            class="sh-mi"
+            role="menuitem"
+            data-test="settings-open"
+            :aria-expanded="settingsOpen"
+            @click="
+              () => {
+                settingsOpen = !settingsOpen;
+                closeBookMenu();
+              }
+            "
+          >
+            <span class="sh-mi-lead" aria-hidden="true"
+              ><AppIcon name="settings" class="app-menu-icon"
+            /></span>
+            Settings<span class="sh-k">{{ appMenuShortcuts.settings }}</span>
+          </button>
+          <button
+            v-if="isTauri()"
+            type="button"
+            class="sh-mi"
+            role="menuitem"
+            data-test="app-menu-quit"
+            @click="
+              () => {
+                void quitApp();
+                closeBookMenu();
+              }
+            "
+          >
+            <span class="sh-mi-lead" aria-hidden="true"
+              ><AppIcon name="power" class="app-menu-icon"
+            /></span>
+            Quit<span class="sh-k">{{ appMenuShortcuts.quit }}</span>
+          </button>
+        </div>
+      </details>
       <span class="topbar__brand">
-        <AppLogo :size="24" />
         <span class="topbar__name">{{
           session && !choosingBook ? session.title : PRODUCT_NAME
         }}</span>
       </span>
-      <details class="topbar__menu" data-test="app-menu">
-        <summary class="topbar__icon" aria-label="Book menu" title="Book menu">⋯</summary>
-        <div
-          class="topbar__menu-list"
-          @click="($event.currentTarget as HTMLElement).closest('details')?.removeAttribute('open')"
-        >
-          <button
-            v-if="session && !choosingBook"
-            type="button"
-            class="topbar__button topbar__open"
-            data-test="open-another"
-            @click="choosingBook = true"
-          >
-            Open another book
-          </button>
-          <button
-            ref="settingsButton"
-            type="button"
-            class="topbar__button"
-            data-test="settings-open"
-            :aria-expanded="settingsOpen"
-            @click="settingsOpen = !settingsOpen"
-          >
-            Settings
-          </button>
-        </div>
-      </details>
     </header>
     <MigrationNoticeBanner :notices="migrationNotices" @dismiss="dismissMigration" />
     <SettingsScreen
@@ -808,14 +1013,18 @@ body {
   display: flex;
   align-items: center;
   justify-content: flex-start;
+  gap: var(--ct-space-2);
   padding: var(--ct-space-2) var(--ct-space-4);
   border-bottom: 1px solid var(--ct-border);
   background: var(--ct-surface);
+  -webkit-app-region: drag;
 }
 .topbar__brand {
   display: flex;
   align-items: center;
   gap: var(--ct-space-2);
+  min-width: 0;
+  flex: 1;
 }
 .topbar__name {
   font-weight: var(--ct-weight-semibold);
@@ -830,45 +1039,61 @@ body {
   white-space: nowrap;
 }
 .topbar__open {
-  margin-left: auto;
-  margin-right: var(--ct-space-2);
+  margin-right: 0;
 }
 .btn,
 .topbar__menu {
   position: relative;
-  margin-left: auto;
+  flex: none;
+  -webkit-app-region: no-drag;
 }
-.topbar__icon {
+.topbar__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ct-space-1);
+  box-sizing: border-box;
+  min-width: var(--ct-space-10);
+  min-height: var(--ct-space-10);
   list-style: none;
-  padding: 0 var(--ct-space-2);
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--ct-radius-sm);
+  background: transparent;
   color: var(--ct-text-muted);
   cursor: pointer;
 }
-.topbar__icon::-webkit-details-marker {
+.topbar__trigger::-webkit-details-marker {
   display: none;
 }
-.topbar__menu-list {
+.topbar__hamburger {
+  color: var(--ct-text-muted);
+}
+.topbar__menu-list.sh-menu {
   position: absolute;
-  right: 0;
+  left: 0;
   z-index: 20;
-  display: flex;
-  flex-direction: column;
-  gap: var(--ct-space-1);
-  padding: var(--ct-space-2);
-  border: 1px solid var(--ct-border);
-  border-radius: var(--ct-radius-md);
-  background: var(--ct-surface);
+  width: 240px;
   white-space: nowrap;
 }
-.topbar__button {
-  min-height: var(--ct-space-12);
-  padding: 0 var(--ct-space-4);
-  border: 1px solid var(--ct-border-strong);
-  border-radius: var(--ct-radius-md);
-  background: var(--ct-surface);
-  color: var(--ct-text);
-  font: inherit;
-  cursor: pointer;
+.sh-mi-lead {
+  display: inline-flex;
+  width: 16px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+.app-menu-icon {
+  color: var(--ct-text-muted);
+}
+.topbar__recent {
+  position: relative;
+}
+.topbar__submenu {
+  top: 0;
+  left: 100%;
+  margin-left: var(--ct-space-1);
 }
 .visually-hidden {
   position: absolute;
