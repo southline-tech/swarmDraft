@@ -2267,8 +2267,19 @@ describe('title bar book menu (#104)', () => {
     await w.get('[data-test="app-menu-trigger"]').trigger('click');
     await settle();
     const labels = w.findAll('[data-test="app-menu"] [role=menuitem]').map((b) => b.text());
-    expect(labels).toEqual(expect.arrayContaining(['New', 'Open', 'Settings']));
+    expect(labels.some((l) => l.startsWith('New') && l.includes('Ctrl+N'))).toBe(true);
+    expect(labels.some((l) => l.startsWith('Open') && l.includes('Ctrl+O'))).toBe(true);
     expect(labels.some((l) => l.startsWith('Recent'))).toBe(true);
+    expect(labels.some((l) => l.startsWith('Settings') && l.includes('Ctrl+,'))).toBe(true);
+    expect(w.get('[data-test="app-menu-new"]').find('[data-icon="plus"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('binds Ctrl+O to open the book picker (#104 Designer)', async () => {
+    const { w } = await withManuscript();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', ctrlKey: true, bubbles: true }));
+    await settle();
+    expect(w.find('[data-test="home-open"]').exists()).toBe(true);
     w.unmount();
   });
 

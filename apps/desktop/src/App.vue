@@ -41,6 +41,7 @@ import { BUSY_NOTICE } from './errors/busy';
 import { PRODUCT_NAME } from './lib/brand';
 import ShellsPreview from './shells/ShellsPreview.vue';
 import AppToast from './shells/AppToast.vue';
+import './shells/shells.css';
 import { applyThemeParam, readPreview } from './shells/preview';
 import { CLOSE_FLUSH_TIMEOUT_MS, confirmQuit, flushOnClose, flushWithTimeout } from './close-flush';
 import { isTauri } from '@tauri-apps/api/core';
@@ -277,7 +278,39 @@ watch(settingsOpen, async (isOpen) => {
 const fileInput = ref<HTMLInputElement | null>(null);
 const chooseFile = () => fileInput.value?.click();
 
+/** Book-menu shortcuts wired in this build (#104 Designer). */
+const appMenuShortcuts = computed(() => ({
+  new: 'Ctrl+N',
+  open: 'Ctrl+O',
+  settings: 'Ctrl+,',
+  quit: isTauri() ? 'Ctrl+Q' : undefined,
+}));
+
+const menuField = (t: EventTarget | null) =>
+  t instanceof HTMLElement && !!t.closest('input, textarea, select, [contenteditable=true]');
+
+function onAppMenuKey(e: KeyboardEvent) {
+  if (menuField(e.target)) return;
+  const mod = e.ctrlKey || e.metaKey;
+  if (!mod || e.shiftKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === 'n' && !importing.value) {
+    e.preventDefault();
+    chooseFile();
+  } else if (k === 'o') {
+    e.preventDefault();
+    openBookPicker();
+  } else if (e.key === ',') {
+    e.preventDefault();
+    settingsOpen.value = !settingsOpen.value;
+  } else if (k === 'q' && isTauri()) {
+    e.preventDefault();
+    void quitApp();
+  }
+}
+
 let stopCloseFlush = () => {};
+let stopAppMenuKeys = () => {};
 /**
  * With Tauri's drag-drop off, the webview's default for a file dropped anywhere
  * is to navigate to it, unloading the app. Swallow that at window level; the
@@ -292,12 +325,15 @@ onMounted(() => {
   window.addEventListener('dragover', blockFileNavigation);
   window.addEventListener('drop', blockFileNavigation);
   window.addEventListener('focus', reloadAgents);
+  window.addEventListener('keydown', onAppMenuKey);
   void refreshAgents();
+  stopAppMenuKeys = () => window.removeEventListener('keydown', onAppMenuKey);
 });
 onBeforeUnmount(() => {
   window.removeEventListener('dragover', blockFileNavigation);
   window.removeEventListener('drop', blockFileNavigation);
   window.removeEventListener('focus', reloadAgents);
+  stopAppMenuKeys();
 });
 onMounted(async () => {
   info.value = await getAppInfo();
@@ -625,28 +661,34 @@ defineExpose({ open, closeSession });
           <AppLogo :size="24" />
         </summary>
         <div
-          class="topbar__menu-list"
+          class="topbar__menu-list sh-menu"
           role="menu"
           @click="($event.currentTarget as HTMLElement).closest('details')?.removeAttribute('open')"
         >
           <button
             type="button"
-            class="topbar__button"
+            class="sh-mi"
             role="menuitem"
             data-test="app-menu-new"
-            :disabled="importing"
-            @click="chooseFile"
+            :aria-disabled="importing ? 'true' : undefined"
+            @click="!importing && chooseFile()"
           >
-            New
+            <span class="sh-mi-lead" aria-hidden="true"
+              ><AppIcon name="plus" class="app-menu-icon"
+            /></span>
+            New<span class="sh-k">{{ appMenuShortcuts.new }}</span>
           </button>
           <button
             type="button"
-            class="topbar__button topbar__open"
+            class="sh-mi topbar__open"
             role="menuitem"
             data-test="app-menu-open"
             @click="openBookPicker"
           >
-            Open
+            <span class="sh-mi-lead" aria-hidden="true"
+              ><AppIcon name="folder" class="app-menu-icon"
+            /></span>
+            Open<span class="sh-k">{{ appMenuShortcuts.open }}</span>
           </button>
           <div
             class="topbar__recent"
@@ -655,19 +697,22 @@ defineExpose({ open, closeSession });
           >
             <button
               type="button"
-              class="topbar__button"
+              class="sh-mi"
               role="menuitem"
               aria-haspopup="menu"
               :aria-expanded="recentOpen"
               data-test="app-menu-recent"
-              :disabled="!recentBooks.length"
-              @click="recentOpen = !recentOpen"
+              :aria-disabled="!recentBooks.length ? 'true' : undefined"
+              @click="recentBooks.length && (recentOpen = !recentOpen)"
             >
-              Recent<span class="topbar__submark">›</span>
+              <span class="sh-mi-lead" aria-hidden="true"
+                ><AppIcon name="clock" class="app-menu-icon"
+              /></span>
+              Recent<span class="sh-k">›</span>
             </button>
             <div
               v-if="recentOpen && recentBooks.length"
-              class="topbar__menu-list topbar__submenu"
+              class="topbar__menu-list sh-menu sh-sub topbar__submenu"
               role="menu"
               aria-label="Recent books"
               @click.stop
@@ -676,7 +721,7 @@ defineExpose({ open, closeSession });
                 v-for="m in recentBooks"
                 :key="m.id"
                 type="button"
-                class="topbar__button"
+                class="sh-mi"
                 role="menuitem"
                 :data-test="`app-menu-recent-${m.id}`"
                 @click="openRecentBook(m.id)"
@@ -685,27 +730,33 @@ defineExpose({ open, closeSession });
               </button>
             </div>
           </div>
-          <div class="topbar__sep" role="separator" />
+          <div class="sh-sep" role="separator" />
           <button
             ref="settingsButton"
             type="button"
-            class="topbar__button"
+            class="sh-mi"
             role="menuitem"
             data-test="settings-open"
             :aria-expanded="settingsOpen"
             @click="settingsOpen = !settingsOpen"
           >
-            Settings
+            <span class="sh-mi-lead" aria-hidden="true"
+              ><AppIcon name="settings" class="app-menu-icon"
+            /></span>
+            Settings<span class="sh-k">{{ appMenuShortcuts.settings }}</span>
           </button>
           <button
             v-if="isTauri()"
             type="button"
-            class="topbar__button"
+            class="sh-mi"
             role="menuitem"
             data-test="app-menu-quit"
             @click="quitApp"
           >
-            Quit
+            <span class="sh-mi-lead" aria-hidden="true"
+              ><AppIcon name="power" class="app-menu-icon"
+            /></span>
+            Quit<span class="sh-k">{{ appMenuShortcuts.quit }}</span>
           </button>
         </div>
       </details>
@@ -989,18 +1040,22 @@ body {
 .topbar__hamburger {
   color: var(--ct-text-muted);
 }
-.topbar__menu-list {
+.topbar__menu-list.sh-menu {
   position: absolute;
   left: 0;
   z-index: 20;
-  display: flex;
-  flex-direction: column;
-  gap: var(--ct-space-1);
-  padding: var(--ct-space-2);
-  border: 1px solid var(--ct-border);
-  border-radius: var(--ct-radius-md);
-  background: var(--ct-surface);
+  width: 240px;
   white-space: nowrap;
+}
+.sh-mi-lead {
+  display: inline-flex;
+  width: 16px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+.app-menu-icon {
+  color: var(--ct-text-muted);
 }
 .topbar__recent {
   position: relative;
@@ -1009,25 +1064,6 @@ body {
   top: 0;
   left: 100%;
   margin-left: var(--ct-space-1);
-}
-.topbar__submark {
-  margin-left: var(--ct-space-2);
-  color: var(--ct-text-muted);
-}
-.topbar__sep {
-  height: 1px;
-  margin: var(--ct-space-1) 0;
-  background: var(--ct-border);
-}
-.topbar__button {
-  min-height: var(--ct-space-12);
-  padding: 0 var(--ct-space-4);
-  border: 1px solid var(--ct-border-strong);
-  border-radius: var(--ct-radius-md);
-  background: var(--ct-surface);
-  color: var(--ct-text);
-  font: inherit;
-  cursor: pointer;
 }
 .visually-hidden {
   position: absolute;
