@@ -1,12 +1,20 @@
 <script setup lang="ts">
 /**
- * Find & replace panel (wp3, #53). UI shell: matches are counted read-only from the document
- * text; Replace and Replace all are not wired yet and never change the manuscript.
+ * Find & replace panel (wp3, #53). Search highlights are decoration-only; replace runs through
+ * `@coauthor/editor` find-replace helpers (one undo step per replace operation).
  */
-import { computed, nextTick, onMounted, ref, toRaw } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRaw, watch } from 'vue';
 import type { Editor } from '@tiptap/core';
+import {
+  listFindMatches,
+  replaceFindMatches,
+  scrollFindMatchIntoView,
+  updateFindHighlight,
+  type FindMatch,
+} from '@coauthor/editor';
+import AppIcon from '../icons/AppIcon.vue';
 
-const props = defineProps<{ editor?: Editor }>();
+const props = defineProps<{ editor?: Editor; focusReplace?: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 
 const query = ref('');
@@ -14,26 +22,19 @@ const replacement = ref('');
 const matchCase = ref(false);
 const wholeWord = ref(false);
 const current = ref(0);
-const input = ref<HTMLInputElement>();
+const findInput = ref<HTMLInputElement>();
+const replaceInput = ref<HTMLInputElement>();
 
-const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-/** Number of matches, counted per text block so a match never spans two paragraphs. */
-const total = computed(() => {
+const opts = computed(() => ({ matchCase: matchCase.value, wholeWord: wholeWord.value }));
+
+const matches = computed((): FindMatch[] => {
   const e = props.editor && toRaw(props.editor);
-  const q = query.value;
-  if (!e || !q) return 0;
-  const re = new RegExp(
-    wholeWord.value ? `(?<![\\p{L}\\p{M}\\p{N}])${escape(q)}(?![\\p{L}\\p{M}\\p{N}])` : escape(q),
-    matchCase.value ? 'gu' : 'giu',
-  );
-  let n = 0;
-  e.state.doc.descendants((node) => {
-    if (!node.isTextblock) return true;
-    n += node.textContent.match(re)?.length ?? 0;
-    return false;
-  });
-  return n;
+  if (!e || !query.value) return [];
+  return listFindMatches(e.state.doc, query.value, opts.value);
 });
+
+const total = computed(() => matches.value.length);
+
 const label = computed(() =>
   !query.value
     ? ''
@@ -41,11 +42,77 @@ const label = computed(() =>
       ? `${Math.min(current.value + 1, total.value)} of ${total.value}`
       : 'No matches',
 );
-function step(d: 1 | -1) {
-  if (total.value) current.value = (current.value + d + total.value) % total.value;
+
+function syncHighlight() {
+  const e = props.editor && toRaw(props.editor);
+  if (!e) return;
+  updateFindHighlight(e, matches.value, total.value ? current.value : 0);
 }
-const NOT_YET = 'Replace is not available yet';
-onMounted(() => nextTick(() => input.value?.focus()));
+
+/** Updates the active match highlight and scrolls it into view without moving editor focus or selection. */
+function focusMatch(index: number) {
+  const e = props.editor && toRaw(props.editor);
+  const list = matches.value;
+  if (!e || !list.length) return;
+  const i = ((index % list.length) + list.length) % list.length;
+  current.value = i;
+  syncHighlight();
+  scrollFindMatchIntoView(e, list[i]!);
+}
+
+function step(d: 1 | -1) {
+  if (!total.value) return;
+  focusMatch(current.value + d);
+}
+
+function onQueryChange() {
+  current.value = 0;
+  syncHighlight();
+  if (total.value) focusMatch(0);
+}
+
+function replace(mode: 'one' | 'all') {
+  const e = props.editor && toRaw(props.editor);
+  if (!e || !query.value || !total.value) return;
+  current.value = replaceFindMatches(
+    e,
+    query.value,
+    replacement.value,
+    opts.value,
+    mode,
+    current.value,
+  );
+  syncHighlight();
+  if (listFindMatches(e.state.doc, query.value, opts.value).length) focusMatch(current.value);
+}
+
+watch(matches, () => {
+  if (current.value >= total.value) current.value = Math.max(0, total.value - 1);
+  syncHighlight();
+});
+
+watch(
+  () => props.editor,
+  (ed, _prev, onCleanup) => {
+    if (!ed) return;
+    const refresh = () => syncHighlight();
+    ed.on('update', refresh);
+    onCleanup(() => ed.off('update', refresh));
+  },
+  { immediate: true },
+);
+
+onMounted(() =>
+  nextTick(() => {
+    if (props.focusReplace) replaceInput.value?.focus();
+    else findInput.value?.focus();
+    syncHighlight();
+  }),
+);
+onBeforeUnmount(() => {
+  const e = props.editor && toRaw(props.editor);
+  if (e) updateFindHighlight(e, [], 0);
+});
 </script>
 
 <template>
@@ -58,22 +125,36 @@ onMounted(() => nextTick(() => input.value?.focus()));
   >
     <div class="sh-row">
       <input
-        ref="input"
+        ref="findInput"
         v-model="query"
         class="sh-inp"
         data-test="find-input"
         aria-label="Find"
         placeholder="Find"
-        @input="current = 0"
+        @input="onQueryChange"
         @keydown.enter.prevent="step($event.shiftKey ? -1 : 1)"
         @keydown.esc.stop="emit('close')"
       />
       <span class="sh-count" role="status" data-test="find-count">{{ label }}</span>
-      <button type="button" class="sh-tbtn sh-icon" aria-label="Previous match" @click="step(-1)">
-        ‹
+      <button
+        type="button"
+        class="sh-tbtn sh-icon"
+        aria-label="Previous match"
+        data-test="find-prev"
+        :disabled="!total"
+        @click="step(-1)"
+      >
+        <AppIcon name="chevron-up" />
       </button>
-      <button type="button" class="sh-tbtn sh-icon" aria-label="Next match" @click="step(1)">
-        ›
+      <button
+        type="button"
+        class="sh-tbtn sh-icon"
+        aria-label="Next match"
+        data-test="find-next"
+        :disabled="!total"
+        @click="step(1)"
+      >
+        <AppIcon name="chevron-down" />
       </button>
       <button
         type="button"
@@ -82,23 +163,25 @@ onMounted(() => nextTick(() => input.value?.focus()));
         data-test="find-close"
         @click="emit('close')"
       >
-        ×
+        <AppIcon name="x" />
       </button>
     </div>
     <div class="sh-row">
       <input
+        ref="replaceInput"
         v-model="replacement"
         class="sh-inp"
         data-test="replace-input"
         aria-label="Replace with"
         placeholder="Replace with…"
+        @keydown.esc.stop="emit('close')"
       />
       <button
         type="button"
         class="sh-tbtn"
         data-test="replace-one"
-        aria-disabled="true"
-        :title="NOT_YET"
+        :disabled="!total"
+        @click="replace('one')"
       >
         Replace
       </button>
@@ -106,8 +189,8 @@ onMounted(() => nextTick(() => input.value?.focus()));
         type="button"
         class="sh-tbtn"
         data-test="replace-all"
-        aria-disabled="true"
-        :title="NOT_YET"
+        :disabled="!total"
+        @click="replace('all')"
       >
         Replace all
       </button>
@@ -116,10 +199,11 @@ onMounted(() => nextTick(() => input.value?.focus()));
       <button
         type="button"
         class="sh-chip"
+        data-test="find-match-case"
         :aria-pressed="matchCase"
         @click="
           matchCase = !matchCase;
-          current = 0;
+          onQueryChange();
         "
       >
         Match case
@@ -127,10 +211,11 @@ onMounted(() => nextTick(() => input.value?.focus()));
       <button
         type="button"
         class="sh-chip"
+        data-test="find-whole-word"
         :aria-pressed="wholeWord"
         @click="
           wholeWord = !wholeWord;
-          current = 0;
+          onQueryChange();
         "
       >
         Whole word

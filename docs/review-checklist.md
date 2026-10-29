@@ -220,6 +220,8 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-29 · branding · Linux taskbar showed a generic/settings-style icon while in-app logo was updated · enable `app.enableGTKAppId`, apply `default_window_icon()` on the main window at startup, sync `public/favicon.svg` from `generate.py`
 - 2026-10-29 · #141 · PM review · taskbar `set_icon` must not fail startup · log to stderr and continue if the window icon cannot be applied
 - 2026-10-29 · #141 · Designer review · favicon link must not remove `<title>swarmDraft</title>` in `index.html` · keep both; test in `icons-logo.test.ts`
+- 2026-10-29 · #53 · Designer review · find navigation must not `focus()` the editor or set native selection (steals find-field focus and hides decoration highlights) · `scrollFindMatchIntoView` only
+- 2026-10-29 · #53 · Designer review · find prev/next/close use `AppIcon` (`chevron-up`, `chevron-down`, `x` on the 16px grid), not literal ‹ › ×
 - 2026-10-28 · #35 · save-failure test unmounted before a successful save could clear the banner (RAD-265) · after mocking recovery, drive one more edit and assert the banner is gone and status shows Saved
 - 2026-10-28 · #113 · read-only restore test used `isEditable` only · assert `contenteditable="false"`, toolbar read-only title, and `typeThroughDom` leaves the doc unchanged
 - 2026-10-28 · #113 · `saveStatusShown` survived `open()` on another book · reset it in `open()` and test the status line is empty until the next successful persist
