@@ -36,6 +36,8 @@ const props = defineProps<{
   externalLoadError?: boolean;
   outlineForced?: boolean;
   notesHidden?: boolean;
+  /** From `getAppInfo`; seeds track-changes writer name (#57). */
+  computerName?: string;
 }>();
 
 const commentRows = shallowRef<readonly CommentRow[]>([]);
@@ -203,6 +205,7 @@ onBeforeUnmount(() => observer?.disconnect());
             :external-load-error="externalLoadError"
             :outline-forced="outlineForced"
             :notes-hidden="notesHidden"
+            :computer-name="computerName"
             @reload="emit('reload')"
             @toggle-navigator="emit('toggle-navigator')"
             @decisions="emit('decisions', $event)"
