@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
 import { docToYDoc } from '@coauthor/docx';
 import ManuscriptEditor from '../ManuscriptEditor.vue';
+import ContextMenu from './ContextMenu.vue';
+import type { ContextMenuAction } from './context-menu';
 import { SAMPLE_DOC } from '../fixtures/sample';
 
 /** Each UI shell opens and renders, and using it leaves the manuscript and its Y.Doc untouched. */
@@ -19,6 +21,11 @@ async function mounted() {
     expect(w.emitted('change')).toBeUndefined();
   };
   return { w, editor, unchanged };
+}
+
+async function openContextMenu(w: ReturnType<typeof mount>) {
+  await w.find('.page').trigger('contextmenu', { clientX: 100, clientY: 100 });
+  await flushPromises();
 }
 
 describe('UI shells (Part of #36)', () => {
@@ -38,20 +45,75 @@ describe('UI shells (Part of #36)', () => {
     w.unmount();
   });
 
-  it('context menu opens on right-click and every item is a no-op', async () => {
+  it('context menu closes on Esc and click-away without changing the doc', async () => {
     const { w, unchanged } = await mounted();
-    const ids = ['cut', 'copy', 'paste', 'comment', 'ask-bot'];
-    for (const id of ids) {
-      await w.find('.page').trigger('contextmenu', { clientX: 100, clientY: 100 });
-      expect(w.find('[data-test="context-menu"]').exists()).toBe(true);
-      await w.find(`[data-test="ctx-${id}"]`).trigger('click');
-      expect(w.find('[data-test="context-menu"]').exists()).toBe(false);
-    }
-    await w.find('.page').trigger('contextmenu', { clientX: 100, clientY: 100 });
+    await openContextMenu(w);
+    await w.get('[data-test="context-dismiss"]').trigger('click');
+    expect(w.find('[data-test="context-menu"]').exists()).toBe(false);
+    unchanged();
+    await openContextMenu(w);
+    await w.get('[data-test="context-menu"]').trigger('keydown', { key: 'Escape' });
+    expect(w.find('[data-test="context-menu"]').exists()).toBe(false);
+    unchanged();
+    w.unmount();
+  });
+
+  it('context menu cut, copy, paste, style, and comment change the manuscript (#54)', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const readText = vi.fn().mockResolvedValue(' CLIP');
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText, readText },
+      configurable: true,
+    });
+
+    const { w, editor } = await mounted();
+    const select = (snippet: string) => {
+      let from = -1;
+      let to = -1;
+      editor.state.doc.descendants((node, pos) => {
+        if (!node.isText || from >= 0) return;
+        const i = node.text!.indexOf(snippet);
+        if (i >= 0) {
+          from = pos + i;
+          to = from + snippet.length;
+        }
+      });
+      editor.commands.setTextSelection({ from, to });
+    };
+
+    select('rain');
+    await openContextMenu(w);
+    await w.find('[data-test="ctx-copy"]').trigger('click');
+    await flushPromises();
+    expect(writeText).toHaveBeenCalledWith('rain');
+
+    await openContextMenu(w);
+    await w.find('[data-test="ctx-cut"]').trigger('click');
+    await flushPromises();
+    expect(editor.getText()).not.toContain('rain');
+
+    editor.commands.setTextSelection(1);
+    await openContextMenu(w);
+    await w.find('[data-test="ctx-paste"]').trigger('click');
+    await flushPromises();
+    expect(editor.getText()).toContain('CLIP');
+
+    await openContextMenu(w);
     await w.find('[data-test="ctx-style"]').trigger('click');
     await w.find('[data-test="ctx-style-heading"]').trigger('click');
     await flushPromises();
-    unchanged();
+    expect(editor.isActive('heading')).toBe(true);
+
+    select('Morning');
+    await openContextMenu(w);
+    await w.find('[data-test="ctx-comment"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test="review-item"]').exists()).toBe(true);
+
+    await openContextMenu(w);
+    await w.find('[data-test="ctx-ask-bot"]').trigger('click');
+    expect(w.emitted('ask-bot')).toHaveLength(1);
+
     w.unmount();
   });
 
@@ -94,5 +156,19 @@ describe('UI shells (Part of #36)', () => {
     expect(w.findAll('[data-test="margin-note"]').length).toBeGreaterThan(0);
     unchanged();
     w.unmount();
+  });
+});
+
+describe('ContextMenu theme (#54)', () => {
+  it('uses token-backed shell classes in light and dark', () => {
+    for (const theme of ['light', 'dark'] as const) {
+      document.documentElement.dataset.theme = theme;
+      const w = mount(ContextMenu, {
+        props: { x: 8, y: 8, disabled: new Set<ContextMenuAction>() },
+        attachTo: document.body,
+      });
+      expect(w.get('.sh-menu').classes()).toContain('sh-menu');
+      w.unmount();
+    }
   });
 });
