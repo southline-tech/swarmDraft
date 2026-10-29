@@ -114,7 +114,8 @@ describe('outline auto-collapse (#92)', () => {
     expect(css).toContain('--ct-page-gutter: var(--ct-space-6);');
     expect(css).toContain(`--ct-space-6: ${PAGE_GUTTER}px;`);
     expect(css).toContain(`--ct-margin-notes-w: ${MARGIN_NOTES_W}px;`);
-    expect(css).toContain('--ct-page-w: 576px;');
+    expect(css).toContain('--ct-measure-page: 70ch;');
+    expect(css).not.toContain('--ct-page-w');
     expect(css).toContain('--ct-panel-w-narrow: 320px;');
   });
 });

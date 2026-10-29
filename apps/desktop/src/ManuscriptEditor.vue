@@ -863,15 +863,12 @@ const LABELS: Record<ReviewItem['type'], string> = {
 .manuscript-editor .body > .desk {
   min-height: 0;
 }
-/* 6x9 in trim (576x864 px at 100%), 72 px margins -> 432 px text block. A rule marks each 864 px
-   page height until real pagination lands (RAD-227).
-   #92: on a narrow desk the page narrows with it, min(576px, desk minus the side gutters and any
-   margin notes), never below 440px. The parent closes the outline before it would go lower. */
+/* 864 px page height at 100% zoom until real pagination lands (RAD-227). Side padding on the
+   sheet sits outside the text measure (RAD-105).
+   #92: on a narrow desk the page narrows with the desk (minus gutters and margin notes), never
+   below 440px. The parent closes the outline before it would go lower. */
 .manuscript-editor .page-sheet {
-  width: max(
-    var(--ct-page-min-w),
-    min(var(--ct-page-w), 100% - 2 * var(--ct-page-gutter) - var(--ct-page-notes-room))
-  );
+  width: max(var(--ct-page-min-w), 100% - 2 * var(--ct-page-gutter) - var(--ct-page-notes-room));
   background-image: repeating-linear-gradient(
     to bottom,
     transparent 0 863px,
@@ -881,10 +878,9 @@ const LABELS: Record<ReviewItem['type'], string> = {
 /* #96: the writer forced the outline open on a narrow desk. The page may shrink to 320px so it
    never overflows the desk; the 24px gutters stay, so text never touches the review panel. */
 .manuscript-editor .desk--outline-forced .page-sheet {
-  width: clamp(
+  width: max(
     var(--ct-page-forced-min-w),
-    100% - 2 * var(--ct-page-gutter) - var(--ct-page-notes-room),
-    var(--ct-page-w)
+    100% - 2 * var(--ct-page-gutter) - var(--ct-page-notes-room)
   );
 }
 .manuscript-editor .page-sheet.page-sheet--narrow {
@@ -892,6 +888,9 @@ const LABELS: Record<ReviewItem['type'], string> = {
   padding-right: var(--ct-space-8);
 }
 .manuscript-editor .page .tiptap {
+  max-width: var(--ct-measure-page);
+  margin-left: auto;
+  margin-right: auto;
   font-family: var(--ct-font-manuscript);
   font-size: var(--ct-text-page);
   line-height: var(--ct-leading-body);
@@ -904,7 +903,10 @@ const LABELS: Record<ReviewItem['type'], string> = {
   text-align: center;
 }
 .manuscript-editor .chapter-label {
-  margin: 0 0 var(--ct-space-2);
+  max-width: var(--ct-measure-page);
+  margin-left: auto;
+  margin-right: auto;
+  margin-bottom: var(--ct-space-2);
   font-family: var(--ct-font-manuscript);
   font-variant: small-caps;
   letter-spacing: 0.18em;

@@ -1,6 +1,6 @@
 /**
- * Page zoom (RAD-255). The page is a fixed 6x9 in trim at 96 px/in, so zoom scales it and never
- * reflows the text. Levels run 50%-200%; the chosen level persists per user (this device profile).
+ * Page zoom (RAD-255). The page sheet keeps a fixed height at 100% zoom; zoom scales the sheet and
+ * never reflows the text. Levels run 50%-200%; the chosen level persists per user (this device profile).
  */
 export const ZOOM_LEVELS = [50, 67, 75, 90, 100, 110, 125, 150, 175, 200] as const;
 export const ZOOM_MIN = 50;
@@ -8,8 +8,8 @@ export const ZOOM_MAX = 200;
 export const ZOOM_DEFAULT = 100;
 export const ZOOM_STORAGE_KEY = 'coauthor.editor.zoom';
 
-/** 6 x 9 in at 96 px/in, 0.75 in margins: a 432 px text block. */
-export const PAGE = { width: 576, height: 864, margin: 72 } as const;
+/** Page sheet at 100% zoom: 864px tall, 72px side padding; text measure capped at 70ch (#105). */
+export const PAGE = { height: 864, margin: 72, measureCh: 70 } as const;
 
 export function clampZoom(z: number): number {
   if (!Number.isFinite(z)) return ZOOM_DEFAULT;

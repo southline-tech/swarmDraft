@@ -8,9 +8,8 @@ import { PAGE, ZOOM_STORAGE_KEY, clampZoom, loadZoom, saveZoom, stepZoom } from 
 beforeEach(() => localStorage.clear());
 
 describe('zoom model', () => {
-  it('is a 6x9 in trim at 96 px/in with 0.75 in margins and a 432 px text block', () => {
-    expect(PAGE).toEqual({ width: 576, height: 864, margin: 72 });
-    expect(PAGE.width - 2 * PAGE.margin).toBe(432);
+  it('uses an 864px page height, 72px sheet padding, and a 70ch text measure at 100% zoom', () => {
+    expect(PAGE).toEqual({ height: 864, margin: 72, measureCh: 70 });
   });
   it('clamps to 50-200 and steps through levels, stopping at the ends', () => {
     expect(clampZoom(10)).toBe(50);
@@ -76,7 +75,7 @@ describe('ZoomControl', () => {
 });
 
 describe('page on desk', () => {
-  it('centers a 576 px paper page on the desk with token shadow, margins and Literata', async () => {
+  it('centers the page sheet on the desk with token shadow, padding and Literata', async () => {
     const w = mount(ManuscriptEditor, { props: { content: SAMPLE_DOC }, attachTo: document.body });
     await flushPromises();
     const desk = w.find('[data-test="desk"]');
