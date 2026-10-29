@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { isProxy, reactive } from 'vue';
 import * as Y from 'yjs';
 import type { Section } from '@coauthor/schema';
-import { readStructure, writeStructure } from '@coauthor/docx';
+import { docToYDoc, readStructure, writeStructure, yDocToDoc } from '@coauthor/docx';
 import { openSession } from './manuscript-session';
 
 const ch = (id: string, title: string, docId: string): Section => ({
@@ -82,5 +82,23 @@ describe('openSession keeps Y.Docs raw', () => {
     expect(isProxy(r.m)).toBe(false);
     expect(isProxy(r.d)).toBe(false);
     s.close();
+  });
+});
+
+describe('outline undo delete', () => {
+  it('rehydrates section doc content when a removed docId returns to the outline', async () => {
+    const a = new Y.Doc();
+    const d1 = docToYDoc({
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Undo keep' }] }],
+    } as never);
+    writeStructure(a, [ch('c', 'C1', 'd1')]);
+    const session = openSession('m', 'M', a, new Map([['d1', d1]]), report);
+    await session.save([]);
+    expect(session.sections.has('d1')).toBe(false);
+    await session.save([ch('c', 'C1', 'd1')]);
+    const restored = session.sections.get('d1')!;
+    expect(JSON.stringify(yDocToDoc(restored))).toContain('Undo keep');
+    session.close();
   });
 });

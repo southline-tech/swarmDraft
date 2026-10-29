@@ -105,26 +105,19 @@ describe('icon set', () => {
     }
   });
 
-  it('outline move buttons are labelled icon buttons, not arrow characters', () => {
+  it('outline row actions live in the context menu, not bottom toolbar buttons', async () => {
     const w = mount(SectionNav, {
       props: {
         manuscriptId: SAMPLE_MANUSCRIPT_ID,
         sections: sampleOutline(),
-        selectedId: sampleOutline()[1]!.id,
+        selectedId: 'ch-1',
       },
+      attachTo: document.body,
     });
-    for (const [t, label, icon] of [
-      ['move-up', 'Move up', 'arrow-up'],
-      ['move-down', 'Move down', 'arrow-down'],
-    ]) {
-      const b = w.get(`[data-test="${t}"]`);
-      expect(b.attributes('aria-label')).toBe(label);
-      expect(b.attributes('title')).toBe(label);
-      expect(b.find(`svg[data-icon="${icon}"]`).exists()).toBe(true);
-      expect(b.text()).not.toMatch(/[↑↓]/);
-    }
-    expect(
-      w.findAll('[aria-label="Add section"] button svg[data-icon="plus"]').length,
-    ).toBeGreaterThan(0);
+    expect(w.find('[data-test="move-up"]').exists()).toBe(false);
+    await w.find('[data-test="section-ch-1"]').trigger('contextmenu', { clientX: 10, clientY: 10 });
+    expect(document.body.querySelector('[data-test="outline-ctx-move-up"]')).toBeTruthy();
+    expect(document.body.querySelector('[data-test="outline-ctx-move-down"]')).toBeTruthy();
+    w.unmount();
   });
 });
