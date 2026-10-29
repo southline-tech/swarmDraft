@@ -1,12 +1,16 @@
 /**
  * Editor package: the Tiptap manuscript editor (RAD-202), its Yjs binding (`./collab`) and the
- * parts/chapters/scenes outline (`./outline`, RAD-214). Local persistence lands next (RAD-203).
+ * parts/chapters outline (`./outline`, RAD-214). Local persistence lands next (RAD-203).
  */
 import { Editor, Extension, type EditorOptions, type JSONContent } from '@tiptap/core';
 import { Plugin } from '@tiptap/pm/state';
 import { manuscriptExtensions } from './extensions';
 
 export * from './outline';
+export {
+  coalesceLegacySceneSections,
+  docWordCount as sectionDocWordCount,
+} from './legacy-scene-merge';
 export * from './section-numbering';
 export * from './content';
 export * from './extensions';
