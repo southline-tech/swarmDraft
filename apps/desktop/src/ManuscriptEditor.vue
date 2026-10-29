@@ -45,6 +45,12 @@ import {
 } from './review/review-state';
 import FindPanel from './shells/FindPanel.vue';
 import ContextMenu from './shells/ContextMenu.vue';
+import {
+  contextMenuDisabled,
+  runContextMenuAction,
+  type ContextMenuAction,
+} from './shells/context-menu';
+import { caretStyle } from './toolbar/toolbar';
 import ShortcutsSheet from './shells/ShortcutsSheet.vue';
 import './shells/shells.css';
 import {
@@ -123,6 +129,8 @@ const emit = defineEmits<{
   'load-error': [message: string];
   /** Desk room and review-panel visibility, for the parent's outline auto-collapse (#92). */
   layout: [layout: EditorLayout];
+  /** Writer chose “Ask bot to suggest…” from the editor context menu (#54). */
+  'ask-bot': [];
 }>();
 
 /* UI shells for the audit review (Part of #36). Local view state only: none of these change the
@@ -201,6 +209,27 @@ function openMenu(e: MouseEvent) {
     x: Math.min(e.clientX, window.innerWidth - 280),
     y: Math.min(e.clientY, window.innerHeight - 300),
   };
+}
+const menuDisabled = computed(() => contextMenuDisabled(editor.value));
+const menuActiveStyle = computed((): ContextMenuAction | undefined => {
+  const e = editor.value;
+  if (!e || e.isDestroyed) return undefined;
+  const s = caretStyle(e);
+  if (s === 'body' || s === 'heading' || s === 'block_quote' || s === 'scene_break') return s;
+  return undefined;
+});
+async function onContextMenuSelect(action: ContextMenuAction) {
+  menuAt.value = null;
+  const e = editor.value;
+  if (!e || e.isDestroyed) return;
+  if (action === 'ask-bot') {
+    emit('ask-bot');
+    return;
+  }
+  if (await runContextMenuAction(e, action)) {
+    if (action === 'comment') refreshReview(e);
+    void nextTick(() => e.view.focus());
+  }
 }
 /** Review list visibility, driven by the toolbar's review toggle. */
 const reviewOpen = shallowRef(true);
@@ -743,7 +772,15 @@ const LABELS: Record<ReviewItem['type'], string> = {
         </div>
       </Teleport>
     </div>
-    <ContextMenu v-if="menuAt" :x="menuAt.x" :y="menuAt.y" @close="menuAt = null" />
+    <ContextMenu
+      v-if="menuAt"
+      :x="menuAt.x"
+      :y="menuAt.y"
+      :disabled="menuDisabled"
+      :active-style="menuActiveStyle"
+      @select="onContextMenuSelect"
+      @close="menuAt = null"
+    />
     <div
       v-if="menuAt"
       class="fixed inset-0 z-30"

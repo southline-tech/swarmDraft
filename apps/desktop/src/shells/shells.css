@@ -129,11 +129,20 @@
   text-align: left;
   cursor: default;
 }
-.sh-mi:hover,
-.sh-mi:focus,
+.sh-mi[aria-disabled='true'] {
+  color: var(--ct-text-muted);
+  opacity: 0.5;
+  cursor: default;
+}
+.sh-mi:hover:not([aria-disabled='true']),
+.sh-mi:focus:not([aria-disabled='true']),
 .sh-mi.sh-open {
   background: var(--ct-selected-bg);
   color: var(--ct-accent);
+}
+.sh-mi[aria-disabled='true']:focus-visible {
+  outline: var(--ct-focus-outline);
+  outline-offset: 1px;
 }
 .sh-mi .sh-k {
   margin-left: auto;
