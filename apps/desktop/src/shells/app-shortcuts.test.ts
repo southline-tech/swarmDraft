@@ -16,6 +16,9 @@ describe('app shortcuts (#56)', () => {
     expect(chords).toContain(MANUSCRIPT_SHORTCUTS.find);
     expect(chords).toContain(MANUSCRIPT_SHORTCUTS.replace);
     expect(chords).toContain(MANUSCRIPT_SHORTCUTS.shortcutsSheet);
+    const labels = SHORTCUT_SHEET_GROUPS.flatMap((g) => g.rows.map((r) => r.label));
+    expect(labels).not.toContain('Save now');
+    expect(labels.some((l) => l.startsWith('Zoom'))).toBe(false);
   });
 
   it('formats display keys for the sheet', () => {
