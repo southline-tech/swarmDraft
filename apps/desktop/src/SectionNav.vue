@@ -56,6 +56,38 @@ const KIND_LABELS: Record<SectionKind, string> = {
   chapter: 'Chapter',
   back_matter: 'Back matter',
 };
+
+/** Brett #109: default front/back matter catalog and which front rows show as placeholders. */
+const FRONT_MATTER_CATALOG = [
+  'Title page',
+  'Copyright',
+  'Dedication',
+  'Epigraph',
+  'Contents',
+] as const;
+const BACK_MATTER_CATALOG = ['Acknowledgements', 'About the author', 'Also by'] as const;
+const DEFAULT_FRONT_PLACEHOLDERS = new Set<string>(['Title page', 'Copyright', 'Contents']);
+
+function normalizeMatterTitle(title: string) {
+  return title.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+function catalogTitle(title: string, catalog: readonly string[]) {
+  const n = normalizeMatterTitle(title);
+  return catalog.find((c) => normalizeMatterTitle(c) === n);
+}
+function matterSlug(title: string) {
+  return normalizeMatterTitle(title).replace(/[^a-z0-9]+/g, '-');
+}
+function topLevelMatter(sections: Section[], kind: 'front_matter' | 'back_matter') {
+  return sections.filter((s) => !s.parentId && s.kind === kind);
+}
+function hasCatalogMatter(
+  sections: Section[],
+  title: string,
+  kind: 'front_matter' | 'back_matter',
+) {
+  return topLevelMatter(sections, kind).some((s) => catalogTitle(s.title, [title]) === title);
+}
 const loadIssues = computed(() => normalizeOutline(props.sections).issues);
 const list = computed(() => normalizeOutline(props.sections).sections);
 
@@ -63,6 +95,15 @@ interface Row {
   section: Section;
   depth: number;
 }
+type DisplayEntry =
+  | { kind: 'section'; section: Section; depth: number }
+  | {
+      kind: 'placeholder';
+      title: string;
+      matterKind: 'front_matter' | 'back_matter';
+      depth: number;
+    };
+
 const rows = computed<Row[]>(() => {
   const out: Row[] = [];
   const walk = (nodes: OutlineNode[], depth: number) => {
@@ -73,6 +114,57 @@ const rows = computed<Row[]>(() => {
   };
   walk(buildOutline(list.value), 0);
   return out;
+});
+
+/** Map catalog front-matter slots to existing sections (title match; first front row fills Title page). */
+function frontCatalogSlots(sections: Section[]) {
+  const front = topLevelMatter(sections, 'front_matter');
+  const unmatched = [...front];
+  const filled = new Map<string, Section>();
+  for (const title of FRONT_MATTER_CATALOG) {
+    const i = unmatched.findIndex((s) => catalogTitle(s.title, [title]) === title);
+    if (i >= 0) {
+      filled.set(title, unmatched[i]!);
+      unmatched.splice(i, 1);
+    }
+  }
+  if (!filled.has('Title page') && unmatched.length) filled.set('Title page', unmatched.shift()!);
+  return { filled, extras: unmatched };
+}
+
+/** Reading-order outline rows plus default front-matter placeholders (#109). */
+const displayEntries = computed<DisplayEntry[]>(() => {
+  const out: DisplayEntry[] = [];
+  const { filled, extras } = frontCatalogSlots(list.value);
+  for (const title of FRONT_MATTER_CATALOG) {
+    const section = filled.get(title);
+    if (section) out.push({ kind: 'section', section, depth: 0 });
+    else if (DEFAULT_FRONT_PLACEHOLDERS.has(title))
+      out.push({ kind: 'placeholder', title, matterKind: 'front_matter', depth: 0 });
+  }
+  for (const section of extras) out.push({ kind: 'section', section, depth: 0 });
+  for (const row of rows.value) {
+    if (row.depth === 0 && row.section.kind === 'front_matter') continue;
+    out.push({ kind: 'section', section: row.section, depth: row.depth });
+  }
+  return out;
+});
+
+function entryKey(entry: DisplayEntry) {
+  return entry.kind === 'section' ? entry.section.id : `placeholder:${entry.title}`;
+}
+
+const newMatterOptions = computed(() => {
+  const opts: { title: string; matterKind: 'front_matter' | 'back_matter' }[] = [];
+  for (const title of FRONT_MATTER_CATALOG) {
+    if (!hasCatalogMatter(list.value, title, 'front_matter'))
+      opts.push({ title, matterKind: 'front_matter' });
+  }
+  for (const title of BACK_MATTER_CATALOG) {
+    if (!hasCatalogMatter(list.value, title, 'back_matter'))
+      opts.push({ title, matterKind: 'back_matter' });
+  }
+  return opts;
 });
 
 const byId = (id?: string) => list.value.find((s) => s.id === id);
@@ -142,6 +234,28 @@ function siblingInsertAfter(id: string): { beforeId?: string; parentId?: string 
     if (r.depth === depth && r.section.parentId === s.parentId) return { beforeId: r.section.id };
   }
   return s.parentId ? { parentId: s.parentId } : {};
+}
+
+/** Add a catalog front/back matter section at the correct outline slot (#109). */
+async function addCatalogMatter(title: string, matterKind: 'front_matter' | 'back_matter') {
+  closeMenu();
+  newMenuOpen.value = false;
+  if (hasCatalogMatter(list.value, title, matterKind)) return;
+  const beforeIds = new Set(list.value.map((x) => x.id));
+  const next = await commit((cur) =>
+    addSection(cur, {
+      manuscriptId: props.manuscriptId,
+      kind: matterKind,
+      title,
+    }),
+  );
+  const created = next?.find((x) => !beforeIds.has(x.id));
+  if (created) {
+    undoSections.value = null;
+    if (matterKind === 'front_matter') frontOpen.value = true;
+    select(created.id);
+    activate(created.id);
+  }
 }
 
 async function addSiblingAfter(id: string) {
@@ -230,10 +344,13 @@ function onRowContextMenu(e: MouseEvent, id: string) {
   e.preventDefault();
   openMenu(id, { x: e.clientX, y: e.clientY });
 }
+const newMenuOpen = ref(false);
+const newMenuWrap = ref<HTMLElement>();
+
 function onPointerDownCapture(e: MouseEvent) {
-  if (!menuFor.value) return;
-  if (menuRoot.value?.contains(e.target as Node)) return;
-  closeMenu();
+  const t = e.target as Node;
+  if (menuFor.value && !menuRoot.value?.contains(t)) closeMenu();
+  if (newMenuOpen.value && !newMenuWrap.value?.contains(t)) newMenuOpen.value = false;
 }
 onMounted(() => document.addEventListener('mousedown', onPointerDownCapture, true));
 onUnmounted(() => document.removeEventListener('mousedown', onPointerDownCapture, true));
@@ -397,32 +514,46 @@ function focusRow(id: string) {
     )?.focus(),
   );
 }
-function onKey(e: KeyboardEvent, row: Row) {
+function onKey(e: KeyboardEvent, entry: DisplayEntry) {
   if (editingId.value) return;
+  if (entry.kind === 'placeholder') {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      void addCatalogMatter(entry.title, entry.matterKind);
+    }
+    return;
+  }
+  const row: Row = { section: entry.section, depth: entry.depth };
   if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
     e.preventDefault();
     openMenu(row.section.id, menuAnchorForRow(row.section.id));
     return;
   }
-  const ids = (isFront(row) ? rows : visibleRows).value.map((r) => r.section.id);
-  const i = ids.indexOf(row.section.id);
+  const allSectionIds = displayEntries.value
+    .filter((e): e is Extract<DisplayEntry, { kind: 'section' }> => e.kind === 'section')
+    .map((e) => e.section.id);
+  const keys = isFrontEntry(entry) ? allSectionIds : navigableKeys.value;
+  const i = keys.indexOf(row.section.id);
   const go = (j: number) => {
-    const id = ids[Math.max(0, Math.min(ids.length - 1, j))];
-    if (id) {
-      activate(id);
-      focusRow(id);
+    const key = keys[Math.max(0, Math.min(keys.length - 1, j))];
+    if (!key) return;
+    if (key.startsWith('placeholder:')) {
+      focusEntryKey(key);
+      return;
     }
+    activate(key);
+    focusRow(key);
   };
   const handlers: Record<string, () => void> = {
     ArrowDown: () => (e.altKey ? void move(1, row.section.id) : go(i + 1)),
     ArrowUp: () => (e.altKey ? void move(-1, row.section.id) : go(i - 1)),
     Home: () => go(0),
-    End: () => go(ids.length - 1),
-    ArrowLeft: () => row.section.parentId && go(ids.indexOf(row.section.parentId)),
+    End: () => go(keys.length - 1),
+    ArrowLeft: () => row.section.parentId && go(keys.indexOf(row.section.parentId)),
     // Rows are always expanded, so Right goes to the first child when there is one.
     ArrowRight: () => {
       const child = rows.value.find((r) => r.section.parentId === row.section.id);
-      if (child) go(ids.indexOf(child.section.id));
+      if (child) go(keys.indexOf(child.section.id));
     },
     Enter: () => (select(row.section.id), startRename(row.section.id, row.section.title)),
     F2: () => startRename(row.section.id, row.section.title),
@@ -436,16 +567,45 @@ function onKey(e: KeyboardEvent, row: Row) {
 }
 /** UI shell (#52): top-level front matter collapses into one group row (display state only). */
 const frontOpen = ref(false);
-const isFront = (r: Row) => r.depth === 0 && r.section.kind === 'front_matter';
-const frontCount = computed(() => rows.value.filter(isFront).length);
-const showFront = computed(
-  () => frontOpen.value || rows.value.some((r) => isFront(r) && r.section.id === props.selectedId),
+const isFrontEntry = (entry: DisplayEntry) =>
+  entry.depth === 0 &&
+  (entry.kind === 'placeholder'
+    ? entry.matterKind === 'front_matter'
+    : entry.section.kind === 'front_matter');
+const frontCount = computed(
+  () => rows.value.filter((r) => r.depth === 0 && r.section.kind === 'front_matter').length,
 );
-const visibleRows = computed(() =>
-  showFront.value ? rows.value : rows.value.filter((r) => !isFront(r)),
+const hasFrontZone = computed(
+  () =>
+    frontCount.value > 0 ||
+    displayEntries.value.some((e) => e.kind === 'placeholder' && e.matterKind === 'front_matter'),
+);
+const showFront = computed(
+  () =>
+    frontOpen.value ||
+    rows.value.some(
+      (r) =>
+        r.depth === 0 && r.section.kind === 'front_matter' && r.section.id === props.selectedId,
+    ),
+);
+const navigableEntries = computed(() =>
+  showFront.value ? displayEntries.value : displayEntries.value.filter((e) => !isFrontEntry(e)),
+);
+const navigableKeys = computed(() =>
+  navigableEntries.value
+    .filter((e): e is Extract<DisplayEntry, { kind: 'section' }> => e.kind === 'section')
+    .map((e) => e.section.id),
 );
 
-const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
+function focusEntryKey(key: string) {
+  void nextTick(() =>
+    (document.querySelector(`[data-entry="${CSS.escape(key)}"]`) as HTMLElement | null)?.focus(),
+  );
+}
+
+const focusId = computed(
+  () => props.selectedId ?? displayEntries.value.find((e) => e.kind === 'section')?.section.id,
+);
 </script>
 
 <template>
@@ -456,7 +616,7 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
     </p>
     <p v-if="saveError" role="alert" class="warn" data-test="save-error">{{ saveError }}</p>
     <ul role="tree" aria-label="Sections">
-      <li v-if="frontCount" role="none" class="group-row">
+      <li v-if="hasFrontZone" role="none" class="group-row">
         <button
           type="button"
           class="group"
@@ -468,68 +628,128 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
           <span class="count">{{ frontCount }}</span>
         </button>
       </li>
-      <li
-        v-for="row in rows"
-        v-show="showFront || !isFront(row)"
-        :key="row.section.id"
-        role="treeitem"
-        :aria-level="row.depth + 1"
-        :aria-label="`${KIND_LABELS[row.section.kind]}: ${row.section.title || 'Untitled'}`"
-        :aria-selected="row.section.id === selectedId"
-        :tabindex="row.section.id === focusId ? 0 : -1"
-        :class="[
-          'row',
-          row.section.kind,
-          {
-            selected: row.section.id === selectedId,
-            'row--drop-into': dropHint?.targetId === row.section.id && dropHint.edge === 'into',
-          },
-        ]"
-        :style="{ paddingLeft: `${row.depth * 1.25 + 0.5}rem` }"
-        :data-test="`section-${row.section.id}`"
-        draggable="true"
-        @dragstart="onDragStart(row.section.id)"
-        @dragend="onDragEnd"
-        @dragover="onDragOver($event, row)"
-        @dragleave="onDragLeave($event, row)"
-        @drop.prevent="onDrop($event, row.section, row)"
-        @click="activate(row.section.id)"
-        @contextmenu="onRowContextMenu($event, row.section.id)"
-        @dblclick="startRename(row.section.id, row.section.title)"
-        @keydown="onKey($event, row)"
-      >
-        <span
-          v-if="dropHint?.targetId === row.section.id && dropHint.edge === 'before'"
-          class="drop-line drop-line--before"
-          data-test="drop-line-before"
-          aria-hidden="true"
-        />
-        <span
-          v-if="dropHint?.targetId === row.section.id && dropHint.edge === 'after'"
-          class="drop-line drop-line--after"
-          data-test="drop-line-after"
-          aria-hidden="true"
-        />
-        <input
-          v-if="editingId === row.section.id"
-          v-model="draft"
-          data-test="rename-input"
-          aria-label="Section title"
-          @click.stop
-          @keydown.stop.enter="commitRename"
-          @keydown.stop.esc="cancelRename"
-          @blur="commitRename"
-        />
-        <span v-else class="title">{{ row.section.title || 'Untitled' }}</span>
-        <span
-          v-if="wordCounts"
-          class="count"
-          data-test="word-count"
-          :aria-label="`${wordCounts[row.section.id] ?? 0} words`"
-          >{{ wordCounts[row.section.id] ? formatCount(wordCounts[row.section.id]!) : '—' }}</span
+      <template v-for="entry in displayEntries" :key="entryKey(entry)">
+        <li
+          v-if="entry.kind === 'placeholder'"
+          v-show="showFront || !isFrontEntry(entry)"
+          role="treeitem"
+          :aria-level="entry.depth + 1"
+          :aria-label="`Add ${entry.title}`"
+          :tabindex="entryKey(entry) === focusId ? 0 : -1"
+          class="row row--placeholder front_matter"
+          :style="{ paddingLeft: `${entry.depth * 1.25 + 0.5}rem` }"
+          :data-test="`matter-placeholder-${matterSlug(entry.title)}`"
+          :data-entry="entryKey(entry)"
+          @click="addCatalogMatter(entry.title, entry.matterKind)"
+          @keydown="onKey($event, entry)"
         >
-      </li>
+          <span class="placeholder-icon" aria-hidden="true"
+            ><AppIcon name="book" class="placeholder-icon__glyph"
+          /></span>
+          <span class="placeholder-plus" aria-hidden="true"
+            ><AppIcon name="plus" class="placeholder-icon__glyph"
+          /></span>
+          <span class="title placeholder-label">Add {{ entry.title }}</span>
+        </li>
+        <li
+          v-else
+          v-show="showFront || !isFrontEntry(entry)"
+          role="treeitem"
+          :aria-level="entry.depth + 1"
+          :aria-label="`${KIND_LABELS[entry.section.kind]}: ${entry.section.title || 'Untitled'}`"
+          :aria-selected="entry.section.id === selectedId"
+          :tabindex="entry.section.id === focusId ? 0 : -1"
+          :class="[
+            'row',
+            entry.section.kind,
+            {
+              selected: entry.section.id === selectedId,
+              'row--drop-into': dropHint?.targetId === entry.section.id && dropHint.edge === 'into',
+            },
+          ]"
+          :style="{ paddingLeft: `${entry.depth * 1.25 + 0.5}rem` }"
+          :data-test="`section-${entry.section.id}`"
+          :data-entry="entryKey(entry)"
+          draggable="true"
+          @dragstart="onDragStart(entry.section.id)"
+          @dragend="onDragEnd"
+          @dragover="onDragOver($event, { section: entry.section, depth: entry.depth })"
+          @dragleave="onDragLeave($event, { section: entry.section, depth: entry.depth })"
+          @drop.prevent="
+            onDrop($event, entry.section, { section: entry.section, depth: entry.depth })
+          "
+          @click="activate(entry.section.id)"
+          @contextmenu="onRowContextMenu($event, entry.section.id)"
+          @dblclick="startRename(entry.section.id, entry.section.title)"
+          @keydown="onKey($event, entry)"
+        >
+          <span
+            v-if="dropHint?.targetId === entry.section.id && dropHint.edge === 'before'"
+            class="drop-line drop-line--before"
+            data-test="drop-line-before"
+            aria-hidden="true"
+          />
+          <span
+            v-if="dropHint?.targetId === entry.section.id && dropHint.edge === 'after'"
+            class="drop-line drop-line--after"
+            data-test="drop-line-after"
+            aria-hidden="true"
+          />
+          <input
+            v-if="editingId === entry.section.id"
+            v-model="draft"
+            data-test="rename-input"
+            aria-label="Section title"
+            @click.stop
+            @keydown.stop.enter="commitRename"
+            @keydown.stop.esc="cancelRename"
+            @blur="commitRename"
+          />
+          <span v-else class="title">{{ entry.section.title || 'Untitled' }}</span>
+          <span
+            v-if="wordCounts"
+            class="count"
+            data-test="word-count"
+            :aria-label="`${wordCounts[entry.section.id] ?? 0} words`"
+            >{{
+              wordCounts[entry.section.id] ? formatCount(wordCounts[entry.section.id]!) : '—'
+            }}</span
+          >
+        </li>
+      </template>
     </ul>
+    <div v-if="newMatterOptions.length" ref="newMenuWrap" class="outline-new">
+      <button
+        type="button"
+        class="outline-new__btn"
+        data-test="outline-new"
+        :aria-expanded="newMenuOpen"
+        aria-haspopup="menu"
+        @click="newMenuOpen = !newMenuOpen"
+      >
+        + New
+      </button>
+      <div
+        v-if="newMenuOpen"
+        class="sh-menu outline-new__menu"
+        role="menu"
+        aria-label="Add section"
+        data-test="outline-new-menu"
+      >
+        <button
+          v-for="opt in newMatterOptions"
+          :key="`${opt.matterKind}-${opt.title}`"
+          type="button"
+          role="menuitem"
+          tabindex="-1"
+          class="sh-mi"
+          :data-test="`outline-new-${matterSlug(opt.title)}`"
+          @click="addCatalogMatter(opt.title, opt.matterKind)"
+        >
+          {{ opt.title }}
+        </button>
+      </div>
+    </div>
     <label v-if="numberingStyle" class="numbering-style" data-test="outline-numbering-style">
       <span class="numbering-style__label">Number display</span>
       <select
@@ -816,9 +1036,77 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
 .row.selected .count {
   color: var(--ct-text-muted);
 }
+.row--placeholder {
+  color: var(--ct-text-muted);
+}
+.row--placeholder .placeholder-label {
+  flex: 1;
+  min-width: 0;
+}
+.placeholder-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border: 1px dashed var(--ct-border-strong);
+  border-radius: var(--ct-radius-sm);
+  color: var(--ct-text-muted);
+}
+.placeholder-plus {
+  display: inline-flex;
+  width: 16px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  color: var(--ct-text-muted);
+}
+.row--placeholder:hover .placeholder-plus,
+.row--placeholder:focus-visible .placeholder-plus {
+  opacity: 1;
+}
+.placeholder-icon__glyph {
+  width: 12px;
+  height: 12px;
+}
 .row .title {
   flex: 1;
   min-width: 0;
+}
+.outline-new {
+  position: relative;
+  margin: var(--ct-space-2) var(--ct-space-2) 0;
+}
+.outline-new__btn {
+  width: 100%;
+  padding: 0.25rem 0.5rem;
+  border: 0;
+  border-radius: var(--ct-radius-md);
+  background: none;
+  color: var(--ct-text-muted);
+  font: inherit;
+  font-size: var(--ct-text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.outline-new__btn:hover,
+.outline-new__btn:focus-visible {
+  background: var(--ct-hover-bg);
+  color: var(--ct-text);
+  outline: var(--ct-focus-outline);
+  outline-offset: calc(var(--ct-focus-offset) * -1);
+}
+.outline-new__menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  margin-top: var(--ct-space-1);
+  z-index: 20;
+  max-height: 12rem;
+  overflow: auto;
 }
 .count {
   margin-left: auto;

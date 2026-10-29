@@ -27,7 +27,9 @@ function setup(
   return w;
 }
 type W = ReturnType<typeof setup>;
-const titles = (w: W) => w.findAll('.row .title').map((r) => r.text());
+const titles = (w: W) => w.findAll('.row:not(.row--placeholder) .title').map((r) => r.text());
+const placeholderLabels = (w: W) =>
+  w.findAll('.row--placeholder .placeholder-label').map((r) => r.text());
 const settle = async () => {
   await flushPromises();
   await flushPromises();
@@ -418,6 +420,45 @@ describe('SectionNav', () => {
     await settle();
     expect(w.find('[data-test="outline-undo-delete-btn"]').exists()).toBe(false);
     w.unmount();
+  });
+
+  it('shows default front-matter placeholders for missing Copyright and Contents (#109)', () => {
+    const w = setup();
+    expect(placeholderLabels(w)).toEqual(['Add Copyright', 'Add Contents']);
+    expect(w.find('[data-test="matter-placeholder-dedication"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('adds a section from a placeholder click and activates the editor (#109)', async () => {
+    const w = setup();
+    await w.find('[data-test="matter-placeholder-copyright"]').trigger('click');
+    await settle();
+    expect(titles(w)).toContain('Copyright');
+    const id = w.props('sections').find((s) => s.title === 'Copyright')!.id;
+    expect(w.emitted('activate')?.at(-1)).toEqual([id]);
+    expect(placeholderLabels(w)).toEqual(['Add Contents']);
+    w.unmount();
+  });
+
+  it('adds catalog back matter via + New without a dashed placeholder (#109)', async () => {
+    const w = setup();
+    await w.find('[data-test="outline-new"]').trigger('click');
+    await settle();
+    await ctxEl('outline-new-dedication').click();
+    await settle();
+    expect(titles(w)).toContain('Dedication');
+    expect(w.find('[data-test="matter-placeholder-dedication"]').exists()).toBe(false);
+    const id = w.props('sections').find((s) => s.title === 'Dedication')!.id;
+    expect(w.emitted('activate')?.at(-1)).toEqual([id]);
+    w.unmount();
+  });
+
+  it('styles matter placeholders with muted tokens (#109)', () => {
+    const sfc = readFileSync(resolve(__dirname, 'SectionNav.vue'), 'utf8');
+    const css = sfc.slice(sfc.indexOf('<style'));
+    expect(css).toContain('.row--placeholder');
+    expect(css).toMatch(/\.row--placeholder[\s\S]*color:\s*var\(--ct-text-muted\)/);
+    expect(css).toContain('border: 1px dashed var(--ct-border-strong)');
   });
 
   it('drops after a part row as a sibling, not under the next chapter (#108)', async () => {
