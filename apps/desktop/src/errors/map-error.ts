@@ -123,7 +123,13 @@ export function rawErrorText(err: unknown): string {
   };
   if (typeof err === 'string') return err;
   if (err === null || err === undefined) return '';
-  if (typeof err === 'object' && safe(() => 'message' in err && 'x')) {
+  let hasMessage = false;
+  try {
+    hasMessage = typeof err === 'object' && err !== null && 'message' in err;
+  } catch {
+    hasMessage = false;
+  }
+  if (hasMessage) {
     const m = safe(() => String((err as { message: unknown }).message));
     if (m !== undefined) return m;
   }
