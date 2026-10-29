@@ -48,10 +48,12 @@ import ContextMenu from './shells/ContextMenu.vue';
 import {
   contextMenuDisabled,
   runContextMenuAction,
+  contextMenuActionForKey,
   type ContextMenuAction,
 } from './shells/context-menu';
 import { caretStyle } from './toolbar/toolbar';
 import ShortcutsSheet from './shells/ShortcutsSheet.vue';
+import { ariaKeyshortcuts, MANUSCRIPT_SHORTCUTS } from './shells/app-shortcuts';
 import './shells/shells.css';
 import {
   collaborativeEditorOptions,
@@ -164,6 +166,7 @@ const rootEl = useTemplateRef<HTMLElement>('root');
     the editor root already reach onShellKey, so they are skipped here to avoid a double toggle. */
 function onWindowKey(e: KeyboardEvent) {
   if (e.defaultPrevented) return;
+  if (shortcutsOpen.value) return;
   if (e.target instanceof Node && rootEl.value?.contains(e.target)) return;
   if (isField(e.target)) return;
   const mod = e.ctrlKey || e.metaKey;
@@ -193,6 +196,7 @@ function onWindowKey(e: KeyboardEvent) {
 const isField = (t: EventTarget | null) =>
   t instanceof HTMLElement && !!t.closest('input, textarea, select');
 function onShellKey(e: KeyboardEvent) {
+  if (shortcutsOpen.value) return;
   if (isField(e.target)) return;
   const mod = e.ctrlKey || e.metaKey;
   if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
@@ -215,6 +219,12 @@ function onShellKey(e: KeyboardEvent) {
     closeFind();
   } else if (e.key === 'Escape' && focusMode.value && !shortcutsOpen.value) {
     focusMode.value = false;
+  } else {
+    const ctx = contextMenuActionForKey(e);
+    if (ctx) {
+      e.preventDefault();
+      void runEditorContextAction(ctx);
+    }
   }
 }
 /** Close Find and put focus back in the page, so Escape and the focus-mode keys keep working. */
@@ -239,6 +249,9 @@ const menuActiveStyle = computed((): ContextMenuAction | undefined => {
 });
 async function onContextMenuSelect(action: ContextMenuAction) {
   menuAt.value = null;
+  await runEditorContextAction(action);
+}
+async function runEditorContextAction(action: ContextMenuAction) {
   const e = editor.value;
   if (!e || e.isDestroyed) return;
   if (action === 'ask-bot') {
@@ -365,6 +378,7 @@ const decideVisible = (d: Decision, keys: readonly string[]) =>
   );
 
 function onKeydown(ev: KeyboardEvent) {
+  if (shortcutsOpen.value) return;
   const action = reviewActionFor(ev);
   if (!action) return;
   if (action !== 'toggle') {
@@ -676,8 +690,8 @@ const LABELS: Record<ReviewItem['type'], string> = {
               class="sh-tbtn sh-icon"
               data-test="shortcuts-open"
               aria-label="Keyboard shortcuts"
-              title="Keyboard shortcuts (Ctrl+/)"
-              aria-keyshortcuts="Control+/"
+              :title="`Keyboard shortcuts (${MANUSCRIPT_SHORTCUTS.shortcutsSheet})`"
+              :aria-keyshortcuts="ariaKeyshortcuts(MANUSCRIPT_SHORTCUTS.shortcutsSheet)"
               @click="shortcutsOpen = true"
             >
               ?
@@ -686,8 +700,8 @@ const LABELS: Record<ReviewItem['type'], string> = {
               type="button"
               class="sh-tbtn"
               data-test="focus-mode"
-              title="Focus mode (Ctrl+Shift+F)"
-              aria-keyshortcuts="Control+Shift+F"
+              :title="`Focus mode (${MANUSCRIPT_SHORTCUTS.focusMode})`"
+              :aria-keyshortcuts="ariaKeyshortcuts(MANUSCRIPT_SHORTCUTS.focusMode)"
               @click="focusMode = true"
             >
               Focus
