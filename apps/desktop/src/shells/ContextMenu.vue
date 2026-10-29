@@ -4,6 +4,7 @@
  */
 import { nextTick, onMounted, ref } from 'vue';
 import AppIcon from '../icons/AppIcon.vue';
+import { MANUSCRIPT_SHORTCUTS } from './app-shortcuts';
 import type { ContextMenuAction } from './context-menu';
 
 const props = defineProps<{
@@ -23,13 +24,13 @@ const ITEMS: { id: ContextMenuAction; label: string; keys: string }[] = [
   { id: 'paste', label: 'Paste', keys: 'Ctrl+V' },
 ];
 const STYLES: { id: ContextMenuAction; label: string; keys: string }[] = [
-  { id: 'body', label: 'Body', keys: 'Ctrl+Alt+0' },
-  { id: 'heading', label: 'Heading', keys: 'Ctrl+Alt+1' },
-  { id: 'block_quote', label: 'Block quote', keys: 'Ctrl+Alt+2' },
+  { id: 'body', label: 'Body', keys: MANUSCRIPT_SHORTCUTS.body },
+  { id: 'heading', label: 'Heading', keys: MANUSCRIPT_SHORTCUTS.heading },
+  { id: 'block_quote', label: 'Block quote', keys: MANUSCRIPT_SHORTCUTS.blockQuote },
   { id: 'scene_break', label: 'Scene break', keys: '' },
 ];
 const AFTER: { id: ContextMenuAction; label: string; keys: string; icon?: 'sparkle' }[] = [
-  { id: 'comment', label: 'Add comment', keys: 'Ctrl+Alt+M' },
+  { id: 'comment', label: 'Add comment', keys: MANUSCRIPT_SHORTCUTS.comment },
   { id: 'ask-bot', label: 'Ask bot to suggest…', keys: 'Ctrl+Alt+S', icon: 'sparkle' },
 ];
 

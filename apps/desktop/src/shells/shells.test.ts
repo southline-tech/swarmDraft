@@ -7,6 +7,9 @@ import ContextMenu from './ContextMenu.vue';
 import type { ContextMenuAction } from './context-menu';
 import { SAMPLE_DOC } from '../fixtures/sample';
 import { loadTracking, PROFILE_KEY, TRACK_PROMPT_SEEN_KEY, TRACKING_KEY } from '../settings/prefs';
+import { REVIEW_SHORTCUTS } from '../review/review-state';
+import { SHORTCUTS } from '../toolbar/toolbar';
+import { MANUSCRIPT_SHORTCUTS } from './app-shortcuts';
 
 /** Each UI shell opens and renders, and using it leaves the manuscript and its Y.Doc untouched. */
 async function mounted() {
@@ -201,16 +204,54 @@ describe('UI shells (Part of #36)', () => {
     w.unmount();
   });
 
+  it('opens from the menu button with shared shortcut chord', async () => {
+    const { w, unchanged } = await mounted();
+    await w.find('[data-test="shortcuts-open"]').trigger('click');
+    expect(w.find('[data-test="shortcuts-sheet"]').exists()).toBe(true);
+    unchanged();
+    w.unmount();
+  });
+
   it('keyboard shortcuts sheet opens with Ctrl+/ and closes on Esc', async () => {
     const { w, unchanged } = await mounted();
     await w.find('.manuscript-editor').trigger('keydown', { key: '/', ctrlKey: true });
     const sheet = w.find('[data-test="shortcuts-sheet"]');
     expect(sheet.exists()).toBe(true);
     expect(sheet.text()).toContain('Keyboard shortcuts');
+    expect(sheet.text()).toContain('Bold');
+    expect(sheet.text()).toContain(SHORTCUTS.bold.split('+')[1]);
+    expect(sheet.text()).toContain(MANUSCRIPT_SHORTCUTS.find.split('+')[1]);
+    expect(sheet.text()).toContain(REVIEW_SHORTCUTS.accept.split('+').slice(-1)[0]!);
     expect(document.activeElement?.getAttribute('data-test')).toBe('shortcuts-close');
     await sheet.trigger('keydown', { key: 'Escape' });
     expect(w.find('[data-test="shortcuts-sheet"]').exists()).toBe(false);
     unchanged();
+    w.unmount();
+  });
+
+  it('does not run editor shortcuts while the shortcuts sheet is open', async () => {
+    const { w } = await mounted();
+    await w.find('[data-test="shortcuts-open"]').trigger('click');
+    await w.find('[data-test="shortcuts-sheet"]').trigger('keydown', {
+      key: 'f',
+      ctrlKey: true,
+    });
+    expect(w.find('[data-test="find-panel"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('applies heading style from Ctrl+Alt+1 on the editor shell (#56)', async () => {
+    const ydoc = docToYDoc(SAMPLE_DOC as never);
+    const w = mount(ManuscriptEditor, { props: { doc: ydoc }, attachTo: document.body });
+    await flushPromises();
+    const editor = (
+      w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+    ).editor;
+    editor.commands.setTextSelection(1);
+    await w
+      .find('.manuscript-editor')
+      .trigger('keydown', { key: '1', ctrlKey: true, altKey: true });
+    expect(editor.isActive('heading')).toBe(true);
     w.unmount();
   });
 
