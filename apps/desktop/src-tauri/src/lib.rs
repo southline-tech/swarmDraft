@@ -470,7 +470,9 @@ pub fn run() {
         .setup(|app| {
             if let Some(icon) = app.default_window_icon().cloned() {
                 if let Some(window) = app.get_webview_window("main") {
-                    window.set_icon(icon).map_err(|e| e.to_string())?;
+                    if let Err(e) = window.set_icon(icon) {
+                        eprintln!("Main window icon not set: {e}");
+                    }
                 }
             }
             let dir = app.path().app_data_dir()?;
