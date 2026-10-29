@@ -185,6 +185,29 @@ describe('ContextMenu theme (#54)', () => {
     w.unmount();
   });
 
+  it('opens paragraph styles with ArrowRight and activates with Enter', async () => {
+    const w = mount(ContextMenu, {
+      props: { x: 8, y: 8, disabled: new Set<ContextMenuAction>() },
+      attachTo: document.body,
+    });
+    const menu = w.get('[data-test="context-menu"]');
+    await menu.trigger('keydown', { key: 'ArrowDown' });
+    await menu.trigger('keydown', { key: 'ArrowDown' });
+    await menu.trigger('keydown', { key: 'ArrowDown' });
+    await menu.trigger('keydown', { key: 'ArrowDown' });
+    expect(document.activeElement?.getAttribute('data-test')).toBe('ctx-style');
+    await menu.trigger('keydown', { key: 'ArrowRight' });
+    await flushPromises();
+    expect(w.find('[data-test="ctx-style-heading"]').exists()).toBe(true);
+    expect(document.activeElement?.getAttribute('data-test')).toBe('ctx-style-body');
+    await menu.trigger('keydown', { key: 'ArrowDown' });
+    expect(document.activeElement?.getAttribute('data-test')).toBe('ctx-style-heading');
+    w.get('[data-test="ctx-style-heading"]').element.focus();
+    await menu.trigger('keydown', { key: 'Enter' });
+    expect(w.emitted('select')).toEqual([['heading']]);
+    w.unmount();
+  });
+
   it('marks disabled entries with aria-disabled', () => {
     const w = mount(ContextMenu, {
       props: { x: 8, y: 8, disabled: new Set<ContextMenuAction>(['cut']) },

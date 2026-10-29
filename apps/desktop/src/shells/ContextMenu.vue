@@ -43,32 +43,87 @@ function pick(id: ContextMenuAction) {
   emit('close');
 }
 
+function styleTrigger() {
+  return root.value?.querySelector<HTMLElement>('[data-test="ctx-style"]') ?? null;
+}
+
+function mainMenuItems() {
+  return [...(root.value?.querySelectorAll<HTMLElement>('[role=menuitem]') ?? [])];
+}
+
+function styleMenuItems() {
+  return [...(root.value?.querySelectorAll<HTMLElement>('[role=menuitemradio]') ?? [])];
+}
+
+function openStyleSub(focusFirst = true) {
+  subOpen.value = true;
+  if (focusFirst) void nextTick(() => styleMenuItems()[0]?.focus());
+}
+
+function closeStyleSub(focusTrigger = true) {
+  subOpen.value = false;
+  if (focusTrigger) void nextTick(() => styleTrigger()?.focus());
+}
+
 function onKey(e: KeyboardEvent) {
-  const items = [...(root.value?.querySelectorAll<HTMLElement>('[role=menuitem]') ?? [])];
-  const i = items.indexOf(document.activeElement as HTMLElement);
-  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-    e.preventDefault();
-    items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
-  } else if (e.key === 'Enter' || e.key === ' ') {
-    const el = document.activeElement as HTMLElement | null;
-    if (el?.dataset.test === 'ctx-style') {
+  const active = document.activeElement as HTMLElement | null;
+  const inStyleSub = active?.getAttribute('role') === 'menuitemradio';
+
+  if (e.key === 'ArrowRight') {
+    if (active?.dataset.test === 'ctx-style') {
       e.preventDefault();
-      subOpen.value = !subOpen.value;
+      openStyleSub();
       return;
     }
-    const action = el?.dataset.action as ContextMenuAction | undefined;
+  }
+  if (e.key === 'ArrowLeft') {
+    if (inStyleSub || (subOpen.value && active?.dataset.test === 'ctx-style')) {
+      e.preventDefault();
+      closeStyleSub();
+      return;
+    }
+  }
+
+  const items = inStyleSub ? styleMenuItems() : mainMenuItems();
+  const i = items.indexOf(active as HTMLElement);
+
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (
+      !inStyleSub &&
+      active?.dataset.test === 'ctx-style' &&
+      subOpen.value &&
+      e.key === 'ArrowDown'
+    ) {
+      openStyleSub();
+      return;
+    }
+    items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
+  } else if (e.key === 'Enter' || e.key === ' ') {
+    if (active?.dataset.test === 'ctx-style') {
+      e.preventDefault();
+      if (subOpen.value) closeStyleSub();
+      else openStyleSub();
+      return;
+    }
+    const action = active?.dataset.action as ContextMenuAction | undefined;
     if (action && !isDisabled(action)) {
       e.preventDefault();
       pick(action);
     }
   } else if (e.key === 'Escape') {
-    // Escape closes only the menu; don't let it reach the editor's focus-mode exit.
+    if (subOpen.value) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeStyleSub();
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     emit('close');
   }
 }
-onMounted(() => nextTick(() => root.value?.querySelector<HTMLElement>('[role=menuitem]')?.focus()));
+onMounted(() => nextTick(() => mainMenuItems()[0]?.focus()));
 </script>
 
 <template>
@@ -107,8 +162,8 @@ onMounted(() => nextTick(() => root.value?.querySelector<HTMLElement>('[role=men
         class="sh-mi"
         :class="{ 'sh-open': subOpen }"
         data-test="ctx-style"
-        @click="subOpen = !subOpen"
-        @keydown.right.prevent="subOpen = true"
+        @click="subOpen ? closeStyleSub(false) : openStyleSub()"
+        @keydown.right.prevent="openStyleSub()"
       >
         Paragraph style<span class="sh-k">›</span>
       </button>
