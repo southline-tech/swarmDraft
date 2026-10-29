@@ -239,6 +239,18 @@ describe('UI shells (Part of #36)', () => {
     w.unmount();
   });
 
+  it('applies heading style from Ctrl+Alt+1 on the editor shell (#56)', async () => {
+    const ydoc = docToYDoc(SAMPLE_DOC as never);
+    const w = mount(ManuscriptEditor, { props: { doc: ydoc }, attachTo: document.body });
+    await flushPromises();
+    const editor = (w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor })
+      .editor;
+    editor.commands.setTextSelection(1);
+    await w.find('.manuscript-editor').trigger('keydown', { key: '1', ctrlKey: true, altKey: true });
+    expect(editor.isActive('heading')).toBe(true);
+    w.unmount();
+  });
+
   it('track changes toggle is visual state only', async () => {
     const { w, unchanged } = await mounted();
     const t = w.find('[data-test="track-changes"]');

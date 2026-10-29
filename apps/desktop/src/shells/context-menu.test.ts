@@ -5,6 +5,7 @@ import { collectReviewItems } from '@coauthor/editor';
 import { SAMPLE_DOC } from '../fixtures/sample';
 import {
   contextMenuDisabled,
+  contextMenuActionForKey,
   runContextMenuAction,
   type ContextMenuClipboard,
 } from './context-menu';
@@ -29,6 +30,22 @@ function selectText(e: Editor, snippet: string) {
 }
 
 describe('context menu actions (#54)', () => {
+  it('maps Ctrl+Alt+0/1/2/M to style and comment actions (#56)', () => {
+    const key = (key: string) =>
+      contextMenuActionForKey(
+        new KeyboardEvent('keydown', { key, ctrlKey: true, altKey: true, bubbles: true }),
+      );
+    expect(key('0')).toBe('body');
+    expect(key('1')).toBe('heading');
+    expect(key('2')).toBe('block_quote');
+    expect(key('m')).toBe('comment');
+    expect(
+      contextMenuActionForKey(
+        new KeyboardEvent('keydown', { key: '1', ctrlKey: true, altKey: true, shiftKey: true }),
+      ),
+    ).toBeNull();
+  });
+
   it('marks cut, copy, and comment disabled with an empty selection', () => {
     const e = editor();
     const disabled = contextMenuDisabled(e);

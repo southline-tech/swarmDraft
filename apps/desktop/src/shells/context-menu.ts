@@ -24,6 +24,24 @@ export type ContextMenuClipboard = {
 
 const STYLE_ACTIONS = new Set<ContextMenuAction>(['body', 'heading', 'block_quote', 'scene_break']);
 
+/** Map wp4 style/comment accelerators (shared with the shortcuts sheet, #56). */
+export function contextMenuActionForKey(ev: KeyboardEvent): ContextMenuAction | null {
+  if (!(ev.ctrlKey || ev.metaKey) || !ev.altKey || ev.shiftKey) return null;
+  switch (ev.key) {
+    case '0':
+      return 'body';
+    case '1':
+      return 'heading';
+    case '2':
+      return 'block_quote';
+    case 'm':
+    case 'M':
+      return 'comment';
+    default:
+      return null;
+  }
+}
+
 function defaultClipboard(): ContextMenuClipboard | undefined {
   const c = navigator.clipboard;
   if (!c?.readText || !c?.writeText) return undefined;

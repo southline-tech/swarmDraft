@@ -48,6 +48,7 @@ import ContextMenu from './shells/ContextMenu.vue';
 import {
   contextMenuDisabled,
   runContextMenuAction,
+  contextMenuActionForKey,
   type ContextMenuAction,
 } from './shells/context-menu';
 import { caretStyle } from './toolbar/toolbar';
@@ -218,6 +219,12 @@ function onShellKey(e: KeyboardEvent) {
     closeFind();
   } else if (e.key === 'Escape' && focusMode.value && !shortcutsOpen.value) {
     focusMode.value = false;
+  } else {
+    const ctx = contextMenuActionForKey(e);
+    if (ctx) {
+      e.preventDefault();
+      void runEditorContextAction(ctx);
+    }
   }
 }
 /** Close Find and put focus back in the page, so Escape and the focus-mode keys keep working. */
@@ -242,6 +249,9 @@ const menuActiveStyle = computed((): ContextMenuAction | undefined => {
 });
 async function onContextMenuSelect(action: ContextMenuAction) {
   menuAt.value = null;
+  await runEditorContextAction(action);
+}
+async function runEditorContextAction(action: ContextMenuAction) {
   const e = editor.value;
   if (!e || e.isDestroyed) return;
   if (action === 'ask-bot') {
