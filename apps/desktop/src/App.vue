@@ -42,6 +42,8 @@ import { flushOnClose } from './close-flush';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { resetCollabSlots } from './author-colors';
+import { sectionNumberLabels } from '@coauthor/editor';
+import type { NumberingStyle } from '@coauthor/schema';
 import { docWordCount, outlineDocs, sectionTreeDocs } from './status/wordcount';
 import {
   importAndOpen,
@@ -533,37 +535,15 @@ const focusMode = ref(false);
 /** #96: the writer opened the outline by hand while the review panel shows. */
 const outlineForced = computed(() => outlineAuto.manual.value && navigatorOpen.value);
 
-const NUMBER_WORDS = [
-  'One',
-  'Two',
-  'Three',
-  'Four',
-  'Five',
-  'Six',
-  'Seven',
-  'Eight',
-  'Nine',
-  'Ten',
-  'Eleven',
-  'Twelve',
-  'Thirteen',
-  'Fourteen',
-  'Fifteen',
-  'Sixteen',
-  'Seventeen',
-  'Eighteen',
-  'Nineteen',
-  'Twenty',
-];
-/** Display-only chapter label above the H1 ("Chapter Three"); never written into the doc. */
-const chapterLabel = computed(() => {
+const sectionLabels = computed(() => {
   const s = session.value;
-  const sel = selected.value;
-  if (!s || !sel || sel.kind !== 'chapter') return '';
-  const n =
-    s.outline.value.filter((x) => x.kind === 'chapter').findIndex((c) => c.id === sel.id) + 1;
-  return n ? `Chapter ${NUMBER_WORDS[n - 1] ?? n}` : '';
+  if (!s) return new Map<string, string>();
+  return sectionNumberLabels(s.outline.value, s.numberingStyle.value);
 });
+
+async function onNumberingStyle(style: NumberingStyle) {
+  await session.value?.setNumberingStyle(style);
+}
 
 defineExpose({ open, closeSession });
 </script>
@@ -613,7 +593,10 @@ defineExpose({ open, closeSession });
       :backup-status="backupStatus"
       :confirming-restore="confirmingRestore"
       :tokens-notice="tokensNotice"
+      :book-open="!!session && !choosingBook"
+      :numbering-style="session?.numberingStyle.value"
       @close="settingsOpen = false"
+      @numbering-style="onNumberingStyle"
       @open-previews="openPreview('all')"
       @backup="onBackup"
       @ask-restore="confirmingRestore = true"
@@ -738,8 +721,10 @@ defineExpose({ open, closeSession });
         :selected-id="selectedId"
         :save="session.save"
         :word-counts="wordCounts"
+        :numbering-style="session.numberingStyle.value"
         @select="selectedId = $event"
         @activate="focusEditor"
+        @numbering-style="onNumberingStyle"
       />
       <ContinuousManuscript
         ref="editorPane"
@@ -751,7 +736,7 @@ defineExpose({ open, closeSession });
         :read-only-reason="restoreInProgress ? 'restore in progress' : undefined"
         :navigator-open="navigatorOpen"
         :chapter-title="selected?.title"
-        :chapter-label="chapterLabel"
+        :section-labels="sectionLabels"
         :book-docs="outlineDocs(session.outline.value, session.sections)"
         :chapter-docs="
           selectedId

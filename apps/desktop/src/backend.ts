@@ -145,6 +145,7 @@ export interface StoredManuscriptRow {
   id: string;
   title: string;
   createdAt: string;
+  numberingStyle: string;
 }
 
 /** A stored section plus its full Yjs state (v1 update from an empty doc). */
@@ -223,6 +224,13 @@ export async function saveSectionUpdate(
  * Save a stored manuscript's whole outline (rename, reorder, move, add, delete) in one backend
  * transaction. Rejects, writing nothing, if the outline is invalid. No-op in a plain browser.
  */
+export async function setManuscriptNumberingStyle(
+  manuscriptId: string,
+  style: string,
+): Promise<StoredManuscriptRow> {
+  return invoke<StoredManuscriptRow>('manuscript_set_numbering_style', { manuscriptId, style });
+}
+
 export async function saveOutline(
   manuscriptId: string,
   outline: { id: string; parentId?: string; kind: string; title: string; docId: string }[],

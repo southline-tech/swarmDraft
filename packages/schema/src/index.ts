@@ -36,6 +36,8 @@ export function isSectionKind(value: string): value is SectionKind {
   return (SECTION_KINDS as readonly string[]).includes(value);
 }
 
+export * from './numbering';
+
 /**
  * Each section has its own Yjs document so it can be loaded,
  * synced, persisted and exposed over MCP independently. The manuscript-level

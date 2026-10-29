@@ -118,6 +118,8 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-28 · #107 · continuous view put review/status inside the scroll stack · teleported chrome to a fixed rail beside the scroll column (height/layout of stacked sections deferred to PM)
 - 2026-10-28 · #128 · #107 PM review · outline row needs `:hover`; add tests for scroll/focus/title; arrow keys should `activate` like click; document perf in `docs/perf-107.md`
 - 2026-10-28 · #107 · continuous view mounts many editors; tests must scope to lead slice · use `[data-test="lead-editor"]` helpers, not first `.tiptap` in the DOM
+- 2026-10-28 · #111 · numbering is computed from outline order, not stored in section titles · persist only `numbering_style` on the manuscript row; default `chapter_arabic` with roman part labels; style picker in outline and Settings
+- 2026-10-28 · #129 · PM re-review · SQLite ADD COLUMN default and INSERT must both use `chapter_arabic`; mock/sample outline titles live in `outline-display-titles.ts`; test Settings + outline picker and label recompute
 - 2026-10-26 · #71 · user-facing notices said 'database' and 'port 7337' · user-visible text stays plain for writers; technical details go to logs
 - 2026-10-26 · #71 · a read-only SQLite open of the old db after a crash created -shm in the old folder · never open the source db with SQLite in a folder you must not touch; copy db + -wal byte for byte to staging and snapshot from the copy; prove it with tests that hash names, bytes and mtimes before and after
 - 2026-10-26 · #71 · the snapshot test still passed with the fix replaced by a raw copy · before handoff, revert each fix, confirm its test fails, then restore

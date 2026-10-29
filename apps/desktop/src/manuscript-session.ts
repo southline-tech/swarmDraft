@@ -5,14 +5,16 @@
  */
 import { markRaw, shallowRef, type ShallowRef } from 'vue';
 import * as Y from 'yjs';
-import type { Section } from '@coauthor/schema';
-import { normalizeOutline, type OutlineIssue } from '@coauthor/editor';
+import type { NumberingStyle, Section } from '@coauthor/schema';
+import { normalizeOutline, parseNumberingStyle, type OutlineIssue } from '@coauthor/editor';
 import {
   importDocx,
   importedToYDocs,
   META_FIELD,
   observeStructure,
+  readNumberingStyle,
   readStructure,
+  writeNumberingStyle,
   writeStructure,
   type ImportReport,
   type ImportedManuscript,
@@ -23,6 +25,7 @@ import {
   pollUpdates,
   saveOutline,
   saveSectionUpdate,
+  setManuscriptNumberingStyle,
   type ImportPayload,
   type StoredManuscript,
   type UpdatesSince,
@@ -62,7 +65,12 @@ export interface ManuscriptSession {
    * keeps the session on screen.
    */
   resumeLive?(): void;
+  /** Book-wide numbering display (#111); the index is computed from outline order. */
+  numberingStyle: ShallowRef<NumberingStyle>;
+  setNumberingStyle(style: NumberingStyle): Promise<void>;
 }
+
+export type SaveNumberingStyle = (style: NumberingStyle) => Promise<void>;
 
 export function openSession(
   id: string,
@@ -72,6 +80,7 @@ export function openSession(
   report: ImportReport | null,
   persist?: SectionPersister,
   saveOutline?: SaveOutline,
+  saveNumberingStyle?: SaveNumberingStyle,
 ): ManuscriptSession {
   // Y.Docs must never be wrapped in Vue reactive proxies: Yjs observers compare types by identity,
   // so a proxied doc silently stops delivering remote changes. (ManuscriptEditor also toRaw's.)
@@ -90,6 +99,7 @@ export function openSession(
   );
   const saver = persist ? watchSections(manuscript, sections, persist) : undefined;
   const closed = shallowRef(false); // reactive, so a closed session's editor turns read-only
+  const numberingStyle = shallowRef(parseNumberingStyle(readNumberingStyle(manuscript)));
   return {
     id,
     title,
@@ -98,6 +108,13 @@ export function openSession(
     outline,
     report,
     repairs,
+    numberingStyle,
+    setNumberingStyle: async (style) => {
+      if (closed.value) return;
+      writeNumberingStyle(manuscript, style);
+      numberingStyle.value = style;
+      await saveNumberingStyle?.(style);
+    },
     get closed() {
       return closed.value;
     },
@@ -393,9 +410,11 @@ export function sessionFromStored(
   persist?: SectionPersister,
   saveOutline?: SaveOutline,
   live?: PollUpdates,
+  saveNumberingStyle?: SaveNumberingStyle,
 ): ManuscriptSession {
   const manuscript = new Y.Doc();
   manuscript.getMap(META_FIELD).set('title', stored.manuscript.title);
+  writeNumberingStyle(manuscript, parseNumberingStyle(stored.manuscript.numberingStyle));
   writeStructure(
     manuscript,
     stored.sections.map((s) => ({
@@ -420,6 +439,7 @@ export function sessionFromStored(
     report,
     persist,
     saveOutline,
+    saveNumberingStyle,
   );
   if (!live || stored.updatesCursor === undefined) return session;
   // Follow writes made elsewhere until the session closes. `sections` is the session's own map,
@@ -459,6 +479,7 @@ export function openStored(
     },
     (next) => saveOutline(id, next),
     (after) => pollUpdates(id, after),
+    (style) => setManuscriptNumberingStyle(id, style).then(() => undefined),
   );
 }
 
