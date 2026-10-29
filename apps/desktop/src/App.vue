@@ -260,8 +260,10 @@ async function quitApp() {
   if (!isTauri()) return;
   const win = getCurrentWindow();
   if (
-    (await flushWithTimeout(() => session.value?.flush() ?? Promise.resolve(), CLOSE_FLUSH_TIMEOUT_MS)) !==
-      'saved' &&
+    (await flushWithTimeout(
+      () => session.value?.flush() ?? Promise.resolve(),
+      CLOSE_FLUSH_TIMEOUT_MS,
+    )) !== 'saved' &&
     !(await confirmQuit())
   )
     return;
