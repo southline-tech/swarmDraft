@@ -40,6 +40,45 @@ describe('find-replace', () => {
     e.destroy();
   });
 
+  it('finds a phrase split across formatting marks in one paragraph', () => {
+    const e = boundEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'the ' },
+            { type: 'text', text: 'great', marks: [{ type: 'italic' }] },
+            { type: 'text', text: ' war' },
+          ],
+        },
+      ],
+    });
+    expect(
+      listFindMatches(e.state.doc, 'great war', { matchCase: false, wholeWord: false }),
+    ).toHaveLength(1);
+    e.destroy();
+  });
+
+  it('whole word does not match inside a longer word split by formatting', () => {
+    const e = boundEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'un' },
+            { type: 'text', text: 'happy', marks: [{ type: 'italic' }] },
+          ],
+        },
+      ],
+    });
+    expect(
+      listFindMatches(e.state.doc, 'happy', { matchCase: false, wholeWord: true }),
+    ).toHaveLength(0);
+    e.destroy();
+  });
+
   it('does not match across a suggestion between two plain runs', () => {
     const e = boundEditor({
       type: 'doc',

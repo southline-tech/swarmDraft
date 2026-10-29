@@ -40,23 +40,54 @@ export function buildFindRegExp(query: string, opts: FindOptions): RegExp | null
   return new RegExp(body, opts.matchCase ? 'gu' : 'giu');
 }
 
-function searchablePieces(block: PMNode, blockPos: number): { start: number; text: string }[] {
+interface SearchSegment {
+  /** Concatenated searchable text for one run (breaks at suggestion marks). */
+  text: string;
+  /** Document position for each code unit in `text`. */
+  map: number[];
+}
+
+/** One searchable string per contiguous non-suggestion text (formatting may split nodes). */
+function searchSegments(block: PMNode, blockPos: number): SearchSegment[] {
   const base = blockPos + 1;
-  const pieces: { start: number; text: string }[] = [];
+  const segments: SearchSegment[] = [];
+  let text = '';
+  const map: number[] = [];
+
+  const flush = () => {
+    if (text.length) segments.push({ text, map: [...map] });
+    text = '';
+    map.length = 0;
+  };
+
   block.descendants((node, pos) => {
-    if (node.isText && node.text && !node.marks.some(isSuggestion))
-      pieces.push({ start: base + pos, text: node.text });
+    if (!node.isText || !node.text) return true;
+    if (node.marks.some(isSuggestion)) {
+      flush();
+      return true;
+    }
+    const nodeStart = base + pos;
+    for (let i = 0; i < node.text.length; i++) {
+      map.push(nodeStart + i);
+      text += node.text[i]!;
+    }
     return true;
   });
-  return pieces;
+  flush();
+  return segments;
 }
 
 function matchesInBlock(block: PMNode, blockPos: number, re: RegExp): FindMatch[] {
-  const pieces = searchablePieces(block, blockPos);
   const out: FindMatch[] = [];
-  for (const p of pieces) {
-    for (const m of p.text.matchAll(re)) {
-      out.push({ from: p.start + m.index!, to: p.start + m.index! + m[0].length });
+  for (const seg of searchSegments(block, blockPos)) {
+    const blockRe = new RegExp(re.source, re.flags);
+    for (const m of seg.text.matchAll(blockRe)) {
+      const fromIdx = m.index!;
+      const toIdx = fromIdx + m[0].length;
+      const from = seg.map[fromIdx];
+      const toPos = seg.map[toIdx - 1];
+      if (from === undefined || toPos === undefined) continue;
+      out.push({ from, to: toPos + 1 });
     }
   }
   return out;
