@@ -27,7 +27,9 @@ function setup(
   return w;
 }
 type W = ReturnType<typeof setup>;
-const titles = (w: W) => w.findAll('.row .title').map((r) => r.text());
+const titles = (w: W) => w.findAll('.row:not(.row--placeholder) .title').map((r) => r.text());
+const placeholderLabels = (w: W) =>
+  w.findAll('.row--placeholder .placeholder-label').map((r) => r.text());
 const settle = async () => {
   await flushPromises();
   await flushPromises();
@@ -418,6 +420,96 @@ describe('SectionNav', () => {
     await settle();
     expect(w.find('[data-test="outline-undo-delete-btn"]').exists()).toBe(false);
     w.unmount();
+  });
+
+  it('shows default front-matter placeholders for missing Copyright and Contents (#109)', () => {
+    const w = setup();
+    expect(placeholderLabels(w)).toEqual(['Add Copyright', 'Add Contents']);
+    expect(w.find('[data-test="matter-placeholder-dedication"]').exists()).toBe(false);
+    expect(w.find('[data-test="front-matter-group"]').attributes('aria-expanded')).toBe('false');
+    w.unmount();
+  });
+
+  it('adds a section from a placeholder click and activates the editor (#109)', async () => {
+    const w = setup();
+    await w.find('[data-test="matter-placeholder-copyright"]').trigger('click');
+    await settle();
+    expect(titles(w)).toContain('Copyright');
+    const id = w.props('sections').find((s) => s.title === 'Copyright')!.id;
+    expect(w.emitted('activate')?.at(-1)).toEqual([id]);
+    expect(placeholderLabels(w)).toEqual(['Add Contents']);
+    w.unmount();
+  });
+
+  it('adds catalog front matter via per-group + New (#109, #110)', async () => {
+    const w = setup();
+    await w.find('[data-test="outline-new-front"]').trigger('click');
+    await settle();
+    await ctxEl('outline-new-dedication').click();
+    await settle();
+    expect(titles(w)).toContain('Dedication');
+    expect(w.find('[data-test="matter-placeholder-dedication"]').exists()).toBe(false);
+    const id = w.props('sections').find((s) => s.title === 'Dedication')!.id;
+    expect(w.emitted('activate')?.at(-1)).toEqual([id]);
+    w.unmount();
+  });
+
+  it('adds catalog back matter via back-group + New (#109, designer)', async () => {
+    const w = setup();
+    expect(w.find('[data-test="back-matter-group"]').exists()).toBe(true);
+    await w.find('[data-test="outline-new-back"]').trigger('click');
+    await settle();
+    await ctxEl('outline-new-also-by').click();
+    await settle();
+    expect(titles(w)).toContain('Also by');
+    const id = w.props('sections').find((s) => s.title === 'Also by')!.id;
+    expect(w.emitted('activate')?.at(-1)).toEqual([id]);
+    w.unmount();
+  });
+
+  it('does not show a footer + New control (#110)', () => {
+    const w = setup();
+    expect(w.find('[data-test="outline-new"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('roves keyboard focus through matter placeholders (#109 designer)', async () => {
+    const w = setup({ selectedId: 'title' });
+    await w.find('[data-test="section-title"]').trigger('keydown', { key: 'ArrowDown' });
+    await settle();
+    expect(document.activeElement?.getAttribute('data-test')).toBe('matter-placeholder-copyright');
+    await w.find('[data-test="matter-placeholder-copyright"]').trigger('keydown', { key: 'Enter' });
+    await settle();
+    expect(titles(w)).toContain('Copyright');
+    w.unmount();
+  });
+
+  it('supports arrow keys and Escape on per-group + New menus (designer)', async () => {
+    const w = setup();
+    await w.find('[data-test="outline-new-front"]').trigger('click');
+    await settle();
+    const menu = ctxEl('outline-new-menu-front');
+    const items = menu.querySelectorAll('[role=menuitem]');
+    expect(items.length).toBeGreaterThan(0);
+    expect(document.activeElement).toBe(items[0]);
+    items[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(document.activeElement).toBe(items[1] ?? items[0]);
+    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(w.find('[data-test="outline-new-menu-front"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('styles matter placeholders with muted tokens (#109)', () => {
+    const sfc = readFileSync(resolve(__dirname, 'SectionNav.vue'), 'utf8');
+    const css = sfc.slice(sfc.indexOf('<style'));
+    expect(css).toContain('.row--placeholder');
+    expect(css).toMatch(/\.row--placeholder[\s\S]*color:\s*var\(--ct-text-muted\)/);
+    expect(css).toContain('border: 1px dashed var(--ct-border-strong)');
+    expect(css).toMatch(/\.outline-new__btn[\s\S]*border:\s*1px dashed var\(--ct-border\)/);
+    expect(css).toMatch(
+      /\.outline-new__btn:hover[\s\S]*var\(--ct-selected-bg\)[\s\S]*var\(--ct-accent\)/,
+    );
   });
 
   it('drops after a part row as a sibling, not under the next chapter (#108)', async () => {
