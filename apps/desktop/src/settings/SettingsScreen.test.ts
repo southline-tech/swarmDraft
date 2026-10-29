@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import SettingsScreen from './SettingsScreen.vue';
 import NameColorSection from './NameColorSection.vue';
-import iconUrl from '../assets/logo/swarmdraft-icon-small.svg';
+import logo24Url from '../assets/logo/swarmdraft-icon-24.png';
 import { loadProfile, loadTheme, PROFILE_KEY, THEME_KEY } from './prefs';
 import { previewsEnabled } from './previews';
 
@@ -44,11 +44,11 @@ describe('Settings screen (#99)', () => {
     expect(w.get('[data-test="settings-nav-backups"]').attributes('aria-current')).toBe('page');
   });
 
-  it('nav is 240px wide and the title bar uses the small swarmDraft icon', () => {
+  it('nav is 240px wide and the title bar uses AppLogo with the small mark', () => {
     const sfc = readFileSync(resolve(__dirname, 'SettingsScreen.vue'), 'utf8');
     expect(sfc).toMatch(/\.st__nav \{[^}]*width: 240px;/);
-    expect(screen().get('[data-test="settings-logo"]').attributes('src')).toBe(iconUrl);
-    expect(sfc).toContain("from '../assets/logo/swarmdraft-icon-small.svg'");
+    expect(screen().get('[data-test="settings-logo"]').attributes('src')).toBe(logo24Url);
+    expect(sfc).toContain('<AppLogo :size="18"');
   });
 
   it('General shows the page size read-only and the About rows', () => {

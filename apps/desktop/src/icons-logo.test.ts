@@ -3,9 +3,9 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import AppLogo from './AppLogo.vue';
-import logoUrl from './assets/logo/coauthor-c-caret.svg';
-import logo24Url from './assets/logo/coauthor-c-caret-24.png';
-import logo48Url from './assets/logo/coauthor-c-caret-48.png';
+import logoUrl from './assets/logo/swarmdraft-icon.svg';
+import logo24Url from './assets/logo/swarmdraft-icon-24.png';
+import logo48Url from './assets/logo/swarmdraft-icon-48.png';
 import HomeScreen from './HomeScreen.vue';
 import SectionNav from './SectionNav.vue';
 import AppIcon from './icons/AppIcon.vue';
@@ -73,10 +73,24 @@ it('settings.css (#99) uses only --ct-* tokens that exist and no hard-coded colo
 });
 
 describe('logo', () => {
-  it('uses the caret SVG at 48px and up and the 24px PNG with a 48px 2x srcset below', () => {
+  it('bundles swarmDraft icons for the window and taskbar', () => {
+    const conf = JSON.parse(read('../src-tauri/tauri.conf.json')) as {
+      app: { enableGTKAppId?: boolean };
+      bundle: { icon: string[] };
+    };
+    expect(conf.app.enableGTKAppId).toBe(true);
+    expect(conf.bundle.icon).toEqual(
+      expect.arrayContaining(['icons/32x32.png', 'icons/icon.ico', 'icons/icon.icns']),
+    );
+  });
+
+  it('uses the full S SVG at 48px and up and 24/48 PNG below', () => {
     const big = mount(AppLogo, { props: { size: 64 } }).get('img');
+    const at48 = mount(AppLogo, { props: { size: 48 } }).get('img');
     const small = mount(AppLogo, { props: { size: 24 } }).get('img');
     expect(big.attributes('src')).toBe(logoUrl);
+    expect(at48.attributes('src')).toBe(logoUrl);
+    expect(at48.attributes('srcset')).toBeUndefined();
     expect(big.attributes('srcset')).toBeUndefined();
     expect(small.attributes('src')).toBe(logo24Url);
     expect(small.attributes('srcset')).toBe(`${logo24Url} 1x, ${logo48Url} 2x`);
@@ -85,7 +99,7 @@ describe('logo', () => {
     expect(big.attributes('alt')).toBe('');
   });
 
-  it('defaults to the 64px caret SVG when no size is given', () => {
+  it('defaults to the 64px full mark when no size is given', () => {
     const img = mount(AppLogo).get('img');
     expect(img.attributes('width')).toBe('64');
     expect(img.attributes('height')).toBe('64');

@@ -9,7 +9,7 @@ import { NUMBERING_STYLE_LABELS, NUMBERING_STYLES } from '../numbering-style-lab
 import { nextTick, onMounted, ref } from 'vue';
 import AgentsSettings from '../AgentsSettings.vue';
 import type { AppInfo } from '../backend';
-import iconUrl from '../assets/logo/swarmdraft-icon-small.svg';
+import AppLogo from '../AppLogo.vue';
 import { PRODUCT_NAME } from '../lib/brand';
 import BackupsSection from './BackupsSection.vue';
 import NameColorSection from './NameColorSection.vue';
@@ -87,7 +87,7 @@ onMounted(() => root.value?.focus());
     @keydown="onKeydown"
   >
     <div class="st__title">
-      <img :src="iconUrl" width="18" height="18" alt="" data-test="settings-logo" />
+      <AppLogo :size="18" data-test="settings-logo" />
       <b>{{ PRODUCT_NAME }}</b>
     </div>
     <div class="st__main">

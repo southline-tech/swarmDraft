@@ -217,6 +217,7 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-27 · #102 · loadProfile's typeof-string name check had no test, so String(p.name) would have let "[object Object]" through · seed non-string JSON in tests for every stored-value guard
 - 2026-10-27 · #102 · the PR body's test counts (447) didn't match the log (462) after merging main · regenerate the checks log and revert table from the pushed head and copy counts from that run
 - 2026-10-29 · #47 · review sidebar trapped scroll in ReviewPanel while comments sat below the flex child · one `overflow-y: auto` on `.review`, `flex: none` on the panel, comments full width below
+- 2026-10-29 · branding · Linux taskbar showed a generic/settings-style icon while in-app logo was updated · enable `app.enableGTKAppId`, apply `default_window_icon()` on the main window at startup, sync `public/favicon.svg` from `generate.py`
 - 2026-10-28 · #35 · save-failure test unmounted before a successful save could clear the banner (RAD-265) · after mocking recovery, drive one more edit and assert the banner is gone and status shows Saved
 - 2026-10-28 · #113 · read-only restore test used `isEditable` only · assert `contenteditable="false"`, toolbar read-only title, and `typeThroughDom` leaves the doc unchanged
 - 2026-10-28 · #113 · `saveStatusShown` survived `open()` on another book · reset it in `open()` and test the status line is empty until the next successful persist
