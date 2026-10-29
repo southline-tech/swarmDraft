@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import type { Section } from '@coauthor/schema';
@@ -330,6 +331,58 @@ describe('SectionNav', () => {
     const w = setup({ sections: corrupt });
     expect(titles(w).sort()).toEqual(['A', 'B', 'C', 'C again']);
     expect(w.find('[data-test="outline-repaired"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('styles the drop indicator as a 2px accent line (#108)', () => {
+    const sfc = readFileSync(new URL('./SectionNav.vue', import.meta.url), 'utf8');
+    const css = sfc.slice(sfc.indexOf('<style'));
+    expect(css).toMatch(/\.drop-line[\s\S]*height:\s*2px/);
+    expect(css).toContain('background: var(--ct-accent)');
+  });
+
+  it('shows an accent drop line while dragging over a row (#108)', async () => {
+    const w = setup();
+    const target = w.get('[data-test="section-ch-2"]').element as HTMLElement;
+    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({
+      top: 80,
+      height: 40,
+      bottom: 120,
+      left: 0,
+      right: 200,
+      width: 200,
+      x: 0,
+      y: 80,
+      toJSON: () => ({}),
+    } as DOMRect);
+    await w.find('[data-test="section-ch-1"]').trigger('dragstart');
+    await w.find('[data-test="section-ch-2"]').trigger('dragover', { clientY: 85 });
+    await settle();
+    expect(w.find('[data-test="drop-line-before"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('drops before the target when the pointer is in the upper half (#108)', async () => {
+    const w = setup();
+    const target = w.get('[data-test="section-ch-1"]').element as HTMLElement;
+    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({
+      top: 60,
+      height: 40,
+      bottom: 100,
+      left: 0,
+      right: 200,
+      width: 200,
+      x: 0,
+      y: 60,
+      toJSON: () => ({}),
+    } as DOMRect);
+    await w.find('[data-test="section-ch-2"]').trigger('dragstart');
+    await w.find('[data-test="section-ch-1"]').trigger('dragover', { clientY: 65 });
+    await settle();
+    expect(w.find('[data-test="drop-line-before"]').exists()).toBe(true);
+    await w.find('[data-test="section-ch-1"]').trigger('drop');
+    await settle();
+    expect(titles(w).slice(2, 4)).toEqual(['After the bell', 'Harbor dawn']);
     w.unmount();
   });
 });

@@ -301,13 +301,65 @@ async function confirmDelete(children: 'delete' | 'promote') {
 }
 
 const dragId = ref<string>();
+type DropEdge = 'before' | 'after' | 'into';
+const dropHint = ref<{ targetId: string; edge: DropEdge } | null>(null);
+
+function onDragStart(id: string) {
+  dragId.value = id;
+  dropHint.value = null;
+}
+function onDragEnd() {
+  dragId.value = undefined;
+  dropHint.value = null;
+}
+function dropEdgeFor(e: DragEvent, row: Row): DropEdge | null {
+  const id = dragId.value;
+  if (!id || id === row.section.id) return null;
+  const dragged = byId(id);
+  if (!dragged) return null;
+  const el = e.currentTarget as HTMLElement;
+  const h = el.getBoundingClientRect().height || 1;
+  const y = e.clientY - el.getBoundingClientRect().top;
+  const nest = canNest(dragged.kind, row.section.kind);
+  if (nest && y >= h * 0.25 && y <= h * 0.75) return 'into';
+  return y < h / 2 ? 'before' : 'after';
+}
+function onDragOver(e: DragEvent, row: Row) {
+  e.preventDefault();
+  const edge = dropEdgeFor(e, row);
+  if (!edge) {
+    dropHint.value = null;
+    return;
+  }
+  dropHint.value = { targetId: row.section.id, edge };
+}
+function onDragLeave(e: DragEvent, row: Row) {
+  const el = e.currentTarget as HTMLElement;
+  if (e.relatedTarget instanceof Node && el.contains(e.relatedTarget)) return;
+  if (dropHint.value?.targetId === row.section.id) dropHint.value = null;
+}
+function dropTargetFor(target: Section, edge: DropEdge) {
+  if (edge === 'into') return { parentId: target.id };
+  if (edge === 'before') return { beforeId: target.id };
+  const idx = list.value.findIndex((x) => x.id === target.id);
+  const next = list.value[idx + 1];
+  if (next && next.parentId === target.parentId) return { beforeId: next.id };
+  return { parentId: target.parentId };
+}
 async function onDrop(target: Section) {
   const id = dragId.value;
+  const hint = dropHint.value;
   dragId.value = undefined;
+  dropHint.value = null;
   const dragged = byId(id);
   if (!id || !dragged || id === target.id) return;
-  const into = canNest(dragged.kind, target.kind);
-  await commit((s) => dropSection(s, id, into ? { parentId: target.id } : { beforeId: target.id }));
+  const edge =
+    hint?.targetId === target.id
+      ? hint.edge
+      : canNest(dragged.kind, target.kind)
+        ? 'into'
+        : 'before';
+  await commit((s) => dropSection(s, id, dropTargetFor(target, edge)));
 }
 
 // Keyboard: roving focus over the visible rows.
@@ -406,18 +458,39 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
         :aria-label="`${KIND_LABELS[row.section.kind]}: ${row.section.title || 'Untitled'}`"
         :aria-selected="row.section.id === selectedId"
         :tabindex="row.section.id === focusId ? 0 : -1"
-        :class="['row', row.section.kind, { selected: row.section.id === selectedId }]"
+        :class="[
+          'row',
+          row.section.kind,
+          {
+            selected: row.section.id === selectedId,
+            'row--drop-into': dropHint?.targetId === row.section.id && dropHint.edge === 'into',
+          },
+        ]"
         :style="{ paddingLeft: `${row.depth * 1.25 + 0.5}rem` }"
         :data-test="`section-${row.section.id}`"
         draggable="true"
-        @dragstart="dragId = row.section.id"
-        @dragover.prevent
+        @dragstart="onDragStart(row.section.id)"
+        @dragend="onDragEnd"
+        @dragover="onDragOver($event, row)"
+        @dragleave="onDragLeave($event, row)"
         @drop.prevent="onDrop(row.section)"
         @click="activate(row.section.id)"
         @contextmenu="onRowContextMenu($event, row.section.id)"
         @dblclick="startRename(row.section.id, row.section.title)"
         @keydown="onKey($event, row)"
       >
+        <span
+          v-if="dropHint?.targetId === row.section.id && dropHint.edge === 'before'"
+          class="drop-line drop-line--before"
+          data-test="drop-line-before"
+          aria-hidden="true"
+        />
+        <span
+          v-if="dropHint?.targetId === row.section.id && dropHint.edge === 'after'"
+          class="drop-line drop-line--after"
+          data-test="drop-line-after"
+          aria-hidden="true"
+        />
         <input
           v-if="editingId === row.section.id"
           v-model="draft"
@@ -690,6 +763,25 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
   align-items: baseline;
   padding: 0.2rem 0.5rem;
   cursor: pointer;
+  position: relative;
+}
+.drop-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--ct-accent);
+  pointer-events: none;
+  z-index: 1;
+}
+.drop-line--before {
+  top: 0;
+}
+.drop-line--after {
+  bottom: 0;
+}
+.row--drop-into {
+  box-shadow: inset 0 0 0 2px var(--ct-accent);
 }
 .row:hover {
   background: var(--ct-selected-bg);
