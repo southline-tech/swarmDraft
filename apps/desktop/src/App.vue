@@ -10,7 +10,9 @@ import {
   dismissMigrationNotices,
   listManuscripts,
   loadManuscript,
+  listenOpeningProgress,
   type AppInfo,
+  type OpeningProgressEvent,
   type RecoveryNotice,
   type MigrationNotice,
   type StoredManuscriptRow,
@@ -31,16 +33,27 @@ import SaveFailureBanner from './errors/SaveFailureBanner.vue';
 import MigrationNoticeBanner from './migration/MigrationNoticeBanner.vue';
 import {
   errorLine,
+  mapError,
   saveFailed,
   saveSucceeded,
   SAVE_OK,
   SECTION_LOAD_ERROR_COPY,
+  type MappedError,
 } from './errors/map-error';
 import { saveCopy } from './errors/save-copy';
 import { BUSY_NOTICE } from './errors/busy';
 import { PRODUCT_NAME } from './lib/brand';
 import ShellsPreview from './shells/ShellsPreview.vue';
 import AppToast from './shells/AppToast.vue';
+import OpeningProgress from './shells/OpeningProgress.vue';
+import ErrorCard from './shells/ErrorCard.vue';
+import {
+  OPENING_REVEAL_MS,
+  errorCardIcon,
+  openingStateFromEvent,
+  titleFromDocxName,
+  type OpeningUiState,
+} from './errors/opening-flow';
 import './shells/shells.css';
 import { applyThemeParam, readPreview } from './shells/preview';
 import { CLOSE_FLUSH_TIMEOUT_MS, confirmQuit, flushOnClose, flushWithTimeout } from './close-flush';
@@ -99,6 +112,47 @@ const openError = ref('');
 const fatalError = ref('');
 const REOPEN_BACKOFF_MS = [250, 500, 1000];
 const importing = ref(false);
+/** ob6: backend-driven opening progress; revealed only after a short delay (#80). */
+const opening = ref<OpeningUiState | null>(null);
+const openingVisible = ref(false);
+const openingError = ref<MappedError | null>(null);
+let openingRevealTimer: ReturnType<typeof setTimeout> | undefined;
+let stopOpeningProgress = () => {};
+function onOpeningProgress(event: OpeningProgressEvent) {
+  if (!opening.value) return;
+  opening.value = openingStateFromEvent(opening.value, event);
+}
+function startOpening(title: string) {
+  clearTimeout(openingRevealTimer);
+  openingVisible.value = false;
+  openingError.value = null;
+  opening.value = { title, found: 0, progress: 0 };
+  openingRevealTimer = setTimeout(() => {
+    if (opening.value) openingVisible.value = true;
+  }, OPENING_REVEAL_MS);
+}
+function finishOpening() {
+  clearTimeout(openingRevealTimer);
+  openingVisible.value = false;
+  opening.value = null;
+  openingError.value = null;
+}
+function failOpening(err: unknown, context: 'open' | 'import') {
+  clearTimeout(openingRevealTimer);
+  openingVisible.value = false;
+  opening.value = null;
+  const mapped = mapError(err, context);
+  openingError.value = mapped;
+  if (session.value && !choosingBook.value) {
+    openError.value = `${mapped.title}. ${mapped.message}`;
+  }
+}
+function onOpeningErrorAction() {
+  const err = openingError.value;
+  openingError.value = null;
+  if (!err) return;
+  if (err.action === 'choose-another-file') chooseFile();
+}
 /** Save-failure banner state (#62, ob9): shown while edits are unsaved; cleared once a save
  * succeeds. Edits are never dropped. Raw error text only goes to the console. */
 const saveFailure = ref({ ...SAVE_OK });
@@ -247,24 +301,31 @@ let openingRecent = false;
 async function openRecentBook(id: string) {
   if (openingRecent || session.value?.id === id) return;
   openingRecent = true;
+  const title = recentBooks.value.find((m) => m.id === id)?.title || 'your book';
+  startOpening(title);
   try {
     try {
       await session.value?.flush();
     } catch (e) {
       console.error('Flush before open failed', e);
+      finishOpening();
       openError.value = `Couldn't switch books: ${errorLine(e, 'save')}`;
       return;
     }
     openError.value = '';
     const stored = await loadManuscript(id);
     if (!stored) {
-      openError.value = "That book couldn't be opened. Please try again.";
+      failOpening('not found: manuscript', 'open');
       return;
     }
     const next = openStored(stored, null, persistHooks);
+    finishOpening();
     open(next);
     showOpenToast(next);
     closeBookMenu();
+  } catch (e) {
+    console.error('Open recent failed', e);
+    failOpening(e, 'open');
   } finally {
     openingRecent = false;
   }
@@ -349,6 +410,7 @@ onBeforeUnmount(() => {
   stopAppMenuKeys();
 });
 onMounted(async () => {
+  stopOpeningProgress = await listenOpeningProgress(onOpeningProgress);
   info.value = await getAppInfo();
   if (info.value) {
     try {
@@ -365,10 +427,15 @@ onMounted(async () => {
       recoveryNotices.value = [];
     }
     try {
+      startOpening(PRODUCT_NAME);
       const latest = await reopenLatest(persistHooks);
-      if (latest && !session.value) open(latest);
+      if (latest && !session.value) {
+        finishOpening();
+        open(latest);
+      } else finishOpening();
     } catch (err) {
       console.error('Reopen failed', err);
+      finishOpening();
       openError.value = `Couldn't reopen the last manuscript. ${errorLine(err, 'open')}`;
     }
   }
@@ -437,6 +504,8 @@ async function onRestore(): Promise<void> {
 }
 onBeforeUnmount(() => {
   stopCloseFlush();
+  stopOpeningProgress();
+  clearTimeout(openingRevealTimer);
   closeQuietly(session.value);
 });
 
@@ -477,6 +546,7 @@ function open(next: ManuscriptSession) {
   // A manuscript is open again, so an earlier "please restart" or open failure no longer holds.
   fatalError.value = '';
   openError.value = '';
+  openingError.value = null;
   // Anyone with a book open is past first run: never flash the welcome at them.
   markWelcomed();
   choosingBook.value = false;
@@ -558,12 +628,14 @@ async function importFile(file: File) {
     return;
   }
   openError.value = '';
+  startOpening(titleFromDocxName(file.name));
   importing.value = true;
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const current = session.value;
     try {
       const next = await importAndOpen(bytes, persistHooks, current);
+      finishOpening();
       open(next);
       showOpenToast(next);
     } catch (err) {
@@ -585,10 +657,12 @@ async function importFile(file: File) {
   } catch (err) {
     console.error('Import failed', err);
     dismissToast();
-    openError.value =
-      err instanceof UnsavedEditsError
-        ? `Couldn't open ${file.name}: some edits in the current manuscript aren't saved yet`
-        : `Couldn't open ${file.name}. ${errorLine(err, 'import')}`;
+    if (err instanceof UnsavedEditsError) {
+      finishOpening();
+      openError.value = `Couldn't open ${file.name}: some edits in the current manuscript aren't saved yet`;
+    } else {
+      failOpening(err, 'import');
+    }
   } finally {
     importing.value = false;
   }
@@ -901,7 +975,7 @@ defineExpose({ open, closeSession });
       />
     </div>
     <HomeScreen
-      v-if="!session || choosingBook"
+      v-if="(!session || choosingBook) && !openingVisible && !openingError"
       ref="home"
       data-test="no-manuscript"
       :step="welcomed ? 'open' : 'welcome'"
@@ -912,6 +986,28 @@ defineExpose({ open, closeSession });
       @choose="chooseFile"
       @drop-file="importFile"
     />
+    <div
+      v-if="(!session || choosingBook) && (openingVisible || openingError)"
+      class="opening-shell"
+      data-test="opening-shell"
+    >
+      <OpeningProgress
+        v-if="openingVisible && opening"
+        :title="opening.title"
+        :found="opening.found"
+        :progress="opening.progress"
+      />
+      <ErrorCard
+        v-else-if="openingError"
+        data-test="opening-error"
+        :icon="errorCardIcon(openingError.code)"
+        :tone="openingError.tone"
+        :title="openingError.title"
+        :text="openingError.message"
+        :action="openingError.actionLabel"
+        @action="onOpeningErrorAction"
+      />
+    </div>
     <!-- #84: full-width toolbar row under the title bar; the side panels start below it. -->
     <div
       v-if="session && !choosingBook"
@@ -981,6 +1077,13 @@ defineExpose({ open, closeSession });
   left: 50%;
   z-index: 40;
   transform: translateX(-50%);
+}
+.opening-shell {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ct-space-8);
 }
 body {
   margin: 0;

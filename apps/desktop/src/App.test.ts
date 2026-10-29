@@ -11,6 +11,10 @@ import { storedFixture } from './stored-fixture.test-helper';
 import { openSession, sessionFromDocx } from './manuscript-session';
 import { docWordCount } from './status/wordcount';
 
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn(async () => () => {}),
+}));
+
 enableAutoUnmount(afterEach);
 
 const fixture = resolve(
@@ -230,11 +234,73 @@ describe('App', () => {
     const w = mount(App, { attachTo: document.body });
     await flushPromises();
     await chooseFile(w);
-    expect(w.text()).toContain(
-      "Couldn't open synthetic.docx. This book is open in another program.",
+    expect(w.find('[data-test="opening-error"]').text()).toContain(
+      'This book is open in another program',
     );
     expect(w.text()).not.toContain('database is locked');
     expect(w.findAll('.row')).toHaveLength(0);
+    expect(w.find('[data-test="opening-error"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('shows ob6 after the reveal delay while import is still running (#80)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const backend = await import('./backend');
+    let done!: (v: ReturnType<typeof storedFixture>) => void;
+    vi.mocked(backend.persistImport).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          done = resolve;
+        }),
+    );
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    const picked = chooseFile(w);
+    await flushPromises();
+    expect(w.find('[data-test="opening-progress"]').exists()).toBe(false);
+    await vi.advanceTimersByTimeAsync(150);
+    expect(w.find('[data-test="opening-progress"]').exists()).toBe(true);
+    done(storedFixture());
+    await picked;
+    await flushPromises();
+    expect(w.find('[data-test="opening-progress"]').exists()).toBe(false);
+    w.unmount();
+    vi.useRealTimers();
+  });
+
+  it('does not flash ob6 when import finishes before the reveal delay (#80)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(w.find('[data-test="opening-progress"]').exists()).toBe(false);
+    w.unmount();
+    vi.useRealTimers();
+  });
+
+  it('maps import failures through mapError on the opening error card (#80)', async () => {
+    const backend = await import('./backend');
+    let onProgress: ((e: import('./backend').OpeningProgressEvent) => void) | undefined;
+    vi.mocked(backend.listenOpeningProgress).mockImplementationOnce(async (cb) => {
+      onProgress = cb;
+      return () => {};
+    });
+    vi.mocked(backend.persistImport).mockImplementationOnce(async (payload) => {
+      onProgress?.({
+        stage: 'saving',
+        percent: 40,
+        title: payload.title,
+        chaptersFound: payload.sections.filter((s) => s.kind === 'chapter').length,
+      });
+      throw new Error('truncated zip');
+    });
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    expect(w.find('[data-test="opening-error"]').text()).toContain("We couldn't read this file");
+    expect(w.text()).not.toContain('truncated');
     w.unmount();
   });
 
@@ -690,7 +756,7 @@ describe('App open-file input', () => {
     expect(w.text()).not.toContain('Could not import');
 
     await pick(w, 'broken.docx', new TextEncoder().encode('not a zip'));
-    expect(w.text()).toContain("Couldn't open broken.docx. This isn't a Word manuscript.");
+    expect(w.find('[data-test="opening-error"]').text()).toContain("This isn't a Word manuscript");
     expect(w.text()).not.toContain('zip directory');
     expect(w.findAll('.row')).toHaveLength(rows);
     w.unmount();
@@ -887,6 +953,7 @@ vi.mock('./backend', async (orig) => ({
   dismissMigrationNotices: vi.fn(async () => {}),
   saveManuscriptCopy: vi.fn(async () => 'D:\\Copies\\book.docx'),
   restoreBackup: vi.fn(async () => ({ tokensRevoked: 2 })),
+  listenOpeningProgress: vi.fn(async () => () => {}),
 }));
 
 describe('save-failure banner', () => {
@@ -1118,6 +1185,7 @@ describe('restore confirmation', () => {
     expect(w.find('[contenteditable="true"]').exists()).toBe(true); // the import, reopened
     // The import is open, so no stale "Could not import" error stays on screen (#25 QA).
     expect(w.find('[data-test="open-error"]').exists()).toBe(false);
+    expect(w.find('[data-test="opening-error"]').exists()).toBe(false);
     expect(w.find('[data-test="fatal-error"]').exists()).toBe(false);
     w.unmount();
   });
@@ -1132,7 +1200,7 @@ describe('restore confirmation', () => {
     vi.mocked(backend.persistImport).mockResolvedValueOnce(bad);
     vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(storedFixture()); // same id
     await chooseFile(w);
-    expect(w.find('[data-test="open-error"]').text()).toContain("Couldn't open synthetic.docx");
+    expect(w.find('[data-test="open-error"]').text()).toContain("We couldn't read this file");
     w.unmount();
   });
 
@@ -1155,6 +1223,7 @@ describe('restore confirmation', () => {
     expect(w.find('[contenteditable="true"]').exists()).toBe(true);
     expect(w.find('[data-test="fatal-error"]').exists()).toBe(false);
     expect(w.find('[data-test="open-error"]').exists()).toBe(false);
+    expect(w.find('[data-test="opening-error"]').exists()).toBe(false);
     w.unmount();
   });
 
@@ -1214,6 +1283,7 @@ describe('restore confirmation', () => {
     await chooseFile(w);
     expect(backend.persistImport).toHaveBeenCalledTimes(1);
     expect(w.find('[data-test="open-error"]').exists()).toBe(false);
+    expect(w.find('[data-test="opening-error"]').exists()).toBe(false);
     w.unmount();
   });
 

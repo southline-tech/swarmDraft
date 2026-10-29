@@ -464,6 +464,19 @@ impl Store {
         title: &str,
         sections: &[ImportSection],
     ) -> Result<(Manuscript, Vec<Section>), StorageError> {
+        self.import_manuscript_with_progress(title, sections, None)
+    }
+
+    pub fn import_manuscript_with_progress(
+        &self,
+        title: &str,
+        sections: &[ImportSection],
+        mut progress: Option<&mut crate::opening_progress::Callback<'_>>,
+    ) -> Result<(Manuscript, Vec<Section>), StorageError> {
+        let chapters_found = sections.iter().filter(|s| s.kind == "chapter").count() as u32;
+        if let Some(p) = &mut progress {
+            p("preparing", 0, title, chapters_found);
+        }
         let mut encoded = Vec::with_capacity(sections.len());
         for (i, s) in sections.iter().enumerate() {
             if !SECTION_KINDS.contains(&s.kind.as_str()) {
@@ -488,6 +501,10 @@ impl Store {
                 .transact()
                 .encode_state_as_update_v1(&StateVector::default());
             encoded.push(update);
+            if let Some(p) = &mut progress {
+                let pct = crate::opening_progress::segment_percent(i, sections.len(), 0, 45);
+                p("preparing", pct, title, chapters_found);
+            }
         }
         let manuscript_id = new_id();
         self.with_conn(|c| {
@@ -526,6 +543,10 @@ impl Store {
                     [&id],
                     row_section,
                 )?);
+                if let Some(p) = &mut progress {
+                    let pct = crate::opening_progress::segment_percent(i, sections.len(), 46, 75);
+                    p("saving", pct, title, chapters_found);
+                }
             }
             let m = tx.query_row(
                 &format!("SELECT {MANUSCRIPT_COLS} FROM manuscripts WHERE id = ?1"),
@@ -620,21 +641,43 @@ impl Store {
 
     /// Load a manuscript with every section's full document state.
     pub fn load_manuscript(&self, manuscript_id: &str) -> Result<StoredManuscript, StorageError> {
+        self.load_manuscript_with_progress(manuscript_id, None)
+    }
+
+    pub fn load_manuscript_with_progress(
+        &self,
+        manuscript_id: &str,
+        mut progress: Option<&mut crate::opening_progress::Callback<'_>>,
+    ) -> Result<StoredManuscript, StorageError> {
         let manuscript = self.get_manuscript(manuscript_id)?;
+        let title = manuscript.title.clone();
         // Read the cursor first: anything written after it is replayed by `updates_since`
         // (re-applying an update the state already has is a no-op), so nothing is missed.
         let updates_cursor = self.updates_cursor()?;
-        let sections = self
-            .list_sections(manuscript_id)?
+        let section_rows = self.list_sections(manuscript_id)?;
+        let total = section_rows.len().max(1);
+        let chapters_found = section_rows.iter().filter(|s| s.kind == "chapter").count() as u32;
+        if let Some(p) = &mut progress {
+            p("loading", 76, &title, chapters_found);
+        }
+        let sections = section_rows
             .into_iter()
-            .map(|section| {
+            .enumerate()
+            .map(|(i, section)| {
                 let doc = self.load_doc(&section.doc_id)?;
                 let state = doc
                     .transact()
                     .encode_state_as_update_v1(&StateVector::default());
+                if let Some(p) = &mut progress {
+                    let pct = crate::opening_progress::segment_percent(i, total, 76, 99);
+                    p("loading", pct, &title, chapters_found);
+                }
                 Ok(StoredSection { section, state })
             })
             .collect::<Result<_, StorageError>>()?;
+        if let Some(p) = &mut progress {
+            p("ready", 100, &title, chapters_found);
+        }
         Ok(StoredManuscript {
             manuscript,
             sections,
@@ -684,6 +727,13 @@ impl Store {
 
     /// The most recently created manuscript, for reopening at startup.
     pub fn latest_manuscript(&self) -> Result<Option<StoredManuscript>, StorageError> {
+        self.latest_manuscript_with_progress(None)
+    }
+
+    pub fn latest_manuscript_with_progress(
+        &self,
+        progress: Option<&mut crate::opening_progress::Callback<'_>>,
+    ) -> Result<Option<StoredManuscript>, StorageError> {
         let id: Option<String> = self.with_conn(|c| {
             Ok(c.query_row(
                 "SELECT id FROM manuscripts ORDER BY created_at DESC, rowid DESC LIMIT 1",
@@ -692,7 +742,8 @@ impl Store {
             )
             .optional()?)
         })?;
-        id.map(|id| self.load_manuscript(&id)).transpose()
+        id.map(|id| self.load_manuscript_with_progress(&id, progress))
+            .transpose()
     }
 
     /// Save an editor update (Yjs v1) to a section. The update is applied to the stored doc
@@ -1074,5 +1125,48 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].body, "First");
         assert_eq!(rows[1].thread_id.as_deref(), Some("c1"));
+    }
+
+    #[test]
+    fn load_manuscript_reports_progress() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = Store::open(tmp.path()).unwrap();
+        let pm = json!({"type":"doc","content":[{"type":"paragraph","attrs":{"style":"body"},"content":[{"type":"text","text":"Filler text."}]}]});
+        let (m, _) = s
+            .import_manuscript(
+                "Progress Book",
+                &[
+                    ImportSection {
+                        id: Some("c1".into()),
+                        parent_id: None,
+                        kind: "chapter".into(),
+                        title: "One".into(),
+                        doc: pm.clone(),
+                    },
+                    ImportSection {
+                        id: Some("c2".into()),
+                        parent_id: None,
+                        kind: "chapter".into(),
+                        title: "Two".into(),
+                        doc: pm,
+                    },
+                ],
+            )
+            .unwrap();
+        let hits = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(String, u8, u32)>::new()));
+        let hits_cb = std::sync::Arc::clone(&hits);
+        let mut report = move |stage: &str, percent: u8, _title: &str, chapters: u32| {
+            hits_cb
+                .lock()
+                .expect("progress lock")
+                .push((stage.to_string(), percent, chapters));
+        };
+        s.load_manuscript_with_progress(&m.id, Some(&mut report))
+            .unwrap();
+        let hits = hits.lock().expect("progress lock");
+        assert_eq!(hits.last().map(|h| h.0.as_str()), Some("ready"));
+        assert_eq!(hits.last().map(|h| h.1), Some(100));
+        assert_eq!(hits.last().map(|h| h.2), Some(2));
+        assert!(hits.iter().any(|h| h.0 == "loading"));
     }
 }
