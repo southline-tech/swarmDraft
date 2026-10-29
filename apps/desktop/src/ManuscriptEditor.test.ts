@@ -333,6 +333,14 @@ describe('inline toolbar shortcuts (#87 review)', () => {
   });
 
   it('colors suggestion marks per author to match the review card dot (#48)', async () => {
+    const sheet = document.createElement('style');
+    sheet.textContent = `
+      :root { --ct-collab-1: #2f5da8; --ct-collab-2: #a1452a; }
+      :where([data-suggester]) {
+        --ct-suggest-insert-underline: var(--ct-suggester);
+      }
+    `;
+    document.head.appendChild(sheet);
     const { resetCollabSlots } = await import('./author-colors');
     resetCollabSlots();
     const doc = {
@@ -379,14 +387,24 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     const w = mount(ManuscriptEditor, { props: { content: doc }, attachTo: document.body });
     await flushPromises();
     const token = (el: HTMLElement) => el.style.getPropertyValue('--ct-suggester');
-    const markTokens = w
-      .findAll('.tiptap [data-suggester]')
-      .map((n) => token(n.element as HTMLElement));
-    expect(markTokens.length).toBeGreaterThanOrEqual(2);
+    const markEls = w
+      .findAll(
+        '.tiptap ins.suggestion-insert [data-suggester], .tiptap del.suggestion-delete [data-suggester]',
+      )
+      .map((n) => n.element as HTMLElement);
+    expect(markEls.length).toBeGreaterThanOrEqual(2);
+    const markTokens = markEls.map(token);
     expect(new Set(markTokens).size).toBe(2);
+    const painted = markEls
+      .filter((el) => el.closest('ins.suggestion-insert'))
+      .map((el) => getComputedStyle(el).getPropertyValue('--ct-suggest-insert-underline').trim());
+    expect(painted.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(painted).size).toBe(2);
+    expect(w.find('[data-test="page"] .page').attributes('data-suggester')).toBeUndefined();
     const cardTokens = w.findAll('[data-test="item"]').map((c) => token(c.element as HTMLElement));
     expect(cardTokens).toHaveLength(2);
     for (const t of cardTokens) expect(markTokens).toContain(t);
+    sheet.remove();
     w.unmount();
   });
 });

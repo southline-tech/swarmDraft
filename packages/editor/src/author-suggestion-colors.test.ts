@@ -33,12 +33,26 @@ describe('AuthorSuggestionColors (#48)', () => {
     root = undefined;
   });
 
-  it('sets data-suggester and --ct-suggester from two authors', () => {
+  it('sets data-suggester and per-author paint tokens from two authors', () => {
+    const sheet = document.createElement('style');
+    sheet.textContent = `
+      :root { --ct-text: #111; --ct-text-muted: #666; --ct-collab-1: #2f5da8; --ct-collab-2: #a1452a; --ct-collab-4: #7a4bb0; }
+      :where([data-suggester]) {
+        --ct-suggest-insert-bg: color-mix(in srgb, var(--ct-suggester) 14%, transparent);
+        --ct-suggest-insert-underline: var(--ct-suggester);
+        --ct-suggest-delete-strike: var(--ct-suggester);
+      }
+      ins.suggestion-insert [data-suggester] {
+        background: var(--ct-suggest-insert-bg);
+      }
+    `;
+    document.head.appendChild(sheet);
     const colors = new Map([
       ['agent:a', 'var(--ct-collab-2)'],
       ['agent:b', 'var(--ct-collab-4)'],
     ]);
     root = document.createElement('div');
+    document.body.appendChild(root);
     const editor = createManuscriptEditor({
       element: root,
       content: docWithSuggestions([
@@ -52,13 +66,35 @@ describe('AuthorSuggestionColors (#48)', () => {
       ],
     });
 
-    const tokens = [...root.querySelectorAll('[data-suggester]')].map((el) =>
+    const insertDecos = [...root.querySelectorAll('ins.suggestion-insert [data-suggester]')];
+    expect(insertDecos.length).toBeGreaterThanOrEqual(2);
+    const tokens = insertDecos.map((el) =>
       (el as HTMLElement).style.getPropertyValue('--ct-suggester'),
     );
     expect(tokens).toContain('var(--ct-collab-2)');
     expect(tokens).toContain('var(--ct-collab-4)');
-    expect(new Set(tokens).size).toBe(2);
+    const polluted = document.createElement('div');
+    polluted.setAttribute('data-suggester', '');
+    polluted.style.setProperty('--ct-suggester', 'var(--ct-collab-1)');
+    root!.prepend(polluted);
+    const painted = insertDecos.map((el) =>
+      getComputedStyle(el as HTMLElement)
+        .getPropertyValue('--ct-suggest-insert-underline')
+        .trim(),
+    );
+    expect(new Set(painted).size).toBe(2);
+    expect(new Set(painted)).toEqual(new Set(['#a1452a', '#7a4bb0']));
+    const decos = [
+      ...root.querySelectorAll(
+        'ins.suggestion-insert [data-suggester], del.suggestion-delete [data-suggester]',
+      ),
+    ];
+    expect(decos.map((el) => (el as HTMLElement).style.getPropertyValue('--ct-suggester'))).toEqual(
+      expect.arrayContaining(tokens),
+    );
+    sheet.remove();
     editor.destroy();
+    root.remove();
   });
 
   it('uses a neutral token when the author id is missing', () => {

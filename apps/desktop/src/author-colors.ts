@@ -18,9 +18,25 @@ const slots = new Map<string, number>();
 let next = 0;
 let primaryKey: string | null = null;
 
+function takeNextFreeSlot(): number {
+  const used = new Set(slots.values());
+  if (primaryKey) used.add(1);
+  for (let s = primaryKey ? 2 : 1; s <= COLLAB_TOKENS; s++) {
+    if (!used.has(s)) return s;
+  }
+  return allocateSlot();
+}
+
 /** Pin the built-in bot to collab-1; pass null when none is primary. */
 export function pinPrimaryAgent(agentId: string | null) {
-  primaryKey = agentId ? `${AGENT_KEY_PREFIX}${agentId}` : null;
+  const nextPrimary = agentId ? `${AGENT_KEY_PREFIX}${agentId}` : null;
+  if (nextPrimary === primaryKey) return;
+  primaryKey = nextPrimary;
+  if (!primaryKey) return;
+  for (const [key, slot] of [...slots.entries()]) {
+    if (slot === 1 && key !== primaryKey) slots.set(key, takeNextFreeSlot());
+  }
+  slots.set(primaryKey, 1);
 }
 
 function allocateSlot(): number {

@@ -173,4 +173,12 @@ describe('primary agent color pin (#76)', () => {
     expect(vars).toEqual(['var(--ct-collab-1)', 'var(--ct-collab-2)']);
     expect(collabSlotOf('agent:x')).toBe(2);
   });
+
+  it('moves an author off collab-1 when the primary agent is pinned later', () => {
+    pinPrimaryAgent(null);
+    expect(collabSlotOf('Mara')).toBe(1);
+    pinPrimaryAgent('g');
+    expect(collabSlotOf('Mara')).toBe(2);
+    expect(collabSlotOf('agent:g')).toBe(1);
+  });
 });
