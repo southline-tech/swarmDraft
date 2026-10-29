@@ -84,6 +84,12 @@ describe('logo', () => {
     );
   });
 
+  it('keeps the document title and favicon in index.html (#141)', () => {
+    const html = read('../index.html');
+    expect(html).toMatch(/<title>swarmDraft<\/title>/);
+    expect(html).toMatch(/<link rel="icon" href="\/favicon\.svg"/);
+  });
+
   it('uses the full S SVG at 48px and up and 24/48 PNG below', () => {
     const big = mount(AppLogo, { props: { size: 64 } }).get('img');
     const at48 = mount(AppLogo, { props: { size: 48 } }).get('img');
