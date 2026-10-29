@@ -95,8 +95,9 @@ interface Row {
   section: Section;
   depth: number;
 }
+type SectionEntry = { kind: 'section'; section: Section; depth: number };
 type DisplayEntry =
-  | { kind: 'section'; section: Section; depth: number }
+  | SectionEntry
   | {
       kind: 'placeholder';
       title: string;
@@ -132,8 +133,7 @@ function frontCatalogSlots(sections: Section[]) {
   return { filled, extras: unmatched };
 }
 
-/** Reading-order outline rows plus default front-matter placeholders (#109). */
-const displayEntries = computed<DisplayEntry[]>(() => {
+const frontEntries = computed<DisplayEntry[]>(() => {
   const out: DisplayEntry[] = [];
   const { filled, extras } = frontCatalogSlots(list.value);
   for (const title of FRONT_MATTER_CATALOG) {
@@ -143,23 +143,39 @@ const displayEntries = computed<DisplayEntry[]>(() => {
       out.push({ kind: 'placeholder', title, matterKind: 'front_matter', depth: 0 });
   }
   for (const section of extras) out.push({ kind: 'section', section, depth: 0 });
+  return out;
+});
+
+const bodyEntries = computed<SectionEntry[]>(() => {
+  const out: SectionEntry[] = [];
   for (const row of rows.value) {
     if (row.depth === 0 && row.section.kind === 'front_matter') continue;
+    if (row.depth === 0 && row.section.kind === 'back_matter') continue;
     out.push({ kind: 'section', section: row.section, depth: row.depth });
   }
   return out;
 });
 
+const backEntries = computed<SectionEntry[]>(() =>
+  rows.value
+    .filter((r) => r.depth === 0 && r.section.kind === 'back_matter')
+    .map((r) => ({ kind: 'section' as const, section: r.section, depth: r.depth })),
+);
+
 function entryKey(entry: DisplayEntry) {
   return entry.kind === 'section' ? entry.section.id : `placeholder:${entry.title}`;
 }
 
-const newMatterOptions = computed(() => {
-  const opts: { title: string; matterKind: 'front_matter' | 'back_matter' }[] = [];
+const frontNewOptions = computed(() => {
+  const opts: { title: string; matterKind: 'front_matter' }[] = [];
   for (const title of FRONT_MATTER_CATALOG) {
     if (!hasCatalogMatter(list.value, title, 'front_matter'))
       opts.push({ title, matterKind: 'front_matter' });
   }
+  return opts;
+});
+const backNewOptions = computed(() => {
+  const opts: { title: string; matterKind: 'back_matter' }[] = [];
   for (const title of BACK_MATTER_CATALOG) {
     if (!hasCatalogMatter(list.value, title, 'back_matter'))
       opts.push({ title, matterKind: 'back_matter' });
@@ -239,7 +255,7 @@ function siblingInsertAfter(id: string): { beforeId?: string; parentId?: string 
 /** Add a catalog front/back matter section at the correct outline slot (#109). */
 async function addCatalogMatter(title: string, matterKind: 'front_matter' | 'back_matter') {
   closeMenu();
-  newMenuOpen.value = false;
+  closeNewMenus();
   if (hasCatalogMatter(list.value, title, matterKind)) return;
   const beforeIds = new Set(list.value.map((x) => x.id));
   const next = await commit((cur) =>
@@ -253,6 +269,7 @@ async function addCatalogMatter(title: string, matterKind: 'front_matter' | 'bac
   if (created) {
     undoSections.value = null;
     if (matterKind === 'front_matter') frontOpen.value = true;
+    if (matterKind === 'back_matter') backOpen.value = true;
     select(created.id);
     activate(created.id);
   }
@@ -344,13 +361,54 @@ function onRowContextMenu(e: MouseEvent, id: string) {
   e.preventDefault();
   openMenu(id, { x: e.clientX, y: e.clientY });
 }
-const newMenuOpen = ref(false);
-const newMenuWrap = ref<HTMLElement>();
+const frontNewMenuOpen = ref(false);
+const backNewMenuOpen = ref(false);
+const frontNewMenuWrap = ref<HTMLElement>();
+const backNewMenuWrap = ref<HTMLElement>();
+
+function closeNewMenus() {
+  frontNewMenuOpen.value = false;
+  backNewMenuOpen.value = false;
+}
+function toggleFrontNewMenu() {
+  const open = !frontNewMenuOpen.value;
+  closeNewMenus();
+  frontNewMenuOpen.value = open;
+  if (open) {
+    void nextTick(() =>
+      frontNewMenuWrap.value?.querySelector<HTMLElement>('[role=menuitem]')?.focus(),
+    );
+  }
+}
+function toggleBackNewMenu() {
+  const open = !backNewMenuOpen.value;
+  closeNewMenus();
+  backNewMenuOpen.value = open;
+  if (open) {
+    void nextTick(() =>
+      backNewMenuWrap.value?.querySelector<HTMLElement>('[role=menuitem]')?.focus(),
+    );
+  }
+}
+function onNewMenuKey(e: KeyboardEvent, wrap: HTMLElement | undefined, close: () => void) {
+  const items = [...(wrap?.querySelectorAll<HTMLElement>('[role=menuitem]') ?? [])];
+  const i = items.indexOf(document.activeElement as HTMLElement);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    close();
+  }
+}
 
 function onPointerDownCapture(e: MouseEvent) {
   const t = e.target as Node;
   if (menuFor.value && !menuRoot.value?.contains(t)) closeMenu();
-  if (newMenuOpen.value && !newMenuWrap.value?.contains(t)) newMenuOpen.value = false;
+  if (frontNewMenuOpen.value && !frontNewMenuWrap.value?.contains(t))
+    frontNewMenuOpen.value = false;
+  if (backNewMenuOpen.value && !backNewMenuWrap.value?.contains(t)) backNewMenuOpen.value = false;
 }
 onMounted(() => document.addEventListener('mousedown', onPointerDownCapture, true));
 onUnmounted(() => document.removeEventListener('mousedown', onPointerDownCapture, true));
@@ -520,20 +578,25 @@ function onKey(e: KeyboardEvent, entry: DisplayEntry) {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       void addCatalogMatter(entry.title, entry.matterKind);
+      return;
     }
-    return;
   }
-  const row: Row = { section: entry.section, depth: entry.depth };
-  if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+  const row: Row =
+    entry.kind === 'section'
+      ? { section: entry.section, depth: entry.depth }
+      : { section: { id: entryKey(entry) } as Section, depth: entry.depth };
+  if (entry.kind === 'section' && (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey))) {
     e.preventDefault();
     openMenu(row.section.id, menuAnchorForRow(row.section.id));
     return;
   }
-  const allSectionIds = displayEntries.value
-    .filter((e): e is Extract<DisplayEntry, { kind: 'section' }> => e.kind === 'section')
-    .map((e) => e.section.id);
-  const keys = isFrontEntry(entry) ? allSectionIds : navigableKeys.value;
-  const i = keys.indexOf(row.section.id);
+  let keys = navigableEntryKeys.value;
+  const currentKey = entryKey(entry);
+  let i = keys.indexOf(currentKey);
+  if (i < 0 && entry.kind === 'section') {
+    keys = allSectionEntryKeys.value;
+    i = keys.indexOf(entry.section.id);
+  }
   const go = (j: number) => {
     const key = keys[Math.max(0, Math.min(keys.length - 1, j))];
     if (!key) return;
@@ -545,19 +608,30 @@ function onKey(e: KeyboardEvent, entry: DisplayEntry) {
     focusRow(key);
   };
   const handlers: Record<string, () => void> = {
-    ArrowDown: () => (e.altKey ? void move(1, row.section.id) : go(i + 1)),
-    ArrowUp: () => (e.altKey ? void move(-1, row.section.id) : go(i - 1)),
+    ArrowDown: () =>
+      e.altKey && entry.kind === 'section' ? void move(1, row.section.id) : go(i + 1),
+    ArrowUp: () =>
+      e.altKey && entry.kind === 'section' ? void move(-1, row.section.id) : go(i - 1),
     Home: () => go(0),
     End: () => go(keys.length - 1),
-    ArrowLeft: () => row.section.parentId && go(keys.indexOf(row.section.parentId)),
+    ArrowLeft: () =>
+      entry.kind === 'section' && row.section.parentId && go(keys.indexOf(row.section.parentId)),
     // Rows are always expanded, so Right goes to the first child when there is one.
     ArrowRight: () => {
+      if (entry.kind !== 'section') return;
       const child = rows.value.find((r) => r.section.parentId === row.section.id);
       if (child) go(keys.indexOf(child.section.id));
     },
-    Enter: () => (select(row.section.id), startRename(row.section.id, row.section.title)),
-    F2: () => startRename(row.section.id, row.section.title),
-    Delete: () => (confirmingDelete.value = row.section.id),
+    Enter: () => {
+      if (entry.kind === 'placeholder') {
+        void addCatalogMatter(entry.title, entry.matterKind);
+        return;
+      }
+      select(row.section.id);
+      startRename(row.section.id, row.section.title);
+    },
+    F2: () => entry.kind === 'section' && startRename(row.section.id, row.section.title),
+    Delete: () => entry.kind === 'section' && (confirmingDelete.value = row.section.id),
   };
   const h = handlers[e.key];
   if (h) {
@@ -567,19 +641,19 @@ function onKey(e: KeyboardEvent, entry: DisplayEntry) {
 }
 /** UI shell (#52): top-level front matter collapses into one group row (display state only). */
 const frontOpen = ref(false);
-const isFrontEntry = (entry: DisplayEntry) =>
-  entry.depth === 0 &&
-  (entry.kind === 'placeholder'
-    ? entry.matterKind === 'front_matter'
-    : entry.section.kind === 'front_matter');
+const backOpen = ref(false);
 const frontCount = computed(
   () => rows.value.filter((r) => r.depth === 0 && r.section.kind === 'front_matter').length,
 );
 const hasFrontZone = computed(
   () =>
     frontCount.value > 0 ||
-    displayEntries.value.some((e) => e.kind === 'placeholder' && e.matterKind === 'front_matter'),
+    frontEntries.value.some((e) => e.kind === 'placeholder' && e.matterKind === 'front_matter'),
 );
+const backCount = computed(
+  () => rows.value.filter((r) => r.depth === 0 && r.section.kind === 'back_matter').length,
+);
+const hasBackZone = computed(() => backCount.value > 0 || backNewOptions.value.length > 0);
 const showFront = computed(
   () =>
     frontOpen.value ||
@@ -588,14 +662,33 @@ const showFront = computed(
         r.depth === 0 && r.section.kind === 'front_matter' && r.section.id === props.selectedId,
     ),
 );
-const navigableEntries = computed(() =>
-  showFront.value ? displayEntries.value : displayEntries.value.filter((e) => !isFrontEntry(e)),
+const showBack = computed(
+  () =>
+    backOpen.value ||
+    rows.value.some(
+      (r) => r.depth === 0 && r.section.kind === 'back_matter' && r.section.id === props.selectedId,
+    ),
 );
-const navigableKeys = computed(() =>
-  navigableEntries.value
-    .filter((e): e is Extract<DisplayEntry, { kind: 'section' }> => e.kind === 'section')
-    .map((e) => e.section.id),
-);
+const navigableEntries = computed(() => {
+  const out: DisplayEntry[] = [];
+  for (const e of frontEntries.value) {
+    if (e.kind === 'placeholder' || showFront.value) out.push(e);
+  }
+  out.push(...bodyEntries.value);
+  if (showBack.value) out.push(...backEntries.value);
+  return out;
+});
+const navigableEntryKeys = computed(() => navigableEntries.value.map((e) => entryKey(e)));
+/** All section ids in outline reading order (includes collapsed front rows). */
+const allSectionEntryKeys = computed(() => {
+  const out: string[] = [];
+  for (const e of frontEntries.value) {
+    if (e.kind === 'section') out.push(e.section.id);
+  }
+  for (const e of bodyEntries.value) out.push(e.section.id);
+  for (const e of backEntries.value) out.push(e.section.id);
+  return out;
+});
 
 function focusEntryKey(key: string) {
   void nextTick(() =>
@@ -603,9 +696,11 @@ function focusEntryKey(key: string) {
   );
 }
 
-const focusId = computed(
-  () => props.selectedId ?? displayEntries.value.find((e) => e.kind === 'section')?.section.id,
-);
+const rovingTabKey = computed(() => {
+  if (props.selectedId) return props.selectedId;
+  const first = navigableEntries.value[0];
+  return first ? entryKey(first) : '';
+});
 </script>
 
 <template>
@@ -628,14 +723,13 @@ const focusId = computed(
           <span class="count">{{ frontCount }}</span>
         </button>
       </li>
-      <template v-for="entry in displayEntries" :key="entryKey(entry)">
+      <template v-for="entry in frontEntries" :key="entryKey(entry)">
         <li
           v-if="entry.kind === 'placeholder'"
-          v-show="showFront || !isFrontEntry(entry)"
           role="treeitem"
           :aria-level="entry.depth + 1"
           :aria-label="`Add ${entry.title}`"
-          :tabindex="entryKey(entry) === focusId ? 0 : -1"
+          :tabindex="entryKey(entry) === rovingTabKey ? 0 : -1"
           class="row row--placeholder front_matter"
           :style="{ paddingLeft: `${entry.depth * 1.25 + 0.5}rem` }"
           :data-test="`matter-placeholder-${matterSlug(entry.title)}`"
@@ -653,12 +747,12 @@ const focusId = computed(
         </li>
         <li
           v-else
-          v-show="showFront || !isFrontEntry(entry)"
+          v-show="showFront"
           role="treeitem"
           :aria-level="entry.depth + 1"
           :aria-label="`${KIND_LABELS[entry.section.kind]}: ${entry.section.title || 'Untitled'}`"
           :aria-selected="entry.section.id === selectedId"
-          :tabindex="entry.section.id === focusId ? 0 : -1"
+          :tabindex="entryKey(entry) === rovingTabKey ? 0 : -1"
           :class="[
             'row',
             entry.section.kind,
@@ -717,39 +811,226 @@ const focusId = computed(
           >
         </li>
       </template>
-    </ul>
-    <div v-if="newMatterOptions.length" ref="newMenuWrap" class="outline-new">
-      <button
-        type="button"
-        class="outline-new__btn"
-        data-test="outline-new"
-        :aria-expanded="newMenuOpen"
-        aria-haspopup="menu"
-        @click="newMenuOpen = !newMenuOpen"
-      >
-        + New
-      </button>
-      <div
-        v-if="newMenuOpen"
-        class="sh-menu outline-new__menu"
-        role="menu"
-        aria-label="Add section"
-        data-test="outline-new-menu"
+      <li
+        v-if="frontNewOptions.length"
+        ref="frontNewMenuWrap"
+        role="none"
+        class="outline-new"
       >
         <button
-          v-for="opt in newMatterOptions"
-          :key="`${opt.matterKind}-${opt.title}`"
           type="button"
-          role="menuitem"
-          tabindex="-1"
-          class="sh-mi"
-          :data-test="`outline-new-${matterSlug(opt.title)}`"
-          @click="addCatalogMatter(opt.title, opt.matterKind)"
+          class="outline-new__btn"
+          data-test="outline-new-front"
+          :aria-expanded="frontNewMenuOpen"
+          aria-haspopup="menu"
+          @click="toggleFrontNewMenu"
         >
-          {{ opt.title }}
+          + New
         </button>
-      </div>
-    </div>
+        <div
+          v-if="frontNewMenuOpen"
+          class="sh-menu outline-new__menu"
+          role="menu"
+          aria-label="Add front matter"
+          data-test="outline-new-menu-front"
+          @keydown="onNewMenuKey($event, frontNewMenuWrap, () => (frontNewMenuOpen = false))"
+        >
+          <button
+            v-for="opt in frontNewOptions"
+            :key="opt.title"
+            type="button"
+            role="menuitem"
+            tabindex="-1"
+            class="sh-mi"
+            :data-test="`outline-new-${matterSlug(opt.title)}`"
+            @click="addCatalogMatter(opt.title, opt.matterKind)"
+          >
+            {{ opt.title }}
+          </button>
+        </div>
+      </li>
+      <template v-for="entry in bodyEntries" :key="entryKey(entry)">
+        <li
+          role="treeitem"
+          :aria-level="entry.depth + 1"
+          :aria-label="`${KIND_LABELS[entry.section.kind]}: ${entry.section.title || 'Untitled'}`"
+          :aria-selected="entry.section.id === selectedId"
+          :tabindex="entryKey(entry) === rovingTabKey ? 0 : -1"
+          :class="[
+            'row',
+            entry.section.kind,
+            {
+              selected: entry.section.id === selectedId,
+              'row--drop-into': dropHint?.targetId === entry.section.id && dropHint.edge === 'into',
+            },
+          ]"
+          :style="{ paddingLeft: `${entry.depth * 1.25 + 0.5}rem` }"
+          :data-test="`section-${entry.section.id}`"
+          :data-entry="entryKey(entry)"
+          draggable="true"
+          @dragstart="onDragStart(entry.section.id)"
+          @dragend="onDragEnd"
+          @dragover="onDragOver($event, { section: entry.section, depth: entry.depth })"
+          @dragleave="onDragLeave($event, { section: entry.section, depth: entry.depth })"
+          @drop.prevent="
+            onDrop($event, entry.section, { section: entry.section, depth: entry.depth })
+          "
+          @click="activate(entry.section.id)"
+          @contextmenu="onRowContextMenu($event, entry.section.id)"
+          @dblclick="startRename(entry.section.id, entry.section.title)"
+          @keydown="onKey($event, entry)"
+        >
+          <span
+            v-if="dropHint?.targetId === entry.section.id && dropHint.edge === 'before'"
+            class="drop-line drop-line--before"
+            data-test="drop-line-before"
+            aria-hidden="true"
+          />
+          <span
+            v-if="dropHint?.targetId === entry.section.id && dropHint.edge === 'after'"
+            class="drop-line drop-line--after"
+            data-test="drop-line-after"
+            aria-hidden="true"
+          />
+          <input
+            v-if="editingId === entry.section.id"
+            v-model="draft"
+            data-test="rename-input"
+            aria-label="Section title"
+            @click.stop
+            @keydown.stop.enter="commitRename"
+            @keydown.stop.esc="cancelRename"
+            @blur="commitRename"
+          />
+          <span v-else class="title">{{ entry.section.title || 'Untitled' }}</span>
+          <span
+            v-if="wordCounts"
+            class="count"
+            data-test="word-count"
+            :aria-label="`${wordCounts[entry.section.id] ?? 0} words`"
+            >{{
+              wordCounts[entry.section.id] ? formatCount(wordCounts[entry.section.id]!) : '—'
+            }}</span
+          >
+        </li>
+      </template>
+      <li v-if="hasBackZone" role="none" class="group-row">
+        <button
+          type="button"
+          class="group"
+          data-test="back-matter-group"
+          :aria-expanded="showBack"
+          @click="backOpen = !backOpen"
+        >
+          <span aria-hidden="true">{{ showBack ? '▾' : '▸' }}</span> Back matter
+          <span class="count">{{ backCount }}</span>
+        </button>
+      </li>
+      <template v-for="entry in backEntries" :key="entryKey(entry)">
+        <li
+          v-show="showBack"
+          role="treeitem"
+          :aria-level="entry.depth + 1"
+          :aria-label="`${KIND_LABELS[entry.section.kind]}: ${entry.section.title || 'Untitled'}`"
+          :aria-selected="entry.section.id === selectedId"
+          :tabindex="entryKey(entry) === rovingTabKey ? 0 : -1"
+          :class="[
+            'row',
+            entry.section.kind,
+            {
+              selected: entry.section.id === selectedId,
+              'row--drop-into': dropHint?.targetId === entry.section.id && dropHint.edge === 'into',
+            },
+          ]"
+          :style="{ paddingLeft: `${entry.depth * 1.25 + 0.5}rem` }"
+          :data-test="`section-${entry.section.id}`"
+          :data-entry="entryKey(entry)"
+          draggable="true"
+          @dragstart="onDragStart(entry.section.id)"
+          @dragend="onDragEnd"
+          @dragover="onDragOver($event, { section: entry.section, depth: entry.depth })"
+          @dragleave="onDragLeave($event, { section: entry.section, depth: entry.depth })"
+          @drop.prevent="
+            onDrop($event, entry.section, { section: entry.section, depth: entry.depth })
+          "
+          @click="activate(entry.section.id)"
+          @contextmenu="onRowContextMenu($event, entry.section.id)"
+          @dblclick="startRename(entry.section.id, entry.section.title)"
+          @keydown="onKey($event, entry)"
+        >
+          <span
+            v-if="dropHint?.targetId === entry.section.id && dropHint.edge === 'before'"
+            class="drop-line drop-line--before"
+            data-test="drop-line-before"
+            aria-hidden="true"
+          />
+          <span
+            v-if="dropHint?.targetId === entry.section.id && dropHint.edge === 'after'"
+            class="drop-line drop-line--after"
+            data-test="drop-line-after"
+            aria-hidden="true"
+          />
+          <input
+            v-if="editingId === entry.section.id"
+            v-model="draft"
+            data-test="rename-input"
+            aria-label="Section title"
+            @click.stop
+            @keydown.stop.enter="commitRename"
+            @keydown.stop.esc="cancelRename"
+            @blur="commitRename"
+          />
+          <span v-else class="title">{{ entry.section.title || 'Untitled' }}</span>
+          <span
+            v-if="wordCounts"
+            class="count"
+            data-test="word-count"
+            :aria-label="`${wordCounts[entry.section.id] ?? 0} words`"
+            >{{
+              wordCounts[entry.section.id] ? formatCount(wordCounts[entry.section.id]!) : '—'
+            }}</span
+          >
+        </li>
+      </template>
+      <li
+        v-if="backNewOptions.length"
+        ref="backNewMenuWrap"
+        role="none"
+        class="outline-new"
+      >
+        <button
+          type="button"
+          class="outline-new__btn"
+          data-test="outline-new-back"
+          :aria-expanded="backNewMenuOpen"
+          aria-haspopup="menu"
+          @click="toggleBackNewMenu"
+        >
+          + New
+        </button>
+        <div
+          v-if="backNewMenuOpen"
+          class="sh-menu outline-new__menu"
+          role="menu"
+          aria-label="Add back matter"
+          data-test="outline-new-menu-back"
+          @keydown="onNewMenuKey($event, backNewMenuWrap, () => (backNewMenuOpen = false))"
+        >
+          <button
+            v-for="opt in backNewOptions"
+            :key="opt.title"
+            type="button"
+            role="menuitem"
+            tabindex="-1"
+            class="sh-mi"
+            :data-test="`outline-new-${matterSlug(opt.title)}`"
+            @click="addCatalogMatter(opt.title, opt.matterKind)"
+          >
+            {{ opt.title }}
+          </button>
+        </div>
+      </li>
+    </ul>
     <label v-if="numberingStyle" class="numbering-style" data-test="outline-numbering-style">
       <span class="numbering-style__label">Number display</span>
       <select
@@ -1082,7 +1363,7 @@ const focusId = computed(
 .outline-new__btn {
   width: 100%;
   padding: 0.25rem 0.5rem;
-  border: 0;
+  border: 1px dashed var(--ct-border);
   border-radius: var(--ct-radius-md);
   background: none;
   color: var(--ct-text-muted);
@@ -1093,8 +1374,9 @@ const focusId = computed(
 }
 .outline-new__btn:hover,
 .outline-new__btn:focus-visible {
-  background: var(--ct-hover-bg);
-  color: var(--ct-text);
+  background: var(--ct-selected-bg);
+  border-color: var(--ct-accent);
+  color: var(--ct-accent);
   outline: var(--ct-focus-outline);
   outline-offset: calc(var(--ct-focus-offset) * -1);
 }
