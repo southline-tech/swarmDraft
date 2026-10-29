@@ -21,6 +21,9 @@ export const ICONS = {
   power: ['M8 2.5v4', 'M5.5 4a3.5 3.5 0 1 0 5 0'],
   pencil: ['M10.5 3.5l2 2L6 12H4v-2l6.5-6.5z'],
   trash: ['M5.5 4h5', 'M6 4V3h4v1', 'M4.5 4.5v7.5h7V4.5', 'M6.5 7v3M9.5 7v3'],
+  'chevron-up': ['M4 10l4-4 4 4'],
+  'chevron-down': ['M4 6l4 4 4-4'],
+  x: ['M4.5 4.5l7 7', 'M11.5 4.5l-7 7'],
 } as const satisfies Record<string, readonly string[]>;
 
 export type IconName = keyof typeof ICONS;

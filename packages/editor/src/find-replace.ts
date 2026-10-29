@@ -153,6 +153,18 @@ export function updateFindHighlight(editor: Editor, matches: FindMatch[], active
   );
 }
 
+/** Scroll a match into the editor viewport without changing focus or document selection. */
+export function scrollFindMatchIntoView(editor: Editor, match: FindMatch): void {
+  const { view } = editor;
+  if (view.isDestroyed) return;
+  const dom = view.domAtPos(match.from);
+  let node: Node | null = dom.node;
+  if (node.nodeType === 3) node = node.parentNode;
+  if (node instanceof HTMLElement) {
+    node.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+}
+
 function replacementText(editor: Editor, from: number, text: string) {
   const marks = editor.state.doc
     .resolve(from)

@@ -8,9 +8,11 @@ import type { Editor } from '@tiptap/core';
 import {
   listFindMatches,
   replaceFindMatches,
+  scrollFindMatchIntoView,
   updateFindHighlight,
   type FindMatch,
 } from '@coauthor/editor';
+import AppIcon from '../icons/AppIcon.vue';
 
 const props = defineProps<{ editor?: Editor; focusReplace?: boolean }>();
 const emit = defineEmits<{ close: [] }>();
@@ -47,6 +49,7 @@ function syncHighlight() {
   updateFindHighlight(e, matches.value, total.value ? current.value : 0);
 }
 
+/** Updates the active match highlight and scrolls it into view without moving editor focus or selection. */
 function focusMatch(index: number) {
   const e = props.editor && toRaw(props.editor);
   const list = matches.value;
@@ -54,8 +57,7 @@ function focusMatch(index: number) {
   const i = ((index % list.length) + list.length) % list.length;
   current.value = i;
   syncHighlight();
-  const { from, to } = list[i]!;
-  e.chain().focus().setTextSelection({ from, to }).scrollIntoView().run();
+  scrollFindMatchIntoView(e, list[i]!);
 }
 
 function step(d: 1 | -1) {
@@ -142,7 +144,7 @@ onBeforeUnmount(() => {
         :disabled="!total"
         @click="step(-1)"
       >
-        ‹
+        <AppIcon name="chevron-up" />
       </button>
       <button
         type="button"
@@ -152,7 +154,7 @@ onBeforeUnmount(() => {
         :disabled="!total"
         @click="step(1)"
       >
-        ›
+        <AppIcon name="chevron-down" />
       </button>
       <button
         type="button"
@@ -161,7 +163,7 @@ onBeforeUnmount(() => {
         data-test="find-close"
         @click="emit('close')"
       >
-        ×
+        <AppIcon name="x" />
       </button>
     </div>
     <div class="sh-row">

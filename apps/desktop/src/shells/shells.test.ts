@@ -38,9 +38,17 @@ describe('Find & replace (#53)', () => {
     await flushPromises();
     expect(w.find('[data-test="find-count"]').text()).toMatch(/1 of 1/);
     expect(w.find('.find-match').exists()).toBe(true);
+    expect(document.activeElement?.getAttribute('data-test')).toBe('find-input');
+    expect(editor.view.hasFocus()).toBe(false);
+
+    expect(w.find('[data-test="find-prev"] [data-icon="chevron-up"]').exists()).toBe(true);
+    expect(w.find('[data-test="find-next"] [data-icon="chevron-down"]').exists()).toBe(true);
+    expect(w.find('[data-test="find-close"] [data-icon="x"]').exists()).toBe(true);
 
     await w.find('[data-test="find-next"]').trigger('click');
+    expect(editor.view.hasFocus()).toBe(false);
     await w.find('[data-test="find-prev"]').trigger('click');
+    expect(editor.view.hasFocus()).toBe(false);
 
     await w.find('[data-test="replace-input"]').setValue('mist');
     await w.find('[data-test="replace-one"]').trigger('click');

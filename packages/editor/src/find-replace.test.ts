@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Editor } from '@tiptap/core';
 import { undoDepth } from '@tiptap/pm/history';
 import { docToYDoc } from '@coauthor/docx';
@@ -7,6 +7,7 @@ import {
   FindHighlight,
   listFindMatches,
   replaceFindMatches,
+  scrollFindMatchIntoView,
   updateFindHighlight,
 } from './find-replace';
 
@@ -165,6 +166,25 @@ describe('find-replace', () => {
     expect(e.commands.undo()).toBe(true);
     await new Promise((r) => setTimeout(r, 0));
     expect(e.getText()).toBe(before);
+    e.destroy();
+  });
+
+  it('scrollFindMatchIntoView scrolls without focusing or changing selection', async () => {
+    const e = boundEditor({
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'abc' }] }],
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    const sel = e.state.selection;
+    const focusSpy = vi.spyOn(e.view, 'focus');
+    const scrollSpy = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
+    const matches = listFindMatches(e.state.doc, 'b', { matchCase: false, wholeWord: false });
+    scrollFindMatchIntoView(e, matches[0]!);
+    expect(scrollSpy).toHaveBeenCalled();
+    expect(focusSpy).not.toHaveBeenCalled();
+    expect(e.state.selection.eq(sel)).toBe(true);
+    focusSpy.mockRestore();
+    scrollSpy.mockRestore();
     e.destroy();
   });
 
