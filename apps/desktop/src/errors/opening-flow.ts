@@ -33,3 +33,9 @@ export function titleFromDocxName(fileName: string): string {
   const base = fileName.replace(/\.docx$/i, '').trim();
   return base || fileName;
 }
+
+/** Stored import bytes for opening-error "Try again" (#80). */
+export type OpeningRetry =
+  | { kind: 'reopen-latest'; title: string }
+  | { kind: 'open-manuscript'; id: string; title: string }
+  | { kind: 'import'; name: string; bytes: Uint8Array };

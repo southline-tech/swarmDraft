@@ -226,3 +226,5 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-28 · #113 · read-only restore test used `isEditable` only · assert `contenteditable="false"`, toolbar read-only title, and `typeThroughDom` leaves the doc unchanged
 - 2026-10-28 · #113 · `saveStatusShown` survived `open()` on another book · reset it in `open()` and test the status line is empty until the next successful persist
 - 2026-10-28 · #52 · New chapter row was a disabled shell · wire it to the same add flow as More sections and test outline + session doc creation
+- 2026-10-29 · #80 · Designer review (#150) · ob6 card sizes (560 / 44 / 48 / xl / 10px bar); opening error in assertive `data-test="opening-error"` wrapper, not on ErrorCard
+- 2026-10-29 · #80 · Designer/PM review (#150) · cold reopen ob6 title from `listManuscripts`, never PRODUCT_NAME; Try again re-runs stored `OpeningRetry`

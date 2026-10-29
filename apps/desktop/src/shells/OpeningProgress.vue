@@ -28,9 +28,9 @@ defineProps<{ title: string; found: number; progress: number }>();
 
 <style scoped>
 .op {
-  max-width: 396px;
+  max-width: 560px;
   margin: 0 auto;
-  padding: var(--ct-space-8);
+  padding: 44px;
   border: 1px solid var(--ct-border);
   border-radius: var(--ct-radius-lg);
   background: var(--ct-surface-raised);
@@ -41,15 +41,15 @@ defineProps<{ title: string; found: number; progress: number }>();
 .op__icon {
   display: inline-grid;
   place-items: center;
-  width: var(--ct-space-8);
-  height: var(--ct-space-8);
+  width: var(--ct-space-12);
+  height: var(--ct-space-12);
   border-radius: var(--ct-radius-md);
   background: var(--ct-selected-bg);
   color: var(--ct-accent);
 }
 .op__title {
   margin: var(--ct-space-4) 0 var(--ct-space-2);
-  font-size: var(--ct-text-lg);
+  font-size: var(--ct-text-xl);
   font-weight: var(--ct-weight-semibold);
 }
 .op__text,
@@ -59,7 +59,7 @@ defineProps<{ title: string; found: number; progress: number }>();
   font-size: var(--ct-text-sm);
 }
 .op__bar {
-  height: 6px;
+  height: 10px;
   margin: var(--ct-space-6) 0 var(--ct-space-3);
   border-radius: var(--ct-radius-full);
   background: var(--ct-border);

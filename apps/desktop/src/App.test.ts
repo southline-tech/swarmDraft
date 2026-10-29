@@ -304,6 +304,58 @@ describe('App', () => {
     w.unmount();
   });
 
+  it('announce opening errors in an assertive live region (#80)', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.persistImport).mockRejectedValueOnce('database is locked');
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    const region = w.get('[data-test="opening-error"]');
+    expect(region.attributes('role')).toBe('alert');
+    expect(region.attributes('aria-live')).toBe('assertive');
+    expect(region.find('[data-test="error-card"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('Try again on opening error retries the import (#80)', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.persistImport)
+      .mockRejectedValueOnce('database is locked')
+      .mockResolvedValueOnce(storedFixture());
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    vi.mocked(backend.persistImport).mockClear();
+    await chooseFile(w);
+    expect(vi.mocked(backend.persistImport)).toHaveBeenCalledTimes(1);
+    await w.get('[data-test="error-card"] .sh-btn--primary').trigger('click');
+    await settle();
+    expect(w.findAll('.row').length).toBeGreaterThan(0);
+    expect(vi.mocked(backend.persistImport)).toHaveBeenCalledTimes(2);
+    w.unmount();
+  });
+
+  it('cold reopen ob6 title uses the stored book name, not the product name (#80)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const backend = await import('./backend');
+    vi.mocked(backend.listManuscripts).mockResolvedValueOnce([
+      { id: 'm1', title: 'Harbor Light', createdAt: '2026-01-01', numberingStyle: 'arabic' },
+    ]);
+    let finish!: (v: ReturnType<typeof storedFixture>) => void;
+    const pending = new Promise<ReturnType<typeof storedFixture>>((resolve) => {
+      finish = resolve;
+    });
+    vi.mocked(backend.openLatestManuscript).mockImplementationOnce(() => pending);
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(150);
+    expect(w.text()).toContain('Harbor Light');
+    expect(w.text()).not.toContain(`Opening “${PRODUCT_NAME}”`);
+    finish(storedFixture());
+    await flushPromises();
+    w.unmount();
+    vi.useRealTimers();
+  });
+
   it('renders in browser mode without the desktop backend, with no sample outline', async () => {
     const backend = await import('./backend');
     vi.mocked(backend.getAppInfo).mockResolvedValueOnce(null);
@@ -2387,7 +2439,7 @@ describe('title bar book menu (#104)', () => {
       ...stored,
       manuscript: { ...stored.manuscript, id: 'other-book', title: 'Other' },
     };
-    vi.mocked(backend.listManuscripts).mockResolvedValueOnce([
+    vi.mocked(backend.listManuscripts).mockResolvedValue([
       {
         id: other.manuscript.id,
         title: other.manuscript.title,
