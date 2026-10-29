@@ -2283,6 +2283,35 @@ describe('title bar book menu (#104)', () => {
     w.unmount();
   });
 
+  it('Recent submenu toggles without closing the book menu; picking a book closes it (#104)', async () => {
+    const backend = await import('./backend');
+    const stored = storedFixture();
+    const other = {
+      ...stored,
+      manuscript: { ...stored.manuscript, id: 'other-book', title: 'Other' },
+    };
+    vi.mocked(backend.listManuscripts).mockResolvedValueOnce([
+      {
+        id: other.manuscript.id,
+        title: other.manuscript.title,
+        createdAt: '',
+        numberingStyle: 'chapter_arabic',
+      },
+    ]);
+    vi.mocked(backend.loadManuscript).mockResolvedValueOnce(other);
+    const { w } = await withManuscript();
+    const menu = w.get('[data-test="app-menu"]');
+    await w.get('[data-test="app-menu-trigger"]').trigger('click');
+    await settle();
+    await w.get('[data-test="app-menu-recent"]').trigger('click');
+    await settle();
+    expect(menu.attributes('open')).toBeDefined();
+    await w.get(`[data-test="app-menu-recent-${other.manuscript.id}"]`).trigger('click');
+    await settle();
+    expect(menu.attributes('open')).toBeUndefined();
+    w.unmount();
+  });
+
   it('keeps the title bar draggable except the menu trigger (Windows)', () => {
     const css = styles();
     expect(css).toMatch(/\.topbar\s*\{[^}]*-webkit-app-region:\s*drag/);

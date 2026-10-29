@@ -229,6 +229,11 @@ async function refreshRecentBooks() {
     recentBooks.value = [];
   }
 }
+const appMenu = ref<HTMLDetailsElement | null>(null);
+function closeBookMenu() {
+  appMenu.value?.removeAttribute('open');
+  recentOpen.value = false;
+}
 function onAppMenuToggle(e: Event) {
   const open = (e.target as HTMLDetailsElement).open;
   if (open) void refreshRecentBooks();
@@ -238,24 +243,31 @@ function openBookPicker() {
   if (session.value) choosingBook.value = true;
   else void getStarted();
 }
+let openingRecent = false;
 async function openRecentBook(id: string) {
-  if (session.value?.id === id) return;
+  if (openingRecent || session.value?.id === id) return;
+  openingRecent = true;
   try {
-    await session.value?.flush();
-  } catch (e) {
-    console.error('Flush before open failed', e);
-    openError.value = `Couldn't switch books: ${errorLine(e, 'save')}`;
-    return;
+    try {
+      await session.value?.flush();
+    } catch (e) {
+      console.error('Flush before open failed', e);
+      openError.value = `Couldn't switch books: ${errorLine(e, 'save')}`;
+      return;
+    }
+    openError.value = '';
+    const stored = await loadManuscript(id);
+    if (!stored) {
+      openError.value = "That book couldn't be opened. Please try again.";
+      return;
+    }
+    const next = openStored(stored, null, persistHooks);
+    open(next);
+    showOpenToast(next);
+    closeBookMenu();
+  } finally {
+    openingRecent = false;
   }
-  openError.value = '';
-  const stored = await loadManuscript(id);
-  if (!stored) {
-    openError.value = "That book couldn't be opened. Please try again.";
-    return;
-  }
-  const next = openStored(stored, null, persistHooks);
-  open(next);
-  showOpenToast(next);
 }
 async function quitApp() {
   if (!isTauri()) return;
@@ -280,7 +292,7 @@ const chooseFile = () => fileInput.value?.click();
 
 /** Book-menu shortcuts wired in this build (#104 Designer). */
 const appMenuShortcuts = computed(() => ({
-  new: 'Ctrl+N',
+  new: importing.value ? undefined : 'Ctrl+N',
   open: 'Ctrl+O',
   settings: 'Ctrl+,',
   quit: isTauri() ? 'Ctrl+Q' : undefined,
@@ -290,6 +302,7 @@ const menuField = (t: EventTarget | null) =>
   t instanceof HTMLElement && !!t.closest('input, textarea, select, [contenteditable=true]');
 
 function onAppMenuKey(e: KeyboardEvent) {
+  if (preview.value) return;
   if (menuField(e.target)) return;
   const mod = e.ctrlKey || e.metaKey;
   if (!mod || e.shiftKey || e.altKey) return;
@@ -649,7 +662,7 @@ defineExpose({ open, closeSession });
   <ShellsPreview v-if="preview" class="shell" :initial="preview" @close="preview = null" />
   <main v-else class="shell">
     <header v-show="!focusMode" class="topbar">
-      <details class="topbar__menu" data-test="app-menu" @toggle="onAppMenuToggle">
+      <details ref="appMenu" class="topbar__menu" data-test="app-menu" @toggle="onAppMenuToggle">
         <summary
           class="topbar__trigger"
           data-test="app-menu-trigger"
@@ -660,30 +673,37 @@ defineExpose({ open, closeSession });
           <AppIcon name="menu" class="topbar__hamburger" />
           <AppLogo :size="24" />
         </summary>
-        <div
-          class="topbar__menu-list sh-menu"
-          role="menu"
-          @click="($event.currentTarget as HTMLElement).closest('details')?.removeAttribute('open')"
-        >
+        <div class="topbar__menu-list sh-menu" role="menu">
           <button
             type="button"
             class="sh-mi"
             role="menuitem"
             data-test="app-menu-new"
             :aria-disabled="importing ? 'true' : undefined"
-            @click="!importing && chooseFile()"
+            @click="
+              () => {
+                if (importing) return;
+                chooseFile();
+                closeBookMenu();
+              }
+            "
           >
             <span class="sh-mi-lead" aria-hidden="true"
               ><AppIcon name="plus" class="app-menu-icon"
             /></span>
-            New<span class="sh-k">{{ appMenuShortcuts.new }}</span>
+            New<span v-if="appMenuShortcuts.new" class="sh-k">{{ appMenuShortcuts.new }}</span>
           </button>
           <button
             type="button"
             class="sh-mi topbar__open"
             role="menuitem"
             data-test="app-menu-open"
-            @click="openBookPicker"
+            @click="
+              () => {
+                openBookPicker();
+                closeBookMenu();
+              }
+            "
           >
             <span class="sh-mi-lead" aria-hidden="true"
               ><AppIcon name="folder" class="app-menu-icon"
@@ -703,7 +723,7 @@ defineExpose({ open, closeSession });
               :aria-expanded="recentOpen"
               data-test="app-menu-recent"
               :aria-disabled="!recentBooks.length ? 'true' : undefined"
-              @click="recentBooks.length && (recentOpen = !recentOpen)"
+              @click.stop="recentBooks.length && (recentOpen = !recentOpen)"
             >
               <span class="sh-mi-lead" aria-hidden="true"
                 ><AppIcon name="clock" class="app-menu-icon"
@@ -738,7 +758,12 @@ defineExpose({ open, closeSession });
             role="menuitem"
             data-test="settings-open"
             :aria-expanded="settingsOpen"
-            @click="settingsOpen = !settingsOpen"
+            @click="
+              () => {
+                settingsOpen = !settingsOpen;
+                closeBookMenu();
+              }
+            "
           >
             <span class="sh-mi-lead" aria-hidden="true"
               ><AppIcon name="settings" class="app-menu-icon"
@@ -751,7 +776,12 @@ defineExpose({ open, closeSession });
             class="sh-mi"
             role="menuitem"
             data-test="app-menu-quit"
-            @click="quitApp"
+            @click="
+              () => {
+                void quitApp();
+                closeBookMenu();
+              }
+            "
           >
             <span class="sh-mi-lead" aria-hidden="true"
               ><AppIcon name="power" class="app-menu-icon"
