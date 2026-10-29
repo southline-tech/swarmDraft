@@ -30,6 +30,19 @@ const settle = async () => {
   await flushPromises();
   await flushPromises();
 };
+function ctxEl(testId: string) {
+  const el = document.body.querySelector(`[data-test="${testId}"]`);
+  expect(el, testId).toBeTruthy();
+  return el as HTMLElement;
+}
+async function openCtx(w: W, id: string) {
+  await w.find(`[data-test="section-${id}"]`).trigger('contextmenu', { clientX: 80, clientY: 120 });
+  await settle();
+}
+async function ctxClick(_w: W, testId: string) {
+  ctxEl(testId).click();
+  await settle();
+}
 
 describe('SectionNav', () => {
   it('lists parts and chapters nested in order', () => {
@@ -42,15 +55,15 @@ describe('SectionNav', () => {
       'About the author',
     ]);
     expect(w.find('[data-test="add-scene"]').exists()).toBe(false);
+    expect(w.find('[data-test="move-up"]').exists()).toBe(false);
+    expect(w.find('[data-test="new-chapter"]').exists()).toBe(false);
     w.unmount();
   });
 
-  it('selects, adds a chapter and renames it', async () => {
-    const w = setup({ selectedId: 'part-1' });
-    await w.find('[data-test="new-chapter"]').trigger('click');
-    await settle();
-    const added = w.props('sections').find((s) => s.title === 'New chapter')!;
-    expect(added).toMatchObject({ kind: 'chapter', parentId: 'part-1' });
+  it('renames from the context menu', async () => {
+    const w = setup({ selectedId: 'ch-1' });
+    await openCtx(w, 'ch-1');
+    await ctxClick(w, 'outline-ctx-rename');
     const input = w.find('[data-test="rename-input"]');
     await input.setValue('Harbor\u0007 at   dusk');
     await input.trigger('keydown', { key: 'Enter' });
@@ -59,21 +72,43 @@ describe('SectionNav', () => {
     w.unmount();
   });
 
-  it('a row click and arrow moves ask to focus the editor; New chapter does not', async () => {
+  it('a row click and arrow moves ask to focus the editor', async () => {
     const w = setup();
     await w.find('[data-test="section-ch-1"]').trigger('click');
     expect(w.emitted('activate')).toEqual([['ch-1']]);
     await w.find('[data-test="section-ch-1"]').trigger('keydown', { key: 'ArrowDown' });
     expect(w.emitted('activate')).toEqual([['ch-1'], ['ch-2']]);
-    await w.find('[data-test="new-chapter"]').trigger('click');
-    await settle();
-    expect(w.emitted('activate')).toHaveLength(2);
     w.unmount();
   });
 
-  it('reorders with the arrow buttons', async () => {
+  it('Edit in the context menu activates the section', async () => {
+    const w = setup({ selectedId: 'ch-1' });
+    await openCtx(w, 'ch-1');
+    await ctxClick(w, 'outline-ctx-edit');
+    expect(w.emitted('activate')).toEqual([['ch-1']]);
+    w.unmount();
+  });
+
+  it('opens the context menu with Shift+F10 and the Menu key', async () => {
+    const w = setup({ selectedId: 'ch-1' });
+    const row = w.find('[data-test="section-ch-1"]');
+    await row.trigger('keydown', { key: 'F10', shiftKey: true });
+    await settle();
+    expect(document.body.querySelector('[data-test="outline-context-menu"]')).toBeTruthy();
+    ctxEl('outline-context-menu').dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+    );
+    await settle();
+    await row.trigger('keydown', { key: 'ContextMenu' });
+    await settle();
+    expect(document.body.querySelector('[data-test="outline-context-menu"]')).toBeTruthy();
+    w.unmount();
+  });
+
+  it('reorders from the context menu', async () => {
     const w = setup({ selectedId: 'ch-2' });
-    await w.find('[data-test="move-up"]').trigger('click');
+    await openCtx(w, 'ch-2');
+    await ctxClick(w, 'outline-ctx-move-up');
     await settle();
     expect(titles(w).slice(2, 4)).toEqual(['After the bell', 'Harbor dawn']);
     w.unmount();
@@ -98,7 +133,7 @@ describe('SectionNav', () => {
     w.unmount();
   });
 
-  it('moves into another parent without dragging', async () => {
+  it('moves into another part from the context menu', async () => {
     let s = sampleOutline();
     s = [
       ...s,
@@ -110,7 +145,9 @@ describe('SectionNav', () => {
       },
     ];
     const w = setup({ sections: s, selectedId: 'ch-1' });
-    await w.find('[data-test="move-to"]').setValue('part-2');
+    await openCtx(w, 'ch-1');
+    await ctxClick(w, 'outline-ctx-move-to-part');
+    await ctxClick(w, 'outline-ctx-part-part-2');
     await settle();
     expect(w.props('sections').find((x) => x.id === 'ch-1')!.parentId).toBe('part-2');
     w.unmount();
@@ -143,8 +180,8 @@ describe('SectionNav', () => {
 
   it('opens the delete dialog with Cancel first and focused; Escape closes it', async () => {
     const w = setup({ selectedId: 'ch-1' });
-    await w.find('[data-test="delete"]').trigger('click');
-    await settle();
+    await openCtx(w, 'ch-1');
+    await ctxClick(w, 'outline-ctx-delete');
     const buttons = w.findAll('[data-test="confirm-delete"] button');
     expect(buttons[0]!.attributes('data-test')).toBe('confirm-delete-cancel');
     expect(document.activeElement).toBe(buttons[0]!.element);
@@ -157,7 +194,8 @@ describe('SectionNav', () => {
 
   it('asks before deleting and applies the child rule', async () => {
     const w = setup({ selectedId: 'part-1' });
-    await w.find('[data-test="delete"]').trigger('click');
+    await openCtx(w, 'part-1');
+    await ctxClick(w, 'outline-ctx-delete');
     const dialog = w.find('[data-test="confirm-delete"]');
     expect(dialog.text()).toContain('2 section(s) inside it');
     await w.find('[data-test="confirm-delete-promote"]').trigger('click');
@@ -165,16 +203,29 @@ describe('SectionNav', () => {
     expect(titles(w)).toEqual(['Title page', 'Harbor dawn', 'After the bell', 'About the author']);
 
     await w.setProps({ selectedId: 'ch-1' });
-    await w.find('[data-test="delete"]').trigger('click');
+    await openCtx(w, 'ch-1');
+    await ctxClick(w, 'outline-ctx-delete');
     await w.find('[data-test="confirm-delete-all"]').trigger('click');
     await settle();
     expect(titles(w)).not.toContain('Harbor dawn');
     w.unmount();
   });
 
+  it('deletes with the Delete key after confirmation', async () => {
+    const w = setup({ selectedId: 'ch-2' });
+    await w.find('[data-test="section-ch-2"]').trigger('keydown', { key: 'Delete' });
+    await settle();
+    expect(w.find('[data-test="confirm-delete"]').exists()).toBe(true);
+    await w.find('[data-test="confirm-delete-all"]').trigger('click');
+    await settle();
+    expect(titles(w)).not.toContain('After the bell');
+    w.unmount();
+  });
+
   it('moves the selection off a just-deleted section', async () => {
     const w = setup({ selectedId: 'ch-2' });
-    await w.find('[data-test="delete"]').trigger('click');
+    await openCtx(w, 'ch-2');
+    await ctxClick(w, 'outline-ctx-delete');
     await w.find('[data-test="confirm-delete-all"]').trigger('click');
     await settle();
     expect(w.props('selectedId')).toBe('ch-1');
@@ -187,7 +238,8 @@ describe('SectionNav', () => {
       save: () => Promise.reject(new Error('disk full')),
     });
     const before = w.props('sections');
-    await w.find('[data-test="move-up"]').trigger('click');
+    await openCtx(w, 'ch-2');
+    await ctxClick(w, 'outline-ctx-move-up');
     await settle();
     expect(w.props('sections')).toBe(before);
     expect(w.find('[data-test="save-error"]').text()).toContain('Not saved');
@@ -200,22 +252,12 @@ describe('SectionNav', () => {
       selectedId: 'ch-2',
       save: () => Promise.reject(new Error('SQLITE_IOERR at C:\\secret\\coauthor.db')),
     });
-    await w.find('[data-test="move-up"]').trigger('click');
+    await openCtx(w, 'ch-2');
+    await ctxClick(w, 'outline-ctx-move-up');
     await settle();
     const msg = w.find('[data-test="save-error"]').text();
     expect(msg).not.toMatch(/SQLITE|secret/);
     log.mockRestore();
-    w.unmount();
-  });
-
-  it('adds a chapter from the New chapter row (#52)', async () => {
-    const saved = vi.fn(async (s: Section[]) => s);
-    const w = setup({ selectedId: 'ch-1', save: saved });
-    const before = w.props('sections').length;
-    await w.find('[data-test="new-chapter"]').trigger('click');
-    await settle();
-    expect(saved).toHaveBeenCalled();
-    expect(w.props('sections').length).toBe(before + 1);
     w.unmount();
   });
 

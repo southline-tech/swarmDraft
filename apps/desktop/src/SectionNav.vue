@@ -1,21 +1,20 @@
 <script setup lang="ts">
-import AppIcon from './icons/AppIcon.vue';
 /**
  * Parts / chapters navigation (RAD-214). Shows the outline as an indented tree; select a
- * section to open it, add sections, rename (double-click, F2 or Rename), reorder (arrow buttons,
- * Alt+↑/↓ or drag), move into another part/chapter (Move to… or drag) and delete (with a
- * confirmation that says what happens to the sections inside).
+ * section to open it, rename (double-click or F2), reorder (Alt+↑/↓ or drag), move into another
+ * part (context menu or drag) and delete (with confirmation). Row actions live in the context menu
+ * (#108); keyboard: Shift+F10 / Menu, F2, Delete.
  *
  * Every change is one all-or-nothing edit: it is validated, handed to `save` (if given), and only
  * emitted once saving succeeded. A stored outline that needed repair on load is flagged.
  */
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import './shells/shells.css';
 import type { NumberingStyle, Section, SectionKind } from '@coauthor/schema';
 import { NUMBERING_STYLE_LABELS, NUMBERING_STYLES } from './numbering-style-labels';
 import { formatCount } from './status/wordcount';
 import { errorLine } from './errors/map-error';
 import {
-  addSection,
   applyOutlineEdit,
   buildOutline,
   canNest,
@@ -55,8 +54,6 @@ const KIND_LABELS: Record<SectionKind, string> = {
   chapter: 'Chapter',
   back_matter: 'Back matter',
 };
-const ADD_KINDS: SectionKind[] = ['part', 'chapter', 'front_matter', 'back_matter'];
-
 const loadIssues = computed(() => normalizeOutline(props.sections).issues);
 const list = computed(() => normalizeOutline(props.sections).sections);
 
@@ -77,7 +74,6 @@ const rows = computed<Row[]>(() => {
 });
 
 const byId = (id?: string) => list.value.find((s) => s.id === id);
-const selected = computed(() => byId(props.selectedId));
 
 const saveError = ref<string>();
 const busy = ref(false);
@@ -103,39 +99,6 @@ async function commit(edit: (s: Section[]) => Section[]): Promise<Section[] | un
   saveError.value = undefined;
   emit('update:sections', result.sections);
   return result.sections;
-}
-
-/** Where a new section of `kind` goes, given the selection; undefined if nowhere sensible. */
-function parentFor(kind: SectionKind): { parentId?: string } | undefined {
-  if (kind === 'chapter' || !canNest(kind, undefined)) {
-    for (
-      let s = selected.value, seen = 0;
-      s && seen < list.value.length;
-      s = byId(s.parentId), seen++
-    )
-      if (canNest(kind, s.kind)) return { parentId: s.id };
-    return canNest(kind, undefined) ? {} : undefined;
-  }
-  return {};
-}
-
-async function add(kind: SectionKind) {
-  const where = parentFor(kind);
-  if (!where) return;
-  const before = new Set(list.value.map((s) => s.id));
-  const next = await commit((s) =>
-    addSection(s, {
-      manuscriptId: props.manuscriptId,
-      kind,
-      title: `New ${KIND_LABELS[kind].toLowerCase()}`,
-      ...where,
-    }),
-  );
-  const created = next?.find((s) => !before.has(s.id));
-  if (created) {
-    select(created.id);
-    startRename(created.id, created.title);
-  }
 }
 
 const editingId = ref<string>();
@@ -168,15 +131,90 @@ async function move(delta: -1 | 1, id = props.selectedId) {
   }
 }
 
-const TOP = '__top__';
-const parentChoices = computed(() =>
-  selected.value ? validParents(list.value, selected.value.id) : [],
-);
-async function moveTo(value: string) {
-  const s = selected.value;
-  if (!s || value === '') return;
-  await commit((x) => dropSection(x, s.id, value === TOP ? {} : { parentId: value }));
-  focusRow(s.id);
+function sectionIdOrder(sections: Section[]) {
+  return sections.map((s) => s.id).join('\0');
+}
+function canMove(id: string, delta: -1 | 1) {
+  return sectionIdOrder(moveSection(list.value, id, delta)) !== sectionIdOrder(list.value);
+}
+
+const menuFor = ref<string>();
+const menuAt = ref<{ x: number; y: number }>();
+const menuRoot = ref<HTMLElement>();
+const moveSubOpen = ref(false);
+const partChoices = computed(() => {
+  const id = menuFor.value;
+  if (!id) return [] as Section[];
+  return validParents(list.value, id).filter((p): p is Section => !!p && p.kind === 'part');
+});
+
+function closeMenu() {
+  const id = menuFor.value;
+  menuFor.value = undefined;
+  menuAt.value = undefined;
+  moveSubOpen.value = false;
+  if (id) focusRow(id);
+}
+function menuAnchorForRow(id: string) {
+  const el = document.querySelector(
+    `[data-test="section-${CSS.escape(id)}"]`,
+  ) as HTMLElement | null;
+  const r = el?.getBoundingClientRect();
+  return { x: r?.left ?? 0, y: (r?.bottom ?? 0) + 4 };
+}
+function openMenu(id: string, anchor: { x: number; y: number }) {
+  select(id);
+  menuFor.value = id;
+  menuAt.value = anchor;
+  moveSubOpen.value = false;
+  void nextTick(() => menuRoot.value?.querySelector<HTMLElement>('[role=menuitem]')?.focus());
+}
+function onRowContextMenu(e: MouseEvent, id: string) {
+  e.preventDefault();
+  openMenu(id, { x: e.clientX, y: e.clientY });
+}
+function onPointerDownCapture(e: MouseEvent) {
+  if (!menuFor.value) return;
+  if (menuRoot.value?.contains(e.target as Node)) return;
+  closeMenu();
+}
+onMounted(() => document.addEventListener('mousedown', onPointerDownCapture, true));
+onUnmounted(() => document.removeEventListener('mousedown', onPointerDownCapture, true));
+
+function onMenuKey(e: KeyboardEvent) {
+  const items = [...(menuRoot.value?.querySelectorAll<HTMLElement>('[role=menuitem]') ?? [])];
+  const i = items.indexOf(document.activeElement as HTMLElement);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    closeMenu();
+  }
+}
+function menuEdit(id: string) {
+  menuFor.value = undefined;
+  menuAt.value = undefined;
+  moveSubOpen.value = false;
+  activate(id);
+}
+function menuRename(id: string) {
+  closeMenu();
+  startRename(id, byId(id)?.title ?? '');
+}
+async function menuMove(delta: -1 | 1, id: string) {
+  closeMenu();
+  await move(delta, id);
+}
+async function menuMoveToPart(id: string, partId: string) {
+  closeMenu();
+  await commit((x) => dropSection(x, id, { parentId: partId }));
+  focusRow(id);
+}
+function menuDelete(id: string) {
+  closeMenu();
+  confirmingDelete.value = id;
 }
 
 const confirmingDelete = ref<string>();
@@ -236,6 +274,11 @@ function focusRow(id: string) {
 }
 function onKey(e: KeyboardEvent, row: Row) {
   if (editingId.value) return;
+  if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+    e.preventDefault();
+    openMenu(row.section.id, menuAnchorForRow(row.section.id));
+    return;
+  }
   const ids = (isFront(row) ? rows : visibleRows).value.map((r) => r.section.id);
   const i = ids.indexOf(row.section.id);
   const go = (j: number) => {
@@ -317,6 +360,7 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
         @dragover.prevent
         @drop.prevent="onDrop(row.section)"
         @click="activate(row.section.id)"
+        @contextmenu="onRowContextMenu($event, row.section.id)"
         @dblclick="startRename(row.section.id, row.section.title)"
         @keydown="onKey($event, row)"
       >
@@ -340,16 +384,6 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
         >
       </li>
     </ul>
-    <button
-      type="button"
-      class="new-chapter"
-      data-test="new-chapter"
-      :disabled="busy || parentFor('chapter') === undefined"
-      title="Add a chapter"
-      @click="add('chapter')"
-    >
-      <span aria-hidden="true">+</span> New chapter
-    </button>
     <label v-if="numberingStyle" class="numbering-style" data-test="outline-numbering-style">
       <span class="numbering-style__label">Number display</span>
       <select
@@ -365,75 +399,116 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
         </option>
       </select>
     </label>
-    <details class="add-more">
-      <summary data-test="add-more">More sections…</summary>
-      <div class="actions" role="toolbar" aria-label="Add section">
+    <Teleport to="body">
+      <div
+        v-if="menuFor && menuAt"
+        ref="menuRoot"
+        class="sh-menu"
+        role="menu"
+        aria-label="Section actions"
+        data-test="outline-context-menu"
+        :style="{ left: `${menuAt.x}px`, top: `${menuAt.y}px` }"
+        @keydown="onMenuKey"
+        @contextmenu.prevent
+      >
         <button
-          v-for="kind in ADD_KINDS"
-          :key="kind"
           type="button"
-          :data-test="`add-${kind}`"
-          :disabled="busy || !parentFor(kind)"
-          @click="add(kind)"
+          role="menuitem"
+          tabindex="-1"
+          class="sh-mi"
+          data-test="outline-ctx-edit"
+          @click="menuEdit(menuFor)"
         >
-          <AppIcon name="plus" />
-          {{ KIND_LABELS[kind] }}
+          Edit
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          tabindex="-1"
+          class="sh-mi"
+          data-test="outline-ctx-rename"
+          :disabled="busy"
+          @click="menuRename(menuFor)"
+        >
+          Rename<span class="sh-k">F2</span>
+        </button>
+        <div class="sh-sep" role="separator" />
+        <button
+          type="button"
+          role="menuitem"
+          tabindex="-1"
+          class="sh-mi"
+          data-test="outline-ctx-move-up"
+          :disabled="busy || !canMove(menuFor, -1)"
+          @click="menuMove(-1, menuFor)"
+        >
+          Move up
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          tabindex="-1"
+          class="sh-mi"
+          data-test="outline-ctx-move-down"
+          :disabled="busy || !canMove(menuFor, 1)"
+          @click="menuMove(1, menuFor)"
+        >
+          Move down
+        </button>
+        <div
+          class="move-to-part"
+          @mouseenter="moveSubOpen = true"
+          @mouseleave="moveSubOpen = false"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            tabindex="-1"
+            class="sh-mi"
+            :class="{ 'sh-open': moveSubOpen }"
+            aria-haspopup="menu"
+            :aria-expanded="moveSubOpen"
+            data-test="outline-ctx-move-to-part"
+            :disabled="busy || !partChoices.length"
+            @click="moveSubOpen = !moveSubOpen"
+            @keydown.right.prevent="moveSubOpen = true"
+          >
+            Move to Part…<span class="sh-k">›</span>
+          </button>
+          <div
+            v-if="moveSubOpen && partChoices.length"
+            class="sh-menu sh-sub"
+            role="menu"
+            aria-label="Move to part"
+          >
+            <button
+              v-for="p in partChoices"
+              :key="p.id"
+              type="button"
+              role="menuitem"
+              tabindex="-1"
+              class="sh-mi"
+              :data-test="`outline-ctx-part-${p.id}`"
+              @click="menuMoveToPart(menuFor, p.id)"
+            >
+              {{ p.title || 'Untitled' }}
+            </button>
+          </div>
+        </div>
+        <div class="sh-sep" role="separator" />
+        <button
+          type="button"
+          role="menuitem"
+          tabindex="-1"
+          class="sh-mi"
+          data-test="outline-ctx-delete"
+          :disabled="busy"
+          @click="menuDelete(menuFor)"
+        >
+          Delete
         </button>
       </div>
-    </details>
-    <div v-if="selected" class="actions" role="toolbar" aria-label="Selected section">
-      <button
-        type="button"
-        class="icon-btn"
-        data-test="move-up"
-        aria-label="Move up"
-        title="Move up"
-        :disabled="busy"
-        @click="move(-1)"
-      >
-        <AppIcon name="arrow-up" />
-      </button>
-      <button
-        type="button"
-        class="icon-btn"
-        data-test="move-down"
-        aria-label="Move down"
-        title="Move down"
-        :disabled="busy"
-        @click="move(1)"
-      >
-        <AppIcon name="arrow-down" />
-      </button>
-      <button
-        type="button"
-        data-test="rename"
-        :disabled="busy"
-        @click="startRename(selected.id, selected.title)"
-      >
-        Rename
-      </button>
-      <label>
-        Move to
-        <select
-          data-test="move-to"
-          :disabled="busy"
-          @change="moveTo(($event.target as HTMLSelectElement).value)"
-        >
-          <option value="">…</option>
-          <option v-for="p in parentChoices" :key="p?.id ?? TOP" :value="p?.id ?? TOP">
-            {{ p ? `${KIND_LABELS[p.kind]}: ${p.title || 'Untitled'}` : 'Top level' }}
-          </option>
-        </select>
-      </label>
-      <button
-        type="button"
-        data-test="delete"
-        :disabled="busy"
-        @click="confirmingDelete = selected.id"
-      >
-        Delete
-      </button>
-    </div>
+    </Teleport>
     <div
       v-if="deleteInfo"
       ref="deleteDialog"
@@ -483,11 +558,8 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
 </template>
 
 <style scoped>
-.icon-btn,
-.actions button {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--ct-space-1);
+.move-to-part {
+  position: relative;
 }
 .confirm .danger {
   background: var(--ct-danger);
@@ -522,23 +594,6 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
   font-size: var(--ct-text-xs);
   color: var(--ct-text-muted);
   font-variant-numeric: tabular-nums;
-}
-.new-chapter {
-  display: flex;
-  gap: var(--ct-space-2);
-  align-items: center;
-  width: 100%;
-  padding: var(--ct-space-1) var(--ct-space-2);
-  border: 0;
-  background: transparent;
-  color: var(--ct-text-muted);
-  font: inherit;
-  font-size: var(--ct-text-sm);
-  cursor: pointer;
-}
-.new-chapter:disabled {
-  cursor: default;
-  opacity: 0.5;
 }
 .row:focus-visible {
   outline: var(--ct-focus-outline);
@@ -580,21 +635,6 @@ const focusId = computed(() => props.selectedId ?? rows.value[0]?.section.id);
   border: 1px solid var(--ct-border);
   border-radius: var(--ct-radius-md);
   padding: var(--ct-space-1) var(--ct-space-2);
-}
-.add-more summary {
-  color: var(--ct-text-muted);
-  font-size: var(--ct-text-sm);
-  cursor: pointer;
-}
-.kind {
-  font-size: var(--ct-text-xs);
-  color: var(--ct-text-muted);
-  min-width: 5.5rem;
-}
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
 }
 .warn {
   color: var(--ct-warning);

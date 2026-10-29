@@ -23,6 +23,22 @@ const settle = async () => {
   await flushPromises();
 };
 
+function outlineCtx(testId: string) {
+  const el = document.body.querySelector(`[data-test="${testId}"]`);
+  if (!el) throw new Error(`Missing outline menu control: ${testId}`);
+  return el as HTMLElement;
+}
+async function clickOutlineCtx(testId: string) {
+  outlineCtx(testId).click();
+  await settle();
+}
+async function openOutlineCtx(w: ReturnType<typeof mount>, sectionId: string) {
+  await w
+    .find(`[data-test="section-${sectionId}"]`)
+    .trigger('contextmenu', { clientX: 40, clientY: 40 });
+  await settle();
+}
+
 function leadEditor(w: ReturnType<typeof mount>) {
   return w.find('[data-test="lead-editor"]').findComponent({ name: 'ManuscriptEditor' });
 }
@@ -265,8 +281,8 @@ describe('App', () => {
     w.unmount();
   });
 
-  it.each(['part', 'chapter', 'front_matter', 'back_matter'] as const)(
-    'a new %s from the navigator opens editable and takes typing (#42)',
+  it.skip.each(['part', 'chapter', 'front_matter', 'back_matter'] as const)(
+    'a new %s from the navigator opens editable and takes typing (#42; add UI deferred #108)',
     async (kind) => {
       const { w, session } = await withManuscript();
       const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -297,8 +313,8 @@ describe('App', () => {
     },
   );
 
-  it.each(['part', 'chapter', 'front_matter', 'back_matter'] as const)(
-    'text typed in a new %s is saved, survives a restart, and switching away and back (#42)',
+  it.skip.each(['part', 'chapter', 'front_matter', 'back_matter'] as const)(
+    'text typed in a new %s is saved, survives a restart, and switching away and back (#42; add UI deferred #108)',
     async (kind) => {
       const backend = await import('./backend');
       // A fake backend: the stored state, the last saved outline, and every saved update.
@@ -469,7 +485,8 @@ describe('App', () => {
     const { w, session, titles } = await withManuscript();
     const first = readStructure(session.manuscript).find((s) => s.kind === 'chapter')!;
     await w.find(`[data-test="section-${first.id}"]`).trigger('click');
-    await w.find('[data-test="rename"]').trigger('click');
+    await openOutlineCtx(w, first.id);
+    await clickOutlineCtx('outline-ctx-rename');
     const input = w.find('[data-test="rename-input"]');
     await input.setValue('Low Tide, Revised');
     await input.trigger('keydown', { key: 'Enter' });
@@ -484,7 +501,8 @@ describe('App', () => {
       );
     const second = chapters()[1]!;
     await w.find(`[data-test="section-${second.id}"]`).trigger('click');
-    await w.find('[data-test="move-up"]').trigger('click');
+    await openOutlineCtx(w, second.id);
+    await clickOutlineCtx('outline-ctx-move-up');
     await settle();
     expect(
       chapters()
@@ -505,7 +523,8 @@ describe('App', () => {
     const second = chapters[1]!;
     await w.find(`[data-test="section-${second.id}"]`).trigger('click');
     await settle();
-    await w.find('[data-test="delete"]').trigger('click');
+    await openOutlineCtx(w, second.id);
+    await clickOutlineCtx('outline-ctx-delete');
     await w.find('[data-test="confirm-delete-all"]').trigger('click');
     await settle();
     expect(readStructure(session.manuscript).some((s) => s.id === second.id)).toBe(false);
@@ -573,7 +592,7 @@ describe('App keyboard and placement on an imported manuscript', () => {
     w.unmount();
   });
 
-  it('adds a part before the back matter of the imported book', async () => {
+  it.skip('adds a part before the back matter of the imported book (#108 add UI deferred)', async () => {
     const { w, session } = await withManuscript();
     await w.find('[data-test="add-part"]').trigger('click');
     await settle();
@@ -583,7 +602,7 @@ describe('App keyboard and placement on an imported manuscript', () => {
     w.unmount();
   });
 
-  it('places + Part before the back matter and + Front matter after the front matter', async () => {
+  it.skip('places + Part before the back matter and + Front matter after the front matter (#108 add UI deferred)', async () => {
     const { w, session } = await withManuscript();
     const top = () => readStructure(session.manuscript).filter((s) => !s.parentId);
     await w.find('[data-test="add-part"]').trigger('click');
@@ -1776,7 +1795,7 @@ describe('home screen', () => {
 });
 
 describe('App UI shells (Part of #36)', () => {
-  it('shows the book title only in the top bar, per-section word counts, and New chapter (#52 / #107)', async () => {
+  it('shows the book title only in the top bar and per-section word counts (#107)', async () => {
     const { w, session } = await withManuscript();
     expect(w.find('[data-test="breadcrumb"]').exists()).toBe(false);
     expect(w.find('.topbar__name').text()).toBe(session.title);
@@ -1793,18 +1812,7 @@ describe('App UI shells (Part of #36)', () => {
         .find(`[data-test="section-${chapter.id}"] [data-test="word-count"]`)
         .attributes('aria-label'),
     ).toBe(`${words} words`);
-    const chaptersBefore = outline.filter((s) => s.kind === 'chapter').length;
-    await w.find('[data-test="new-chapter"]').trigger('click');
-    await settle();
-    const input = w.find('[data-test="rename-input"]');
-    expect(input.exists()).toBe(true);
-    await input.setValue('Added chapter');
-    await input.trigger('keydown.enter');
-    await settle();
-    const next = readStructure(session.manuscript);
-    expect(next.filter((s) => s.kind === 'chapter').length).toBe(chaptersBefore + 1);
-    expect(next.some((s) => s.title === 'Added chapter')).toBe(true);
-    expect(session.sections.has(next.find((s) => s.title === 'Added chapter')!.docId)).toBe(true);
+    expect(w.find('[data-test="new-chapter"]').exists()).toBe(false);
     w.unmount();
   });
 
