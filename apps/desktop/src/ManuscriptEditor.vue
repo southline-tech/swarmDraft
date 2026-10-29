@@ -71,10 +71,12 @@ import './shells/shells.css';
 import {
   collaborativeEditorOptions,
   AuthorLabels,
+  AuthorSuggestionColors,
   FindHighlight,
   collectReviewItems,
   listSuggestions,
   refreshAuthorLabels,
+  refreshSuggestionColors,
   manuscriptEditorOptions,
   type Decision,
   type DecisionRecord,
@@ -84,6 +86,7 @@ import {
   type CommentRow,
 } from '@coauthor/editor';
 import { applyReviewDecision } from './review/apply';
+import { collabColor, setWriterProfileForColors } from './author-colors';
 import { commentRowLabel, primaryCommentByThread } from './review/review-sidebar';
 import { SECTION_LOAD_ERROR_COPY } from './errors/map-error';
 import type { DocNode } from '@coauthor/schema';
@@ -176,9 +179,10 @@ const nameColorPromptOpen = shallowRef(false);
 const profileColorName = computed(
   () => SWATCHES.find((s) => s.id === writerProfile.value.color)?.name ?? 'Green',
 );
-const suggesterStyle = computed(() =>
-  tracking.value ? { '--ct-suggester': swatchVar(writerProfile.value.color) } : undefined,
-);
+watch(writerProfile, (p) => setWriterProfileForColors(p.name, p.color), {
+  deep: true,
+  immediate: true,
+});
 const trackUsingDefaultName = computed(() => writerProfile.value.name === DEFAULT_PROFILE.name);
 const trackSeedFromComputer = computed(() => Boolean(props.computerName?.trim()));
 const trackToggleBtn = useTemplateRef<HTMLButtonElement>('trackToggleBtn');
@@ -619,7 +623,11 @@ onBeforeUnmount(() => emit('load-error', ''));
 /** Retry of the opening cursor placement; cleared when the editor closes. */
 let cursorTimer: ReturnType<typeof setTimeout> | undefined;
 const options: Partial<EditorOptions> = {
-  extensions: [AuthorLabels.configure({ label: authorLabel }), FindHighlight],
+  extensions: [
+    AuthorLabels.configure({ label: authorLabel }),
+    AuthorSuggestionColors.configure({ colorFor: collabColor }),
+    FindHighlight,
+  ],
   onContentError: ({ error }) => {
     const raw = String((error as Error & { cause?: unknown }).cause ?? error.message);
     // Technical detail is for logs only; the banner shows SECTION_LOAD_ERROR_COPY (#89).
@@ -654,8 +662,17 @@ watch(editor, (e) => {
   if (e) {
     refreshReview(e);
     countChapter(e);
+    refreshSuggestionColors(e.view);
   }
 });
+watch(
+  writerProfile,
+  () => {
+    const e = editor.value;
+    if (e && !e.isDestroyed) refreshSuggestionColors(e.view);
+  },
+  { deep: true },
+);
 watch(
   [editor, () => props.readonly || !!loadError.value],
   ([e, ro]) => {
@@ -666,7 +683,10 @@ watch(
 // A renamed or removed agent relabels the marks' hover text without touching content.
 watch(agentDirectory, () => {
   const e = editor.value;
-  if (e && !e.isDestroyed) refreshAuthorLabels(e.view);
+  if (e && !e.isDestroyed) {
+    refreshAuthorLabels(e.view);
+    refreshSuggestionColors(e.view);
+  }
 });
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown, true);
@@ -809,13 +829,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
           <p v-if="chapterLabel" class="chapter-label" data-test="chapter-label" aria-hidden="true">
             {{ chapterLabel }}
           </p>
-          <EditorContent
-            :editor="editor"
-            class="page"
-            :style="suggesterStyle"
-            data-suggester
-            @contextmenu.prevent="openMenu"
-          />
+          <EditorContent :editor="editor" class="page" @contextmenu.prevent="openMenu" />
         </div>
         <!-- Margin notes (wp1): suggestion callouts beside the page, read-only. -->
         <div
@@ -1097,13 +1111,14 @@ const LABELS: Record<ReviewItem['type'], string> = {
 .smallcaps {
   font-variant: small-caps;
 }
-.tiptap ins.suggestion-insert {
+/* Paint on the decoration node: --ct-suggest-* resolve from its --ct-suggester, not the page. */
+.tiptap ins.suggestion-insert [data-suggester] {
   color: var(--ct-text);
   background: var(--ct-suggest-insert-bg);
   text-decoration: underline 2px var(--ct-suggest-insert-underline);
   text-underline-offset: 3px;
 }
-.tiptap del.suggestion-delete {
+.tiptap del.suggestion-delete [data-suggester] {
   color: var(--ct-suggest-delete-text);
   background: var(--ct-suggest-delete-bg);
   text-decoration: line-through 2px var(--ct-suggest-delete-strike);
