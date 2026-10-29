@@ -20,7 +20,7 @@ pub use tools::PARAGRAPH_STYLES;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -112,6 +112,8 @@ struct Gate {
     in_flight: Arc<Semaphore>,
     lookups: Arc<Semaphore>,
     probe: Arc<Semaphore>,
+    /// Wrong-token auth failures since startup (stable under concurrent requests).
+    unknown_failures: Arc<AtomicU32>,
     stats: Arc<GateStats>,
 }
 
@@ -123,10 +125,8 @@ impl Gate {
         bump(w, now) <= self.cfg.rate_limit
     }
 
-    fn budget_spent(&self) -> bool {
-        let f = self.failures.lock().expect("limiter poisoned");
-        f.as_ref()
-            .is_some_and(|w| current(w, Instant::now()) >= self.cfg.auth_failures_global)
+    fn unknown_budget_spent(&self) -> bool {
+        self.unknown_failures.load(Ordering::Acquire) >= self.cfg.auth_failures_global
     }
 
     /// True when this wrong-token attempt is over the global budget. Counts the attempt.
@@ -138,6 +138,7 @@ impl Gate {
             return true;
         }
         bump(w, now);
+        self.unknown_failures.fetch_add(1, Ordering::Release);
         false
     }
 }
@@ -208,7 +209,7 @@ async fn auth(State(gate): State<Gate>, mut req: Request, next: Next) -> Respons
     let known = gate.store.is_known_token_hash(&hash);
     // Once the wrong-token budget is spent, unknown tokens don't reach the database except one
     // probe at a time (so a brand-new valid token still gets in). Known tokens always do.
-    let _probe = if !known && gate.budget_spent() {
+    let _probe = if !known && gate.unknown_budget_spent() {
         match gate.probe.clone().try_acquire_owned() {
             Ok(p) => Some(p),
             Err(_) => {
@@ -322,6 +323,7 @@ pub fn router_with_stats(store: Store, cfg: McpConfig) -> (axum::Router, Arc<Gat
         in_flight,
         lookups,
         probe: Arc::new(Semaphore::new(1)),
+        unknown_failures: Arc::new(AtomicU32::new(0)),
         stats: Arc::default(),
     };
     let stats = gate.stats.clone();
