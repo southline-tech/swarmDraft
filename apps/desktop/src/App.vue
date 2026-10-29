@@ -23,6 +23,7 @@ import {
 } from './desk/outline-auto-collapse';
 import HomeScreen from './HomeScreen.vue';
 import AppLogo from './AppLogo.vue';
+import AppIcon from './icons/AppIcon.vue';
 import SaveFailureBanner from './errors/SaveFailureBanner.vue';
 import MigrationNoticeBanner from './migration/MigrationNoticeBanner.vue';
 import {
@@ -557,22 +558,27 @@ defineExpose({ open, closeSession });
   <ShellsPreview v-if="preview" class="shell" :initial="preview" @close="preview = null" />
   <main v-else class="shell">
     <header v-show="!focusMode" class="topbar">
-      <span class="topbar__brand">
-        <AppLogo :size="24" />
-        <span class="topbar__name">{{
-          session && !choosingBook ? session.title : PRODUCT_NAME
-        }}</span>
-      </span>
       <details class="topbar__menu" data-test="app-menu">
-        <summary class="topbar__icon" aria-label="Book menu" title="Book menu">⋯</summary>
+        <summary
+          class="topbar__trigger"
+          data-test="app-menu-trigger"
+          aria-label="Book menu"
+          title="Book menu"
+          aria-haspopup="menu"
+        >
+          <AppIcon name="menu" class="topbar__hamburger" />
+          <AppLogo :size="24" />
+        </summary>
         <div
           class="topbar__menu-list"
+          role="menu"
           @click="($event.currentTarget as HTMLElement).closest('details')?.removeAttribute('open')"
         >
           <button
             v-if="session && !choosingBook"
             type="button"
             class="topbar__button topbar__open"
+            role="menuitem"
             data-test="open-another"
             @click="choosingBook = true"
           >
@@ -582,6 +588,7 @@ defineExpose({ open, closeSession });
             ref="settingsButton"
             type="button"
             class="topbar__button"
+            role="menuitem"
             data-test="settings-open"
             :aria-expanded="settingsOpen"
             @click="settingsOpen = !settingsOpen"
@@ -590,6 +597,11 @@ defineExpose({ open, closeSession });
           </button>
         </div>
       </details>
+      <span class="topbar__brand">
+        <span class="topbar__name">{{
+          session && !choosingBook ? session.title : PRODUCT_NAME
+        }}</span>
+      </span>
     </header>
     <MigrationNoticeBanner :notices="migrationNotices" @dismiss="dismissMigration" />
     <SettingsScreen
@@ -808,14 +820,18 @@ body {
   display: flex;
   align-items: center;
   justify-content: flex-start;
+  gap: var(--ct-space-2);
   padding: var(--ct-space-2) var(--ct-space-4);
   border-bottom: 1px solid var(--ct-border);
   background: var(--ct-surface);
+  -webkit-app-region: drag;
 }
 .topbar__brand {
   display: flex;
   align-items: center;
   gap: var(--ct-space-2);
+  min-width: 0;
+  flex: 1;
 }
 .topbar__name {
   font-weight: var(--ct-weight-semibold);
@@ -830,26 +846,40 @@ body {
   white-space: nowrap;
 }
 .topbar__open {
-  margin-left: auto;
-  margin-right: var(--ct-space-2);
+  margin-right: 0;
 }
 .btn,
 .topbar__menu {
   position: relative;
-  margin-left: auto;
+  flex: none;
+  -webkit-app-region: no-drag;
 }
-.topbar__icon {
+.topbar__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ct-space-1);
+  box-sizing: border-box;
+  min-width: var(--ct-space-10);
+  min-height: var(--ct-space-10);
   list-style: none;
-  padding: 0 var(--ct-space-2);
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--ct-radius-sm);
+  background: transparent;
   color: var(--ct-text-muted);
   cursor: pointer;
 }
-.topbar__icon::-webkit-details-marker {
+.topbar__trigger::-webkit-details-marker {
   display: none;
+}
+.topbar__hamburger {
+  color: var(--ct-text-muted);
 }
 .topbar__menu-list {
   position: absolute;
-  right: 0;
+  left: 0;
   z-index: 20;
   display: flex;
   flex-direction: column;

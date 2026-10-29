@@ -2219,6 +2219,51 @@ describe('book-open toast (ob7)', () => {
   });
 });
 
+describe('title bar book menu (#104)', () => {
+  const styles = () => {
+    const sfc = readFileSync(resolve(__dirname, 'App.vue'), 'utf8');
+    return [...sfc.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join('\n');
+  };
+
+  it('uses one hamburger+logo trigger with aria-haspopup and a 40px hit area', async () => {
+    const css = styles();
+    expect(css).toMatch(/\.topbar__trigger[^}]*min-height:\s*var\(--ct-space-10\)/);
+    expect(css).toMatch(/\.topbar__trigger[^}]*min-width:\s*var\(--ct-space-10\)/);
+    const w = mount(App);
+    await flushPromises();
+    expect(w.findAll('[data-test="app-menu"]')).toHaveLength(1);
+    expect(w.text()).not.toContain('⋯');
+    const trigger = w.get('[data-test="app-menu-trigger"]');
+    expect(trigger.attributes('aria-haspopup')).toBe('menu');
+    const hamburger = trigger.find('svg[data-icon="menu"]');
+    const logo = trigger.find('[data-test="app-logo"]');
+    expect(hamburger.exists()).toBe(true);
+    expect(logo.exists()).toBe(true);
+    expect(
+      hamburger.element.compareDocumentPosition(logo.element) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    w.unmount();
+  });
+
+  it('opens the book menu from the shared trigger (hamburger and logo)', async () => {
+    const w = mount(App);
+    await flushPromises();
+    const menu = w.get('[data-test="app-menu"]');
+    expect(menu.attributes('open')).toBeUndefined();
+    await w.get('[data-test="app-menu-trigger"]').trigger('click');
+    await settle();
+    expect(menu.attributes('open')).toBeDefined();
+    expect(w.find('[data-test="settings-open"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('keeps the title bar draggable except the menu trigger (Windows)', () => {
+    const css = styles();
+    expect(css).toMatch(/\.topbar\s*\{[^}]*-webkit-app-region:\s*drag/);
+    expect(css).toMatch(/\.topbar__menu\s*\{[^}]*-webkit-app-region:\s*no-drag/);
+  });
+});
+
 describe('product name in App.vue', () => {
   it('never hardcodes the old product name and shows the brand constant in the topbar', async () => {
     const src = readFileSync(resolve(__dirname, 'App.vue'), 'utf8');

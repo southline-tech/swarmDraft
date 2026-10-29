@@ -1,5 +1,6 @@
 /** Path data for the shared 16px line icon set (see AppIcon.vue). */
 export const ICONS = {
+  menu: ['M3 4.5h10', 'M3 8h10', 'M3 11.5h10'],
   'arrow-up': ['M8 13V3', 'M4 7l4-4 4 4'],
   'arrow-down': ['M8 3v10', 'M4 9l4 4 4-4'],
   plus: ['M8 3v10', 'M3 8h10'],
