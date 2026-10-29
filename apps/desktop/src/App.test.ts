@@ -756,7 +756,7 @@ describe('App open-file input', () => {
     expect(w.text()).not.toContain('Could not import');
 
     await pick(w, 'broken.docx', new TextEncoder().encode('not a zip'));
-    expect(w.find('[data-test="opening-error"]').text()).toContain("This isn't a Word manuscript");
+    expect(w.text()).toContain("Couldn't open broken.docx. This isn't a Word manuscript.");
     expect(w.text()).not.toContain('zip directory');
     expect(w.findAll('.row')).toHaveLength(rows);
     w.unmount();
