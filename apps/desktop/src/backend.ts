@@ -284,3 +284,19 @@ export async function sectionReviewMeta(sectionId: string): Promise<SectionRevie
   if (!isTauri()) return { comments: [], authorSavedNames: {} };
   return invoke<SectionReviewMeta>('section_review_meta', { sectionId });
 }
+
+/** Open comment rows for Save a copy .docx export (#74). */
+export interface ManuscriptCopyComment {
+  sectionId: string;
+  threadId: string;
+  body: string;
+  authorName: string;
+  createdAt: string;
+}
+
+export async function manuscriptOpenComments(
+  manuscriptId: string,
+): Promise<ManuscriptCopyComment[]> {
+  if (!isTauri()) return [];
+  return invoke<ManuscriptCopyComment[]>('manuscript_open_comments', { manuscriptId });
+}
