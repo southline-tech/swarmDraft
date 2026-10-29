@@ -322,4 +322,13 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     expect(w.find('[data-test="find-panel"]').exists()).toBe(true);
     w.unmount();
   });
+
+  it('Ctrl+H opens Find with focus on replace', async () => {
+    const { w, pd } = await fire('h', false);
+    expect(pd).toHaveBeenCalledTimes(1);
+    expect(w.find('[data-test="find-panel"]').exists()).toBe(true);
+    await flushPromises();
+    expect(document.activeElement?.getAttribute('data-test')).toBe('replace-input');
+    w.unmount();
+  });
 });

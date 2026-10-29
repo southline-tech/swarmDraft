@@ -84,3 +84,4 @@ export function createManuscriptEditor(opts: Partial<EditorOptions> = {}): Edito
 export * from './decisions';
 export * from './comments';
 export * from './author-labels';
+export * from './find-replace';

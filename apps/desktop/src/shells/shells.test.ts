@@ -28,23 +28,84 @@ async function openContextMenu(w: ReturnType<typeof mount>) {
   await flushPromises();
 }
 
-describe('UI shells (Part of #36)', () => {
-  it('find & replace opens from the toolbar, counts matches, and replace is a no-op', async () => {
-    const { w, unchanged } = await mounted();
+describe('Find & replace (#53)', () => {
+  it('match count, navigation, replace, options, shortcuts, and themes', async () => {
+    const { w, editor } = await mounted();
+    await w.find('.manuscript-editor').trigger('keydown', { key: 'f', ctrlKey: true });
+    expect(w.find('[data-test="find-panel"]').exists()).toBe(true);
+
+    await w.find('[data-test="find-input"]').setValue('rain');
+    await flushPromises();
+    expect(w.find('[data-test="find-count"]').text()).toMatch(/1 of 1/);
+    expect(w.find('.find-match').exists()).toBe(true);
+
+    await w.find('[data-test="find-next"]').trigger('click');
+    await w.find('[data-test="find-prev"]').trigger('click');
+
+    await w.find('[data-test="replace-input"]').setValue('mist');
+    await w.find('[data-test="replace-one"]').trigger('click');
+    await flushPromises();
+    expect(editor.getText()).toContain('mist');
+    expect(editor.commands.undo()).toBe(true);
+    expect(editor.getText()).toContain('rain');
+
+    await w.find('[data-test="find-input"]').setValue('the');
+    await w.find('[data-test="replace-input"]').setValue('a');
+    await w.find('[data-test="replace-all"]').trigger('click');
+    await flushPromises();
+    const afterAll = editor.getText();
+    expect(editor.commands.undo()).toBe(true);
+    expect(editor.getText()).not.toBe(afterAll);
+
+    await w.find('[data-test="find-match-case"]').trigger('click');
+    expect(w.find('[data-test="find-match-case"]').attributes('aria-pressed')).toBe('true');
+    await w.find('[data-test="find-whole-word"]').trigger('click');
+    expect(w.find('[data-test="find-whole-word"]').attributes('aria-pressed')).toBe('true');
+
+    await w.find('[data-test="find-close"]').trigger('click');
+    expect(w.find('[data-test="find-panel"]').exists()).toBe(false);
+
+    await w.find('.manuscript-editor').trigger('keydown', { key: 'h', ctrlKey: true });
+    expect(w.find('[data-test="find-panel"]').exists()).toBe(true);
+    expect(document.activeElement?.getAttribute('data-test')).toBe('replace-input');
+
+    await w.find('[data-test="find-panel"]').trigger('keydown', { key: 'Escape' });
+    expect(w.find('[data-test="find-panel"]').exists()).toBe(false);
+
+    for (const theme of ['light', 'dark'] as const) {
+      document.documentElement.dataset.theme = theme;
+      await w.find('[data-test="tb-find"]').trigger('click');
+      expect(w.get('.sh-find').classes()).toContain('sh-find');
+      await w.find('[data-test="find-close"]').trigger('click');
+    }
+
+    w.unmount();
+  });
+
+  it('does not replace text inside suggestions', async () => {
+    const { w, editor } = await mounted();
+    const before = editor.getText();
+    await w.find('[data-test="tb-find"]').trigger('click');
+    await w.find('[data-test="find-input"]').setValue('guttered');
+    await flushPromises();
+    expect(w.find('[data-test="find-count"]').text()).toBe('No matches');
+    await w.find('[data-test="replace-all"]').trigger('click');
+    expect(editor.getText()).toBe(before);
+    w.unmount();
+  });
+
+  it('opens from the toolbar and counts matches', async () => {
+    const { w } = await mounted();
     await w.find('[data-test="tb-find"]').trigger('click');
     expect(w.find('[data-test="find-panel"]').exists()).toBe(true);
     await w.find('[data-test="find-input"]').setValue('the');
     expect(w.find('[data-test="find-count"]').text()).toMatch(/of \d+|No matches/);
-    await w.find('[data-test="replace-input"]').setValue('Synthetic');
-    await w.find('[data-test="replace-one"]').trigger('click');
-    await w.find('[data-test="replace-all"]').trigger('click');
-    await flushPromises();
-    unchanged();
     await w.find('[data-test="find-close"]').trigger('click');
-    expect(w.find('[data-test="find-panel"]').exists()).toBe(false);
     w.unmount();
   });
+});
 
+describe('UI shells (Part of #36)', () => {
   it('context menu closes on Esc and click-away without changing the doc', async () => {
     const { w, unchanged } = await mounted();
     await openContextMenu(w);

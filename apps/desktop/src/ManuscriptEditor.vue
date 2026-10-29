@@ -56,6 +56,7 @@ import './shells/shells.css';
 import {
   collaborativeEditorOptions,
   AuthorLabels,
+  FindHighlight,
   collectReviewItems,
   listSuggestions,
   refreshAuthorLabels,
@@ -142,6 +143,7 @@ const emit = defineEmits<{
 /* UI shells for the audit review (Part of #36). Local view state only: none of these change the
    manuscript, the Y.Doc, the selection or the undo history. */
 const findOpen = shallowRef(false);
+const findFocusReplace = shallowRef(false);
 const menuAt = shallowRef<{ x: number; y: number } | null>(null);
 const shortcutsOpen = shallowRef(false);
 const focusMode = shallowRef(false);
@@ -174,6 +176,11 @@ function onWindowKey(e: KeyboardEvent) {
     closeFind();
   } else if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
     e.preventDefault();
+    findFocusReplace.value = false;
+    findOpen.value = true;
+  } else if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'h') {
+    e.preventDefault();
+    findFocusReplace.value = true;
     findOpen.value = true;
   } else if (
     (mod && e.shiftKey && e.key.toLowerCase() === 'f') ||
@@ -190,6 +197,11 @@ function onShellKey(e: KeyboardEvent) {
   const mod = e.ctrlKey || e.metaKey;
   if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
     e.preventDefault();
+    findFocusReplace.value = false;
+    findOpen.value = true;
+  } else if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'h') {
+    e.preventDefault();
+    findFocusReplace.value = true;
     findOpen.value = true;
   } else if (mod && e.key === '/') {
     e.preventDefault();
@@ -208,6 +220,7 @@ function onShellKey(e: KeyboardEvent) {
 /** Close Find and put focus back in the page, so Escape and the focus-mode keys keep working. */
 function closeFind() {
   findOpen.value = false;
+  findFocusReplace.value = false;
   void nextTick(() => editor.value?.view.focus());
 }
 function openMenu(e: MouseEvent) {
@@ -537,7 +550,7 @@ onBeforeUnmount(() => emit('load-error', ''));
 /** Retry of the opening cursor placement; cleared when the editor closes. */
 let cursorTimer: ReturnType<typeof setTimeout> | undefined;
 const options: Partial<EditorOptions> = {
-  extensions: [AuthorLabels.configure({ label: authorLabel })],
+  extensions: [AuthorLabels.configure({ label: authorLabel }), FindHighlight],
   onContentError: ({ error }) => {
     const raw = String((error as Error & { cause?: unknown }).cause ?? error.message);
     // Technical detail is for logs only; the banner shows SECTION_LOAD_ERROR_COPY (#89).
@@ -692,7 +705,12 @@ const LABELS: Record<ReviewItem['type'], string> = {
         :class="{ 'desk--outline-forced': outlineForced }"
         data-test="desk"
       >
-        <FindPanel v-if="findOpen && !sliceMode" :editor="editor" @close="closeFind" />
+        <FindPanel
+          v-if="findOpen && !sliceMode"
+          :editor="editor"
+          :focus-replace="findFocusReplace"
+          @close="closeFind"
+        />
         <div
           :class="{ 'page-sheet--narrow': pageNarrow }"
           class="page-sheet box-border mx-auto mt-8 mb-8 h-fit min-h-216 flex-none bg-paper p-18 text-text shadow-2"
@@ -987,6 +1005,14 @@ const LABELS: Record<ReviewItem['type'], string> = {
 .tiptap .comment-anchor {
   background: var(--ct-comment-bg);
   color: inherit;
+}
+.tiptap .find-match {
+  background: var(--ct-selected-bg);
+  border-radius: 2px;
+}
+.tiptap .find-match--active {
+  outline: 2px solid var(--ct-accent);
+  outline-offset: -2px;
 }
 .manuscript-editor .desk:has(> .sh-margin) {
   --ct-page-notes-room: calc(var(--ct-margin-notes-w) + var(--ct-space-4));
