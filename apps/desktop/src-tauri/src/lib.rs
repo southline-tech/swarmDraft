@@ -468,6 +468,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            if let Some(icon) = app.default_window_icon().cloned() {
+                if let Some(window) = app.get_webview_window("main") {
+                    if let Err(e) = window.set_icon(icon) {
+                        eprintln!("Main window icon not set: {e}");
+                    }
+                }
+            }
             let dir = app.path().app_data_dir()?;
             // #43: copy (never move) the pre-rename data folder before anything opens it.
             // Only the roaming folder: the local one holds just the WebView2 cache.

@@ -1,13 +1,12 @@
 <script setup lang="ts">
 /**
- * The swarmDraft mark: lowercase c with caret on the accent tile. One asset serves light
- * and dark themes. 48px and up use the SVG master; below that the hinted 24px PNG
- * (48px PNG for 2x screens) keeps the c and caret crisp.
+ * swarmDraft mark: 48px+ uses the full SVG (circle accent); below 48px the small-mark
+ * 24/48 PNG pair keeps the simplified S crisp on dense screens.
  */
 import { computed } from 'vue';
-import logo from './assets/logo/coauthor-c-caret.svg';
-import logo24 from './assets/logo/coauthor-c-caret-24.png';
-import logo48 from './assets/logo/coauthor-c-caret-48.png';
+import logo from './assets/logo/swarmdraft-icon.svg';
+import logo24 from './assets/logo/swarmdraft-icon-24.png';
+import logo48 from './assets/logo/swarmdraft-icon-48.png';
 
 const props = withDefaults(defineProps<{ size?: number }>(), { size: 64 });
 const small = computed(() => props.size < 48);

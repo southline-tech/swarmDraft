@@ -2,6 +2,7 @@
 
 Run from apps/desktop/src-tauri:  python3 icons/source/generate.py
 Needs cairosvg and Pillow. 16-32 px use the simplified small mark; larger sizes use the full mark.
+Also refreshes apps/desktop/src/assets/logo PNGs and SVG copies used by AppLogo.
 """
 import io
 import struct
@@ -12,6 +13,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "icons" / "source"
+WEB = ROOT.parent / "src" / "assets" / "logo"
 FULL = (SRC / "swarmdraft-icon.svg").read_bytes()
 SMALL = (SRC / "swarmdraft-icon-small.svg").read_bytes()
 SURFACE = (255, 255, 255)   # --ct-surface
@@ -28,6 +30,11 @@ ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
 def render(px):
     svg = SMALL if px <= 32 else FULL
     png = cairosvg.svg2png(bytestring=svg, output_width=px, output_height=px)
+    return Image.open(io.BytesIO(png)).convert("RGBA")
+
+
+def render_small(px):
+    png = cairosvg.svg2png(bytestring=SMALL, output_width=px, output_height=px)
     return Image.open(io.BytesIO(png)).convert("RGBA")
 
 
@@ -77,6 +84,17 @@ def main():
     d.text((82, 168), "swarmDraft", font=ImageFont.truetype(literata, 26), fill=TEXT, anchor="mm")
     d.rectangle([0, 308, 163, 313], fill=ACCENT)
     sb.save(win / "nsis-sidebar.bmp")
+
+    WEB.mkdir(parents=True, exist_ok=True)
+    import shutil
+
+    public = ROOT.parent / "public"
+    public.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(SRC / "swarmdraft-icon.svg", WEB / "swarmdraft-icon.svg")
+    shutil.copy2(SRC / "swarmdraft-icon-small.svg", WEB / "swarmdraft-icon-small.svg")
+    shutil.copy2(SRC / "swarmdraft-icon-small.svg", public / "favicon.svg")
+    render_small(24).save(WEB / "swarmdraft-icon-24.png")
+    render_small(48).save(WEB / "swarmdraft-icon-48.png")
 
 
 if __name__ == "__main__":
