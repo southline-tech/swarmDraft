@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import type { CommentRow, CommentThread, SuggestionItem } from '@coauthor/editor';
-import { collabSlotOf, pinPrimaryAgent, resetCollabSlots } from './author-colors';
+import {
+  collabSlotOf,
+  collabColor,
+  pinPrimaryAgent,
+  resetCollabSlots,
+  setWriterProfileForColors,
+  NEUTRAL_SUGGESTER,
+} from './author-colors';
 import CommentsPanel from './comments/CommentsPanel.vue';
 import ReviewPanel from './review/ReviewPanel.vue';
 
@@ -75,6 +82,18 @@ describe('shared author colors (#72)', () => {
     names['agent:g'] = 'Something else';
     await w.setProps({ labels: (a: string) => ({ name: names[a] ?? a }) });
     expect(tok()).toBe('var(--ct-collab-2)');
+  });
+
+  it('uses a neutral token for legacy marks with no author id', () => {
+    expect(NEUTRAL_SUGGESTER).toBe('var(--ct-text-muted)');
+    expect(collabColor('')).toBe(NEUTRAL_SUGGESTER);
+    expect(collabColor('   ')).toBe(NEUTRAL_SUGGESTER);
+  });
+
+  it('uses the writer profile swatch for a person author (#57)', () => {
+    setWriterProfileForColors('Mara', 5);
+    expect(collabColor('Mara')).toBe('var(--ct-collab-5)');
+    expect(collabColor('agent:x')).toBe('var(--ct-collab-1)');
   });
 
   it('colors the same author with the same --ct-collab-N token in both panels', () => {

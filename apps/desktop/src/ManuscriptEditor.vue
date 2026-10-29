@@ -71,10 +71,12 @@ import './shells/shells.css';
 import {
   collaborativeEditorOptions,
   AuthorLabels,
+  AuthorSuggestionColors,
   FindHighlight,
   collectReviewItems,
   listSuggestions,
   refreshAuthorLabels,
+  refreshSuggestionColors,
   manuscriptEditorOptions,
   type Decision,
   type DecisionRecord,
@@ -84,6 +86,7 @@ import {
   type CommentRow,
 } from '@coauthor/editor';
 import { applyReviewDecision } from './review/apply';
+import { collabColor, setWriterProfileForColors } from './author-colors';
 import { commentRowLabel, primaryCommentByThread } from './review/review-sidebar';
 import { SECTION_LOAD_ERROR_COPY } from './errors/map-error';
 import type { DocNode } from '@coauthor/schema';
@@ -179,6 +182,10 @@ const profileColorName = computed(
 const suggesterStyle = computed(() =>
   tracking.value ? { '--ct-suggester': swatchVar(writerProfile.value.color) } : undefined,
 );
+watch(writerProfile, (p) => setWriterProfileForColors(p.name, p.color), {
+  deep: true,
+  immediate: true,
+});
 const trackUsingDefaultName = computed(() => writerProfile.value.name === DEFAULT_PROFILE.name);
 const trackSeedFromComputer = computed(() => Boolean(props.computerName?.trim()));
 const trackToggleBtn = useTemplateRef<HTMLButtonElement>('trackToggleBtn');
@@ -619,7 +626,11 @@ onBeforeUnmount(() => emit('load-error', ''));
 /** Retry of the opening cursor placement; cleared when the editor closes. */
 let cursorTimer: ReturnType<typeof setTimeout> | undefined;
 const options: Partial<EditorOptions> = {
-  extensions: [AuthorLabels.configure({ label: authorLabel }), FindHighlight],
+  extensions: [
+    AuthorLabels.configure({ label: authorLabel }),
+    AuthorSuggestionColors.configure({ colorFor: collabColor }),
+    FindHighlight,
+  ],
   onContentError: ({ error }) => {
     const raw = String((error as Error & { cause?: unknown }).cause ?? error.message);
     // Technical detail is for logs only; the banner shows SECTION_LOAD_ERROR_COPY (#89).
@@ -654,8 +665,17 @@ watch(editor, (e) => {
   if (e) {
     refreshReview(e);
     countChapter(e);
+    refreshSuggestionColors(e.view);
   }
 });
+watch(
+  writerProfile,
+  () => {
+    const e = editor.value;
+    if (e && !e.isDestroyed) refreshSuggestionColors(e.view);
+  },
+  { deep: true },
+);
 watch(
   [editor, () => props.readonly || !!loadError.value],
   ([e, ro]) => {
@@ -666,7 +686,10 @@ watch(
 // A renamed or removed agent relabels the marks' hover text without touching content.
 watch(agentDirectory, () => {
   const e = editor.value;
-  if (e && !e.isDestroyed) refreshAuthorLabels(e.view);
+  if (e && !e.isDestroyed) {
+    refreshAuthorLabels(e.view);
+    refreshSuggestionColors(e.view);
+  }
 });
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown, true);
