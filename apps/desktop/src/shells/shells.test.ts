@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
@@ -187,9 +185,13 @@ describe('ContextMenu theme (#54)', () => {
     w.unmount();
   });
 
-  it('does not apply hover styling to disabled items', () => {
-    const css = readFileSync(fileURLToPath(new URL('shells.css', import.meta.url)), 'utf8');
-    expect(css).toMatch(/\.sh-mi\[aria-disabled='true'\]/);
-    expect(css).toMatch(/:hover:not\(\[aria-disabled='true'\]\)/);
+  it('marks disabled entries with aria-disabled', () => {
+    const w = mount(ContextMenu, {
+      props: { x: 8, y: 8, disabled: new Set<ContextMenuAction>(['cut']) },
+      attachTo: document.body,
+    });
+    expect(w.get('[data-test="ctx-cut"]').attributes('aria-disabled')).toBe('true');
+    expect(w.get('[data-test="ctx-copy"]').attributes('aria-disabled')).toBeUndefined();
+    w.unmount();
   });
 });
