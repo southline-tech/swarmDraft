@@ -92,6 +92,25 @@ describe('SectionNav', () => {
     w.unmount();
   });
 
+  it('keeps the undo banner when restore save fails', async () => {
+    let saves = 0;
+    const w = setup({
+      selectedId: 'ch-2',
+      save: () => {
+        saves += 1;
+        if (saves > 1) throw new Error('save refused');
+      },
+    });
+    await openCtx(w, 'ch-2');
+    await ctxClick(w, 'outline-ctx-delete');
+    await w.find('[data-test="confirm-delete-all"]').trigger('click');
+    await settle();
+    await w.find('[data-test="outline-undo-delete-btn"]').trigger('click');
+    await settle();
+    expect(w.find('[data-test="outline-undo-delete-btn"]').exists()).toBe(true);
+    w.unmount();
+  });
+
   it('renames from the context menu', async () => {
     const w = setup({ selectedId: 'ch-1' });
     await openCtx(w, 'ch-1');

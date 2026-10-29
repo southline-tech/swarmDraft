@@ -107,6 +107,8 @@ export function openSession(
     (next) => (outline.value = normalizeOutline(next).sections),
   );
   const saver = persist ? watchSections(manuscript, sections, persist) : undefined;
+  /** Full Yjs state for docIds removed from the outline until they rejoin (outline undo). */
+  const removedDocSnapshots = new Map<string, Uint8Array>();
   const closed = shallowRef(false); // reactive, so a closed session's editor turns read-only
   const numberingStyle = shallowRef(parseNumberingStyle(readNumberingStyle(manuscript)));
   return {
@@ -140,13 +142,20 @@ export function openSession(
       // Removed sections are no longer tracked: no queued save or later keystroke can target a
       // section that storage no longer has.
       for (const d of removed) {
+        const doc = sections.get(d);
+        if (doc) removedDocSnapshots.set(d, Y.encodeStateAsUpdate(doc));
         saver?.forget(d);
         sections.delete(d);
       }
-      // New sections start with an empty doc (the backend stored one too) and are watched.
+      // New sections start empty unless this docId was removed earlier in-session (undo delete).
       for (const x of next) {
         if (sections.has(x.docId)) continue;
         const doc = markRaw(new Y.Doc());
+        const snap = removedDocSnapshots.get(x.docId);
+        if (snap) {
+          Y.applyUpdate(doc, snap, LOAD_ORIGIN);
+          removedDocSnapshots.delete(x.docId);
+        }
         sections.set(x.docId, doc);
         saver?.watch(x.docId, doc);
       }

@@ -539,6 +539,25 @@ describe('App', () => {
     w.unmount();
   });
 
+  it('undo delete restores typed section text in the same session (#108)', async () => {
+    const { w, session } = await withManuscript();
+    const chapter = readStructure(session.manuscript).find((s) => s.kind === 'chapter')!;
+    await w.find(`[data-test="section-${chapter.id}"]`).trigger('click');
+    await settle();
+    leadTiptapEditor(w).commands.insertContent('UNDO-KEEP ');
+    await settle();
+    await openOutlineCtx(w, chapter.id);
+    await clickOutlineCtx('outline-ctx-delete');
+    await w.find('[data-test="confirm-delete-all"]').trigger('click');
+    await settle();
+    await w.find('[data-test="outline-undo-delete-btn"]').trigger('click');
+    await settle();
+    await w.find(`[data-test="section-${chapter.id}"]`).trigger('click');
+    await settle();
+    expect(editorSurface(w).text()).toContain('UNDO-KEEP');
+    w.unmount();
+  });
+
   it('reflects structure changes made by another writer', async () => {
     const { w, session, titles } = await withManuscript();
     const peer = new Y.Doc();

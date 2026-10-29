@@ -169,8 +169,8 @@ const undoSections = ref<Section[] | null>(null);
 async function undoDelete() {
   const snap = undoSections.value;
   if (!snap) return;
-  undoSections.value = null;
-  await commit(() => snap.map((x) => ({ ...x })));
+  const next = await commit(() => snap.map((x) => ({ ...x })));
+  if (next) undoSections.value = null;
 }
 
 async function move(delta: -1 | 1, id = props.selectedId) {
