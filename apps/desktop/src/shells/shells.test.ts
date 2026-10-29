@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
 import { docToYDoc } from '@coauthor/docx';
+import { listSuggestions } from '@coauthor/editor';
 import ManuscriptEditor from '../ManuscriptEditor.vue';
 import ContextMenu from './ContextMenu.vue';
 import type { ContextMenuAction } from './context-menu';
@@ -255,11 +256,11 @@ describe('UI shells (Part of #36)', () => {
     w.unmount();
   });
 
-  it('track changes toggle persists and shows first-time prompt (#57)', async () => {
+  it('track changes toggle persists, prompts once, and records edits (#57, #126)', async () => {
     localStorage.removeItem(TRACKING_KEY);
     localStorage.removeItem(TRACK_PROMPT_SEEN_KEY);
     localStorage.removeItem(PROFILE_KEY);
-    const { w, unchanged } = await mounted();
+    const { w, editor, unchanged } = await mounted();
     const t = w.find('[data-test="track-changes"]');
     expect(t.attributes('aria-pressed')).toBe('false');
     await t.trigger('click');
@@ -269,10 +270,15 @@ describe('UI shells (Part of #36)', () => {
     expect(w.find('[data-test="status-tracking-as"]').exists()).toBe(true);
     expect(w.find('[data-test="name-prompt"]').exists()).toBe(true);
     expect(w.findAll('[data-test="margin-note"]').length).toBeGreaterThan(0);
+    unchanged();
     await w.get('[data-test="name-prompt-ok"]').trigger('click');
     expect(w.find('[data-test="name-prompt"]').exists()).toBe(false);
     expect(loadTracking()).toBe(true);
-    unchanged();
+    editor.view.dispatch(editor.state.tr.insertText('!', editor.state.doc.content.size - 1));
+    await flushPromises();
+    expect(listSuggestions(editor.getJSON() as never).length).toBeGreaterThan(
+      listSuggestions(SAMPLE_DOC as never).length,
+    );
     w.unmount();
   });
 });
