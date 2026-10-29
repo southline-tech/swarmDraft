@@ -202,7 +202,6 @@ describe('ContextMenu theme (#54)', () => {
     expect(document.activeElement?.getAttribute('data-test')).toBe('ctx-style-body');
     await menu.trigger('keydown', { key: 'ArrowDown' });
     expect(document.activeElement?.getAttribute('data-test')).toBe('ctx-style-heading');
-    w.get('[data-test="ctx-style-heading"]').element.focus();
     await menu.trigger('keydown', { key: 'Enter' });
     expect(w.emitted('select')).toEqual([['heading']]);
     w.unmount();
