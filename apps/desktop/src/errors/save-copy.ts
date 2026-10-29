@@ -48,27 +48,44 @@ function collectAnchorIds(node: unknown, ids: Set<string>): void {
   for (const v of Object.values(o)) collectAnchorIds(v, ids);
 }
 
-function commentsForExport(
-  rows: ManuscriptCopyComment[],
-  anchorIds: Set<string>,
-  defaultSectionId: string,
-): ImportedComment[] {
-  const out: ImportedComment[] = rows.map((r) => ({
-    id: r.threadId,
-    sectionId: r.sectionId,
-    author: r.authorName,
-    date: r.createdAt,
-    body: r.body,
-  }));
-  const threadsWithBody = new Set(rows.map((r) => r.threadId));
-  for (const id of anchorIds) {
-    if (threadsWithBody.has(id)) continue;
+/** Drop `comment_anchor` marks whose id is not in `keep` (resolved / orphan threads). */
+function stripCommentAnchors(node: unknown, keep: Set<string>): unknown {
+  if (Array.isArray(node)) return node.map((n) => stripCommentAnchors(n, keep));
+  if (!node || typeof node !== 'object') return node;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(node)) {
+    if (k === 'marks' && Array.isArray(v)) {
+      const kept = v.filter((m: { type?: string; attrs?: { id?: unknown } }) => {
+        if (m?.type !== 'comment_anchor') return true;
+        const id = String(m.attrs?.id);
+        return keep.has(id);
+      });
+      if (kept.length) out[k] = kept.map((m) => stripCommentAnchors(m, keep));
+    } else out[k] = stripCommentAnchors(v, keep);
+  }
+  return out;
+}
+
+/** One Word comment per thread (anchor id); replies are folded into the root body. */
+export function commentsForExport(rows: ManuscriptCopyComment[]): ImportedComment[] {
+  const groups = new Map<string, ManuscriptCopyComment[]>();
+  for (const r of rows) {
+    const g = groups.get(r.threadId) ?? [];
+    g.push(r);
+    groups.set(r.threadId, g);
+  }
+  const out: ImportedComment[] = [];
+  for (const [anchorId, group] of groups) {
+    group.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const parts = group.map((r) => r.body.trim()).filter(Boolean);
+    if (!parts.length) continue;
+    const first = group[0]!;
     out.push({
-      id,
-      sectionId: defaultSectionId,
-      author: 'Unknown',
-      date: '',
-      body: '',
+      id: anchorId,
+      sectionId: first.sectionId,
+      author: first.authorName,
+      date: first.createdAt,
+      body: parts.join('\n\n'),
     });
   }
   return out;
@@ -87,11 +104,23 @@ export async function buildCopy(
   session: Pick<ManuscriptSession, 'id' | 'title' | 'outline' | 'sections'>,
   deps: BuildCopyDeps = defaultBuildDeps,
 ): Promise<{ bytes: Uint8Array }> {
-  const anchorIds = new Set<string>();
+  let rows: ManuscriptCopyComment[] = [];
+  let commentsUnavailable = false;
+  if (session.id) {
+    try {
+      rows = await deps.loadComments(session.id);
+    } catch (err) {
+      commentsUnavailable = true;
+      console.error('Save a copy: could not load comments; exporting without them', err);
+    }
+  }
+  const comments = commentsUnavailable ? [] : commentsForExport(rows);
+  const keepAnchors = new Set(comments.map((c) => c.id));
+
   const sections = session.outline.value.map((s) => {
     const doc = session.sections.get(s.docId);
-    const content = doc ? yDocToDoc(doc) : { type: 'doc' as const, content: [] };
-    collectAnchorIds(content, anchorIds);
+    const raw = doc ? yDocToDoc(doc) : { type: 'doc' as const, content: [] };
+    const content = stripCommentAnchors(raw, keepAnchors);
     return {
       id: s.id,
       kind: s.kind,
@@ -101,9 +130,6 @@ export async function buildCopy(
       content,
     };
   });
-  const rows = session.id ? await deps.loadComments(session.id) : [];
-  const defaultSectionId = sections[0]?.id ?? '';
-  const comments = commentsForExport(rows, anchorIds, defaultSectionId);
   const m = {
     title: session.title,
     sections,

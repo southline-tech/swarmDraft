@@ -3,7 +3,13 @@ import { shallowRef } from 'vue';
 import * as Y from 'yjs';
 import { docToYDoc, exportDocx, importDocx, type DocNode } from '@coauthor/docx';
 import type { Section } from '@coauthor/schema';
-import { buildCopy, manuscriptDocx, saveCopy, type BuildCopyDeps } from './save-copy';
+import {
+  buildCopy,
+  commentsForExport,
+  manuscriptDocx,
+  saveCopy,
+  type BuildCopyDeps,
+} from './save-copy';
 
 function session(text = 'Unsaved words in memory') {
   const doc = {
@@ -80,6 +86,29 @@ const copyComments: BuildCopyDeps = {
   ],
 };
 
+describe('commentsForExport', () => {
+  it('folds thread replies into one comment id per anchor', () => {
+    const rows = commentsForExport([
+      {
+        sectionId: 's1',
+        threadId: 'c1',
+        body: 'Root note',
+        authorName: 'Ann',
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      {
+        sectionId: 's1',
+        threadId: 'c1',
+        body: 'Reply note',
+        authorName: 'Bo',
+        createdAt: '2026-01-02T00:00:00Z',
+      },
+    ]);
+    expect(rows.map((c) => c.id)).toEqual(['c1']);
+    expect(rows[0]!.body).toBe('Root note\n\nReply note');
+  });
+});
+
 describe('comments in the copy', () => {
   it('keeps anchors, loads comment bodies, and round-trips through the docx package', async () => {
     const s = commentedSession();
@@ -97,6 +126,44 @@ describe('comments in the copy', () => {
     expect(JSON.stringify(round.sections)).toContain('comment_anchor');
     const r = await saveCopy(s, { save: async () => 'D:\\b.docx', build: copyComments });
     expect(r).toEqual({ status: 'saved', path: 'D:\\b.docx' });
+  });
+
+  it('still writes the copy when loading comments fails, without comment anchors', async () => {
+    const s = commentedSession();
+    const failLoad: BuildCopyDeps = {
+      loadComments: async () => {
+        throw new Error('db unavailable');
+      },
+    };
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { bytes } = await buildCopy(s, failLoad);
+    log.mockRestore();
+    const back = importDocx(bytes);
+    expect(back.comments).toEqual([]);
+    expect(JSON.stringify(back.sections)).not.toContain('comment_anchor');
+    expect(JSON.stringify(back.sections)).toContain('anchored words');
+  });
+
+  it('strips anchors with no open comment instead of exporting blank Unknown rows', async () => {
+    const s = commentedSession();
+    const oneOpen: BuildCopyDeps = {
+      loadComments: async () => [
+        {
+          sectionId: 's1',
+          threadId: 'c1',
+          body: 'Note one',
+          authorName: 'Ann',
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+      ],
+    };
+    const { bytes } = await buildCopy(s, oneOpen);
+    const back = importDocx(bytes);
+    expect(back.comments.map((c) => c.id)).toEqual(['c1']);
+    const json = JSON.stringify(back.sections);
+    expect(json).toContain('"id":"c1"');
+    expect(json).not.toContain('"id":"c2"');
+    expect(back.comments.every((c) => c.body.trim() && c.author !== 'Unknown')).toBe(true);
   });
 });
 
