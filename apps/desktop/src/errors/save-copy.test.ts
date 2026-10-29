@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { shallowRef } from 'vue';
 import * as Y from 'yjs';
-import { docToYDoc, importDocx, type DocNode } from '@coauthor/docx';
+import { docToYDoc, exportDocx, importDocx, type DocNode } from '@coauthor/docx';
 import type { Section } from '@coauthor/schema';
-import { buildCopy, manuscriptDocx, saveCopy } from './save-copy';
+import { buildCopy, manuscriptDocx, saveCopy, type BuildCopyDeps } from './save-copy';
 
 function session(text = 'Unsaved words in memory') {
   const doc = {
@@ -12,14 +12,21 @@ function session(text = 'Unsaved words in memory') {
   } as unknown as DocNode;
   const y = docToYDoc(doc);
   const outline: Section[] = [{ id: 's1', kind: 'chapter', title: 'Chapter 1', docId: 'd1' }];
-  return { title: 'Sample Book', outline: shallowRef(outline), sections: new Map([['d1', y]]) };
+  return {
+    id: 'm1',
+    title: 'Sample Book',
+    outline: shallowRef(outline),
+    sections: new Map([['d1', y]]),
+  };
 }
 
+const noComments: BuildCopyDeps = { loadComments: async () => [] };
+
 describe('manuscriptDocx', () => {
-  it('builds a .docx from the in-memory docs that reads back with the same text', () => {
+  it('builds a .docx from the in-memory docs that reads back with the same text', async () => {
     const s = session();
     const before = Y.encodeStateAsUpdate(s.sections.get('d1')!);
-    const back = importDocx(manuscriptDocx(s));
+    const back = importDocx(await manuscriptDocx(s, noComments));
     expect(JSON.stringify(back.sections)).toContain('Unsaved words in memory');
     // Read-only: the live doc is unchanged.
     expect(Y.encodeStateAsUpdate(s.sections.get('d1')!)).toEqual(before);
@@ -54,30 +61,52 @@ function commentedSession() {
   return s;
 }
 
+const copyComments: BuildCopyDeps = {
+  loadComments: async () => [
+    {
+      sectionId: 's1',
+      threadId: 'c1',
+      body: 'Note one',
+      authorName: 'Ann',
+      createdAt: '2026-01-01T00:00:00Z',
+    },
+    {
+      sectionId: 's1',
+      threadId: 'c2',
+      body: 'Note two',
+      authorName: 'Bo',
+      createdAt: '2026-01-02T00:00:00Z',
+    },
+  ],
+};
+
 describe('comments in the copy', () => {
-  it('strips comment markers, keeps the text and other marks, and counts what was left out', async () => {
+  it('keeps anchors, loads comment bodies, and round-trips through the docx package', async () => {
     const s = commentedSession();
     const before = Y.encodeStateAsUpdate(s.sections.get('d1')!);
-    const { bytes, commentsLeftOut } = buildCopy(s);
-    expect(commentsLeftOut).toBe(2);
-    const back = JSON.stringify(importDocx(bytes).sections);
-    expect(back).not.toContain('comment_anchor');
-    expect(back).toContain('anchored words');
-    expect(back).toContain('bold');
+    const { bytes } = await buildCopy(s, copyComments);
+    const back = importDocx(bytes);
+    expect(back.comments.map((c) => c.body)).toEqual(['Note one', 'Note two']);
+    const json = JSON.stringify(back.sections);
+    expect(json).toContain('comment_anchor');
+    expect(json).toContain('anchored words');
+    expect(json).toContain('bold');
     expect(Y.encodeStateAsUpdate(s.sections.get('d1')!)).toEqual(before);
-    const r = await saveCopy(s, { save: async () => 'D:\\b.docx' });
-    expect(r).toEqual({ status: 'saved', path: 'D:\\b.docx', commentsLeftOut: 2 });
-  });
-
-  it('reports no comments left out when there were none', () => {
-    expect(buildCopy(session()).commentsLeftOut).toBe(0);
+    const round = importDocx(exportDocx(back));
+    expect(round.comments.map((c) => c.body)).toEqual(['Note one', 'Note two']);
+    expect(JSON.stringify(round.sections)).toContain('comment_anchor');
+    const r = await saveCopy(s, { save: async () => 'D:\\b.docx', build: copyComments });
+    expect(r).toEqual({ status: 'saved', path: 'D:\\b.docx' });
   });
 });
 
 describe('saveCopy', () => {
   it('reports busy, not a failure, when the backend lock is held (#100)', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const r = await saveCopy(session(), { save: async () => Promise.reject('busy') });
+    const r = await saveCopy(session(), {
+      save: async () => Promise.reject('busy'),
+      build: noComments,
+    });
     expect(r).toEqual({ status: 'busy' });
     expect(log).not.toHaveBeenCalled();
     log.mockRestore();
@@ -87,8 +116,8 @@ describe('saveCopy', () => {
     const save = vi.fn<(title: string, bytes: Uint8Array) => Promise<string | null>>(
       async () => 'D:\\Copies\\book.docx',
     );
-    const r = await saveCopy(session(), { save });
-    expect(r).toEqual({ status: 'saved', path: 'D:\\Copies\\book.docx', commentsLeftOut: 0 });
+    const r = await saveCopy(session(), { save, build: noComments });
+    expect(r).toEqual({ status: 'saved', path: 'D:\\Copies\\book.docx' });
     expect(save).toHaveBeenCalledTimes(1);
     const [title, bytes] = save.mock.calls[0]!;
     expect(title).toBe('Sample Book');
@@ -96,7 +125,7 @@ describe('saveCopy', () => {
   });
 
   it('reports cancelled when the dialog is cancelled', async () => {
-    expect(await saveCopy(session(), { save: async () => null })).toEqual({
+    expect(await saveCopy(session(), { save: async () => null, build: noComments })).toEqual({
       status: 'cancelled',
     });
   });
@@ -107,6 +136,7 @@ describe('saveCopy', () => {
       save: async () => {
         throw 'io: There is not enough space on the disk. (os error 112) C:\\secret\\path';
       },
+      build: noComments,
     });
     expect(r.status).toBe('failed');
     if (r.status !== 'failed') return;

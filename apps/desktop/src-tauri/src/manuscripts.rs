@@ -747,6 +747,23 @@ impl Store {
         })
     }
 
+    /// Every unresolved comment in a manuscript, for building a .docx copy (#74).
+    pub fn open_comments_for_manuscript(
+        &self,
+        manuscript_id: &str,
+    ) -> Result<Vec<Comment>, StorageError> {
+        self.with_conn(|c| {
+            let mut st = c.prepare(&format!(
+                "SELECT {COMMENT_COLS} FROM comments WHERE manuscript_id = ?1 AND resolved_at IS NULL
+                 ORDER BY section_id, created_at, id"
+            ))?;
+            let rows = st
+                .query_map([manuscript_id], row_comment)?
+                .collect::<Result<_, _>>()?;
+            Ok(rows)
+        })
+    }
+
     pub fn open_suggestions(&self, section_id: &str) -> Result<Vec<Suggestion>, StorageError> {
         self.with_conn(|c| {
             let mut st = c.prepare(&format!(
@@ -1007,5 +1024,55 @@ mod tests {
             s.get_section(&m.id, "nope"),
             Err(StorageError::NotFound(_))
         ));
+    }
+
+    #[test]
+    fn open_comments_for_manuscript_returns_only_open_rows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = Store::open(tmp.path()).unwrap();
+        let m = s.create_manuscript("Sample Manuscript").unwrap();
+        let sec = s.import_section_json(
+            &m.id,
+            "chapter",
+            "One",
+            &json!({"type":"doc","content":[{"type":"paragraph","attrs":{"style":"body"},"content":[{"type":"text","text":"Hi."}]}]}),
+        ).unwrap();
+        let author = Author {
+            kind: "human".into(),
+            id: "u1".into(),
+            name: "Ann".into(),
+        };
+        s.insert_comment(
+            &m.id,
+            &Comment {
+                id: "c1".into(),
+                section_id: sec.id.clone(),
+                block_id: None,
+                quote: None,
+                body: "First".into(),
+                thread_id: None,
+                author: author.clone(),
+                created_at: "2026-01-01T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
+        s.insert_comment(
+            &m.id,
+            &Comment {
+                id: "c2".into(),
+                section_id: sec.id.clone(),
+                block_id: None,
+                quote: None,
+                body: "Reply".into(),
+                thread_id: Some("c1".into()),
+                author,
+                created_at: "2026-01-02T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
+        let rows = s.open_comments_for_manuscript(&m.id).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].body, "First");
+        assert_eq!(rows[1].thread_id.as_deref(), Some("c1"));
     }
 }

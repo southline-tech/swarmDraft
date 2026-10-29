@@ -434,6 +434,41 @@ fn review_comment_row(c: manuscripts::Comment) -> ReviewCommentRow {
     }
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ManuscriptCommentRow {
+    section_id: String,
+    thread_id: String,
+    body: String,
+    author_name: String,
+    created_at: String,
+}
+
+fn manuscript_comment_row(c: manuscripts::Comment) -> ManuscriptCommentRow {
+    ManuscriptCommentRow {
+        section_id: c.section_id,
+        thread_id: c.thread_id.unwrap_or(c.id),
+        body: c.body,
+        author_name: c.author.name,
+        created_at: c.created_at,
+    }
+}
+
+/// Open comments for every section of a manuscript (Save a copy .docx export, #74).
+#[tauri::command]
+async fn manuscript_open_comments(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+) -> Result<Vec<ManuscriptCommentRow>, String> {
+    blocking(&store, move |s| {
+        Ok(s.open_comments_for_manuscript(&manuscript_id)?
+            .into_iter()
+            .map(manuscript_comment_row)
+            .collect())
+    })
+    .await
+}
+
 /// Open comments and saved agent display names for the review sidebar (#47).
 #[tauri::command]
 async fn section_review_meta(
@@ -549,6 +584,7 @@ pub fn run() {
             manuscript_updates_since,
             manuscript_set_numbering_style,
             section_review_meta,
+            manuscript_open_comments,
             mcp_status,
             save_manuscript_copy
         ])
