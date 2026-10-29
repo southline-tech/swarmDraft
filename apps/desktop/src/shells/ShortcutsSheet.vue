@@ -40,8 +40,8 @@ onBeforeUnmount(() => opener?.focus?.());
       data-test="shortcuts-sheet"
       @keydown="trap"
     >
-      <h2 id="sh-shortcuts-title">
-        Keyboard shortcuts
+      <div class="sh-row sh-sheet__head">
+        <h2 id="sh-shortcuts-title">Keyboard shortcuts</h2>
         <button
           ref="closeBtn"
           type="button"
@@ -53,7 +53,7 @@ onBeforeUnmount(() => opener?.focus?.());
         >
           ×
         </button>
-      </h2>
+      </div>
       <p class="sh-subt">
         Windows conventions. Press {{ MANUSCRIPT_SHORTCUTS.shortcutsSheet }} any time to open this
         sheet.

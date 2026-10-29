@@ -189,12 +189,13 @@
   padding: 28px 32px 24px;
   font-family: var(--ct-font-ui);
 }
+.sh-sheet__head {
+  gap: 12px;
+}
 .sh-sheet h2 {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
-  display: flex;
-  align-items: center;
 }
 .sh-sheet .sh-subt {
   color: var(--ct-text-muted);

@@ -20,13 +20,6 @@ export const MANUSCRIPT_SHORTCUTS = {
   comment: 'Ctrl+Alt+M',
 } as const;
 
-/** WebView2 zoom accelerators (reference in the sheet; not bound in app UI). */
-const VIEW_ZOOM_SHORTCUTS = {
-  zoomIn: 'Ctrl+=',
-  zoomOut: 'Ctrl+-',
-  zoomReset: 'Ctrl+0',
-} as const;
-
 const KEY_LABELS: Record<string, string> = {
   Backspace: '⌫',
   Right: '→',
@@ -67,7 +60,6 @@ export const SHORTCUT_SHEET_GROUPS: ShortcutSheetGroup[] = [
       { label: 'Redo', chord: SHORTCUTS.redo },
       { label: 'Find', chord: MANUSCRIPT_SHORTCUTS.find },
       { label: 'Replace', chord: MANUSCRIPT_SHORTCUTS.replace },
-      { label: 'Save now', chord: MANUSCRIPT_SHORTCUTS.save },
       { label: 'Add comment', chord: MANUSCRIPT_SHORTCUTS.comment },
     ],
   },
@@ -87,9 +79,6 @@ export const SHORTCUT_SHEET_GROUPS: ShortcutSheetGroup[] = [
       { label: 'Focus mode', chord: MANUSCRIPT_SHORTCUTS.focusMode },
       { label: 'Exit focus mode', chord: MANUSCRIPT_SHORTCUTS.focusModeExit },
       { label: 'Toggle sidebars', chord: REVIEW_SHORTCUTS.toggle },
-      { label: 'Zoom in', chord: VIEW_ZOOM_SHORTCUTS.zoomIn },
-      { label: 'Zoom out', chord: VIEW_ZOOM_SHORTCUTS.zoomOut },
-      { label: 'Reset zoom', chord: VIEW_ZOOM_SHORTCUTS.zoomReset },
     ],
   },
 ];
