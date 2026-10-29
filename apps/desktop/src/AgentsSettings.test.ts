@@ -9,8 +9,16 @@ function fakeApi() {
   const tokens: TokenInfo[] = [];
   const api: AgentsApi = {
     list: vi.fn(async () => agents.map((a) => ({ ...a }))),
+    primaryId: vi.fn(async () => agents.find((a) => a.primary && !a.revokedAt)?.id ?? null),
     create: vi.fn(async (name: string, color: string) => {
-      const a = { id: `a${agents.length}`, name, color, createdAt: 't', revokedAt: null };
+      const a = {
+        id: `a${agents.length}`,
+        name,
+        color,
+        createdAt: 't',
+        revokedAt: null,
+        primary: false,
+      };
       agents.push(a);
       return a;
     }),

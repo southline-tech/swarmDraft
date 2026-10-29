@@ -31,6 +31,7 @@ import {
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import ReviewPanel from './review/ReviewPanel.vue';
 import CommentsPanel from './comments/CommentsPanel.vue';
+import { collabSlotOf, resetCollabSlots } from './author-colors';
 
 const agent = (id: string, name: string): Agent => ({
   id,
@@ -38,12 +39,14 @@ const agent = (id: string, name: string): Agent => ({
   color: '#3366ff',
   createdAt: '2026-10-26T00:00:00Z',
   revokedAt: null,
+  primary: false,
 });
 const EVIL = '<img src=x onerror="alert(1)">Bot';
 
 afterEach(() => {
   agentDirectory.value = null;
   resetAgentReloads();
+  resetCollabSlots();
   tauri.on = false;
   tauri.list.mockReset();
 });
@@ -88,6 +91,21 @@ describe('agent display names (RAD-263)', () => {
     expect(authorLabel('agent:a3')).toBe('Retired Bot (bot, revoked)');
     expect(authorLabel('Brett')).toBe('Brett');
     expect(authorLabel(undefined)).toBe('');
+  });
+
+  it('pins the primary agent id to collab-1 when the directory loads (#76)', () => {
+    setAgents([{ ...agent('p1', 'Grok Bot'), primary: true }, agent('x2', 'Other')]);
+    expect(collabSlotOf('agent:p1')).toBe(1);
+    expect(collabSlotOf('agent:x2')).toBe(2);
+  });
+
+  it('keeps collab-1 on the renamed primary when a new Grok Bot is not primary (#76)', () => {
+    setAgents([
+      { ...agent('p1', 'Renamed Bot'), primary: true },
+      { ...agent('new1', 'Grok Bot'), primary: false },
+    ]);
+    expect(collabSlotOf('agent:p1')).toBe(1);
+    expect(collabSlotOf('agent:new1')).toBe(2);
   });
 
   it('keeps the last list when a reload fails', async () => {

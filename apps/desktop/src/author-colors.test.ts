@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import type { CommentRow, CommentThread, SuggestionItem } from '@coauthor/editor';
-import { collabSlotOf, resetCollabSlots } from './author-colors';
+import { collabSlotOf, pinPrimaryAgent, resetCollabSlots } from './author-colors';
 import CommentsPanel from './comments/CommentsPanel.vue';
 import ReviewPanel from './review/ReviewPanel.vue';
 
@@ -115,5 +115,43 @@ describe('shared author colors (#72)', () => {
     );
     // Review panel order: Grok Bot, Line editor, Mara.
     expect(review.slice(0, 3)).toEqual([grok, editor, mara]);
+  });
+});
+
+describe('primary agent color pin (#76)', () => {
+  beforeEach(resetCollabSlots);
+
+  it('keeps collab-1 for the primary agent id after a rename (same key)', async () => {
+    pinPrimaryAgent('g');
+    const names: Record<string, string> = { Mara: 'Mara', 'agent:g': 'Grok Bot' };
+    const w = mount(ReviewPanel, {
+      props: {
+        items: [sugg('s1', 'Mara'), sugg('s2', 'agent:g')],
+        labels: (a: string) => ({ name: names[a] ?? a }),
+      },
+    });
+    const tok = () =>
+      (w.findAll('[data-suggester]')[1]!.element as HTMLElement).style.getPropertyValue(
+        '--ct-suggester',
+      );
+    expect(tok()).toBe('var(--ct-collab-1)');
+    names['agent:g'] = 'Renamed bot';
+    await w.setProps({ labels: (a: string) => ({ name: names[a] ?? a }) });
+    expect(tok()).toBe('var(--ct-collab-1)');
+  });
+
+  it('does not give collab-1 to a second agent with the same display name', () => {
+    pinPrimaryAgent('g');
+    const w = mount(ReviewPanel, {
+      props: {
+        items: [sugg('s1', 'agent:g'), sugg('s2', 'agent:x')],
+        labels: (a: string) => ({ name: a === 'agent:g' || a === 'agent:x' ? 'Grok Bot' : a }),
+      },
+    });
+    const vars = w
+      .findAll('[data-suggester]')
+      .map((e) => (e.element as HTMLElement).style.getPropertyValue('--ct-suggester'));
+    expect(vars).toEqual(['var(--ct-collab-1)', 'var(--ct-collab-2)']);
+    expect(collabSlotOf('agent:x')).toBe(2);
   });
 });

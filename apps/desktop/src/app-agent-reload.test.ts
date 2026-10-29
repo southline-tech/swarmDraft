@@ -17,12 +17,13 @@ vi.mock('@tauri-apps/api/core', async (orig) => ({
 import App from './App.vue';
 import { agentDirectory, authorLabel, FOCUS_RELOAD_MS, resetAgentReloads } from './agent-names';
 
-const agent = (id: string, name: string) => ({
+const agent = (id: string, name: string, primary = false) => ({
   id,
   name,
   color: '#3366ff',
   createdAt: '2026-10-26T00:00:00Z',
   revokedAt: null,
+  primary,
 });
 
 afterEach(() => {
