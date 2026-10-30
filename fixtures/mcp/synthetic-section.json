@@ -237,8 +237,14 @@
       "link",
       "comment_anchor",
       "suggestion_insert",
-      "suggestion_delete"
+      "suggestion_delete",
+      "format_change"
     ],
-    "nonExclusiveMarks": ["comment_anchor", "suggestion_insert", "suggestion_delete"]
+    "nonExclusiveMarks": [
+      "comment_anchor",
+      "suggestion_insert",
+      "suggestion_delete",
+      "format_change"
+    ]
   }
 }
