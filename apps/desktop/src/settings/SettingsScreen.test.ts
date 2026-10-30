@@ -32,10 +32,17 @@ beforeEach(() => {
 });
 
 describe('Settings screen (#99)', () => {
-  it('has the five sections in order, one shown at a time', async () => {
+  it('has the six sections in order, one shown at a time', async () => {
     const w = screen();
     const nav = w.findAll('[data-test="settings-nav"] button').map((b) => b.text());
-    expect(nav).toEqual(['General', 'Your name & color', 'Appearance', 'Backups', 'Agents']);
+    expect(nav).toEqual([
+      'General',
+      'Your name & color',
+      'Appearance',
+      'Spelling & grammar',
+      'Backups',
+      'Agents',
+    ]);
     expect(w.get('[data-test="settings-general"]').isVisible()).toBe(true);
     expect(w.get('[data-test="settings-backups"]').isVisible()).toBe(false);
     await w.get('[data-test="settings-nav-backups"]').trigger('click');

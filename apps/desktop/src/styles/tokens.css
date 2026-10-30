@@ -144,6 +144,9 @@
 
   /* Suggestions: base suggester. Marks set data-suggester and --ct-suggester: var(--ct-collab-N). */
   --ct-suggester: var(--ct-collab-1);
+  /* Spell / grammar underlines (#159) */
+  --ct-spell: #c43a2f;
+  --ct-grammar: #2a7a45;
 }
 
 [data-theme='dark'] {
@@ -179,6 +182,8 @@
   --ct-collab-6: #e3c066;
   --ct-collab-7: #7fd3dc;
   --ct-collab-8: #b4bdc6;
+  --ct-spell: #f48b82;
+  --ct-grammar: #81c995;
 }
 
 /* Derived suggestion tokens live on the mark element so they resolve against

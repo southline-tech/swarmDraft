@@ -130,6 +130,19 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (section_id, kind, suggestion_id)
      );
      CREATE INDEX review_decisions_section ON review_decisions(section_id);",
+    // #159: per-manuscript spell dictionary and ignored words (Harper decoration layer).
+    "CREATE TABLE spell_dictionary (
+        manuscript_id TEXT NOT NULL REFERENCES manuscripts(id) ON DELETE CASCADE,
+        word TEXT NOT NULL,
+        added_at TEXT NOT NULL,
+        PRIMARY KEY (manuscript_id, word)
+     );
+     CREATE INDEX spell_dictionary_manuscript ON spell_dictionary(manuscript_id);
+     CREATE TABLE spell_ignored (
+        manuscript_id TEXT NOT NULL REFERENCES manuscripts(id) ON DELETE CASCADE,
+        word TEXT NOT NULL,
+        PRIMARY KEY (manuscript_id, word)
+     );",
 ];
 
 /// How long a statement waits on a locked database before failing.
@@ -340,7 +353,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         {
             let mut conn = Connection::open(tmp.path().join("coauthor.db")).unwrap();
-            migrate_with(&mut conn, &MIGRATIONS[..MIGRATIONS.len() - 2]).unwrap();
+            migrate_with(&mut conn, &MIGRATIONS[..MIGRATIONS.len() - 3]).unwrap();
             conn.execute(
                 "INSERT INTO agents (id, name, color, created_at) VALUES (?1, ?2, ?3, ?4)",
                 rusqlite::params!["a1", "Line Editor", "#3366ff", "2026-01-01T00:00:00Z"],

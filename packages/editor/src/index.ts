@@ -92,6 +92,20 @@ export * from './find-replace';
 export * from './human-track';
 export * from './format-track';
 export {
+  Spellcheck,
+  refreshSpellcheck,
+  spellIssueAtPos,
+  invalidateSpellBlock,
+  spellcheckKey,
+} from './spellcheck/spellcheck';
+export { applySpellSuggestion } from './spellcheck/apply';
+export type {
+  SpellIssue,
+  SpellLintResult,
+  SpellcheckOptions,
+  SpellIssueKind,
+} from './spellcheck/types';
+export {
   formatChangeSummary,
   PARAGRAPH_STYLE_TARGET,
   formatChangeAttrs,

@@ -146,3 +146,51 @@ export function seedProfileForTracking(
     storage,
   );
 }
+
+export const SPELL_PREFS_KEY = 'swarmdraft.spellPrefs';
+
+export interface SpellPrefs {
+  spelling: boolean;
+  grammar: boolean;
+}
+
+export const DEFAULT_SPELL_PREFS: Readonly<SpellPrefs> = { spelling: true, grammar: true };
+
+export function loadSpellPrefs(storage: Store = globalThis.localStorage): SpellPrefs {
+  try {
+    const raw = storage?.getItem(SPELL_PREFS_KEY);
+    if (!raw) return { ...DEFAULT_SPELL_PREFS };
+    const p = JSON.parse(raw) as Partial<SpellPrefs>;
+    return {
+      spelling: p.spelling !== false,
+      grammar: p.grammar !== false,
+    };
+  } catch {
+    return { ...DEFAULT_SPELL_PREFS };
+  }
+}
+
+export function saveSpellPrefs(
+  p: SpellPrefs,
+  storage: Store = globalThis.localStorage,
+): SpellPrefs {
+  const kept: SpellPrefs = {
+    spelling: p.spelling !== false,
+    grammar: p.grammar !== false,
+  };
+  try {
+    storage?.setItem(SPELL_PREFS_KEY, JSON.stringify(kept));
+  } catch {
+    // Session-only when storage is unavailable.
+  }
+  try {
+    globalThis.dispatchEvent(new Event('swarmdraft-spell-prefs'));
+  } catch {
+    // Non-browser tests.
+  }
+  return kept;
+}
+
+export function spellcheckEnabled(p: SpellPrefs = loadSpellPrefs()): boolean {
+  return p.spelling || p.grammar;
+}
