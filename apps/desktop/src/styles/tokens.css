@@ -189,9 +189,12 @@
   --ct-suggest-delete-bg: color-mix(in srgb, var(--ct-text-muted) 12%, transparent);
   --ct-suggest-delete-text: var(--ct-text-muted);
   --ct-suggest-delete-strike: var(--ct-suggester);
+  --ct-suggest-format-bg: color-mix(in srgb, var(--ct-suggester) 10%, transparent);
+  --ct-suggest-format-outline: var(--ct-suggester);
 }
 :where([data-theme='dark'] [data-suggester]) {
   --ct-suggest-insert-bg: color-mix(in srgb, var(--ct-suggester) 22%, transparent);
+  --ct-suggest-format-bg: color-mix(in srgb, var(--ct-suggester) 18%, transparent);
 }
 
 /* Base hooks (global only; no component selectors) */

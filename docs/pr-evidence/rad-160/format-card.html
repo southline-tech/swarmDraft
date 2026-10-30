@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Format card evidence (#160)</title>
+    <link rel="stylesheet" href="../../../apps/desktop/src/styles/tokens.css" />
+    <style>
+      body {
+        margin: 24px;
+        width: 400px;
+      }
+      .card {
+        border: 1px solid var(--ct-border);
+        border-left: 3px solid var(--ct-collab-2);
+        border-radius: var(--ct-radius-md);
+        background: var(--ct-surface-raised);
+        padding: var(--ct-space-3) var(--ct-space-4);
+        --ct-suggester: var(--ct-collab-2);
+      }
+      .format {
+        margin: var(--ct-space-2) 0;
+        font-family: var(--ct-font-ui);
+        font-size: var(--ct-text-md);
+        font-weight: var(--ct-weight-semibold);
+        padding: var(--ct-space-2) var(--ct-space-3);
+        border-radius: var(--ct-radius-sm);
+        background: var(--ct-suggest-format-bg);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ct-suggester) 35%, transparent);
+      }
+      .mark {
+        margin-top: 12px;
+        font-family: var(--ct-font-manuscript);
+      }
+      span.format-change [data-suggester] {
+        background: var(--ct-suggest-format-bg);
+        box-shadow: inset 0 0 0 1px
+          color-mix(in srgb, var(--ct-suggest-format-outline) 45%, transparent);
+        border-radius: 2px;
+        --ct-suggester: var(--ct-collab-2);
+      }
+    </style>
+  </head>
+  <body>
+    <article class="card" data-suggester>
+      <strong>Kim</strong>
+      <p class="format">Add bold</p>
+      <p class="mark">
+        The
+        <span class="format-change"
+          ><span data-suggester><strong>tracked</strong></span></span
+        >
+        word.
+      </p>
+    </article>
+  </body>
+</html>

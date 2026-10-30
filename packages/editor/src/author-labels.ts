@@ -14,7 +14,11 @@ export const authorLabelsKey = new PluginKey<DecorationSet>('coauthorAuthorLabel
 export type AuthorLabel = (author: string) => string;
 export type AuthorLabelVisible = (author: string) => boolean;
 
-const KIND: Record<string, string> = { suggestion_insert: 'Added', suggestion_delete: 'Deleted' };
+const KIND: Record<string, string> = {
+  suggestion_insert: 'Added',
+  suggestion_delete: 'Deleted',
+  format_change: 'Format changed',
+};
 
 function decorate(
   doc: PMNode,

@@ -276,7 +276,8 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
           }}</span>
           <span class="pill">{{ authorKind(c.author) }}</span>
         </div>
-        <p class="q">
+        <p v-if="c.format" class="format" data-test="format">{{ c.format.label }}</p>
+        <p v-else class="q">
           <span v-if="c.del" class="del" data-test="del">{{ c.del }}</span
           ><template v-if="c.del && c.ins">{{ ' ' }}</template
           ><span v-if="c.ins" class="ins" data-test="ins">{{ c.ins }}</span>
@@ -611,6 +612,17 @@ button.secondary {
   align-items: center;
   gap: var(--ct-space-2);
   font-weight: var(--ct-weight-semibold);
+}
+.card .format {
+  margin: var(--ct-space-2) 0 var(--ct-space-2);
+  font-family: var(--ct-font-ui);
+  font-size: var(--ct-text-md);
+  font-weight: var(--ct-weight-semibold);
+  color: var(--ct-text);
+  padding: var(--ct-space-2) var(--ct-space-3);
+  border-radius: var(--ct-radius-sm);
+  background: var(--ct-suggest-format-bg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ct-suggester) 35%, transparent);
 }
 .card .q {
   margin: var(--ct-space-2) 0 var(--ct-space-2);

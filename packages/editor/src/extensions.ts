@@ -320,6 +320,19 @@ export const SuggestionDelete = Mark.create({
   ],
 });
 
+export const FormatChange = Mark.create({
+  name: 'format_change',
+  excludes: '',
+  inclusive: false,
+  addAttributes: reviewAttrs(['id', 'author', 'ts', 'target', 'before', 'after']),
+  parseHTML: () => [{ tag: 'span[data-format-change]' }],
+  renderHTML: ({ HTMLAttributes }) => [
+    'span',
+    mergeAttributes(HTMLAttributes, { 'data-format-change': '', class: 'format-change' }),
+    0,
+  ],
+});
+
 /** Every extension the manuscript editor needs. No other schema is loaded. */
 export function manuscriptExtensions(): Extensions {
   return [
@@ -341,6 +354,7 @@ export function manuscriptExtensions(): Extensions {
     CommentAnchor,
     SuggestionInsert,
     SuggestionDelete,
+    FormatChange,
     ReviewGuard,
   ];
 }

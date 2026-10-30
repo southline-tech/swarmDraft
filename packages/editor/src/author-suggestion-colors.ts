@@ -14,7 +14,7 @@ export type SuggestionColor = (author: string) => string;
 /** When false, suggestion marks render as plain text (display only; doc unchanged). */
 export type SuggestionAuthorVisible = (author: string) => boolean;
 
-const SUGGESTION = new Set(['suggestion_insert', 'suggestion_delete']);
+const SUGGESTION = new Set(['suggestion_insert', 'suggestion_delete', 'format_change']);
 
 function hiddenClasses(marks: { type: { name: string } }[]): string {
   const classes = ['suggestion-filter-hidden'];
@@ -22,6 +22,8 @@ function hiddenClasses(marks: { type: { name: string } }[]): string {
     classes.push('suggestion-filter-hidden-insert');
   if (marks.some((m) => m.type.name === 'suggestion_delete'))
     classes.push('suggestion-filter-hidden-delete');
+  if (marks.some((m) => m.type.name === 'format_change'))
+    classes.push('suggestion-filter-hidden-format');
   return classes.join(' ');
 }
 

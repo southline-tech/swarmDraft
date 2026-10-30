@@ -6,6 +6,19 @@
  */
 export type ParagraphStyle = 'body' | 'first' | 'block_quote' | 'epigraph' | 'verse' | 'centered';
 
+/** Stable attrs on the `format_change` review mark (#160). */
+export interface FormatChangeAttrs extends Record<string, string> {
+  id: string;
+  author: string;
+  ts: string;
+  /** Inline mark name (`bold`, …) or `paragraph_style`. */
+  target: string;
+  /** Prior state: `0`/`1` for inline toggles, or a paragraph style id. */
+  before: string;
+  /** Proposed state: same encoding as `before`. */
+  after: string;
+}
+
 export type Mark =
   | { type: 'italic' }
   | { type: 'bold' }
@@ -15,7 +28,8 @@ export type Mark =
   | { type: 'link'; attrs: { href: string } }
   | { type: 'comment_anchor'; attrs: { id: string } }
   | { type: 'suggestion_insert'; attrs: { id: string; author: string; ts: string } }
-  | { type: 'suggestion_delete'; attrs: { id: string; author: string; ts: string } };
+  | { type: 'suggestion_delete'; attrs: { id: string; author: string; ts: string } }
+  | { type: 'format_change'; attrs: FormatChangeAttrs };
 
 export interface TextNode {
   type: 'text';
@@ -75,6 +89,7 @@ export const MARK_TYPES = [
   'comment_anchor',
   'suggestion_insert',
   'suggestion_delete',
+  'format_change',
 ] as const satisfies readonly Mark['type'][];
 
 /** Marks that may overlap with another mark of the same type (keyed `type--hash` in Yjs). */
@@ -82,4 +97,5 @@ export const NON_EXCLUSIVE_MARKS: readonly Mark['type'][] = [
   'comment_anchor',
   'suggestion_insert',
   'suggestion_delete',
+  'format_change',
 ];

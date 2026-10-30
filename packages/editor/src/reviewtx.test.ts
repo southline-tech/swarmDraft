@@ -157,6 +157,43 @@ describe('review decision transaction', () => {
       }),
     ).toBe(false);
   });
+
+  it('accepts a format_change by removing only the review mark', () => {
+    const e = createManuscriptEditor({
+      content: {
+        type: 'doc',
+        content: [
+          para([
+            { type: 'text', text: 'Bold ', marks: [{ type: 'bold' }] },
+            { type: 'text', text: 'word.' },
+          ]),
+        ],
+      },
+    });
+    editor = e;
+    e.view.dispatch(
+      e.state.tr.addMark(
+        1,
+        e.state.doc.content.size - 1,
+        e.state.schema.marks.format_change!.create({
+          id: 'f1',
+          author: 'Kim',
+          ts: '2026-10-25T00:00:00Z',
+          target: 'bold',
+          before: '0',
+          after: '1',
+        }),
+      ),
+    );
+    applyReviewDecision(e.view, {
+      targets: [{ kind: 'format_change', id: 'f1' }],
+      decision: 'accept',
+    });
+    expect(JSON.stringify(e.getJSON())).not.toContain('f1');
+    expect(e.getJSON()).toMatchObject({
+      content: [{ content: [{ marks: [{ type: 'bold' }] }, { type: 'text', text: 'word.' }] }],
+    });
+  });
 });
 
 // Matches any module specifier ending in /trusted or /reviewtx (optionally with an extension).
