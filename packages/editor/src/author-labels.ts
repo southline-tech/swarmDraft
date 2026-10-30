@@ -8,7 +8,8 @@
 import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey, type EditorState } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
-import type { Node as PMNode } from '@tiptap/pm/model';
+import type { Mark, Node as PMNode } from '@tiptap/pm/model';
+import { formatChangeSummary, readFormatAttrs } from './format-change';
 
 export const authorLabelsKey = new PluginKey<DecorationSet>('coauthorAuthorLabels');
 export type AuthorLabel = (author: string) => string;
@@ -17,8 +18,20 @@ export type AuthorLabelVisible = (author: string) => boolean;
 const KIND: Record<string, string> = {
   suggestion_insert: 'Added',
   suggestion_delete: 'Deleted',
-  format_change: 'Format changed',
 };
+
+function markHoverTitle(mark: Mark, label: AuthorLabel): string | null {
+  const author = String(mark.attrs.author ?? '').trim();
+  const name = label(author);
+  if (mark.type.name === 'format_change') {
+    const attrs = readFormatAttrs(mark.attrs as Record<string, unknown>);
+    if (!attrs) return null;
+    return `${formatChangeSummary(attrs.target, attrs.before, attrs.after)} by ${name}`;
+  }
+  const prefix = KIND[mark.type.name];
+  if (!prefix) return null;
+  return `${prefix} by ${name}`;
+}
 
 function decorate(
   doc: PMNode,
@@ -29,9 +42,10 @@ function decorate(
   doc.descendants((node, pos) => {
     if (!node.isText) return true;
     const titles = node.marks
-      .filter((m) => KIND[m.type.name])
+      .filter((m) => KIND[m.type.name] || m.type.name === 'format_change')
       .filter((m) => authorVisible(String(m.attrs.author ?? '').trim()))
-      .map((m) => `${KIND[m.type.name]} by ${label(String(m.attrs.author ?? '').trim())}`);
+      .map((m) => markHoverTitle(m, label))
+      .filter((t): t is string => !!t);
     if (titles.length)
       decos.push(Decoration.inline(pos, pos + node.nodeSize, { title: titles.join('\n') }));
     return false;

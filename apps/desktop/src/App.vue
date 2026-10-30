@@ -50,6 +50,7 @@ import ShellsPreview from './shells/ShellsPreview.vue';
 import Rad60ReviewEvidence from './evidence/Rad60ReviewEvidence.vue';
 import Rad67EditorChromeEvidence from './evidence/Rad67EditorChromeEvidence.vue';
 import Rad55FocusModeEvidence from './evidence/Rad55FocusModeEvidence.vue';
+import { readEvidenceQuery } from './evidence/evidence-routes';
 import AppToast from './shells/AppToast.vue';
 import OpeningProgress from './shells/OpeningProgress.vue';
 import ErrorCard from './shells/ErrorCard.vue';
@@ -345,7 +346,7 @@ const choosingBook = ref(false);
 const settingsOpen = ref(false);
 // UI-shell previews (Part of #36): `?preview=<id|all>`, or Settings → Preview new screens.
 applyThemeParam(window.location.search, document.documentElement);
-const evidence = ref(new URLSearchParams(window.location.search).get('evidence'));
+const evidence = ref(readEvidenceQuery(window.location.search));
 const preview = ref(readPreview(window.location.search));
 function openPreview(id: 'all') {
   settingsOpen.value = false;

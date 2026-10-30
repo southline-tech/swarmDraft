@@ -183,7 +183,7 @@ const findOpen = shallowRef(false);
 const findFocusReplace = shallowRef(false);
 const menuAt = shallowRef<{ x: number; y: number } | null>(null);
 const shortcutsOpen = shallowRef(false);
-const focusMode = shallowRef(Boolean(props.initialFocusMode));
+const focusMode = shallowRef(Boolean(import.meta.env.DEV && props.initialFocusMode));
 const prefStore = () => props.storage ?? globalThis.localStorage;
 /** Track changes (#57): persisted on/off; first enable may show the tc3 name prompt. */
 const tracking = shallowRef(loadTracking(prefStore()));
