@@ -204,6 +204,32 @@ describe('human track changes (#126)', () => {
     e.destroy();
   });
 
+  it('marks every inserted run in a multi-paragraph paste (#163)', () => {
+    const e = editor();
+    editors.push(e);
+    const pos = e.state.doc.content.size - 1;
+    e.commands.insertContentAt(pos, [
+      {
+        type: 'paragraph',
+        attrs: { style: 'body' },
+        content: [{ type: 'text', text: 'Para A.' }],
+      },
+      {
+        type: 'paragraph',
+        attrs: { style: 'body' },
+        content: [{ type: 'text', text: 'Para B.' }],
+      },
+    ]);
+    expect(e.state.doc.textContent).toContain('Para B.');
+    const inserts = listSuggestions(e.getJSON() as never).filter(
+      (i) => i.kind === 'suggestion_insert' && i.author === WRITER,
+    );
+    expect(inserts.some((i) => i.text.includes('Para A'))).toBe(true);
+    expect(inserts.some((i) => i.text.includes('Para B'))).toBe(true);
+    expect(new Set(inserts.map((i) => i.id)).size).toBe(1);
+    e.destroy();
+  });
+
   it('preserves paragraph structure on a cross-paragraph delete', () => {
     const e = editor(twoParaDoc);
     editors.push(e);
@@ -217,6 +243,20 @@ describe('human track changes (#126)', () => {
       .map((i) => i.text)
       .join('');
     expect(delText.length).toBeGreaterThan(2);
+    e.destroy();
+  });
+
+  it('records replace as paired marks sharing an id after an earlier delete', () => {
+    const e = editor();
+    editors.push(e);
+    e.commands.setTextSelection({ from: 7, to: 12 });
+    e.view.dispatch(e.state.tr.deleteSelection());
+    e.commands.setTextSelection({ from: 1, to: 6 });
+    e.view.dispatch(e.state.tr.insertText('Howdy'));
+    const items = listSuggestions(e.getJSON() as never).filter((i) => i.author === WRITER);
+    const howdy = items.find((i) => i.kind === 'suggestion_insert' && i.text === 'Howdy');
+    expect(howdy).toBeDefined();
+    expect(items.some((i) => i.kind === 'suggestion_delete' && i.id === howdy!.id)).toBe(true);
     e.destroy();
   });
 

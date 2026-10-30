@@ -245,6 +245,47 @@ describe('Human track changes (#126)', () => {
     w.unmount();
   });
 
+  it('tracks multi-paragraph paste and paragraph join in the mounted editor (#163)', async () => {
+    const twoPara = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          attrs: { style: 'body' },
+          content: [{ type: 'text', text: 'First.' }],
+        },
+        {
+          type: 'paragraph',
+          attrs: { style: 'body' },
+          content: [{ type: 'text', text: 'Second.' }],
+        },
+      ],
+    } as const;
+    const { w, editor } = await mountedEditor({
+      storage: trackingStore('Paste'),
+      content: twoPara as never,
+    });
+    editor.commands.insertContentAt(editor.state.doc.content.size - 1, [
+      {
+        type: 'paragraph',
+        attrs: { style: 'body' },
+        content: [{ type: 'text', text: 'Pasted A.' }],
+      },
+      {
+        type: 'paragraph',
+        attrs: { style: 'body' },
+        content: [{ type: 'text', text: 'Pasted B.' }],
+      },
+    ]);
+    await flushPromises();
+    const items = listSuggestions(editor.getJSON() as never).filter(
+      (i) => i.author === 'Paste' && i.kind === 'suggestion_insert',
+    );
+    expect(items.some((i) => i.text.includes('Pasted A'))).toBe(true);
+    expect(items.some((i) => i.text.includes('Pasted B'))).toBe(true);
+    w.unmount();
+  });
+
   it('persists tracked suggestions across remount and Y.Doc round-trip', async () => {
     const s = trackingStore('Export');
     const { w, ydoc, editor } = await mountedEditor({ storage: s, content: PLAIN as never });
