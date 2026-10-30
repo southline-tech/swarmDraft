@@ -194,6 +194,45 @@ describe('review decision transaction', () => {
       content: [{ content: [{ marks: [{ type: 'bold' }] }, { type: 'text', text: 'word.' }] }],
     });
   });
+
+  it('rejects a format_change by restoring inline format before', () => {
+    const e = createManuscriptEditor({
+      content: {
+        type: 'doc',
+        content: [
+          para([
+            {
+              type: 'text',
+              text: 'word',
+              marks: [
+                { type: 'bold' },
+                {
+                  type: 'format_change',
+                  attrs: {
+                    id: 'f2',
+                    author: 'Kim',
+                    ts: '2026-10-25T00:00:00Z',
+                    target: 'bold',
+                    before: '0',
+                    after: '1',
+                  },
+                },
+              ],
+            },
+          ]),
+        ],
+      },
+    });
+    editor = e;
+    applyReviewDecision(e.view, {
+      targets: [{ kind: 'format_change', id: 'f2' }],
+      decision: 'reject',
+    });
+    expect(JSON.stringify(e.getJSON())).not.toContain('f2');
+    expect(e.getJSON()).toMatchObject({
+      content: [{ content: [{ text: 'word' }] }],
+    });
+  });
 });
 
 // Matches any module specifier ending in /trusted or /reviewtx (optionally with an extension).

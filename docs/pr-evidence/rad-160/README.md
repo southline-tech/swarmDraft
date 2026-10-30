@@ -11,4 +11,7 @@ Regenerate:
 google-chrome --headless --disable-gpu --window-size=448,320 \
   --screenshot=docs/pr-evidence/rad-160/format-card-light.png \
   file://$PWD/docs/pr-evidence/rad-160/format-card.html
+google-chrome --headless --disable-gpu --window-size=448,320 \
+  --screenshot=docs/pr-evidence/rad-160/format-card-dark.png \
+  'file://'"$PWD"'/docs/pr-evidence/rad-160/format-card.html?theme=dark'
 ```

@@ -34,8 +34,12 @@ pub fn new_doc() -> Doc {
 }
 
 /// Marks that may overlap with another mark of the same type; keyed `type--hash` in Yjs.
-pub const NON_EXCLUSIVE_MARKS: &[&str] =
-    &["comment_anchor", "suggestion_insert", "suggestion_delete"];
+pub const NON_EXCLUSIVE_MARKS: &[&str] = &[
+    "comment_anchor",
+    "suggestion_insert",
+    "suggestion_delete",
+    "format_change",
+];
 const MARK_ORDER: &[&str] = &[
     "bold",
     "italic",
@@ -46,6 +50,7 @@ const MARK_ORDER: &[&str] = &[
     "comment_anchor",
     "suggestion_insert",
     "suggestion_delete",
+    "format_change",
 ];
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
