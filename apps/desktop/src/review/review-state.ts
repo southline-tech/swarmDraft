@@ -68,6 +68,17 @@ export interface ReviewChange {
   reason?: string;
   targets: SuggestionTarget[];
 }
+
+function mergeReason(existing: string | undefined, next: string | undefined): string | undefined {
+  const n = next?.trim();
+  if (!n) return existing?.trim() || undefined;
+  const e = existing?.trim();
+  if (!e) return n;
+  if (e === n || e.includes(n)) return e;
+  if (n.includes(e)) return n;
+  return `${e} ${n}`;
+}
+
 export function groupChanges(items: readonly SuggestionItem[]): ReviewChange[] {
   const out = new Map<string, ReviewChange>();
   for (const i of items) {
@@ -77,7 +88,7 @@ export function groupChanges(items: readonly SuggestionItem[]): ReviewChange[] {
     c.targets.push({ kind: i.kind, id: i.id });
     if (i.kind === 'suggestion_delete') c.del = (c.del ?? '') + i.text;
     else c.ins = (c.ins ?? '') + i.text;
-    if (!c.reason && i.reason) c.reason = i.reason;
+    c.reason = mergeReason(c.reason, i.reason);
   }
   return [...out.values()];
 }
@@ -91,10 +102,16 @@ export function withSuggestionReasons(
   items: readonly SuggestionItem[],
   reasons: Readonly<Record<string, string>> | undefined,
 ): SuggestionItem[] {
-  if (!reasons || !Object.keys(reasons).length) return [...items];
   return items.map((i) => {
-    const reason = reasons[i.id]?.trim();
-    return reason ? { ...i, reason } : i;
+    const fromMeta = reasons?.[i.id]?.trim();
+    const base: SuggestionItem = {
+      id: i.id,
+      kind: i.kind,
+      author: i.author,
+      ts: i.ts,
+      text: i.text,
+    };
+    return fromMeta ? { ...base, reason: fromMeta } : base;
   });
 }
 

@@ -216,6 +216,14 @@ describe('ReviewPanel (RAD-258)', () => {
       'Matches the date in Chapter 3.',
     );
     expect(cards[1]!.find('[data-test=reason-line]').exists()).toBe(false);
+    const botCard = cards[0]!.element;
+    expect(botCard.querySelector('.who')?.nextElementSibling?.classList.contains('q')).toBe(true);
+    expect(botCard.querySelector('.q')?.nextElementSibling?.classList.contains('reason')).toBe(
+      true,
+    );
+    expect(
+      botCard.querySelector('.reason')?.nextElementSibling?.classList.contains('actions'),
+    ).toBe(true);
     w.unmount();
 
     const longReason = 'x'.repeat(120);

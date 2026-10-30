@@ -217,6 +217,9 @@ describe('review sidebar polish (#47)', () => {
     });
     await flushPromises();
     expect(w.get('[data-test=reason-line]').text()).toContain('Stronger verb.');
+    const card = w.get('[data-test=item]').element;
+    expect(card.querySelector('.who')?.nextElementSibling?.classList.contains('q')).toBe(true);
+    expect(card.querySelector('.q')?.nextElementSibling?.classList.contains('reason')).toBe(true);
     w.unmount();
   });
 });

@@ -137,6 +137,28 @@ describe('review state (RAD-258)', () => {
     ]);
   });
 
+  it('groupChanges merges reasons on replace pairs (#60)', () => {
+    const items: SuggestionItem[] = [
+      {
+        id: 'r1',
+        kind: 'suggestion_delete',
+        author: 'agent:a',
+        ts: 't',
+        text: 'old',
+        reason: 'Part one.',
+      },
+      {
+        id: 'r1',
+        kind: 'suggestion_insert',
+        author: 'agent:a',
+        ts: 't',
+        text: 'new',
+        reason: 'Part two.',
+      },
+    ];
+    expect(groupChanges(items)[0]?.reason).toBe('Part one. Part two.');
+  });
+
   it('withSuggestionReasons attaches rationales by suggestion id (#60)', () => {
     const base: SuggestionItem[] = [
       {
@@ -149,5 +171,20 @@ describe('review state (RAD-258)', () => {
     ];
     expect(withSuggestionReasons(base, { s1: ' Because.' })[0]?.reason).toBe('Because.');
     expect(withSuggestionReasons(base, {})).toEqual(base);
+  });
+
+  it('withSuggestionReasons uses meta only, not mark attrs (#60)', () => {
+    const base: SuggestionItem[] = [
+      {
+        id: 's1',
+        kind: 'suggestion_insert',
+        author: 'agent:a',
+        ts: 't',
+        text: 'x',
+        reason: 'From mark attrs.',
+      },
+    ];
+    expect(withSuggestionReasons(base, { s1: 'From SQLite.' })[0]?.reason).toBe('From SQLite.');
+    expect(withSuggestionReasons(base, undefined)[0]?.reason).toBeUndefined();
   });
 });

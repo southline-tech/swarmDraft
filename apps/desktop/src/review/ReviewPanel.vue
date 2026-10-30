@@ -309,14 +309,14 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
           }}</span>
           <span class="pill">{{ authorKind(c.author) }}</span>
         </div>
-        <div v-if="authorKind(c.author) === 'Bot' && c.reason" class="reason" @click.stop>
-          <ReasonLine :reason="c.reason" />
-        </div>
         <p class="q">
           <span v-if="c.del" class="del" data-test="del">{{ c.del }}</span
           ><template v-if="c.del && c.ins">{{ ' ' }}</template
           ><span v-if="c.ins" class="ins" data-test="ins">{{ c.ins }}</span>
         </p>
+        <div v-if="authorKind(c.author) === 'Bot' && c.reason" class="reason" @click.stop>
+          <ReasonLine :reason="c.reason" />
+        </div>
         <div class="actions">
           <button
             type="button"
@@ -615,7 +615,7 @@ button.secondary {
   font-weight: var(--ct-weight-semibold);
 }
 .card .q {
-  margin: var(--ct-space-2) 0 var(--ct-space-3);
+  margin: var(--ct-space-2) 0 var(--ct-space-2);
   font-family: var(--ct-font-manuscript);
   font-size: var(--ct-text-md);
   line-height: 1.5;
@@ -631,6 +631,9 @@ button.secondary {
   color: var(--ct-suggest-delete-text);
   background: var(--ct-suggest-delete-bg);
   text-decoration: line-through 2px var(--ct-suggest-delete-strike) !important;
+}
+.card .reason {
+  margin-bottom: var(--ct-space-3);
 }
 .actions .primary,
 .actions .secondary {

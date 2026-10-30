@@ -46,6 +46,7 @@ import { saveCopy } from './errors/save-copy';
 import { BUSY_NOTICE } from './errors/busy';
 import { PRODUCT_NAME } from './lib/brand';
 import ShellsPreview from './shells/ShellsPreview.vue';
+import Rad60ReviewEvidence from './evidence/Rad60ReviewEvidence.vue';
 import AppToast from './shells/AppToast.vue';
 import OpeningProgress from './shells/OpeningProgress.vue';
 import ErrorCard from './shells/ErrorCard.vue';
@@ -341,6 +342,7 @@ const choosingBook = ref(false);
 const settingsOpen = ref(false);
 // UI-shell previews (Part of #36): `?preview=<id|all>`, or Settings → Preview new screens.
 applyThemeParam(window.location.search, document.documentElement);
+const evidence = ref(new URLSearchParams(window.location.search).get('evidence'));
 const preview = ref(readPreview(window.location.search));
 function openPreview(id: 'all') {
   settingsOpen.value = false;
@@ -836,7 +838,8 @@ defineExpose({ open, closeSession });
 </script>
 
 <template>
-  <ShellsPreview v-if="preview" class="shell" :initial="preview" @close="preview = null" />
+  <Rad60ReviewEvidence v-if="evidence === 'rad60-review'" class="shell" />
+  <ShellsPreview v-else-if="preview" class="shell" :initial="preview" @close="preview = null" />
   <main v-else class="shell">
     <header v-show="!focusMode" class="topbar">
       <details ref="appMenu" class="topbar__menu" data-test="app-menu" @toggle="onAppMenuToggle">
