@@ -1,6 +1,6 @@
 # PR evidence — #55 Focus mode (wp5)
 
-Designer screenshots for wp5 focus mode. Captured from the real editor shell (not shells preview):
+Designer screenshots for wp5 focus mode. Captured from the production App shell with a manuscript open (not shells preview or editor-only):
 
 ```text
 pnpm --filter @coauthor/desktop dev
@@ -10,7 +10,7 @@ pnpm --filter @coauthor/desktop dev
 
 Files:
 
-- `wp5-light.png` — focus pill, manuscript page, word count; no top bar, outline, toolbar, review, or status bar
+- `wp5-light.png` — focus pill, manuscript page, word count; no top bar, outline, toolbar, review, or status bar; no empty strip below the page (`.shell--focus-mode` drops the 1.75rem status-bar reserve)
 - `wp5-dark.png` — same layout in dark theme
 
-Re-capture after any change to focus-mode chrome (`sh-esc`, `sh-fwc`, or App focus-mode layout).
+Re-capture after any change to focus-mode chrome (`sh-esc`, `sh-fwc`, App focus-mode layout, or shell padding).

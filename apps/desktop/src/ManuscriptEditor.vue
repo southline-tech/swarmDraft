@@ -12,6 +12,7 @@ import {
   nextTick,
   onBeforeUnmount,
   onMounted,
+  ref,
   shallowRef,
   toRaw,
   useTemplateRef,
@@ -223,16 +224,19 @@ function onNameColorPromptClose() {
   writerProfile.value = loadProfile(prefStore());
   if (tracking.value && !loadTrackPromptSeen(prefStore())) dismissNamePrompt();
 }
-function syncFocusMode(on: boolean) {
+const focusModeLive = ref('');
+/** Polite SR cue when focus mode toggles (#55); chrome hides with no other feedback. */
+function syncFocusMode(on: boolean, announce = true) {
   emit('focus-mode', on);
-  if (on) {
-    window.addEventListener('keydown', onWindowKey);
-    void nextTick(() => editor.value?.view.focus());
-  } else window.removeEventListener('keydown', onWindowKey);
+  if (on) window.addEventListener('keydown', onWindowKey);
+  else window.removeEventListener('keydown', onWindowKey);
+  if (announce) focusModeLive.value = on ? 'Focus mode on.' : 'Focus mode off.';
+  // Enter and exit both land focus in the page (#55 Designer, #87 QA).
+  void nextTick(() => editor.value?.view.focus());
 }
-watch(focusMode, syncFocusMode);
+watch(focusMode, (on) => syncFocusMode(on));
 onMounted(() => {
-  if (focusMode.value) syncFocusMode(true);
+  if (focusMode.value) syncFocusMode(true, false);
 });
 onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKey));
 const rootEl = useTemplateRef<HTMLElement>('root');
@@ -772,6 +776,9 @@ const LABELS: Record<ReviewItem['type'], string> = {
     :data-focus-mode="focusMode || undefined"
     @keydown="onShellKey"
   >
+    <p class="visually-hidden" role="status" aria-live="polite" data-test="focus-mode-live">
+      {{ focusModeLive }}
+    </p>
     <div v-if="!externalLoadError" role="alert" aria-live="assertive" data-test="load-error-region">
       <p v-if="shownLoadError" class="load-error" data-test="load-error">
         {{ SECTION_LOAD_ERROR_COPY }}
@@ -1338,5 +1345,13 @@ const LABELS: Record<ReviewItem['type'], string> = {
   border-radius: var(--ct-radius-lg);
   background: var(--ct-surface-raised);
   box-shadow: var(--ct-elevation-3);
+}
+.manuscript-editor .visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 </style>

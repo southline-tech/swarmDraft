@@ -244,3 +244,4 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-30 · #67 · Designer re-review (#157) · collapsed review rail removed `#review-changes-region` · keep a `review-region-anchor` node with the same id while the panel is rail-only so `aria-controls` stays valid
 - 2026-10-30 · #67 · Designer re-review (#157) · Esc on wp8 author filter left focus in the closed popover · `closeFilterMenu(true)` refocuses `[data-test=filter-toggle]` (overflow-menu pattern)
 - 2026-10-30 · #67 · Designer re-review (#157) · PR wp1/wp6/wp8 shots stale or load-error · re-capture from `?evidence=rad67&frame=…&theme=…` App shell after harness fix
+- 2026-10-30 · #55 · Designer review (#158) · pill × exit dropped focus to body; Ctrl+Shift+F hides chrome with no SR cue; evidence was editor-only · focus page on exit; polite `focus-mode-live`; `.shell--focus-mode` drops status-bar padding; re-capture wp5 from App `?evidence=rad55`

@@ -851,9 +851,9 @@ defineExpose({ open, closeSession });
 <template>
   <Rad60ReviewEvidence v-if="evidence === 'rad60-review'" class="shell" />
   <Rad67EditorChromeEvidence v-else-if="evidence === 'rad67'" class="shell" />
-  <Rad55FocusModeEvidence v-else-if="evidence === 'rad55'" class="shell" />
+  <Rad55FocusModeEvidence v-else-if="evidence === 'rad55'" class="shell shell--focus-mode" />
   <ShellsPreview v-else-if="preview" class="shell" :initial="preview" @close="preview = null" />
-  <main v-else class="shell">
+  <main v-else class="shell" :class="{ 'shell--focus-mode': focusMode }">
     <header v-show="!focusMode" class="topbar">
       <details ref="appMenu" class="topbar__menu" data-test="app-menu" @toggle="onAppMenuToggle">
         <summary
@@ -1221,6 +1221,10 @@ body {
   height: 100vh;
   overflow: auto;
   padding-bottom: 1.75rem;
+}
+/* #55 wp5: status bar is hidden in focus mode; drop the reserved strip. */
+.shell.shell--focus-mode {
+  padding-bottom: 0;
 }
 .toolbar-row {
   flex: none;
