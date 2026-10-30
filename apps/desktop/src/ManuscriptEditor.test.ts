@@ -91,7 +91,9 @@ describe('ManuscriptEditor', () => {
     expect(page.find('ins.suggestion-insert').text()).toBe('guttered');
     expect(page.find('del.suggestion-delete').text()).toBe('flickered');
     expect(page.find('.comment-anchor').text()).toBe('rain');
-    expect(page.find('.scene-break').exists()).toBe(true);
+    const sceneBreak = page.find('.scene-break');
+    expect(sceneBreak.exists()).toBe(true);
+    expect(sceneBreak.text()).toBe('* * *');
     // The replacement is one card with an inline diff.
     const cards = w.findAll('[data-test="item"]');
     expect(cards).toHaveLength(1);

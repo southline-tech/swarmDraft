@@ -1173,7 +1173,9 @@ const LABELS: Record<ReviewItem['type'], string> = {
 }
 .tiptap .scene-break {
   text-align: center;
-  margin: 1em 0;
+  margin: var(--ct-space-4) 0;
+  color: var(--ct-text);
+  user-select: none;
 }
 .tiptap .page-break {
   border-top: 1px dashed var(--ct-border-strong);
