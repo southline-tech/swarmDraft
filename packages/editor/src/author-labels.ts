@@ -3,7 +3,7 @@
  * suggested text to "Added by <name>" / "Deleted by <name>". The host supplies the label
  * (e.g. an agent's display name for `agent:<id>`), so the stored `author` attr is never shown
  * raw. Decorations set attributes through the DOM, so names are never parsed as HTML. Dispatch
- * `refreshAuthorLabels(view)` after names change.
+ * `refreshAuthorLabels(view)` after names or author visibility change.
  */
 import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey, type EditorState } from '@tiptap/pm/state';
@@ -26,8 +26,8 @@ function decorate(
     if (!node.isText) return true;
     const titles = node.marks
       .filter((m) => KIND[m.type.name])
-      .filter((m) => authorVisible(String(m.attrs.author ?? '')))
-      .map((m) => `${KIND[m.type.name]} by ${label(String(m.attrs.author ?? ''))}`);
+      .filter((m) => authorVisible(String(m.attrs.author ?? '').trim()))
+      .map((m) => `${KIND[m.type.name]} by ${label(String(m.attrs.author ?? '').trim())}`);
     if (titles.length)
       decos.push(Decoration.inline(pos, pos + node.nodeSize, { title: titles.join('\n') }));
     return false;

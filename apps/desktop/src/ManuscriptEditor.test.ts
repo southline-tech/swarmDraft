@@ -442,6 +442,11 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     };
     const w = mount(ManuscriptEditor, { props: { content: doc }, attachTo: document.body });
     await flushPromises();
+    const editor = (
+      w.vm as unknown as { $: { setupState: { editor: import('@tiptap/core').Editor } } }
+    ).$.setupState.editor;
+    const before = editor.state.doc;
+    const undoBefore = pmUndoDepth(editor.state);
     const suggesters = () =>
       w.findAll(
         '.tiptap ins.suggestion-insert [data-suggester], .tiptap del.suggestion-delete [data-suggester]',
@@ -453,6 +458,9 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     await w.find('[data-test="filter-toggle"]').trigger('click');
     await w.findAll('[data-test="filter-option"]')[0]!.trigger('click');
     await flushPromises();
+    expect(editor.state.doc.eq(before)).toBe(true);
+    expect(pmUndoDepth(editor.state)).toBe(undoBefore);
+    expect(w.emitted('change')).toBeUndefined();
     expect(w.findAll('[data-test="item"]')).toHaveLength(1);
     expect(suggesters()).toHaveLength(1);
     expect(hidden()).toHaveLength(1);

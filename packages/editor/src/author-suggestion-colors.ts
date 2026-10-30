@@ -2,7 +2,7 @@
  * Per-author suggestion mark colors (#48): decoration-only `data-suggester` and `--ct-suggester`
  * on suggested text so manuscript CSS resolves `--ct-suggest-*` per author. The host supplies
  * the token (e.g. `var(--ct-collab-N)`); legacy marks with no author get a neutral token.
- * Dispatch `refreshSuggestionColors(view)` when the color map changes.
+ * Dispatch `refreshSuggestionColors(view)` when the color map or author visibility changes.
  */
 import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey, type EditorState } from '@tiptap/pm/state';
