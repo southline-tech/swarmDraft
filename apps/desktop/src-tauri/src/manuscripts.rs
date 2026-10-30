@@ -798,7 +798,16 @@ impl Store {
             .map_err(|e| StorageError::Invalid(format!("bad update: {e}")))?;
         validate_saved_doc(&doc)?;
         if update.len() > 2 {
-            self.append_doc_update(&s.doc_id, update)?;
+            self.with_conn(|c| {
+                let tx = c.unchecked_transaction()?;
+                tx.execute(
+                    "INSERT INTO doc_updates (doc_id, data) VALUES (?1, ?2)",
+                    params![s.doc_id, update],
+                )?;
+                upsert_human_suggestions_from_doc(&tx, manuscript_id, &s.id, &doc)?;
+                tx.commit()?;
+                Ok(())
+            })?;
         }
         Ok(())
     }
@@ -1044,10 +1053,213 @@ impl Store {
                     ],
                 )?;
             }
+            sync_suggestion_index_for_decisions(&tx, manuscript_id, section_id, records)?;
             tx.commit()?;
             Ok(())
         })
     }
+}
+
+#[derive(Default)]
+struct DocMarkRun {
+    author: String,
+    ts: String,
+    insert: String,
+    delete: String,
+}
+
+fn push_doc_suggestion_marks(
+    node: &Value,
+    block_id: Option<&str>,
+    out: &mut Vec<(String, DocMarkRun)>,
+) {
+    if node["type"] == "text" {
+        let text = node["text"].as_str().unwrap_or_default();
+        for m in node["marks"].as_array().into_iter().flatten() {
+            let ty = m["type"].as_str().unwrap_or_default();
+            if ty != "suggestion_insert" && ty != "suggestion_delete" {
+                continue;
+            }
+            let id = m["attrs"]["id"].as_str().unwrap_or_default();
+            let author = m["attrs"]["author"].as_str().unwrap_or_default();
+            if id.is_empty() || author.is_empty() || author.starts_with("agent:") {
+                continue;
+            }
+            let ts = m["attrs"]["ts"].as_str().unwrap_or_default().to_string();
+            let entry = out
+                .iter_mut()
+                .find(|(sid, _)| sid == id)
+                .map(|(_, run)| run);
+            let run = if let Some(r) = entry {
+                r
+            } else {
+                out.push((id.to_string(), DocMarkRun::default()));
+                &mut out.last_mut().unwrap().1
+            };
+            if run.author.is_empty() {
+                run.author = author.to_string();
+            }
+            if run.ts.is_empty() && !ts.is_empty() {
+                run.ts = ts;
+            }
+            if ty == "suggestion_insert" {
+                run.insert.push_str(text);
+            } else {
+                run.delete.push_str(text);
+            }
+            let _ = block_id;
+        }
+        return;
+    }
+    for child in node["content"].as_array().into_iter().flatten() {
+        push_doc_suggestion_marks(child, block_id, out);
+    }
+}
+
+fn human_suggestions_in_doc(doc: &Doc, section_id: &str) -> Vec<Suggestion> {
+    let mut runs: Vec<(String, DocMarkRun)> = Vec::new();
+    for block in crate::content::decode(doc) {
+        push_doc_suggestion_marks(&block.node, Some(&block.id), &mut runs);
+    }
+    let now = "1970-01-01T00:00:00.000Z";
+    runs.into_iter()
+        .map(|(id, run)| {
+            let kind = if !run.delete.is_empty() && !run.insert.is_empty() {
+                "replace"
+            } else if !run.delete.is_empty() {
+                "delete"
+            } else {
+                "insert"
+            };
+            Suggestion {
+                id,
+                section_id: section_id.to_string(),
+                block_id: None,
+                kind: kind.into(),
+                quote: if run.delete.is_empty() {
+                    None
+                } else {
+                    Some(run.delete)
+                },
+                replacement: if run.insert.is_empty() {
+                    None
+                } else {
+                    Some(run.insert)
+                },
+                rationale: None,
+                author: Author {
+                    kind: "human".into(),
+                    id: run.author.clone(),
+                    name: run.author,
+                },
+                status: "open".into(),
+                created_at: if run.ts.is_empty() {
+                    now.into()
+                } else {
+                    run.ts
+                },
+            }
+        })
+        .collect()
+}
+
+fn upsert_human_suggestions_from_doc(
+    tx: &rusqlite::Transaction<'_>,
+    manuscript_id: &str,
+    section_id: &str,
+    doc: &Doc,
+) -> Result<(), StorageError> {
+    for x in human_suggestions_in_doc(doc, section_id) {
+        tx.execute(
+            "INSERT INTO suggestions (id, manuscript_id, section_id, block_id, kind, quote, replacement,
+               rationale, author_kind, author_id, author_name, status, created_at, decided_at, decided_by)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'open', ?12, NULL, NULL)
+             ON CONFLICT(id) DO UPDATE SET
+               kind = excluded.kind,
+               quote = excluded.quote,
+               replacement = excluded.replacement,
+               author_kind = excluded.author_kind,
+               author_id = excluded.author_id,
+               author_name = excluded.author_name,
+               status = 'open',
+               decided_at = NULL,
+               decided_by = NULL
+             WHERE suggestions.author_kind = 'human'",
+            params![
+                x.id,
+                manuscript_id,
+                x.section_id,
+                x.block_id,
+                x.kind,
+                x.quote,
+                x.replacement,
+                x.rationale,
+                x.author.kind,
+                x.author.id,
+                x.author.name,
+                x.created_at,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+fn sync_suggestion_index_for_decisions(
+    tx: &rusqlite::Transaction<'_>,
+    manuscript_id: &str,
+    section_id: &str,
+    records: &[ReviewDecisionRecord],
+) -> Result<(), StorageError> {
+    let mut decided: std::collections::HashMap<&str, (&str, &str, &str)> =
+        std::collections::HashMap::new();
+    for r in records {
+        decided.insert(
+            r.id.as_str(),
+            (
+                r.status.as_str(),
+                r.decided_at.as_str(),
+                r.decided_by.as_str(),
+            ),
+        );
+    }
+    for (id, (status, at, by)) in &decided {
+        let n = tx.execute(
+            "UPDATE suggestions SET status = ?1, decided_at = ?2, decided_by = ?3
+             WHERE id = ?4 AND section_id = ?5",
+            params![status, at, by, id, section_id],
+        )?;
+        if n == 0 {
+            tx.execute(
+                "INSERT INTO suggestions (id, manuscript_id, section_id, block_id, kind, quote, replacement,
+                   rationale, author_kind, author_id, author_name, status, created_at, decided_at, decided_by)
+                 VALUES (?1, ?2, ?3, NULL, 'insert', NULL, NULL, NULL, 'human', ?4, ?4, ?5, ?6, ?6, ?7)",
+                params![id, manuscript_id, section_id, by, status, at, by],
+            )?;
+        }
+    }
+    if decided.is_empty() {
+        tx.execute(
+            "UPDATE suggestions SET status = 'open', decided_at = NULL, decided_by = NULL
+             WHERE section_id = ?1 AND status != 'open'",
+            [section_id],
+        )?;
+    } else {
+        let mut st =
+            tx.prepare("SELECT id FROM suggestions WHERE section_id = ?1 AND status != 'open'")?;
+        let closed: Vec<String> = st
+            .query_map([section_id], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        for id in closed {
+            if !decided.contains_key(id.as_str()) {
+                tx.execute(
+                    "UPDATE suggestions SET status = 'open', decided_at = NULL, decided_by = NULL
+                     WHERE id = ?1 AND section_id = ?2",
+                    params![id, section_id],
+                )?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
