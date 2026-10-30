@@ -53,6 +53,9 @@ const MARK_ORDER: &[&str] = &[
     "format_change",
 ];
 
+/// Inline mark target for paragraph style suggestions (#160 / MCP `suggest_style`).
+pub const PARAGRAPH_STYLE_TARGET: &str = "paragraph_style";
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Block {
     pub id: String,
@@ -494,6 +497,21 @@ fn md_inline(nodes: &[Value]) -> String {
                         "comment_anchor" => format!("{{=={t}==}}{{>>comment:{id}<<}}"),
                         "suggestion_insert" => format!("{{++{t}++}}{{>>suggestion:{id}<<}}"),
                         "suggestion_delete" => format!("{{--{t}--}}{{>>suggestion:{id}<<}}"),
+                        "format_change" => {
+                            let target = m["attrs"]["target"].as_str().unwrap_or_default();
+                            let before = m["attrs"]["before"].as_str().unwrap_or_default();
+                            let after = m["attrs"]["after"].as_str().unwrap_or_default();
+                            let summary = if target == PARAGRAPH_STYLE_TARGET {
+                                format!("{before} → {after}")
+                            } else if after == "1" && before == "0" {
+                                format!("add {target}")
+                            } else if after == "0" && before == "1" {
+                                format!("remove {target}")
+                            } else {
+                                format!("change {target}")
+                            };
+                            format!("{{~~{t}~~}}{{>>format:{id}: {summary}<<}}")
+                        }
                         _ => t,
                     };
                 }

@@ -162,6 +162,15 @@ pub struct SuggestStyleArgs {
     pub rationale: Option<String>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ListSuggestionsArgs {
+    pub manuscript_id: String,
+    /// Filter by status (`open` by default; only `open` is supported today).
+    pub status: Option<String>,
+    /// Filter by author id (e.g. an agent id or `agent:<id>`).
+    pub author: Option<String>,
+}
+
 pub const PARAGRAPH_STYLES: &[&str] = &[
     "body",
     "first",
@@ -338,12 +347,32 @@ impl CoauthorMcp {
                                 ));
                             }
                             for x in &suggestions {
+                                let detail = match x.kind.as_str() {
+                                    "style" => x
+                                        .replacement
+                                        .as_deref()
+                                        .map(|st| format!(" → {st}"))
+                                        .unwrap_or_default(),
+                                    _ => x
+                                        .quote
+                                        .as_deref()
+                                        .zip(x.replacement.as_deref())
+                                        .map(|(q, r)| {
+                                            if r.is_empty() {
+                                                format!(" delete {q:?}")
+                                            } else {
+                                                format!(" replace {q:?} with {r:?}")
+                                            }
+                                        })
+                                        .unwrap_or_default(),
+                                };
                                 md.push_str(&format!(
-                                    "- suggestion:{} ({}) by {} on block {}{}\n",
+                                    "- suggestion:{} ({}) by {} on block {}{}{}\n",
                                     x.id,
                                     x.kind,
                                     x.author.name,
                                     x.block_id.as_deref().unwrap_or("-"),
+                                    detail,
                                     x.rationale
                                         .as_deref()
                                         .map(|r| format!(": {r}"))
@@ -354,6 +383,55 @@ impl CoauthorMcp {
                         Output::Text(md)
                     }
                 })
+            },
+        )
+    }
+
+    #[tool(
+        description = "List suggestions in a manuscript from the index. Defaults to open items; optional filters by status (open only today) and author id."
+    )]
+    async fn list_suggestions(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(a): Parameters<ListSuggestionsArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let args = json!({
+            "manuscriptId": a.manuscript_id,
+            "status": a.status,
+            "author": clip_opt(&a.author, MAX_ID),
+        });
+        self.run(
+            &parts,
+            "read",
+            "list_suggestions",
+            Some(&a.manuscript_id),
+            args,
+            |_| {
+                check_ids(&[("manuscript_id", Some(&a.manuscript_id))])?;
+                if let Some(st) = &a.status {
+                    check_len("status", st, MAX_ID)?;
+                    if st != "open" {
+                        return Err(ToolErr::invalid(
+                            "only open suggestions are listed; omit status or use \"open\"",
+                        ));
+                    }
+                }
+                if let Some(au) = &a.author {
+                    check_len("author", au, MAX_ID)?;
+                }
+                let mut out = Vec::new();
+                for sec in self.store.list_sections(&a.manuscript_id)? {
+                    for x in self.store.open_suggestions(&sec.id)? {
+                        if let Some(au) = &a.author {
+                            let want = au.strip_prefix("agent:").unwrap_or(au.as_str());
+                            if x.author.id != want && format!("agent:{}", x.author.id) != *au {
+                                continue;
+                            }
+                        }
+                        out.push(x);
+                    }
+                }
+                Ok(Output::Json(json!({ "suggestions": out })))
             },
         )
     }
@@ -632,7 +710,11 @@ impl CoauthorMcp {
                     )));
                 }
                 let s = self.store.get_section(&a.manuscript_id, &a.section_id)?;
+                let id = format!("s{}", crate::manuscripts::new_id());
+                let ts = self.store.now()?;
                 let doc = self.store.load_doc(&s.doc_id)?;
+                let sv = crate::manuscripts::state_vector(&doc);
+                let review_before = blocks_of(&doc);
                 let kind = {
                     let txn = yrs::Transact::transact_mut(&doc);
                     crate::anchor::block_kind(&txn, &a.block_id)
@@ -652,8 +734,45 @@ impl CoauthorMcp {
                         ))
                     }
                 }
+                let before_style = {
+                    let txn = yrs::Transact::transact_mut(&doc);
+                    crate::anchor::paragraph_style(&txn, &a.block_id)
+                        .map_err(|e| ToolErr::invalid(e.to_string()))?
+                };
+                if before_style == a.style {
+                    return Err(ToolErr::invalid(format!(
+                        "paragraph is already {:?}",
+                        a.style
+                    )));
+                }
+                {
+                    let mut txn = yrs::Transact::transact_mut(&doc);
+                    if crate::anchor::block_has_format_change(&txn, &a.block_id)
+                        .map_err(|e| ToolErr::invalid(e.to_string()))?
+                    {
+                        return Err(ToolErr::invalid(
+                            crate::anchor::AnchorError::OverlapsSuggestion.to_string(),
+                        ));
+                    }
+                    crate::anchor::add_paragraph_format_change(
+                        &doc,
+                        &mut txn,
+                        &a.block_id,
+                        &id,
+                        &format!("agent:{}", p.agent_id),
+                        &ts,
+                        &before_style,
+                        &a.style,
+                    )
+                    .map_err(|e| ToolErr::invalid(e.to_string()))?;
+                }
+                check_schema(&doc)?;
+                {
+                    let (b, a) = review_marks_pair(&review_before, &blocks_of(&doc));
+                    check_review_marks(&b, &a)?;
+                }
                 let x = crate::manuscripts::Suggestion {
-                    id: format!("s{}", crate::manuscripts::new_id()),
+                    id: id.clone(),
                     section_id: s.id.clone(),
                     block_id: Some(a.block_id.clone()),
                     kind: "style".into(),
@@ -662,13 +781,13 @@ impl CoauthorMcp {
                     rationale: a.rationale.clone(),
                     author: author(p),
                     status: "open".into(),
-                    created_at: self.store.now()?,
+                    created_at: ts,
                 };
                 self.store.agent_write(
                     &p.token_id,
                     AgentWrite {
                         manuscript_id: &a.manuscript_id,
-                        doc: None,
+                        doc: Some((s.doc_id.as_str(), &doc, &sv)),
                         comment: None,
                         suggestion: Some(&x),
                     },
@@ -679,7 +798,12 @@ impl CoauthorMcp {
     }
 }
 
-const REVIEW_MARKS: &[&str] = &["comment_anchor", "suggestion_insert", "suggestion_delete"];
+const REVIEW_MARKS: &[&str] = &[
+    "comment_anchor",
+    "suggestion_insert",
+    "suggestion_delete",
+    "format_change",
+];
 
 /// One contiguous stretch of a review mark: where it sits (block id, plus `#fn<n>.<k>` for the
 /// k-th paragraph of the n-th footnote), its UTF-16 start/end there, the text it covers and its
@@ -882,10 +1006,10 @@ fn check_schema(doc: &yrs::Doc) -> Result<(), ToolErr> {
 impl ServerHandler for CoauthorMcp {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "swarmDraft manuscript tools. Read with list_documents, list_chapters, read_chapter and \
-             search_text; comment with add_comment and propose changes with suggest_edit and \
-             suggest_style. Anchor comments and suggestions with a block id plus an exact quote. \
-             Accepting or rejecting suggestions is reserved for the human author.",
+            "swarmDraft manuscript tools. Read with list_documents, list_chapters, read_chapter, \
+             list_suggestions and search_text; comment with add_comment and propose changes with \
+             suggest_edit and suggest_style. Anchor comments and suggestions with a block id plus \
+             an exact quote. Accepting or rejecting suggestions is reserved for the human author.",
         )
     }
 }

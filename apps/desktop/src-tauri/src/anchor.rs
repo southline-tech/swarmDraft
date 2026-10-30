@@ -10,7 +10,7 @@ use std::sync::Arc;
 use yrs::types::text::YChange;
 use yrs::types::xml::{XmlFragment, XmlOut};
 use yrs::types::Attrs;
-use yrs::{Any, Doc, Out, ReadTxn, Text, TransactionMut, XmlTextRef};
+use yrs::{Any, Doc, Out, ReadTxn, Text, TransactionMut, Xml, XmlTextRef};
 
 use crate::content::{block_id, mark_id_hash, FRAGMENT, NON_EXCLUSIVE_MARKS};
 
@@ -22,6 +22,7 @@ pub enum AnchorError {
     Ambiguous(String, usize),
     OverlapsSuggestion,
     SpansFootnote(String),
+    NoMarkableText,
 }
 
 impl std::fmt::Display for AnchorError {
@@ -33,6 +34,7 @@ impl std::fmt::Display for AnchorError {
             Self::Ambiguous(q, n) => write!(f, "ambiguous anchor: {q:?} occurs {n} times in that block; quote more surrounding text"),
             Self::OverlapsSuggestion => write!(f, "the quoted text overlaps a pending suggestion; wait for the author to decide it"),
             Self::SpansFootnote(q) => write!(f, "quote {q:?} spans a footnote marker; quote text on one side of the footnote only"),
+            Self::NoMarkableText => write!(f, "block has no text to mark with a format suggestion"),
         }
     }
 }
@@ -112,7 +114,13 @@ fn visible_text(txn: &TransactionMut, t: &XmlTextRef) -> String {
 }
 
 fn is_suggestion_key(k: &str) -> bool {
-    k.starts_with("suggestion_insert--") || k.starts_with("suggestion_delete--")
+    k.starts_with("suggestion_insert--")
+        || k.starts_with("suggestion_delete--")
+        || k.starts_with("format_change--")
+}
+
+fn is_format_change_key(k: &str) -> bool {
+    k.starts_with("format_change--")
 }
 
 fn units(doc: &Doc, s: &str) -> u32 {
@@ -284,4 +292,117 @@ pub fn block_kind(txn: &TransactionMut, block: &str) -> Option<String> {
         }
         _ => None,
     })
+}
+
+fn find_block<'a>(
+    txn: &TransactionMut<'a>,
+    block: &str,
+) -> Result<yrs::types::xml::XmlElementRef, AnchorError> {
+    let frag = txn
+        .get_xml_fragment(FRAGMENT)
+        .ok_or_else(|| AnchorError::BlockNotFound(block.into()))?;
+    frag.children(txn)
+        .find_map(|c| match c {
+            XmlOut::Element(e)
+                if block_id(AsRef::<yrs::branch::Branch>::as_ref(&e).id()) == block =>
+            {
+                Some(e)
+            }
+            _ => None,
+        })
+        .ok_or_else(|| AnchorError::BlockNotFound(block.into()))
+}
+
+/// Current paragraph `style` attribute (`body` when unset).
+pub fn paragraph_style(txn: &TransactionMut, block: &str) -> Result<String, AnchorError> {
+    let e = find_block(txn, block)?;
+    if e.tag().as_ref() != "paragraph" {
+        return Err(AnchorError::BlockNotFound(block.into()));
+    }
+    Ok(e.get_attribute(txn, "style")
+        .and_then(|v| match v {
+            Out::Any(Any::String(s)) => Some(s.to_string()),
+            _ => None,
+        })
+        .unwrap_or_else(|| "body".into()))
+}
+
+fn text_unit_len(doc: &Doc, txn: &TransactionMut, t: &XmlTextRef) -> u32 {
+    let mut n = 0u32;
+    for d in t.diff(txn, YChange::identity) {
+        let Out::Any(Any::String(s)) = &d.insert else {
+            continue;
+        };
+        for ch in s.chars() {
+            let mut buf = [0u8; 4];
+            n += units(doc, ch.encode_utf8(&mut buf));
+        }
+    }
+    n
+}
+
+fn block_text_keys(
+    txn: &TransactionMut,
+    el: &impl XmlFragment,
+) -> std::collections::HashSet<String> {
+    let mut texts = Vec::new();
+    collect_texts(txn, el, &mut texts);
+    let mut keys = std::collections::HashSet::new();
+    for t in texts {
+        for d in t.diff(txn, YChange::identity) {
+            if let Some(a) = d.attributes.as_ref() {
+                keys.extend(a.keys().map(|k| k.to_string()));
+            }
+        }
+    }
+    keys
+}
+
+/// True when any run in the block already carries a `format_change` mark.
+pub fn block_has_format_change(txn: &TransactionMut, block: &str) -> Result<bool, AnchorError> {
+    let el = find_block(txn, block)?;
+    Ok(block_text_keys(txn, &el)
+        .into_iter()
+        .any(|k| is_format_change_key(&k)))
+}
+
+/// Mark every text run in a paragraph with a `format_change` for a proposed style change.
+#[allow(clippy::too_many_arguments)]
+pub fn add_paragraph_format_change(
+    doc: &Doc,
+    txn: &mut TransactionMut,
+    block: &str,
+    id: &str,
+    author: &str,
+    ts: &str,
+    before: &str,
+    after: &str,
+) -> Result<(), AnchorError> {
+    let el = find_block(txn, block)?;
+    let mut texts = Vec::new();
+    collect_texts(txn, &el, &mut texts);
+    let mut keys = block_text_keys(txn, &el);
+    let meta = serde_json::json!({
+        "id": id,
+        "author": author,
+        "ts": ts,
+        "target": crate::content::PARAGRAPH_STYLE_TARGET,
+        "before": before,
+        "after": after,
+    });
+    let mut marked = false;
+    for t in texts {
+        let len = text_unit_len(doc, txn, &t);
+        if len == 0 {
+            continue;
+        }
+        let key = free_key("format_change", id, &keys);
+        keys.insert(key.clone());
+        t.format(txn, 0, len, attrs1(key, meta.clone()));
+        marked = true;
+    }
+    if !marked {
+        return Err(AnchorError::NoMarkableText);
+    }
+    Ok(())
 }
