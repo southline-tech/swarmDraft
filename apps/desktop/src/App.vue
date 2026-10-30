@@ -48,6 +48,7 @@ import { BUSY_NOTICE } from './errors/busy';
 import { PRODUCT_NAME } from './lib/brand';
 import ShellsPreview from './shells/ShellsPreview.vue';
 import Rad60ReviewEvidence from './evidence/Rad60ReviewEvidence.vue';
+import Rad67EditorChromeEvidence from './evidence/Rad67EditorChromeEvidence.vue';
 import AppToast from './shells/AppToast.vue';
 import OpeningProgress from './shells/OpeningProgress.vue';
 import ErrorCard from './shells/ErrorCard.vue';
@@ -848,6 +849,7 @@ defineExpose({ open, closeSession });
 
 <template>
   <Rad60ReviewEvidence v-if="evidence === 'rad60-review'" class="shell" />
+  <Rad67EditorChromeEvidence v-else-if="evidence === 'rad67'" class="shell" />
   <ShellsPreview v-else-if="preview" class="shell" :initial="preview" @close="preview = null" />
   <main v-else class="shell">
     <header v-show="!focusMode" class="topbar">

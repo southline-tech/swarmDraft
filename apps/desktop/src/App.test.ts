@@ -1972,7 +1972,7 @@ describe('App UI shells (Part of #36)', () => {
         .find(`[data-test="section-${chapter.id}"] [data-test="word-count"]`)
         .attributes('aria-label'),
     ).toBe(`${words} words`);
-    expect(w.find('[data-test="new-chapter"]').attributes('aria-disabled')).toBe('true');
+    expect(w.find('[data-test="new-chapter"]').attributes('disabled')).toBeDefined();
     w.unmount();
   });
 

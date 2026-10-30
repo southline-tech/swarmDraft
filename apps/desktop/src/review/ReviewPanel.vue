@@ -157,6 +157,7 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
     v-if="collapsed"
     side="right"
     expand-label="Show review panel"
+    :expand-title="tip('Show review panel', REVIEW_SHORTCUTS.toggle)"
     :badge="visible.length"
     data-test="review-rail"
     @expand="emit('toggle-collapsed')"

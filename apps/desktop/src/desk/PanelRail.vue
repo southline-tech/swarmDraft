@@ -7,12 +7,14 @@ withDefaults(
   defineProps<{
     side?: 'left' | 'right';
     expandLabel: string;
+    /** Optional native tooltip; defaults to expandLabel. */
+    expandTitle?: string;
     /** Optional open-count badge (review rail). */
     badge?: number;
     /** Decorative icon character (chapters rail). */
     glyph?: string;
   }>(),
-  { side: 'right', badge: undefined, glyph: undefined },
+  { side: 'right', expandTitle: undefined, badge: undefined, glyph: undefined },
 );
 defineEmits<{ expand: [] }>();
 </script>
@@ -29,6 +31,7 @@ defineEmits<{ expand: [] }>();
       class="panel-rail__btn"
       :data-test="side === 'left' ? 'outline-rail-expand' : 'expand'"
       :aria-label="expandLabel"
+      :title="expandTitle ?? expandLabel"
       @click="$emit('expand')"
     >
       {{ side === 'left' ? '›' : '‹' }}
@@ -38,7 +41,7 @@ defineEmits<{ expand: [] }>();
       v-if="badge !== undefined"
       class="panel-rail__badge"
       data-test="badge"
-      :aria-label="`${badge} open`"
+      :aria-label="`${badge} open changes`"
       >{{ badge }}</span
     >
   </aside>

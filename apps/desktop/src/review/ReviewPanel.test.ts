@@ -168,6 +168,8 @@ describe('ReviewPanel (RAD-258)', () => {
     const w = mount(ReviewPanel, { props: { items, collapsed: true } });
     expect(w.find('[data-test=review-panel]').exists()).toBe(false);
     expect(w.find('[data-test=badge]').text()).toBe('3');
+    expect(w.find('[data-test=badge]').attributes('aria-label')).toBe('3 open changes');
+    expect(w.find('[data-test=expand]').attributes('title')).toContain('Ctrl+\\');
     await w.find('[data-test=expand]').trigger('click');
     expect(w.emitted('toggle-collapsed')).toHaveLength(1);
   });
