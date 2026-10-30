@@ -66,6 +66,7 @@ import { resetCollabSlots } from './author-colors';
 import { sectionNumberLabels } from '@coauthor/editor';
 import type { NumberingStyle } from '@coauthor/schema';
 import type { DecisionRecord } from '@coauthor/editor';
+import { mergeLoadedDecisionRecords } from './review/decision-records-load';
 import { docWordCount, outlineDocs, sectionTreeDocs } from './status/wordcount';
 import {
   importAndOpen,
@@ -222,10 +223,26 @@ const saveCopyOfOpen = () =>
 const reloads = ref(0);
 /** Persisted accept/reject records per section (#51). */
 const decisionRecordsBySection = shallowRef<Record<string, DecisionRecord[]>>({});
+let decisionLoadGeneration = 0;
+function snapshotDecisionRecords(
+  source: Readonly<Record<string, DecisionRecord[]>>,
+): Record<string, DecisionRecord[]> {
+  const out: Record<string, DecisionRecord[]> = {};
+  for (const [sectionId, rows] of Object.entries(source)) {
+    out[sectionId] = [...rows];
+  }
+  return out;
+}
 async function loadDecisionRecords(manuscriptId: string) {
+  const generation = ++decisionLoadGeneration;
+  const atLoadStart = snapshotDecisionRecords(decisionRecordsBySection.value);
   try {
-    decisionRecordsBySection.value = await manuscriptReviewDecisions(manuscriptId);
+    const incoming = await manuscriptReviewDecisions(manuscriptId);
+    if (session.value?.id !== manuscriptId || generation !== decisionLoadGeneration) return;
+    const current = decisionRecordsBySection.value;
+    decisionRecordsBySection.value = mergeLoadedDecisionRecords(atLoadStart, incoming, current);
   } catch (err) {
+    if (session.value?.id !== manuscriptId || generation !== decisionLoadGeneration) return;
     console.error('Could not load review decisions', err);
     decisionRecordsBySection.value = {};
   }
@@ -234,7 +251,7 @@ function onSectionDecisions(sectionId: string, records: DecisionRecord[]) {
   if (!session.value) return;
   decisionRecordsBySection.value = { ...decisionRecordsBySection.value, [sectionId]: records };
   void saveSectionReviewDecisions(session.value.id, sectionId, records).catch((err) => {
-    console.error('Review decision save failed; retrying', err);
+    console.error('Review decision save failed; next change will retry', err);
     saveFailure.value = saveFailed(saveFailure.value, err);
   });
 }
@@ -619,6 +636,7 @@ function open(next: ManuscriptSession) {
   markWelcomed();
   choosingBook.value = false;
   session.value = next;
+  decisionRecordsBySection.value = {};
   void loadDecisionRecords(next.id);
   syncWindowTitle(next.title || PRODUCT_NAME);
   const rows = next.outline.value;

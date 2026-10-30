@@ -308,7 +308,6 @@ export async function saveManuscriptCopy(title: string, bytes: Uint8Array): Prom
 export interface SectionReviewMeta {
   comments: import('@coauthor/editor').CommentRow[];
   authorSavedNames: Record<string, string>;
-  decisions: import('@coauthor/editor').DecisionRecord[];
 }
 
 export async function manuscriptReviewDecisions(
@@ -336,15 +335,8 @@ export async function saveSectionReviewDecisions(
 }
 
 export async function sectionReviewMeta(sectionId: string): Promise<SectionReviewMeta> {
-  if (!isTauri()) return { comments: [], authorSavedNames: {}, decisions: [] };
-  const meta = await invoke<Omit<SectionReviewMeta, 'decisions'> & { decisions: unknown[] }>(
-    'section_review_meta',
-    { sectionId },
-  );
-  return {
-    ...meta,
-    decisions: parseDecisionRecords(meta.decisions),
-  };
+  if (!isTauri()) return { comments: [], authorSavedNames: {} };
+  return invoke<SectionReviewMeta>('section_review_meta', { sectionId });
 }
 
 /** Open comment rows for Save a copy .docx export (#74). */

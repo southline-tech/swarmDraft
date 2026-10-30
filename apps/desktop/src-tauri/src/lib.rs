@@ -459,7 +459,6 @@ struct ReviewCommentRow {
 struct SectionReviewMeta {
     comments: Vec<ReviewCommentRow>,
     author_saved_names: std::collections::HashMap<String, String>,
-    decisions: Vec<manuscripts::ReviewDecisionRecord>,
 }
 
 fn review_comment_row(c: manuscripts::Comment) -> ReviewCommentRow {
@@ -518,7 +517,6 @@ async fn section_review_meta(
     blocking(&store, move |s| {
         let comments = s.open_comments(&section_id)?;
         let suggestions = s.open_suggestions(&section_id)?;
-        let decisions = s.review_decisions_for_section(&section_id)?;
         let mut author_saved_names = std::collections::HashMap::new();
         for sug in &suggestions {
             if sug.author.kind == "agent" {
@@ -534,7 +532,6 @@ async fn section_review_meta(
         Ok(SectionReviewMeta {
             comments: comments.into_iter().map(review_comment_row).collect(),
             author_saved_names,
-            decisions,
         })
     })
     .await

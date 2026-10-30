@@ -1017,7 +1017,7 @@ vi.mock('./backend', async (orig) => ({
   listenOpeningProgress: vi.fn(async () => () => {}),
   manuscriptReviewDecisions: vi.fn(async () => ({})),
   saveSectionReviewDecisions: vi.fn(async () => {}),
-  sectionReviewMeta: vi.fn(async () => ({ comments: [], authorSavedNames: {}, decisions: [] })),
+  sectionReviewMeta: vi.fn(async () => ({ comments: [], authorSavedNames: {} })),
 }));
 
 describe('save-failure banner', () => {
