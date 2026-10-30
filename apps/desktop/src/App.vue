@@ -23,6 +23,7 @@ import SettingsScreen from './settings/SettingsScreen.vue';
 import { markAuthorLabel, refreshAgents, reloadOnFocus } from './agent-names';
 import ContinuousManuscript from './ContinuousManuscript.vue';
 import SectionNav from './SectionNav.vue';
+import OutlineRail from './desk/OutlineRail.vue';
 import {
   toastPlacement,
   useOutlineAutoCollapse,
@@ -47,6 +48,7 @@ import { BUSY_NOTICE } from './errors/busy';
 import { PRODUCT_NAME } from './lib/brand';
 import ShellsPreview from './shells/ShellsPreview.vue';
 import Rad60ReviewEvidence from './evidence/Rad60ReviewEvidence.vue';
+import Rad67EditorChromeEvidence from './evidence/Rad67EditorChromeEvidence.vue';
 import AppToast from './shells/AppToast.vue';
 import OpeningProgress from './shells/OpeningProgress.vue';
 import ErrorCard from './shells/ErrorCard.vue';
@@ -823,6 +825,14 @@ function onAskBotFromEditor() {
 }
 /** #96: the writer opened the outline by hand while the review panel shows. */
 const outlineForced = computed(() => outlineAuto.manual.value && navigatorOpen.value);
+/** wp2 (#67): full outline, collapsed rail, or hidden in focus mode. */
+const workspaceGridClass = computed(() => {
+  if (focusMode.value) return 'grid-cols-1';
+  return navigatorOpen.value ? 'grid-cols-[18rem_1fr]' : 'grid-cols-[var(--ct-rail-w)_1fr]';
+});
+const chapterNavControls = computed(() =>
+  navigatorOpen.value ? 'chapter-navigator' : 'chapter-navigator-rail',
+);
 
 const sectionLabels = computed(() => {
   const s = session.value;
@@ -839,6 +849,7 @@ defineExpose({ open, closeSession });
 
 <template>
   <Rad60ReviewEvidence v-if="evidence === 'rad60-review'" class="shell" />
+  <Rad67EditorChromeEvidence v-else-if="evidence === 'rad67'" class="shell" />
   <ShellsPreview v-else-if="preview" class="shell" :initial="preview" @close="preview = null" />
   <main v-else class="shell">
     <header v-show="!focusMode" class="topbar">
@@ -1124,7 +1135,7 @@ defineExpose({ open, closeSession });
     <div
       v-if="session && !choosingBook"
       class="workspace grid gap-4 p-4"
-      :class="navigatorOpen && !focusMode ? 'grid-cols-[18rem_1fr]' : 'grid-cols-1'"
+      :class="workspaceGridClass"
       data-test="workspace"
     >
       <SectionNav
@@ -1141,6 +1152,7 @@ defineExpose({ open, closeSession });
         @activate="focusEditor"
         @numbering-style="onNumberingStyle"
       />
+      <OutlineRail v-show="!navigatorOpen && !focusMode" @expand="outlineAuto.toggleByHand()" />
       <ContinuousManuscript
         ref="editorPane"
         :outline="session.outline.value"
@@ -1150,6 +1162,7 @@ defineExpose({ open, closeSession });
         :readonly="session.closed || restoreInProgress"
         :read-only-reason="restoreInProgress ? 'restore in progress' : undefined"
         :navigator-open="navigatorOpen"
+        :navigator-controls="chapterNavControls"
         :chapter-title="selected?.title"
         :section-labels="sectionLabels"
         :book-docs="outlineDocs(session.outline.value, session.sections)"

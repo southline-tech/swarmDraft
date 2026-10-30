@@ -40,9 +40,11 @@ import {
   reviewActionFor,
   saveCollapsed,
   step,
+  toggleAuthor,
   visibleItems,
   withSuggestionReasons,
   authorVisibleInFilter,
+  authorsOf,
   type AuthorFilter,
 } from './review/review-state';
 import FindPanel from './shells/FindPanel.vue';
@@ -106,6 +108,8 @@ const props = defineProps<{
   readOnlyReason?: string;
   /** Whether the parent's chapter navigator is showing; reflected on the toolbar's Chapters button. */
   navigatorOpen?: boolean;
+  /** aria-controls target for the chapters toggle (#67 rail vs full outline). */
+  navigatorControls?: string;
   /** Status bar (RAD-256): the open chapter's title, when known. */
   chapterTitle?: string;
   /** Display-only label above the chapter heading ("Chapter Three"); not part of the doc. */
@@ -471,6 +475,11 @@ const decideVisible = (d: Decision, keys: readonly string[]) =>
     d,
   );
 
+function onToggleAuthor(author: string) {
+  filter.value = toggleAuthor(authorsOf(changes.value), filter.value, author);
+  if (editor.value) refreshReview(editor.value);
+}
+
 function onKeydown(ev: KeyboardEvent) {
   if (shortcutsOpen.value) return;
   const action = reviewActionFor(ev);
@@ -781,6 +790,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
           :editor="editor"
           :review-open="reviewOpen"
           :navigator-open="props.navigatorOpen"
+          :navigator-controls="props.navigatorControls ?? 'chapter-navigator'"
           :read-only-reason="
             loadError ? 'document failed to load' : props.readOnlyReason || undefined
           "
@@ -915,14 +925,13 @@ const LABELS: Record<ReviewItem['type'], string> = {
             :collapsed="collapsed"
             :busy="!editor?.isEditable"
             :labels="labelAuthor"
-            @show-only="(a: string) => (filter = new Set([a]))"
-            @show-all="filter = null"
             @select="select"
             @prev="move(-1)"
             @next="move(1)"
             @decide-one="decideOne"
             @decide-visible="decideVisible"
             @toggle-collapsed="collapsed = !collapsed"
+            @toggle-author="onToggleAuthor"
           />
           <EmptyState
             v-if="!collapsed && !comments.length && !loadError"

@@ -299,6 +299,7 @@ describe('no room for the outline while notes show (#98)', () => {
   it('OUTLINE_ROOM matches the 18rem outline column plus the gap-4 workspace gap', () => {
     const app = readFileSync(resolve(__dirname, '../App.vue'), 'utf8');
     expect(app).toContain("'grid-cols-[18rem_1fr]'");
+    expect(app).toContain("'grid-cols-[var(--ct-rail-w)_1fr]'");
     expect(app).toMatch(/class="workspace grid gap-4/);
     expect(OUTLINE_ROOM).toBe(18 * 16 + 16);
   });

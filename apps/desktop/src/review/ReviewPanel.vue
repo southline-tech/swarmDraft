@@ -9,11 +9,14 @@
  */
 import EmptyState from '../shells/EmptyState.vue';
 import ReasonLine from '../shells/ReasonLine.vue';
+import PanelRail from '../desk/PanelRail.vue';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { Decision, SuggestionItem } from '@coauthor/editor';
 import {
   authorKind,
   authorsOf,
+  authorVisibleInFilter,
+  filterSummary,
   groupChanges,
   REVIEW_SHORTCUTS,
   visibleItems,
@@ -21,6 +24,9 @@ import {
 } from './review-state';
 import { authorName, type AgentName } from '../agent-names';
 import { collabColor } from '../author-colors';
+import { REVIEW_CHANGES_REGION_ID } from './review-panel-a11y';
+
+const FILTER_MENU_ID = 'review-author-filter-menu';
 
 const props = withDefaults(
   defineProps<{
@@ -44,9 +50,6 @@ const props = withDefaults(
   },
 );
 const emit = defineEmits<{
-  /** Show only this author's changes (raw id). */
-  'show-only': [author: string];
-  'show-all': [];
   select: [key: string];
   prev: [];
   next: [];
@@ -54,6 +57,8 @@ const emit = defineEmits<{
   /** Keys are locked when the confirmation opens, so later arrivals are not included. */
   'decide-visible': [decision: Decision, keys: string[]];
   'toggle-collapsed': [];
+  /** wp8 (#67): multi-author filter toggles (raw id). */
+  'toggle-author': [author: string];
 }>();
 
 const changes = computed(() => groupChanges(props.items));
@@ -67,50 +72,22 @@ const name = (a: string) => {
   return n.note ? `${n.name} ${n.note}` : n.name;
 };
 const initial = (a: string) => (parts(a).name[0] ?? '?').toUpperCase();
-const only = (a: string) => !!props.filter && props.filter.size === 1 && props.filter.has(a);
-/** The one author shown, or null for All (or a multi-author filter set elsewhere). */
-const selected = computed(() => authors.value.find(only) ?? null);
 
-/** "Show changes from" dropdown (single choice: All or one author). */
+/** "Show changes from" popover (multi-author checkbox picker, #67). */
 const menuOpen = ref(false);
 const root = ref<HTMLElement | null>(null);
-function choose(a: string | null) {
+const filterToggle = ref<HTMLButtonElement | null>(null);
+function closeFilterMenu(refocus = false) {
+  if (!menuOpen.value) return;
   menuOpen.value = false;
-  if (a === null) emit('show-all');
-  else emit('show-only', a);
-}
-function filterMenuOptions(): HTMLElement[] {
-  const menu = root.value?.querySelector('[data-test=filter-menu]');
-  if (!menu) return [];
-  return [...menu.querySelectorAll('[role=option]')] as HTMLElement[];
-}
-function activateFilterOption(el: HTMLElement) {
-  if (el.dataset.test === 'filter-all') choose(null);
-  else if (el.dataset.filterAuthor) choose(el.dataset.filterAuthor);
-}
-function onFilterMenuKeydown(e: KeyboardEvent) {
-  const items = filterMenuOptions();
-  if (!items.length) return;
-  const active = document.activeElement as HTMLElement;
-  const i = items.indexOf(active);
-  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-    e.preventDefault();
-    items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
-  } else if (e.key === ' ') {
-    if (i >= 0) {
-      e.preventDefault();
-      activateFilterOption(active);
-    }
-  }
+  if (refocus) void nextTick(() => filterToggle.value?.focus());
 }
 function onDocDown(e: MouseEvent) {
-  if (root.value && !root.value.contains(e.target as Node)) menuOpen.value = false;
+  if (root.value && !root.value.contains(e.target as Node)) closeFilterMenu(false);
 }
 watch(menuOpen, (open) => {
-  if (open) {
-    document.addEventListener('mousedown', onDocDown);
-    void nextTick(() => filterMenuOptions()[0]?.focus());
-  } else document.removeEventListener('mousedown', onDocDown);
+  if (open) document.addEventListener('mousedown', onDocDown);
+  else document.removeEventListener('mousedown', onDocDown);
 });
 onBeforeUnmount(() => document.removeEventListener('mousedown', onDocDown));
 /** Theme-aware author color: a --ct-collab-N token keyed by the raw author id, never the name. */
@@ -138,31 +115,41 @@ function confirm() {
   if (c) emit('decide-visible', c.decision, c.keys);
   confirming.value = null;
 }
+function onAuthorFilterChange(e: Event) {
+  const t = e.target;
+  if (!(t instanceof HTMLInputElement) || t.type !== 'checkbox') return;
+  const author = t.dataset.author;
+  if (author) emit('toggle-author', author);
+}
 const tip = (text: string, keys: string) => `${text} (${keys})`;
 </script>
 
 <template>
-  <aside
+  <PanelRail
     v-if="collapsed"
-    class="review-rail"
-    aria-label="Review changes (collapsed)"
+    side="right"
+    expand-label="Show review panel"
+    :expand-title="tip('Show review panel', REVIEW_SHORTCUTS.toggle)"
+    :badge="visible.length"
+    :controls-id="REVIEW_CHANGES_REGION_ID"
+    :panel-expanded="false"
     data-test="review-rail"
+    @expand="emit('toggle-collapsed')"
+  />
+  <div
+    v-if="collapsed"
+    :id="REVIEW_CHANGES_REGION_ID"
+    class="review-region-anchor"
+    aria-hidden="true"
+    data-test="review-region-anchor"
+  />
+  <aside
+    v-else
+    :id="REVIEW_CHANGES_REGION_ID"
+    class="review-panel"
+    aria-label="Review changes"
+    data-test="review-panel"
   >
-    <button
-      type="button"
-      class="icon"
-      data-test="expand"
-      :title="tip('Show review panel', REVIEW_SHORTCUTS.toggle)"
-      aria-label="Show review panel"
-      @click="emit('toggle-collapsed')"
-    >
-      ‹
-    </button>
-    <span class="badge" data-test="badge" :aria-label="`${visible.length} open changes`">{{
-      visible.length
-    }}</span>
-  </aside>
-  <aside v-else class="review-panel" aria-label="Review changes" data-test="review-panel">
     <header class="head">
       <h2>Review changes</h2>
       <button
@@ -196,72 +183,52 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
         data-test="collapse"
         :title="tip('Hide review panel', REVIEW_SHORTCUTS.toggle)"
         aria-label="Hide review panel"
+        aria-expanded="true"
+        :aria-controls="REVIEW_CHANGES_REGION_ID"
         @click="emit('toggle-collapsed')"
       >
         ⇥
       </button>
     </header>
 
-    <div ref="root" class="filter" @keydown.escape.stop="menuOpen = false">
+    <div
+      v-if="authors.length > 1"
+      ref="root"
+      class="filter"
+      @keydown.escape.stop="closeFilterMenu(true)"
+    >
       <div id="show-from" class="lbl">Show changes from</div>
       <button
+        ref="filterToggle"
         type="button"
         class="dd"
         data-test="filter-toggle"
-        aria-haspopup="listbox"
+        aria-haspopup="true"
         aria-labelledby="show-from filter-current"
         :aria-expanded="menuOpen"
+        :aria-controls="FILTER_MENU_ID"
         @click="menuOpen = !menuOpen"
       >
-        <span id="filter-current" class="cur" data-test="filter-current">
-          <template v-if="selected">
-            <span class="av sm" :style="hue(selected)" aria-hidden="true">{{
-              initial(selected)
-            }}</span>
-            <bdi class="name" dir="auto" :title="name(selected)">{{ name(selected) }}</bdi>
-            <span class="pill">{{ authorKind(selected) }}</span>
-          </template>
-          <span v-else class="name">{{ filter ? 'Some authors' : 'All' }}</span>
-        </span>
-        <span class="cnt">{{ visible.length }}</span>
+        <span id="filter-current" class="cur name" data-test="filter-current">{{
+          filterSummary(authors, filter)
+        }}</span>
         <span class="caret" aria-hidden="true">▾</span>
       </button>
-      <ul
+      <fieldset
         v-if="menuOpen"
-        class="menu"
-        role="listbox"
-        aria-labelledby="show-from"
-        data-test="filter-menu"
-        @keydown="onFilterMenuKeydown"
+        :id="FILTER_MENU_ID"
+        class="menu author-filter"
+        data-test="step-authors"
+        @change="onAuthorFilterChange"
       >
-        <li
-          role="option"
-          class="fo"
-          :class="{ sel: !filter }"
-          data-test="filter-all"
-          :aria-selected="!filter"
-          tabindex="0"
-          @click="choose(null)"
-          @keydown.enter.prevent="choose(null)"
-        >
-          <span class="check" aria-hidden="true">{{ !filter ? '✓' : '' }}</span>
-          <span class="name">All</span>
-          <span class="cnt">{{ changes.length }}</span>
-        </li>
-        <li
-          v-for="a in authors"
-          :key="a"
-          role="option"
-          class="fo"
-          :class="{ sel: only(a) }"
-          data-test="filter-option"
-          :data-filter-author="a"
-          :aria-selected="only(a)"
-          tabindex="0"
-          @click="choose(a)"
-          @keydown.enter.prevent="choose(a)"
-        >
-          <span class="check" aria-hidden="true">{{ only(a) ? '✓' : '' }}</span>
+        <legend class="visually-hidden">Show changes from</legend>
+        <label v-for="a in authors" :key="`af-${a}`" class="author-filter__row">
+          <input
+            type="checkbox"
+            data-test="author-filter"
+            :data-author="a"
+            :checked="authorVisibleInFilter(filter, a)"
+          />
           <span class="av sm" :style="hue(a)" aria-hidden="true">{{ initial(a) }}</span>
           <bdi class="name" dir="auto" data-test="agent-name" :title="name(a)">{{
             parts(a).name
@@ -269,8 +236,8 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
           <span v-if="parts(a).note" class="note" data-test="agent-note">{{ parts(a).note }}</span>
           <span class="pill">{{ authorKind(a) }}</span>
           <span class="cnt">{{ countOf(a) }}</span>
-        </li>
-      </ul>
+        </label>
+      </fieldset>
     </div>
 
     <p v-if="!changes.length && loadFailed" class="muted" data-test="empty-load-failed">
@@ -367,8 +334,15 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
 </template>
 
 <style scoped>
-.review-panel,
-.review-rail {
+.review-region-anchor {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.review-panel {
   background: var(--ct-surface);
   border-left: 1px solid var(--ct-border);
   color: var(--ct-text);
@@ -386,15 +360,39 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
   position: relative;
   overflow: visible;
 }
-.review-rail {
-  width: 40px;
-  box-sizing: border-box;
+.author-filter {
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-md);
+  margin: 0;
+  padding: var(--ct-space-2);
+}
+.filter .menu.author-filter {
+  position: absolute;
+  z-index: 10;
+  left: 0;
+  right: 0;
+  margin: 2px 0 0;
+  box-shadow: var(--ct-elevation-2);
+  background: var(--ct-surface-raised);
+  max-height: 320px;
+  overflow-y: auto;
+}
+.author-filter__summary {
+  margin: 0 0 var(--ct-space-2);
+  color: var(--ct-text-muted);
+  font-size: var(--ct-text-xs);
+}
+.author-filter__row {
   display: flex;
-  flex-direction: column;
   align-items: center;
   gap: var(--ct-space-2);
-  padding-top: var(--ct-space-2);
-  overflow: auto;
+  padding: 2px 0;
+  cursor: pointer;
+}
+.author-filter__row .cnt {
+  margin-left: auto;
+  color: var(--ct-text-muted);
+  font-size: var(--ct-text-xs);
 }
 .head {
   display: flex;

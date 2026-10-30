@@ -75,7 +75,7 @@ describe('SectionNav', () => {
     ]);
     expect(w.find('[data-test="add-scene"]').exists()).toBe(false);
     expect(w.find('[data-test="move-up"]').exists()).toBe(false);
-    expect(w.find('[data-test="new-chapter"]').exists()).toBe(false);
+    expect(w.find('[data-test="new-chapter"]').attributes('disabled')).toBeDefined();
     w.unmount();
   });
 
@@ -473,86 +473,11 @@ describe('SectionNav', () => {
     w.unmount();
   });
 
-  it('adds a chapter at the end of the last part via content + New default (#110)', async () => {
+  it('does not mount working chapter add controls until #52 (#67)', () => {
     const w = setup();
-    await w.find('[data-test="outline-new-content"]').trigger('click');
-    await settle();
-    expect(w.find('[data-test="rename-input"]').exists()).toBe(true);
-    await w.find('[data-test="rename-input"]').setValue('Closing harbor');
-    await w.find('[data-test="rename-input"]').trigger('keydown', { key: 'Enter' });
-    await settle();
-    expect(titles(w)).toEqual([
-      'Title page',
-      'Opening arc',
-      'Harbor dawn',
-      'After the bell',
-      'Closing harbor',
-      'About the author',
-    ]);
-    const created = w.props('sections').find((s) => s.title === 'Closing harbor')!;
-    expect(created.kind).toBe('chapter');
-    expect(created.parentId).toBe('part-1');
-    w.unmount();
-  });
-
-  it('adds a chapter to the last part when multiple parts exist (#110)', async () => {
-    let s = sampleOutline();
-    s = [
-      ...s,
-      {
-        id: 'part-2',
-        kind: 'part',
-        title: 'Part Two',
-        docId: 'manuscript/sample/section/part-2',
-      },
-    ];
-    const w = setup({ sections: s });
-    await w.find('[data-test="outline-new-content"]').trigger('click');
-    await settle();
-    await w.find('[data-test="rename-input"]').trigger('keydown', { key: 'Enter' });
-    await settle();
-    const created = w.props('sections').find((x) => x.title === 'New chapter')!;
-    expect(created.parentId).toBe('part-2');
-    w.unmount();
-  });
-
-  it('adds a part via content + New split menu (#110)', async () => {
-    const w = setup();
-    await w.find('[data-test="outline-new-content-split"]').trigger('click');
-    await settle();
-    await ctxEl('outline-new-part').click();
-    await settle();
-    expect(w.find('[data-test="rename-input"]').exists()).toBe(true);
-    await w.find('[data-test="rename-input"]').setValue('Middle arc');
-    await w.find('[data-test="rename-input"]').trigger('keydown', { key: 'Enter' });
-    await settle();
-    expect(titles(w)).toEqual([
-      'Title page',
-      'Opening arc',
-      'Harbor dawn',
-      'After the bell',
-      'Middle arc',
-      'About the author',
-    ]);
-    const created = w.props('sections').find((s) => s.title === 'Middle arc')!;
-    expect(created.kind).toBe('part');
-    expect(created.parentId).toBeUndefined();
-    w.unmount();
-  });
-
-  it('supports arrow keys and Escape on content + New menu (#110)', async () => {
-    const w = setup();
-    await w.find('[data-test="outline-new-content-split"]').trigger('click');
-    await settle();
-    const menu = ctxEl('outline-new-menu-content');
-    const items = menu.querySelectorAll('[role=menuitem]');
-    expect(items.length).toBe(2);
-    expect(document.activeElement).toBe(items[0]);
-    items[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
-    expect(document.activeElement).toBe(items[1]);
-    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    await settle();
-    expect(w.find('[data-test="outline-new-menu-content"]').exists()).toBe(false);
+    expect(w.find('[data-test="outline-new-content"]').exists()).toBe(false);
+    expect(w.find('[data-test="outline-new-content-split"]').exists()).toBe(false);
+    expect(w.find('[data-test="new-chapter"]').attributes('disabled')).toBeDefined();
     w.unmount();
   });
 

@@ -30,6 +30,7 @@ import {
   validParents,
   type OutlineNode,
 } from '@coauthor/editor';
+import { OUTLINE_CHAPTER_ADD_UI } from './outline-chapter-add';
 
 const props = defineProps<{
   manuscriptId: string;
@@ -954,58 +955,69 @@ const rovingTabKey = computed(() => {
         </li>
       </template>
       <li ref="contentNewMenuWrap" role="none" class="outline-new outline-new--split">
-        <div class="outline-new__split">
-          <button
-            type="button"
-            class="outline-new__btn outline-new__btn--main"
-            data-test="outline-new-content"
-            :disabled="busy"
-            @click="addContentSection('chapter')"
-          >
-            + New
-          </button>
-          <button
-            type="button"
-            class="outline-new__caret"
-            data-test="outline-new-content-split"
-            :aria-expanded="contentNewMenuOpen"
-            aria-haspopup="menu"
-            aria-label="Add chapter or part"
-            :disabled="busy"
-            @click="toggleContentNewMenu"
-          >
-            <span aria-hidden="true">▾</span>
-          </button>
-        </div>
-        <div
-          v-if="contentNewMenuOpen"
-          class="sh-menu outline-new__menu"
-          role="menu"
-          aria-label="Add content"
-          data-test="outline-new-menu-content"
-          @keydown="onNewMenuKey($event, contentNewMenuWrap, () => (contentNewMenuOpen = false))"
+        <button
+          type="button"
+          class="outline-new-chapter outline-new__btn"
+          data-test="new-chapter"
+          disabled
+          title="Add chapter (coming soon)"
         >
-          <button
-            type="button"
-            role="menuitem"
-            tabindex="-1"
-            class="sh-mi"
-            data-test="outline-new-chapter"
-            @click="addContentSection('chapter')"
+          + New chapter
+        </button>
+        <template v-if="OUTLINE_CHAPTER_ADD_UI">
+          <div class="outline-new__split">
+            <button
+              type="button"
+              class="outline-new__btn outline-new__btn--main"
+              data-test="outline-new-content"
+              :disabled="busy"
+              @click="addContentSection('chapter')"
+            >
+              + New
+            </button>
+            <button
+              type="button"
+              class="outline-new__caret"
+              data-test="outline-new-content-split"
+              :aria-expanded="contentNewMenuOpen"
+              aria-haspopup="menu"
+              aria-label="Add chapter or part"
+              :disabled="busy"
+              @click="toggleContentNewMenu"
+            >
+              <span aria-hidden="true">▾</span>
+            </button>
+          </div>
+          <div
+            v-if="contentNewMenuOpen"
+            class="sh-menu outline-new__menu"
+            role="menu"
+            aria-label="Add content"
+            data-test="outline-new-menu-content"
+            @keydown="onNewMenuKey($event, contentNewMenuWrap, () => (contentNewMenuOpen = false))"
           >
-            Chapter
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            tabindex="-1"
-            class="sh-mi"
-            data-test="outline-new-part"
-            @click="addContentSection('part')"
-          >
-            Part
-          </button>
-        </div>
+            <button
+              type="button"
+              role="menuitem"
+              tabindex="-1"
+              class="sh-mi"
+              data-test="outline-new-chapter"
+              @click="addContentSection('chapter')"
+            >
+              Chapter
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              tabindex="-1"
+              class="sh-mi"
+              data-test="outline-new-part"
+              @click="addContentSection('part')"
+            >
+              Part
+            </button>
+          </div>
+        </template>
       </li>
       <li v-if="hasBackZone" role="none" class="group-row">
         <button
@@ -1447,6 +1459,22 @@ const rovingTabKey = computed(() => {
 .outline-new {
   position: relative;
   margin: var(--ct-space-2) var(--ct-space-2) 0;
+}
+.outline-new-chapter {
+  display: block;
+  width: 100%;
+  margin: 0 0 var(--ct-space-2);
+  cursor: not-allowed;
+}
+.outline-new-chapter:disabled {
+  opacity: 1;
+}
+.outline-new-chapter:disabled:hover,
+.outline-new-chapter:disabled:focus-visible {
+  background: none;
+  border-color: var(--ct-border);
+  color: var(--ct-text-muted);
+  outline: none;
 }
 .outline-new__btn {
   width: 100%;

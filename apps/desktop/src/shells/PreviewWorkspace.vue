@@ -5,6 +5,7 @@
  */
 import { computed, ref } from 'vue';
 import { swatchVar } from './colors';
+import PanelRail from '../desk/PanelRail.vue';
 
 const props = defineProps<{ mode: 'wp1' | 'wp2' | 'wp8' | 'tc4' }>();
 const emit = defineEmits<{ stub: [what: string] }>();
@@ -60,17 +61,14 @@ const count = (bot: boolean) => changes.filter((c) => c.bot === bot).length;
     :class="{ 'pw--rails': props.mode === 'wp2' }"
     :data-test="`preview-${props.mode}`"
   >
-    <aside v-if="props.mode === 'wp2'" class="pw__rail" aria-label="Chapters (collapsed, sample)">
-      <button
-        type="button"
-        class="pw__icon"
-        aria-label="Show chapters"
-        @click="emit('stub', 'Show chapters')"
-      >
-        ›
-      </button>
-      <span class="pw__icon" aria-hidden="true">☰</span>
-    </aside>
+    <PanelRail
+      v-if="props.mode === 'wp2'"
+      side="left"
+      expand-label="Show chapters"
+      glyph="☰"
+      data-test="preview-outline-rail"
+      @expand="emit('stub', 'Show chapters')"
+    />
     <aside v-else class="pw__nav" aria-label="Chapters (sample)">
       <p class="pw__cap">Chapters</p>
       <ol>
@@ -125,22 +123,14 @@ const count = (bot: boolean) => changes.filter((c) => c.bot === bot).length;
       <b>Writing assistant</b
       ><span class="pw__muted">Suggested, not applied. Review to accept.</span>
     </div>
-    <aside
+    <PanelRail
       v-if="props.mode === 'wp2'"
-      class="pw__rail pw__rail--r"
-      aria-label="Review (collapsed, sample)"
-    >
-      <button
-        type="button"
-        class="pw__icon"
-        aria-label="Show review"
-        @click="emit('stub', 'Show review')"
-      >
-        ‹
-      </button>
-      <span class="pw__icon" aria-hidden="true">💬</span>
-      <span class="pw__badge" aria-label="3 open">3</span>
-    </aside>
+      side="right"
+      expand-label="Show review"
+      :badge="3"
+      data-test="preview-review-rail"
+      @expand="emit('stub', 'Show review')"
+    />
     <aside v-else class="pw__review" aria-label="Review (sample)">
       <template v-if="props.mode === 'wp8'">
         <p class="pw__cap">Review</p>

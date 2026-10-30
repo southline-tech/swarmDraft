@@ -26,6 +26,7 @@ const props = defineProps<{
   readonly?: boolean;
   readOnlyReason?: string;
   navigatorOpen?: boolean;
+  navigatorControls?: string;
   chapterTitle?: string;
   sectionLabels?: ReadonlyMap<string, string>;
   bookDocs?: readonly Y.Doc[];
@@ -196,6 +197,7 @@ onBeforeUnmount(() => observer?.disconnect());
             :readonly="readonly"
             :read-only-reason="readOnlyReason"
             :navigator-open="navigatorOpen"
+            :navigator-controls="navigatorControls"
             :slice-mode="sec.id !== selectedId"
             :toolbar-target="sec.id === selectedId ? toolbarTarget : undefined"
             :review-target="sec.id === selectedId ? REVIEW_RAIL : undefined"
