@@ -70,6 +70,32 @@ function sliceWithMark(slice: Slice, mark: PMMark): Slice {
   return new Slice(addMarkToFragment(slice.content, mark), slice.openStart, slice.openEnd);
 }
 
+function insertSpanLen(beforeDoc: PMNode, step: ReplaceStep, hasDeletion: boolean): number {
+  const applied = step.apply(beforeDoc);
+  if (applied.failed || !applied.doc) return 0;
+  if (!hasDeletion) return applied.doc.content.size - beforeDoc.content.size;
+  const net = applied.doc.content.size - beforeDoc.content.size;
+  if (net > 0) return net;
+  return step.slice.size;
+}
+
+function markInsertedSlice(
+  tr: Transaction,
+  beforeDoc: PMNode,
+  step: ReplaceStep,
+  mapFrom: number,
+  mark: PMMark,
+  offset: number,
+  hasDeletion: boolean,
+): Transaction {
+  const insertLen = insertSpanLen(beforeDoc, step, hasDeletion);
+  const insFrom = mapFrom + offset;
+  const insTo = insFrom + insertLen;
+  if (insertLen <= 0 || insTo <= insFrom || insTo > tr.doc.content.size) return tr;
+  const existing = tr.doc.slice(insFrom, insTo);
+  return tr.replace(insFrom, insTo, sliceWithMark(existing, mark));
+}
+
 /**
  * After a direct edit lands, rewrite it into tracked suggestions in the same history step.
  */
@@ -89,15 +115,15 @@ export function humanTrackAppendTransaction(
     const beforeDoc = src.docs[i] ?? oldState.doc;
     const from = step.from;
     const to = step.to;
-    const deletedText = beforeDoc.textBetween(from, to, '', '');
-    const insertedText = step.slice.content.textBetween(0, step.slice.content.size, '', '');
-    if (!deletedText && !insertedText) continue;
+    const hasDeletion = to > from;
+    const hasInsertion = step.slice.content.size > 0;
+    if (!hasDeletion && !hasInsertion) continue;
 
-    if (deletedText && !insertedText && isOwnPendingInsertRange(beforeDoc, from, to, author)) {
+    if (hasDeletion && !hasInsertion && isOwnPendingInsertRange(beforeDoc, from, to, author)) {
       continue;
     }
 
-    const extended = !deletedText && insertedText ? ownInsertAttrs(beforeDoc, from, author) : null;
+    const extended = !hasDeletion && hasInsertion ? ownInsertAttrs(beforeDoc, from, author) : null;
     const attrs = extended ?? {
       id: newSuggestionId(),
       author: author.trim(),
@@ -108,15 +134,13 @@ export function humanTrackAppendTransaction(
     const mapFrom = tr.mapping.map(from);
     const deletedSlice = beforeDoc.slice(from, to);
 
-    if (deletedText && !insertedText) {
+    if (hasDeletion && !hasInsertion) {
       tr = tr.replace(mapFrom, mapFrom, sliceWithMark(deletedSlice, delMark));
-    } else if (!deletedText && insertedText) {
-      const start = mapFrom;
-      tr = tr.addMark(start, start + insertedText.length, insMark);
+    } else if (!hasDeletion && hasInsertion) {
+      tr = markInsertedSlice(tr, beforeDoc, step, mapFrom, insMark, 0, false);
     } else {
       tr = tr.replace(mapFrom, mapFrom, sliceWithMark(deletedSlice, delMark));
-      const insStart = mapFrom + deletedSlice.size;
-      tr = tr.addMark(insStart, insStart + insertedText.length, insMark);
+      tr = markInsertedSlice(tr, beforeDoc, step, mapFrom, insMark, deletedSlice.size, true);
     }
   }
 
