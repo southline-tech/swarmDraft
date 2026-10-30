@@ -33,6 +33,21 @@ describe('ManuscriptEditor', () => {
     w.unmount();
   });
 
+  it('announces focus mode on and off in a polite live region (#55)', async () => {
+    const w = mount(ManuscriptEditor, { props: { content: SAMPLE_DOC }, attachTo: document.body });
+    await flushPromises();
+    const live = () => w.get('[data-test="focus-mode-live"]');
+    expect(live().attributes('aria-live')).toBe('polite');
+    await w.find('[data-test="focus-mode"]').trigger('click');
+    await flushPromises();
+    expect(live().text()).toBe('Focus mode on.');
+    await w.find('[data-test="focus-exit"]').trigger('click');
+    await flushPromises();
+    expect(live().text()).toBe('Focus mode off.');
+    expect(document.activeElement?.closest('.ProseMirror')).not.toBeNull();
+    w.unmount();
+  });
+
   it('hides the empty-state cards while the section failed to load (looks like data loss)', async () => {
     const bad = {
       type: 'doc',

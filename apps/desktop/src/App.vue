@@ -49,6 +49,7 @@ import { PRODUCT_NAME } from './lib/brand';
 import ShellsPreview from './shells/ShellsPreview.vue';
 import Rad60ReviewEvidence from './evidence/Rad60ReviewEvidence.vue';
 import Rad67EditorChromeEvidence from './evidence/Rad67EditorChromeEvidence.vue';
+import Rad55FocusModeEvidence from './evidence/Rad55FocusModeEvidence.vue';
 import AppToast from './shells/AppToast.vue';
 import OpeningProgress from './shells/OpeningProgress.vue';
 import ErrorCard from './shells/ErrorCard.vue';
@@ -816,7 +817,7 @@ onBeforeUnmount(() => {
   clearTimeout(countTimer);
 });
 
-/** Focus mode (#56): hides the app chrome; local UI state only. */
+/** Focus mode (#55 / wp5): hides the app chrome; local UI state only. */
 const focusMode = ref(false);
 /** Set when the writer chooses Ask bot from the editor menu (#54 wiring to App). */
 const askBotRequested = ref(false);
@@ -850,8 +851,9 @@ defineExpose({ open, closeSession });
 <template>
   <Rad60ReviewEvidence v-if="evidence === 'rad60-review'" class="shell" />
   <Rad67EditorChromeEvidence v-else-if="evidence === 'rad67'" class="shell" />
+  <Rad55FocusModeEvidence v-else-if="evidence === 'rad55'" class="shell shell--focus-mode" />
   <ShellsPreview v-else-if="preview" class="shell" :initial="preview" @close="preview = null" />
-  <main v-else class="shell">
+  <main v-else class="shell" :class="{ 'shell--focus-mode': focusMode }">
     <header v-show="!focusMode" class="topbar">
       <details ref="appMenu" class="topbar__menu" data-test="app-menu" @toggle="onAppMenuToggle">
         <summary
@@ -1219,6 +1221,10 @@ body {
   height: 100vh;
   overflow: auto;
   padding-bottom: 1.75rem;
+}
+/* #55 wp5: status bar is hidden in focus mode; drop the reserved strip. */
+.shell.shell--focus-mode {
+  padding-bottom: 0;
 }
 .toolbar-row {
   flex: none;

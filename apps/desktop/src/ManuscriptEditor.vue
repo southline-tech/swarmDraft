@@ -12,6 +12,7 @@ import {
   nextTick,
   onBeforeUnmount,
   onMounted,
+  ref,
   shallowRef,
   toRaw,
   useTemplateRef,
@@ -154,6 +155,8 @@ const props = defineProps<{
   computerName?: string;
   /** Persisted accept/reject records for this section (#51). */
   decisionRecords?: readonly DecisionRecord[];
+  /** Designer evidence (#55 / wp5): start in focus mode for screenshot harness. */
+  initialFocusMode?: boolean;
 }>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
@@ -179,7 +182,7 @@ const findOpen = shallowRef(false);
 const findFocusReplace = shallowRef(false);
 const menuAt = shallowRef<{ x: number; y: number } | null>(null);
 const shortcutsOpen = shallowRef(false);
-const focusMode = shallowRef(false);
+const focusMode = shallowRef(Boolean(props.initialFocusMode));
 const prefStore = () => props.storage ?? globalThis.localStorage;
 /** Track changes (#57): persisted on/off; first enable may show the tc3 name prompt. */
 const tracking = shallowRef(loadTracking(prefStore()));
@@ -221,14 +224,19 @@ function onNameColorPromptClose() {
   writerProfile.value = loadProfile(prefStore());
   if (tracking.value && !loadTrackPromptSeen(prefStore())) dismissNamePrompt();
 }
-watch(focusMode, (on) => {
+const focusModeLive = ref('');
+/** Polite SR cue when focus mode toggles (#55); chrome hides with no other feedback. */
+function syncFocusMode(on: boolean, announce = true) {
   emit('focus-mode', on);
-  // #87 QA: focus mode hides the toolbar, so a toolbar button that started it would drop focus
-  // to <body>. Move focus into the page, and listen on window for the exit keys while active.
-  if (on) {
-    window.addEventListener('keydown', onWindowKey);
-    void nextTick(() => editor.value?.view.focus());
-  } else window.removeEventListener('keydown', onWindowKey);
+  if (on) window.addEventListener('keydown', onWindowKey);
+  else window.removeEventListener('keydown', onWindowKey);
+  if (announce) focusModeLive.value = on ? 'Focus mode on.' : 'Focus mode off.';
+  // Enter and exit both land focus in the page (#55 Designer, #87 QA).
+  void nextTick(() => editor.value?.view.focus());
+}
+watch(focusMode, (on) => syncFocusMode(on));
+onMounted(() => {
+  if (focusMode.value) syncFocusMode(true, false);
 });
 onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKey));
 const rootEl = useTemplateRef<HTMLElement>('root');
@@ -768,6 +776,9 @@ const LABELS: Record<ReviewItem['type'], string> = {
     :data-focus-mode="focusMode || undefined"
     @keydown="onShellKey"
   >
+    <p class="visually-hidden" role="status" aria-live="polite" data-test="focus-mode-live">
+      {{ focusModeLive }}
+    </p>
     <div v-if="!externalLoadError" role="alert" aria-live="assertive" data-test="load-error-region">
       <p v-if="shownLoadError" class="load-error" data-test="load-error">
         {{ SECTION_LOAD_ERROR_COPY }}
@@ -1334,5 +1345,13 @@ const LABELS: Record<ReviewItem['type'], string> = {
   border-radius: var(--ct-radius-lg);
   background: var(--ct-surface-raised);
   box-shadow: var(--ct-elevation-3);
+}
+.manuscript-editor .visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 </style>

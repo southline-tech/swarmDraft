@@ -2103,6 +2103,75 @@ describe('focus mode started from the toolbar (#87 QA)', () => {
     }
     w.unmount();
   });
+
+  it('the focus pill close button returns focus to the page (#55 Designer)', async () => {
+    const { w } = await withManuscript();
+    await w.get('[data-test="focus-mode"]').trigger('click');
+    await settle();
+    await w.get('[data-test="focus-exit"]').trigger('click');
+    await settle();
+    expect(leadFocusModeOff(w)).toBe(true);
+    expect(document.activeElement?.closest('.ProseMirror')).not.toBeNull();
+    w.unmount();
+  });
+});
+
+describe('focus mode screen reader (#55)', () => {
+  it('announces on and off in a polite live region', async () => {
+    const { w } = await withManuscript();
+    const live = () => w.get('[data-test="lead-editor"] [data-test="focus-mode-live"]');
+    expect(live().attributes('aria-live')).toBe('polite');
+    expect(live().text()).toBe('');
+    await w.get('[data-test="focus-mode"]').trigger('click');
+    await settle();
+    expect(live().text()).toBe('Focus mode on.');
+    await w.get('[data-test="focus-exit"]').trigger('click');
+    await settle();
+    expect(live().text()).toBe('Focus mode off.');
+    w.unmount();
+  });
+
+  it('Ctrl+Shift+F toggle updates the same live region', async () => {
+    const { w } = await withManuscript();
+    const live = () => w.get('[data-test="lead-editor"] [data-test="focus-mode-live"]');
+    const prose = () => proseFind(w).element;
+    prose().dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'F',
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await settle();
+    expect(live().text()).toBe('Focus mode on.');
+    prose().dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'F',
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await settle();
+    expect(live().text()).toBe('Focus mode off.');
+    w.unmount();
+  });
+
+  it('drops the status-bar padding strip on the app shell while focus mode is on', async () => {
+    const { w } = await withManuscript();
+    const shell = () => w.get('main.shell');
+    expect(shell().classes()).not.toContain('shell--focus-mode');
+    await w.get('[data-test="focus-mode"]').trigger('click');
+    await settle();
+    expect(shell().classes()).toContain('shell--focus-mode');
+    await w.get('[data-test="focus-exit"]').trigger('click');
+    await settle();
+    expect(shell().classes()).not.toContain('shell--focus-mode');
+    w.unmount();
+  });
 });
 
 describe('context menu in focus mode (#87 QA)', () => {
