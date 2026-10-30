@@ -119,6 +119,17 @@ const MIGRATIONS: &[&str] = &[
          SELECT id FROM agents WHERE revoked_at IS NULL AND lower(trim(name)) = 'grok bot'
          ORDER BY created_at, id LIMIT 1
      );",
+    // #51: human accept/reject records for tracked changes (CRDT marks), keyed by section.
+    "CREATE TABLE review_decisions (
+        section_id TEXT NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('suggestion_insert','suggestion_delete')),
+        suggestion_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('accepted','rejected')),
+        decided_at TEXT NOT NULL,
+        decided_by TEXT NOT NULL,
+        PRIMARY KEY (section_id, kind, suggestion_id)
+     );
+     CREATE INDEX review_decisions_section ON review_decisions(section_id);",
 ];
 
 /// How long a statement waits on a locked database before failing.
@@ -329,7 +340,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         {
             let mut conn = Connection::open(tmp.path().join("coauthor.db")).unwrap();
-            migrate_with(&mut conn, &MIGRATIONS[..MIGRATIONS.len() - 1]).unwrap();
+            migrate_with(&mut conn, &MIGRATIONS[..MIGRATIONS.len() - 2]).unwrap();
             conn.execute(
                 "INSERT INTO agents (id, name, color, created_at) VALUES (?1, ?2, ?3, ?4)",
                 rusqlite::params!["a1", "Line Editor", "#3366ff", "2026-01-01T00:00:00Z"],

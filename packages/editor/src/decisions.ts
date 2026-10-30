@@ -53,6 +53,43 @@ export interface DecisionRecord {
   decidedBy: string;
 }
 
+const DECISION_KINDS: readonly SuggestionKind[] = ['suggestion_insert', 'suggestion_delete'];
+const DECISION_STATUSES = ['accepted', 'rejected'] as const;
+
+/** Narrow persisted JSON to a decision record (#51). */
+export function parseDecisionRecord(value: unknown): DecisionRecord | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Record<string, unknown>;
+  const kind = v.kind;
+  const id = v.id;
+  const status = v.status;
+  const decidedAt = v.decidedAt;
+  const decidedBy = v.decidedBy;
+  if (typeof id !== 'string' || !id) return null;
+  if (typeof decidedAt !== 'string' || !decidedAt) return null;
+  if (typeof decidedBy !== 'string' || !decidedBy) return null;
+  if (!DECISION_KINDS.includes(kind as SuggestionKind)) return null;
+  if (!DECISION_STATUSES.includes(status as (typeof DECISION_STATUSES)[number])) return null;
+  return {
+    id,
+    kind: kind as SuggestionKind,
+    status: status as 'accepted' | 'rejected',
+    decidedAt,
+    decidedBy,
+  };
+}
+
+/** Parse and dedupe persisted rows (last wins per target key). */
+export function parseDecisionRecords(values: unknown): DecisionRecord[] {
+  const out = new Map<string, DecisionRecord>();
+  if (!Array.isArray(values)) return [];
+  for (const raw of values) {
+    const r = parseDecisionRecord(raw);
+    if (r) out.set(targetKey(r), r);
+  }
+  return [...out.values()];
+}
+
 /** Writes status/decided_at/decided_by to the suggestion index. */
 export interface SuggestionDecisionSink {
   recordDecisions(records: DecisionRecord[]): void | Promise<void>;

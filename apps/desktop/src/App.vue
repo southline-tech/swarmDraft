@@ -11,6 +11,8 @@ import {
   listManuscripts,
   loadManuscript,
   listenOpeningProgress,
+  manuscriptReviewDecisions,
+  saveSectionReviewDecisions,
   type AppInfo,
   type OpeningProgressEvent,
   type RecoveryNotice,
@@ -63,6 +65,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { resetCollabSlots } from './author-colors';
 import { sectionNumberLabels } from '@coauthor/editor';
 import type { NumberingStyle } from '@coauthor/schema';
+import type { DecisionRecord } from '@coauthor/editor';
 import { docWordCount, outlineDocs, sectionTreeDocs } from './status/wordcount';
 import {
   importAndOpen,
@@ -217,6 +220,24 @@ const saveCopyOfOpen = () =>
  * editor was read-only after a content error was ever accepted, so there is nothing else to lose.
  */
 const reloads = ref(0);
+/** Persisted accept/reject records per section (#51). */
+const decisionRecordsBySection = shallowRef<Record<string, DecisionRecord[]>>({});
+async function loadDecisionRecords(manuscriptId: string) {
+  try {
+    decisionRecordsBySection.value = await manuscriptReviewDecisions(manuscriptId);
+  } catch (err) {
+    console.error('Could not load review decisions', err);
+    decisionRecordsBySection.value = {};
+  }
+}
+function onSectionDecisions(sectionId: string, records: DecisionRecord[]) {
+  if (!session.value) return;
+  decisionRecordsBySection.value = { ...decisionRecordsBySection.value, [sectionId]: records };
+  void saveSectionReviewDecisions(session.value.id, sectionId, records).catch((err) => {
+    console.error('Review decision save failed; retrying', err);
+    saveFailure.value = saveFailed(saveFailure.value, err);
+  });
+}
 /** The open section's load error, shown in a live region that stays mounted (#79). */
 const editorLoadError = ref('');
 function reloadSection() {
@@ -569,6 +590,7 @@ function closeSession() {
   void session.value?.close({ discard: true });
   session.value = null;
   saveStatusShown.value = false;
+  decisionRecordsBySection.value = {};
   selectedId.value = undefined;
   choosingBook.value = false;
   syncWindowTitle(PRODUCT_NAME);
@@ -597,6 +619,7 @@ function open(next: ManuscriptSession) {
   markWelcomed();
   choosingBook.value = false;
   session.value = next;
+  void loadDecisionRecords(next.id);
   syncWindowTitle(next.title || PRODUCT_NAME);
   const rows = next.outline.value;
   selectedId.value = rows.find((s) => s.kind === 'chapter')?.id;
@@ -1121,10 +1144,12 @@ defineExpose({ open, closeSession });
         :outline-forced="outlineForced"
         :notes-hidden="notesHidden"
         :computer-name="info?.computerName"
+        :decision-records-by-section="decisionRecordsBySection"
         @update:selected-id="selectedId = $event"
         @load-error="editorLoadError = $event"
         @reload="reloadSection"
         @toggle-navigator="outlineAuto.toggleByHand()"
+        @decisions="onSectionDecisions"
         @layout="onEditorLayout"
         @focus-mode="focusMode = $event"
         @ask-bot="onAskBotFromEditor"

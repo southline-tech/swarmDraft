@@ -124,6 +124,13 @@ export class DecisionLog {
     }
   }
 
+  /** Hydrate from storage after reload; does not emit. */
+  restore(records: readonly DecisionRecord[]): void {
+    this.active.clear();
+    this.withdrawn.clear();
+    this.record(records);
+  }
+
   /** Returns true when the log changed. */
   sync(open: readonly SuggestionTarget[]): boolean {
     const present = new Set(open.map(keyOf));

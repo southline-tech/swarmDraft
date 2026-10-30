@@ -459,6 +459,7 @@ struct ReviewCommentRow {
 struct SectionReviewMeta {
     comments: Vec<ReviewCommentRow>,
     author_saved_names: std::collections::HashMap<String, String>,
+    decisions: Vec<manuscripts::ReviewDecisionRecord>,
 }
 
 fn review_comment_row(c: manuscripts::Comment) -> ReviewCommentRow {
@@ -517,6 +518,7 @@ async fn section_review_meta(
     blocking(&store, move |s| {
         let comments = s.open_comments(&section_id)?;
         let suggestions = s.open_suggestions(&section_id)?;
+        let decisions = s.review_decisions_for_section(&section_id)?;
         let mut author_saved_names = std::collections::HashMap::new();
         for sug in &suggestions {
             if sug.author.kind == "agent" {
@@ -532,7 +534,42 @@ async fn section_review_meta(
         Ok(SectionReviewMeta {
             comments: comments.into_iter().map(review_comment_row).collect(),
             author_saved_names,
+            decisions,
         })
+    })
+    .await
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ManuscriptReviewDecisions {
+    by_section: std::collections::HashMap<String, Vec<manuscripts::ReviewDecisionRecord>>,
+}
+
+/// All review decision records for a manuscript (#51).
+#[tauri::command]
+async fn manuscript_review_decisions(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+) -> Result<ManuscriptReviewDecisions, String> {
+    blocking(&store, move |s| {
+        Ok(ManuscriptReviewDecisions {
+            by_section: s.review_decisions_for_manuscript(&manuscript_id)?,
+        })
+    })
+    .await
+}
+
+/// Replace the decision log for one section (#51).
+#[tauri::command]
+async fn section_save_review_decisions(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+    section_id: String,
+    records: Vec<manuscripts::ReviewDecisionRecord>,
+) -> Result<(), String> {
+    blocking(&store, move |s| {
+        s.save_section_review_decisions(&manuscript_id, &section_id, &records)
     })
     .await
 }
@@ -624,6 +661,8 @@ pub fn run() {
             manuscript_updates_since,
             manuscript_set_numbering_style,
             section_review_meta,
+            manuscript_review_decisions,
+            section_save_review_decisions,
             manuscript_open_comments,
             mcp_status,
             save_manuscript_copy

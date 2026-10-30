@@ -145,6 +145,8 @@ const props = defineProps<{
   storage?: Pick<Storage, 'getItem' | 'setItem'>;
   /** Override computer display name when seeding profile on first track enable (#57). */
   computerName?: string;
+  /** Persisted accept/reject records for this section (#51). */
+  decisionRecords?: readonly DecisionRecord[];
 }>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
@@ -358,6 +360,15 @@ watch(collapsed, (v) => saveCollapsed(v));
 const changes = computed(() => groupChanges(suggestions.value));
 const visible = computed(() => visibleItems(changes.value, filter.value));
 const log = new DecisionLog();
+watch(
+  () => props.decisionRecords,
+  (records) => {
+    const next = records ?? [];
+    if (JSON.stringify(next) === JSON.stringify(log.records())) return;
+    log.restore(next);
+  },
+  { immediate: true },
+);
 
 function refreshReview(e: Editor) {
   review.value = collectReviewItems(e.state.doc);
