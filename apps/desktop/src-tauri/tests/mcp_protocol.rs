@@ -643,10 +643,15 @@ async fn write_tools_listed_and_decisions_absent() {
         .iter()
         .map(|t| t["name"].as_str().unwrap())
         .collect();
-    for t in ["add_comment", "suggest_edit", "suggest_style"] {
+    for t in [
+        "add_comment",
+        "suggest_edit",
+        "suggest_style",
+        "list_suggestions",
+    ] {
         assert!(names.contains(&t), "missing {t}");
     }
-    assert_eq!(names.len(), 7, "{names:?}");
+    assert_eq!(names.len(), 8, "{names:?}");
     let r = call(&s, "accept_suggestion", json!({"id": "x"})).await;
     let r2 = rpc(
         &s,
@@ -752,16 +757,31 @@ async fn suggest_edit_is_tracked_never_applied() {
     assert_eq!(del["structuredContent"]["suggestion"]["kind"], "delete");
 
     let st = call(&s, "suggest_style", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "style": "centered"})).await;
-    assert_eq!(st["structuredContent"]["suggestion"]["kind"], "style");
+    assert_ne!(st["isError"], true, "{st}");
+    let sx = &st["structuredContent"]["suggestion"];
+    let sxid = sx["id"].as_str().unwrap();
+    assert_eq!(sx["kind"], "style");
     let bad = call(&s, "suggest_style", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "style": "huge"})).await;
     assert!(text(&bad).contains("unknown style"));
-    assert_eq!(
-        read_json(&s, &sid).await["suggestions"]
-            .as_array()
-            .unwrap()
-            .len(),
-        3
+    let md = read_md(&s, &sid).await;
+    assert!(
+        md.contains(&format!("{{>>format:{sxid}: body → centered<<}}")),
+        "{md}"
     );
+    let js = read_json(&s, &sid).await;
+    let marks: Vec<_> = js["blocks"][0]["node"]["content"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|n| n["marks"].as_array().cloned().unwrap_or_default())
+        .filter(|m| m["type"] == "format_change")
+        .collect();
+    assert!(!marks.is_empty(), "{js}");
+    assert_eq!(marks[0]["attrs"]["id"], sxid);
+    assert_eq!(marks[0]["attrs"]["target"], "paragraph_style");
+    assert_eq!(marks[0]["attrs"]["before"], "body");
+    assert_eq!(marks[0]["attrs"]["after"], "centered");
+    assert_eq!(js["suggestions"].as_array().unwrap().len(), 3);
     // The paragraph style itself is unchanged.
     assert_eq!(
         read_json(&s, &sid).await["blocks"][0]["node"]["attrs"]["style"],
@@ -1168,10 +1188,21 @@ async fn suggest_style_only_accepts_allowlisted_styles() {
         assert!(text(&r).contains("unknown style"), "{bad:?}: {r}");
     }
     assert!(s.store.open_suggestions(&sid).unwrap().is_empty());
-    for ok in coauthor_lib::mcp::PARAGRAPH_STYLES {
-        let r = call(&s, "suggest_style", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "style": ok})).await;
-        assert_ne!(r["isError"], true, "{ok}: {r}");
-    }
+    let r = call(
+        &s,
+        "suggest_style",
+        json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "style": "centered"}),
+    )
+    .await;
+    assert_ne!(r["isError"], true, "{r}");
+    let dup = call(
+        &s,
+        "suggest_style",
+        json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "style": "first"}),
+    )
+    .await;
+    assert_eq!(dup["isError"], true, "{dup}");
+    assert!(text(&dup).contains("pending suggestion"), "{dup}");
 }
 
 #[tokio::test]
@@ -1253,6 +1284,7 @@ async fn suggest_only_no_tool_can_accept_or_reject() {
             "add_comment",
             "list_chapters",
             "list_documents",
+            "list_suggestions",
             "read_chapter",
             "search_text",
             "suggest_edit",
@@ -1283,4 +1315,106 @@ async fn suggest_only_no_tool_can_accept_or_reject() {
     .to_lowercase();
     assert!(!src.contains("update suggestions"));
     assert!(!src.contains("'accepted'") && !src.contains("'rejected'"));
+}
+
+#[tokio::test]
+async fn suggest_style_mark_survives_reload() {
+    let s = start(&["read", "suggest"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    let r = call(
+        &s,
+        "suggest_style",
+        json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "style": "verse"}),
+    )
+    .await;
+    assert_ne!(r["isError"], true, "{r}");
+    let id = r["structuredContent"]["suggestion"]["id"].as_str().unwrap();
+    let sec = s.store.get_section(&s.manuscript_id, &sid).unwrap();
+    let doc = s.store.load_doc(&sec.doc_id).unwrap();
+    let js = read_json(&s, &sid).await;
+    let has = js["blocks"][0]["node"]["content"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|n| {
+            n["marks"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|m| m["type"] == "format_change" && m["attrs"]["id"] == id)
+        });
+    assert!(has, "{js}");
+    drop(doc);
+    let doc2 = s.store.load_doc(&sec.doc_id).unwrap();
+    let blocks = coauthor_lib::content::decode_checked(&doc2).unwrap();
+    let again = blocks[0].node["content"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|n| {
+            n["marks"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|m| m["type"] == "format_change" && m["attrs"]["id"] == id)
+        });
+    assert!(again);
+}
+
+#[tokio::test]
+async fn list_suggestions_filters_by_author_and_status() {
+    let s = start(&["read", "suggest"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    let r = call(
+        &s,
+        "suggest_style",
+        json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "style": "epigraph"}),
+    )
+    .await;
+    assert_ne!(r["isError"], true, "{r}");
+    let agent_id = r["structuredContent"]["suggestion"]["author"]["id"]
+        .as_str()
+        .unwrap();
+    let all = call(
+        &s,
+        "list_suggestions",
+        json!({"manuscript_id": s.manuscript_id}),
+    )
+    .await;
+    assert_ne!(all["isError"], true, "{all}");
+    assert_eq!(
+        all["structuredContent"]["suggestions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let mine = call(
+        &s,
+        "list_suggestions",
+        json!({"manuscript_id": s.manuscript_id, "author": agent_id}),
+    )
+    .await;
+    assert_eq!(
+        mine["structuredContent"]["suggestions"][0]["id"],
+        r["structuredContent"]["suggestion"]["id"]
+    );
+    let other = call(
+        &s,
+        "list_suggestions",
+        json!({"manuscript_id": s.manuscript_id, "author": "someone-else"}),
+    )
+    .await;
+    assert!(other["structuredContent"]["suggestions"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    let closed = call(
+        &s,
+        "list_suggestions",
+        json!({"manuscript_id": s.manuscript_id, "status": "accepted"}),
+    )
+    .await;
+    assert_eq!(closed["isError"], true);
+    assert!(text(&closed).contains("only open"));
 }
