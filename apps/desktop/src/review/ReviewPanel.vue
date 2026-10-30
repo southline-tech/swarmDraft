@@ -10,7 +10,7 @@
 import EmptyState from '../shells/EmptyState.vue';
 import ReasonLine from '../shells/ReasonLine.vue';
 import PanelRail from '../desk/PanelRail.vue';
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { Decision, SuggestionItem } from '@coauthor/editor';
 import {
   authorKind,
@@ -76,8 +76,14 @@ const initial = (a: string) => (parts(a).name[0] ?? '?').toUpperCase();
 /** "Show changes from" popover (multi-author checkbox picker, #67). */
 const menuOpen = ref(false);
 const root = ref<HTMLElement | null>(null);
+const filterToggle = ref<HTMLButtonElement | null>(null);
+function closeFilterMenu(refocus = false) {
+  if (!menuOpen.value) return;
+  menuOpen.value = false;
+  if (refocus) void nextTick(() => filterToggle.value?.focus());
+}
 function onDocDown(e: MouseEvent) {
-  if (root.value && !root.value.contains(e.target as Node)) menuOpen.value = false;
+  if (root.value && !root.value.contains(e.target as Node)) closeFilterMenu(false);
 }
 watch(menuOpen, (open) => {
   if (open) document.addEventListener('mousedown', onDocDown);
@@ -129,6 +135,13 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
     :panel-expanded="false"
     data-test="review-rail"
     @expand="emit('toggle-collapsed')"
+  />
+  <div
+    v-if="collapsed"
+    :id="REVIEW_CHANGES_REGION_ID"
+    class="review-region-anchor"
+    aria-hidden="true"
+    data-test="review-region-anchor"
   />
   <aside
     v-else
@@ -182,10 +195,11 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
       v-if="authors.length > 1"
       ref="root"
       class="filter"
-      @keydown.escape.stop="menuOpen = false"
+      @keydown.escape.stop="closeFilterMenu(true)"
     >
       <div id="show-from" class="lbl">Show changes from</div>
       <button
+        ref="filterToggle"
         type="button"
         class="dd"
         data-test="filter-toggle"
@@ -320,6 +334,14 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
 </template>
 
 <style scoped>
+.review-region-anchor {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
 .review-panel {
   background: var(--ct-surface);
   border-left: 1px solid var(--ct-border);

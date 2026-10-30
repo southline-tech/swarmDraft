@@ -72,6 +72,10 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(all.emitted('toggle-author')).toEqual([['agent:a']]);
     await all.setProps({ filter: new Set(['brett']) });
     expect(all.find('[data-test=filter-current]').text()).toBe('1 of 2');
+    expect(all.find('[data-test=step-authors]').exists()).toBe(true);
+    await all.find('.filter').trigger('keydown', { key: 'Escape' });
+    expect(all.find('[data-test=step-authors]').exists()).toBe(false);
+    expect(document.activeElement).toBe(all.find('[data-test=filter-toggle]').element);
     all.unmount();
 
     const w = mount(ReviewPanel, { props: { items, labels, filter: new Set(['brett']) } });
@@ -152,6 +156,7 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(w.find('[data-test=expand]').attributes('title')).toContain('Ctrl+\\');
     expect(w.find('[data-test=expand]').attributes('aria-expanded')).toBe('false');
     expect(w.find('[data-test=expand]').attributes('aria-controls')).toBe(REVIEW_CHANGES_REGION_ID);
+    expect(w.find(`#${REVIEW_CHANGES_REGION_ID}`).exists()).toBe(true);
     await w.find('[data-test=expand]').trigger('click');
     expect(w.emitted('toggle-collapsed')).toHaveLength(1);
   });
