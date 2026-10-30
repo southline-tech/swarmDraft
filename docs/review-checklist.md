@@ -237,3 +237,4 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-29 · #50 · Designer review (#154) · filtered-out deletes looked like normal body text · `suggestion-filter-hidden-delete` uses `--ct-text-muted`; inserts stay `color: inherit`
 - 2026-10-29 · #50 · Designer review (#154) · filter listbox lacked Space/arrow keyboard · roving focus on `[role=option]` like ContextMenu; Space activates focused row
 - 2026-10-29 · #50 · Designer re-review (#154) · hidden delete still showed author strike · `:has(.suggestion-filter-hidden-*) [data-suggester]` overrides after per-author paint; focus first option when filter menu opens
+- 2026-10-30 · #51 · PM review (#155) · async `manuscript_review_decisions` could overwrite in-flight accepts · merge loaded rows with current per section when the log changed since load started; drop unused `section_review_meta.decisions`

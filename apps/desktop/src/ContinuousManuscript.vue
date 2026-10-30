@@ -38,6 +38,8 @@ const props = defineProps<{
   notesHidden?: boolean;
   /** From `getAppInfo`; seeds track-changes writer name (#57). */
   computerName?: string;
+  /** Persisted review decisions keyed by section id (#51). */
+  decisionRecordsBySection?: Readonly<Record<string, DecisionRecord[]>>;
 }>();
 
 const commentRows = shallowRef<readonly CommentRow[]>([]);
@@ -68,7 +70,7 @@ const emit = defineEmits<{
   'update:selectedId': [id: string];
   reload: [];
   'toggle-navigator': [];
-  decisions: [records: DecisionRecord[]];
+  decisions: [sectionId: string, records: DecisionRecord[]];
   'focus-mode': [on: boolean];
   'load-error': [message: string];
   layout: [layout: EditorLayout];
@@ -206,9 +208,10 @@ onBeforeUnmount(() => observer?.disconnect());
             :outline-forced="outlineForced"
             :notes-hidden="notesHidden"
             :computer-name="computerName"
+            :decision-records="decisionRecordsBySection?.[sec.id] ?? []"
             @reload="emit('reload')"
             @toggle-navigator="emit('toggle-navigator')"
-            @decisions="emit('decisions', $event)"
+            @decisions="(records) => emit('decisions', sec.id, records)"
             @focus-mode="emit('focus-mode', $event)"
             @load-error="(msg) => sec.id === selectedId && emit('load-error', msg)"
             @layout="(layout) => sec.id === selectedId && onLeadLayout(layout)"

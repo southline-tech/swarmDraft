@@ -537,6 +537,40 @@ async fn section_review_meta(
     .await
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ManuscriptReviewDecisions {
+    by_section: std::collections::HashMap<String, Vec<manuscripts::ReviewDecisionRecord>>,
+}
+
+/// All review decision records for a manuscript (#51).
+#[tauri::command]
+async fn manuscript_review_decisions(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+) -> Result<ManuscriptReviewDecisions, String> {
+    blocking(&store, move |s| {
+        Ok(ManuscriptReviewDecisions {
+            by_section: s.review_decisions_for_manuscript(&manuscript_id)?,
+        })
+    })
+    .await
+}
+
+/// Replace the decision log for one section (#51).
+#[tauri::command]
+async fn section_save_review_decisions(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+    section_id: String,
+    records: Vec<manuscripts::ReviewDecisionRecord>,
+) -> Result<(), String> {
+    blocking(&store, move |s| {
+        s.save_section_review_decisions(&manuscript_id, &section_id, &records)
+    })
+    .await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -624,6 +658,8 @@ pub fn run() {
             manuscript_updates_since,
             manuscript_set_numbering_style,
             section_review_meta,
+            manuscript_review_decisions,
+            section_save_review_decisions,
             manuscript_open_comments,
             mcp_status,
             save_manuscript_copy

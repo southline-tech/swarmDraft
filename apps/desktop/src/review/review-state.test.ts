@@ -66,6 +66,37 @@ describe('review state (RAD-258)', () => {
     expect(log.records()).toEqual([r]);
   });
 
+  it('restore replaces the log from persisted storage (#51)', () => {
+    const log = new DecisionLog();
+    log.record([
+      {
+        kind: 'suggestion_insert',
+        id: 'old',
+        status: 'accepted',
+        decidedAt: 't',
+        decidedBy: 'author',
+      },
+    ]);
+    log.restore([
+      {
+        kind: 'suggestion_delete',
+        id: 's2',
+        status: 'rejected',
+        decidedAt: 't2',
+        decidedBy: 'human:pat',
+      },
+    ]);
+    expect(log.records()).toEqual([
+      {
+        kind: 'suggestion_delete',
+        id: 's2',
+        status: 'rejected',
+        decidedAt: 't2',
+        decidedBy: 'human:pat',
+      },
+    ]);
+  });
+
   it('maps the review shortcuts and never claims Ctrl+R or Ctrl+J', () => {
     const k = (key: string, m: Partial<KeyboardEventInit> = {}) =>
       reviewActionFor(new KeyboardEvent('keydown', { key, ...m }));

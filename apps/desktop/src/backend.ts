@@ -1,5 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { parseDecisionRecords } from '@coauthor/editor';
 
 export interface AppInfo {
   version: string;
@@ -307,6 +308,30 @@ export async function saveManuscriptCopy(title: string, bytes: Uint8Array): Prom
 export interface SectionReviewMeta {
   comments: import('@coauthor/editor').CommentRow[];
   authorSavedNames: Record<string, string>;
+}
+
+export async function manuscriptReviewDecisions(
+  manuscriptId: string,
+): Promise<Record<string, import('@coauthor/editor').DecisionRecord[]>> {
+  if (!isTauri()) return {};
+  const res = await invoke<{ bySection: Record<string, unknown[]> }>(
+    'manuscript_review_decisions',
+    { manuscriptId },
+  );
+  const out: Record<string, import('@coauthor/editor').DecisionRecord[]> = {};
+  for (const [sectionId, rows] of Object.entries(res.bySection ?? {})) {
+    out[sectionId] = parseDecisionRecords(rows);
+  }
+  return out;
+}
+
+export async function saveSectionReviewDecisions(
+  manuscriptId: string,
+  sectionId: string,
+  records: import('@coauthor/editor').DecisionRecord[],
+): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('section_save_review_decisions', { manuscriptId, sectionId, records });
 }
 
 export async function sectionReviewMeta(sectionId: string): Promise<SectionReviewMeta> {

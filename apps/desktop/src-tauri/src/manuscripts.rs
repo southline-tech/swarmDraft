@@ -12,6 +12,39 @@ use crate::storage::{StorageError, Store};
 pub(crate) const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 pub const SECTION_KINDS: &[&str] = &["front_matter", "part", "chapter", "back_matter"];
 
+const DECISION_KINDS: &[&str] = &["suggestion_insert", "suggestion_delete"];
+const DECISION_STATUS: &[&str] = &["accepted", "rejected"];
+
+/// Human accept/reject of a tracked-change mark (#51). Mirrors `@coauthor/editor` `DecisionRecord`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewDecisionRecord {
+    pub kind: String,
+    pub id: String,
+    pub status: String,
+    pub decided_at: String,
+    pub decided_by: String,
+}
+
+fn validate_decision_record(r: &ReviewDecisionRecord) -> Result<(), StorageError> {
+    if !DECISION_KINDS.contains(&r.kind.as_str()) {
+        return Err(StorageError::Invalid(format!(
+            "bad decision kind: {}",
+            r.kind
+        )));
+    }
+    if !DECISION_STATUS.contains(&r.status.as_str()) {
+        return Err(StorageError::Invalid(format!(
+            "bad decision status: {}",
+            r.status
+        )));
+    }
+    if r.id.is_empty() || r.decided_by.is_empty() || r.decided_at.is_empty() {
+        return Err(StorageError::Invalid("empty decision field".into()));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Manuscript {
@@ -618,6 +651,7 @@ impl Store {
                     )?;
                     let suggestions =
                         tx.execute("DELETE FROM suggestions WHERE section_id = ?1", [&s.id])?;
+                    tx.execute("DELETE FROM review_decisions WHERE section_id = ?1", [&s.id])?;
                     tx.execute("DELETE FROM sections WHERE id = ?1", [&s.id])?;
                     gone.push(serde_json::json!({
                         "sectionId": s.id, "title": s.title, "kind": s.kind, "docId": s.doc_id,
@@ -900,6 +934,118 @@ impl Store {
                 .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
                 .collect::<Result<_, _>>()?;
             Ok(rows)
+        })
+    }
+
+    /// Persisted review decisions for one section (#51).
+    pub fn review_decisions_for_section(
+        &self,
+        section_id: &str,
+    ) -> Result<Vec<ReviewDecisionRecord>, StorageError> {
+        self.with_conn(|c| {
+            let mut st = c.prepare(
+                "SELECT kind, suggestion_id, status, decided_at, decided_by FROM review_decisions
+                 WHERE section_id = ?1 ORDER BY decided_at, kind, suggestion_id",
+            )?;
+            let rows = st
+                .query_map([section_id], |r| {
+                    Ok(ReviewDecisionRecord {
+                        kind: r.get(0)?,
+                        id: r.get(1)?,
+                        status: r.get(2)?,
+                        decided_at: r.get(3)?,
+                        decided_by: r.get(4)?,
+                    })
+                })?
+                .collect::<Result<_, _>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Every persisted review decision for a manuscript, grouped by section id (#51).
+    pub fn review_decisions_for_manuscript(
+        &self,
+        manuscript_id: &str,
+    ) -> Result<std::collections::HashMap<String, Vec<ReviewDecisionRecord>>, StorageError> {
+        self.get_manuscript(manuscript_id)?;
+        self.with_conn(|c| {
+            let mut st = c.prepare(
+                "SELECT rd.section_id, rd.kind, rd.suggestion_id, rd.status, rd.decided_at, rd.decided_by
+                 FROM review_decisions rd
+                 INNER JOIN sections s ON s.id = rd.section_id
+                 WHERE s.manuscript_id = ?1
+                 ORDER BY rd.section_id, rd.decided_at, rd.kind, rd.suggestion_id",
+            )?;
+            let mut out: std::collections::HashMap<String, Vec<ReviewDecisionRecord>> =
+                std::collections::HashMap::new();
+            let rows = st.query_map([manuscript_id], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    ReviewDecisionRecord {
+                        kind: r.get(1)?,
+                        id: r.get(2)?,
+                        status: r.get(3)?,
+                        decided_at: r.get(4)?,
+                        decided_by: r.get(5)?,
+                    },
+                ))
+            })?;
+            for row in rows {
+                let (section_id, rec) = row?;
+                out.entry(section_id).or_default().push(rec);
+            }
+            Ok(out)
+        })
+    }
+
+    /// Replace the decision log for one section (#51). Validation and the write share one transaction.
+    pub fn save_section_review_decisions(
+        &self,
+        manuscript_id: &str,
+        section_id: &str,
+        records: &[ReviewDecisionRecord],
+    ) -> Result<(), StorageError> {
+        for r in records {
+            validate_decision_record(r)?;
+        }
+        self.with_conn(|c| {
+            let tx = c.unchecked_transaction()?;
+            let owner: Option<String> = tx
+                .query_row(
+                    "SELECT manuscript_id FROM sections WHERE id = ?1",
+                    [section_id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            match owner.as_deref() {
+                Some(mid) if mid == manuscript_id => {}
+                Some(_) => {
+                    return Err(StorageError::Invalid(
+                        "section belongs to another manuscript".into(),
+                    ))
+                }
+                None => return Err(StorageError::NotFound(section_id.into())),
+            }
+            tx.execute(
+                "DELETE FROM review_decisions WHERE section_id = ?1",
+                [section_id],
+            )?;
+            for r in records {
+                tx.execute(
+                    "INSERT INTO review_decisions (section_id, kind, suggestion_id, status, decided_at, decided_by)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        section_id,
+                        r.kind,
+                        r.id,
+                        r.status,
+                        r.decided_at,
+                        r.decided_by
+                    ],
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
         })
     }
 }

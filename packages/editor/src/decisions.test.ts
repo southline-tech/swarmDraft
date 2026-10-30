@@ -3,6 +3,8 @@ import type { DocNode, Mark } from '@coauthor/schema';
 import {
   decideSuggestions,
   listSuggestions,
+  parseDecisionRecord,
+  parseDecisionRecords,
   runDecision,
   selectTargets,
   type DecisionOp,
@@ -52,6 +54,21 @@ const doc: DocNode = {
     para({ text: 'Rain ' }, { text: 'fell', marks: [ins('s3', 'Bot A')] }),
   ],
 };
+
+describe('parseDecisionRecords (#51)', () => {
+  it('parses valid rows and rejects junk', () => {
+    const row = {
+      kind: 'suggestion_insert',
+      id: 's1',
+      status: 'accepted',
+      decidedAt: '2026-10-26T03:00:00.000Z',
+      decidedBy: 'human:me',
+    };
+    expect(parseDecisionRecord(row)).toEqual(row);
+    expect(parseDecisionRecord({ ...row, status: 'maybe' })).toBeNull();
+    expect(parseDecisionRecords([row, null, { ...row, id: 's2' }])).toHaveLength(2);
+  });
+});
 
 describe('listSuggestions / selectTargets', () => {
   it('lists suggestions with authors, ids from attrs', () => {

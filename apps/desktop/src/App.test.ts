@@ -1015,6 +1015,9 @@ vi.mock('./backend', async (orig) => ({
   saveManuscriptCopy: vi.fn(async () => 'D:\\Copies\\book.docx'),
   restoreBackup: vi.fn(async () => ({ tokensRevoked: 2 })),
   listenOpeningProgress: vi.fn(async () => () => {}),
+  manuscriptReviewDecisions: vi.fn(async () => ({})),
+  saveSectionReviewDecisions: vi.fn(async () => {}),
+  sectionReviewMeta: vi.fn(async () => ({ comments: [], authorSavedNames: {} })),
 }));
 
 describe('save-failure banner', () => {
