@@ -191,8 +191,8 @@ describe('agent display names (RAD-263)', () => {
     await flushPromises();
     await p.find('[data-test=filter-toggle]').trigger('click');
     expect(p.text()).not.toContain('agent:');
-    await p.findAll('[data-test=filter-option]')[0]!.trigger('click');
-    expect(p.emitted('show-only')![0]).toEqual(['agent:a1']);
+    await p.findAll('[data-test=author-filter]')[1]!.setValue(false);
+    expect(p.emitted('toggle-author')![0]).toEqual(['agent:gone']);
 
     const row = (
       id: string,

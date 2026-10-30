@@ -957,7 +957,7 @@ const rovingTabKey = computed(() => {
       <li ref="contentNewMenuWrap" role="none" class="outline-new outline-new--split">
         <button
           type="button"
-          class="outline-new-chapter"
+          class="outline-new-chapter outline-new__btn"
           data-test="new-chapter"
           disabled
           title="Add chapter (coming soon)"
@@ -1464,17 +1464,17 @@ const rovingTabKey = computed(() => {
   display: block;
   width: 100%;
   margin: 0 0 var(--ct-space-2);
-  padding: 0.25rem 0.5rem;
-  border: 0;
-  background: none;
-  color: var(--ct-text-muted);
-  font: inherit;
-  font-size: var(--ct-text-sm);
-  text-align: left;
   cursor: not-allowed;
 }
 .outline-new-chapter:disabled {
   opacity: 1;
+}
+.outline-new-chapter:disabled:hover,
+.outline-new-chapter:disabled:focus-visible {
+  background: none;
+  border-color: var(--ct-border);
+  color: var(--ct-text-muted);
+  outline: none;
 }
 .outline-new__btn {
   width: 100%;

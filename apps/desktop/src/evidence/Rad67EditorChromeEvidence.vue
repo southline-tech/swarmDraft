@@ -87,7 +87,7 @@ const wp1Content: JSONContent = {
         {
           type: 'text',
           text: 'lamp',
-          marks: [{ type: 'comment', attrs: { id: 'c1', author: 'agent:demo', ts: by.ts } }],
+          marks: [{ type: 'comment_anchor', attrs: { id: 'c1' } }],
         },
         { type: 'text', text: ' in the old tower was dark, as it had been since March.' },
       ],

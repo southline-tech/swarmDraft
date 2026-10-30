@@ -13,8 +13,19 @@ withDefaults(
     badge?: number;
     /** Decorative icon character (chapters rail). */
     glyph?: string;
+    /** aria-controls target when the panel expands from this rail. */
+    controlsId?: string;
+    /** Whether the controlled region is expanded (false on a collapsed rail). */
+    panelExpanded?: boolean;
   }>(),
-  { side: 'right', expandTitle: undefined, badge: undefined, glyph: undefined },
+  {
+    side: 'right',
+    expandTitle: undefined,
+    badge: undefined,
+    glyph: undefined,
+    controlsId: undefined,
+    panelExpanded: false,
+  },
 );
 defineEmits<{ expand: [] }>();
 </script>
@@ -32,6 +43,8 @@ defineEmits<{ expand: [] }>();
       :data-test="side === 'left' ? 'outline-rail-expand' : 'expand'"
       :aria-label="expandLabel"
       :title="expandTitle ?? expandLabel"
+      :aria-expanded="panelExpanded"
+      :aria-controls="controlsId"
       @click="$emit('expand')"
     >
       {{ side === 'left' ? '›' : '‹' }}

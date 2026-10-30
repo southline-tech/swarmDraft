@@ -211,8 +211,7 @@ describe('Human track changes (#126)', () => {
     await flushPromises();
     expect(w.findAll('[data-test="item"]').length).toBeGreaterThan(0);
     expect(w.find('[data-test="item"] [data-test="agent-name"]').text()).toContain('Alex');
-    await w.get('[data-test="filter-toggle"]').trigger('click');
-    expect(w.find('[data-test="filter-option"] .name').text()).toContain('Alex');
+    expect(w.find('[data-test="filter-toggle"]').exists()).toBe(false);
     w.unmount();
   });
 

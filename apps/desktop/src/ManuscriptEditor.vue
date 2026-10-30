@@ -925,8 +925,6 @@ const LABELS: Record<ReviewItem['type'], string> = {
             :collapsed="collapsed"
             :busy="!editor?.isEditable"
             :labels="labelAuthor"
-            @show-only="(a: string) => (filter = new Set([a]))"
-            @show-all="filter = null"
             @select="select"
             @prev="move(-1)"
             @next="move(1)"

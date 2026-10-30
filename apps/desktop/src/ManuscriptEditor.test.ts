@@ -443,7 +443,7 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     const w = mount(ManuscriptEditor, { props: { content: doc }, attachTo: document.body });
     await flushPromises();
     await w.find('[data-test="filter-toggle"]').trigger('click');
-    await w.findAll('[data-test="filter-option"]')[1]!.trigger('click');
+    await w.findAll('[data-test="author-filter"]')[0]!.setValue(false);
     await flushPromises();
     const hiddenDel = w.find('.tiptap .suggestion-filter-hidden-delete');
     expect(hiddenDel.exists()).toBe(true);
@@ -513,7 +513,7 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     expect(hidden()).toHaveLength(0);
 
     await w.find('[data-test="filter-toggle"]').trigger('click');
-    await w.findAll('[data-test="filter-option"]')[0]!.trigger('click');
+    await w.findAll('[data-test="author-filter"]')[1]!.setValue(false);
     await flushPromises();
     expect(editor.state.doc.eq(before)).toBe(true);
     expect(pmUndoDepth(editor.state)).toBe(undoBefore);
@@ -523,8 +523,7 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     expect(hidden()).toHaveLength(1);
     expect(w.find('.tiptap ins.suggestion-insert').text()).toContain('alpha');
 
-    await w.find('[data-test="filter-toggle"]').trigger('click');
-    await w.find('[data-test="filter-all"]').trigger('click');
+    await w.findAll('[data-test="author-filter"]')[1]!.setValue(true);
     await flushPromises();
     expect(suggesters()).toHaveLength(2);
     expect(hidden()).toHaveLength(0);
@@ -568,7 +567,7 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     expect(w.find('[data-test="counter"]').text()).toBe('1 of 2');
 
     await w.find('[data-test="filter-toggle"]').trigger('click');
-    await w.findAll('[data-test="filter-option"]')[1]!.trigger('click');
+    await w.findAll('[data-test="author-filter"]')[0]!.setValue(false);
     await flushPromises();
     expect(w.find('[data-test="counter"]').text()).toBe('1 of 1');
     expect(w.findAll('[data-test="item"]')[0]!.text()).toContain('second');
@@ -628,6 +627,7 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     const w = mount(ManuscriptEditor, { props: { content: doc }, attachTo: document.body });
     await flushPromises();
     expect(w.find('[data-test="counter"]').text()).toBe('1 of 3');
+    await w.find('[data-test="filter-toggle"]').trigger('click');
     expect(w.find('[data-test="step-authors"]').exists()).toBe(true);
     const boxes = w.findAll('[data-test="author-filter"]');
     expect(boxes).toHaveLength(2);

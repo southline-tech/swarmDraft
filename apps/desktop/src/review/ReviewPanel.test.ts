@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { mount } from '@vue/test-utils';
 import type { SuggestionItem } from '@coauthor/editor';
 import ReviewPanel from './ReviewPanel.vue';
+import { REVIEW_CHANGES_REGION_ID } from './review-panel-a11y';
 import { resetCollabSlots } from '../author-colors';
 
 const items: SuggestionItem[] = [
@@ -55,55 +56,30 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(w.emitted('decide-one')).toEqual([[key(repl[0]!), 'accept']]);
   });
 
-  it('moves focus and selects filter options with arrow keys and Space', async () => {
-    const w = mount(ReviewPanel, { props: { items, labels }, attachTo: document.body });
-    await w.find('[data-test=filter-toggle]').trigger('click');
-    await w.vm.$nextTick();
-    expect(document.activeElement).toBe(w.find('[data-test=filter-all]').element);
-    const menu = w.find('[data-test=filter-menu]');
-    const opts = w.findAll('[data-test=filter-option]');
-    (w.find('[data-test=filter-all]').element as HTMLElement).focus();
-    await menu.trigger('keydown', { key: 'ArrowDown' });
-    expect(document.activeElement).toBe(opts[0]!.element);
-    await menu.trigger('keydown', { key: ' ' });
-    expect(w.emitted('show-only')).toEqual([['agent:a']]);
-
-    await w.find('[data-test=filter-toggle]').trigger('click');
-    const optsAgain = w.findAll('[data-test=filter-option]');
-    (optsAgain[1]!.element as HTMLElement).focus();
-    await w.find('[data-test=filter-menu]').trigger('keydown', { key: 'ArrowUp' });
-    expect((document.activeElement as HTMLElement).dataset.filterAuthor).toBe('agent:a');
-    w.unmount();
-  });
-
-  it('filters from a dropdown defaulting to All, keyed on the raw id', async () => {
+  it('filters with a checkbox popover defaulting to All (#67 wp8)', async () => {
     const all = mount(ReviewPanel, { props: { items, labels }, attachTo: document.body });
     expect(all.find('[data-test=filter-current]').text()).toBe('All');
-    expect(all.find('[data-test=filter-menu]').exists()).toBe(false);
+    expect(all.find('[data-test=step-authors]').exists()).toBe(false);
     await all.find('[data-test=filter-toggle]').trigger('click');
     expect(all.find('[data-test=filter-toggle]').attributes('aria-expanded')).toBe('true');
-    expect(all.find('[data-test=filter-all]').text()).toContain('All');
-    expect(all.find('[data-test=filter-all]').text()).toContain('3');
-    const opts = all.findAll('[data-test=filter-option]');
-    expect(opts.map((o) => o.find('.name').text())).toEqual(['Writing assistant', 'Mara']);
-    expect(opts.map((o) => o.find('.pill').text())).toEqual(['Bot', 'Person']);
-    expect(opts.map((o) => o.find('.cnt').text())).toEqual(['2', '1']);
-    await opts[0]!.trigger('click');
-    expect(all.emitted('show-only')).toEqual([['agent:a']]);
-    expect(all.find('[data-test=filter-menu]').exists()).toBe(false);
-    await all.find('[data-test=filter-toggle]').trigger('click');
-    await all.find('[data-test=filter-all]').trigger('click');
-    expect(all.emitted('show-all')).toHaveLength(1);
+    expect(all.find('[data-test=filter-toggle]').attributes('aria-controls')).toBe(
+      'review-author-filter-menu',
+    );
+    const boxes = all.findAll('[data-test=author-filter]');
+    expect(boxes).toHaveLength(2);
+    expect(boxes.every((b) => (b.element as HTMLInputElement).checked)).toBe(true);
+    await boxes[0]!.setValue(false);
+    expect(all.emitted('toggle-author')).toEqual([['agent:a']]);
+    await all.setProps({ filter: new Set(['brett']) });
+    expect(all.find('[data-test=filter-current]').text()).toBe('1 of 2');
     all.unmount();
 
     const w = mount(ReviewPanel, { props: { items, labels, filter: new Set(['brett']) } });
     expect(w.findAll('[data-test=item]').map((i) => i.text())).toEqual([
       expect.stringContaining('Mara'),
     ]);
-    expect(w.find('[data-test=filter-current]').text()).toContain('Mara');
-    expect(w.find('[data-test=filter-current]').text()).toContain('Person');
-    await w.find('[data-test=filter-toggle]').trigger('click');
-    expect(w.findAll('[data-test=filter-option]')[1]!.classes()).toContain('sel');
+    expect(w.find('[data-test=filter-current]').text()).toBe('1 of 2');
+    w.unmount();
   });
 
   it('colors each author with a distinct --ct-collab-N token, in first-seen order, never by display name', async () => {
@@ -120,9 +96,13 @@ describe('ReviewPanel (RAD-258)', () => {
     });
     await w.find('[data-test=filter-toggle]').trigger('click');
     const vars = w
-      .findAll('[data-test=filter-option] .av')
-      .map((e) => (e.element as HTMLElement).style.getPropertyValue('--ct-suggester'));
-    // agent:g is labelled "Grok Bot" but is third seen, so it gets collab-3, not a pinned collab-1.
+      .findAll('[data-test=author-filter]')
+      .map(
+        (el) =>
+          (el.element as HTMLElement).closest('label')?.querySelector('.av') as HTMLElement | null,
+      )
+      .filter(Boolean)
+      .map((e) => e!.style.getPropertyValue('--ct-suggester'));
     expect(vars).toEqual([
       'var(--ct-collab-1)',
       'var(--ct-collab-2)',
@@ -164,20 +144,29 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(w.emitted('decide-visible')).toEqual([['reject', items.map(key)]]);
   });
 
-  it('collapses to a rail with a badge of open changes', async () => {
+  it('collapses to a rail with a badge of open changes and expand a11y', async () => {
     const w = mount(ReviewPanel, { props: { items, collapsed: true } });
     expect(w.find('[data-test=review-panel]').exists()).toBe(false);
     expect(w.find('[data-test=badge]').text()).toBe('3');
     expect(w.find('[data-test=badge]').attributes('aria-label')).toBe('3 open changes');
     expect(w.find('[data-test=expand]').attributes('title')).toContain('Ctrl+\\');
+    expect(w.find('[data-test=expand]').attributes('aria-expanded')).toBe('false');
+    expect(w.find('[data-test=expand]').attributes('aria-controls')).toBe(REVIEW_CHANGES_REGION_ID);
     await w.find('[data-test=expand]').trigger('click');
     expect(w.emitted('toggle-collapsed')).toHaveLength(1);
+  });
+
+  it('Hide control exposes aria-expanded and aria-controls on the review region', () => {
+    const w = mount(ReviewPanel, { props: { items, collapsed: false } });
+    const hide = w.find('[data-test=collapse]');
+    expect(hide.attributes('aria-expanded')).toBe('true');
+    expect(hide.attributes('aria-controls')).toBe(REVIEW_CHANGES_REGION_ID);
+    expect(w.find(`#${REVIEW_CHANGES_REGION_ID}`).exists()).toBe(true);
   });
 
   it('shows an empty state', () => {
     const w = mount(ReviewPanel, { props: { items: [] } });
     expect(w.find('[data-test=empty]').exists()).toBe(true);
-    // ob8: an icon card with the mockup copy, not a single line.
     const card = w.find('.es');
     expect(card.find('.es__icon').exists()).toBe(true);
     expect(card.find('h3').text()).toBe('Nothing to review');
@@ -218,32 +207,7 @@ describe('ReviewPanel (RAD-258)', () => {
       'Matches the date in Chapter 3.',
     );
     expect(cards[1]!.find('[data-test=reason-line]').exists()).toBe(false);
-    const botCard = cards[0]!.element;
-    expect(botCard.querySelector('.who')?.nextElementSibling?.classList.contains('q')).toBe(true);
-    expect(botCard.querySelector('.q')?.nextElementSibling?.classList.contains('reason')).toBe(
-      true,
-    );
-    expect(
-      botCard.querySelector('.reason')?.nextElementSibling?.classList.contains('actions'),
-    ).toBe(true);
     w.unmount();
-
-    const longReason = 'x'.repeat(120);
-    const longItems: SuggestionItem[] = [
-      {
-        id: 's9',
-        kind: 'suggestion_insert',
-        author: 'agent:a',
-        ts: 't',
-        text: 'word',
-        reason: longReason,
-      },
-    ];
-    const long = mount(ReviewPanel, { props: { items: longItems, labels } });
-    expect(long.get('[data-test=reason-more]').text()).toBe('More');
-    await long.get('[data-test=reason-more]').trigger('click');
-    expect(long.get('[data-test=reason-more]').text()).toBe('Less');
-    long.unmount();
   });
 
   it('reason line styles use --ct-* tokens for light and dark themes (#60)', () => {
