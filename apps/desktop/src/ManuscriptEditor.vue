@@ -41,6 +41,7 @@ import {
   saveCollapsed,
   step,
   visibleItems,
+  withSuggestionReasons,
   authorVisibleInFilter,
   type AuthorFilter,
 } from './review/review-state';
@@ -120,6 +121,8 @@ const props = defineProps<{
   authorLabels?: (author: string) => AgentName;
   /** Saved author display names keyed by mark author (`agent:<id>`) or bare agent id (#47). */
   authorSavedNames?: Readonly<Record<string, string>>;
+  /** Bot rationales for open suggestions in this section (#60). */
+  suggestionReasons?: Readonly<Record<string, string>>;
   /** Comment rows for this section; used to label comment lines in the review sidebar (#47). */
   commentRows?: readonly CommentRow[];
   /** Where the toolbar renders (#84): the parent's full-width row above the side panels. Without
@@ -372,7 +375,10 @@ watch(
 
 function refreshReview(e: Editor) {
   review.value = collectReviewItems(e.state.doc);
-  suggestions.value = listSuggestions(e.state.doc.toJSON() as DocNode);
+  suggestions.value = withSuggestionReasons(
+    listSuggestions(e.state.doc.toJSON() as DocNode),
+    props.suggestionReasons,
+  );
   // Undo/redo of a decision brings a suggestion back or removes it again: keep the log in step.
   if (log.sync(suggestions.value)) emit('decisions', log.records());
   const i = resolveCurrent(visible.value, currentKey.value, currentIndex);
@@ -390,6 +396,12 @@ watch(filter, () => {
   refreshAuthorFilterDecorations();
   if (editor.value) refreshReview(editor.value);
 });
+watch(
+  () => props.suggestionReasons,
+  () => {
+    if (editor.value) refreshReview(editor.value);
+  },
+);
 
 /** First text position of a suggestion, found by (mark type, attrs.id). */
 function rangeOf(e: Editor, t: SuggestionTarget): { from: number; to: number } | null {

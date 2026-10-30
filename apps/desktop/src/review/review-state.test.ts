@@ -3,6 +3,8 @@ import type { DecisionRecord, SuggestionItem } from '@coauthor/editor';
 import {
   DecisionLog,
   filterSummary,
+  groupChanges,
+  withSuggestionReasons,
   resolveCurrent,
   reviewActionFor,
   REVIEW_SHORTCUTS,
@@ -109,5 +111,43 @@ describe('review state (RAD-258)', () => {
     expect(k('j', { ctrlKey: true })).toBeNull();
     expect(k('ArrowRight', { shiftKey: true })).toBeNull();
     expect(Object.values(REVIEW_SHORTCUTS).join(' ')).not.toMatch(/Ctrl\+[RJ]\b/);
+  });
+
+  it('groupChanges carries bot reason onto one card (#60)', () => {
+    const items: SuggestionItem[] = [
+      {
+        id: 'r1',
+        kind: 'suggestion_delete',
+        author: 'agent:a',
+        ts: 't',
+        text: 'old',
+        reason: 'Tighter wording.',
+      },
+      {
+        id: 'r1',
+        kind: 'suggestion_insert',
+        author: 'agent:a',
+        ts: 't',
+        text: 'new',
+        reason: 'Tighter wording.',
+      },
+    ];
+    expect(groupChanges(items)).toEqual([
+      expect.objectContaining({ reason: 'Tighter wording.', del: 'old', ins: 'new' }),
+    ]);
+  });
+
+  it('withSuggestionReasons attaches rationales by suggestion id (#60)', () => {
+    const base: SuggestionItem[] = [
+      {
+        id: 's1',
+        kind: 'suggestion_insert',
+        author: 'agent:a',
+        ts: 't',
+        text: 'x',
+      },
+    ];
+    expect(withSuggestionReasons(base, { s1: ' Because.' })[0]?.reason).toBe('Because.');
+    expect(withSuggestionReasons(base, {})).toEqual(base);
   });
 });

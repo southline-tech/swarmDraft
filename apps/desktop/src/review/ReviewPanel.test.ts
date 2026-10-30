@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { mount } from '@vue/test-utils';
 import type { SuggestionItem } from '@coauthor/editor';
 import ReviewPanel from './ReviewPanel.vue';
@@ -193,5 +196,53 @@ describe('ReviewPanel (RAD-258)', () => {
     const w = mount(ReviewPanel, { props: { items, filter: new Set(['nobody']) } });
     expect(w.find('.es').exists()).toBe(false);
     expect(w.find('[data-test=empty-filtered]').exists()).toBe(true);
+  });
+
+  it('shows the bot reason line on cards and omits it for people (#60, tc4/tc6)', async () => {
+    const withReason: SuggestionItem[] = [
+      {
+        id: 's1',
+        kind: 'suggestion_insert',
+        author: 'agent:a',
+        ts: 't',
+        text: 'guttered',
+        reason: 'Matches the date in Chapter 3.',
+      },
+      { id: 's2', kind: 'suggestion_delete', author: 'brett', ts: 't', text: 'old' },
+    ];
+    const w = mount(ReviewPanel, { props: { items: withReason, labels } });
+    const cards = w.findAll('[data-test=item]');
+    expect(cards[0]!.find('[data-test=reason-line]').text()).toContain(
+      'Matches the date in Chapter 3.',
+    );
+    expect(cards[1]!.find('[data-test=reason-line]').exists()).toBe(false);
+    w.unmount();
+
+    const longReason = 'x'.repeat(120);
+    const longItems: SuggestionItem[] = [
+      {
+        id: 's9',
+        kind: 'suggestion_insert',
+        author: 'agent:a',
+        ts: 't',
+        text: 'word',
+        reason: longReason,
+      },
+    ];
+    const long = mount(ReviewPanel, { props: { items: longItems, labels } });
+    expect(long.get('[data-test=reason-more]').text()).toBe('More');
+    await long.get('[data-test=reason-more]').trigger('click');
+    expect(long.get('[data-test=reason-more]').text()).toBe('Less');
+    long.unmount();
+  });
+
+  it('reason line styles use --ct-* tokens for light and dark themes (#60)', () => {
+    const css = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), '../shells/ReasonLine.vue'),
+      'utf8',
+    );
+    expect(css).toMatch(/color:\s*var\(--ct-text-muted\)/);
+    expect(css).toMatch(/color:\s*var\(--ct-accent\)/);
+    expect(css).not.toMatch(/#[0-9a-f]{3,8}/i);
   });
 });

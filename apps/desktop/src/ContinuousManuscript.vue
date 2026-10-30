@@ -44,6 +44,7 @@ const props = defineProps<{
 
 const commentRows = shallowRef<readonly CommentRow[]>([]);
 const authorSavedNames = shallowRef<Readonly<Record<string, string>>>({});
+const suggestionReasons = shallowRef<Readonly<Record<string, string>>>({});
 
 watch(
   () => props.selectedId,
@@ -51,16 +52,19 @@ watch(
     if (!sectionId) {
       commentRows.value = [];
       authorSavedNames.value = {};
+      suggestionReasons.value = {};
       return;
     }
     try {
       const meta = await sectionReviewMeta(sectionId);
       commentRows.value = meta.comments;
       authorSavedNames.value = meta.authorSavedNames;
+      suggestionReasons.value = meta.suggestionReasons;
     } catch (err) {
       console.error('Could not load review sidebar metadata', err);
       commentRows.value = [];
       authorSavedNames.value = {};
+      suggestionReasons.value = {};
     }
   },
   { immediate: true },
@@ -204,6 +208,7 @@ onBeforeUnmount(() => observer?.disconnect());
             :author-labels="authorLabels"
             :comment-rows="sec.id === selectedId ? commentRows : []"
             :author-saved-names="sec.id === selectedId ? authorSavedNames : undefined"
+            :suggestion-reasons="sec.id === selectedId ? suggestionReasons : undefined"
             :external-load-error="externalLoadError"
             :outline-forced="outlineForced"
             :notes-hidden="notesHidden"

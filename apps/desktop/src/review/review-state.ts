@@ -64,6 +64,8 @@ export interface ReviewChange {
   author: string;
   del?: string;
   ins?: string;
+  /** Bot rationale shown on the review card (#60). */
+  reason?: string;
   targets: SuggestionTarget[];
 }
 export function groupChanges(items: readonly SuggestionItem[]): ReviewChange[] {
@@ -75,6 +77,7 @@ export function groupChanges(items: readonly SuggestionItem[]): ReviewChange[] {
     c.targets.push({ kind: i.kind, id: i.id });
     if (i.kind === 'suggestion_delete') c.del = (c.del ?? '') + i.text;
     else c.ins = (c.ins ?? '') + i.text;
+    if (!c.reason && i.reason) c.reason = i.reason;
   }
   return [...out.values()];
 }
@@ -82,6 +85,18 @@ export function groupChanges(items: readonly SuggestionItem[]): ReviewChange[] {
 /** Raw ids from agents are prefixed `agent:`; everyone else is a person. */
 export const authorKind = (author: string): 'Bot' | 'Person' =>
   author.startsWith('agent:') ? 'Bot' : 'Person';
+
+/** Attach bot rationales from section review meta, keyed by suggestion id (#60). */
+export function withSuggestionReasons(
+  items: readonly SuggestionItem[],
+  reasons: Readonly<Record<string, string>> | undefined,
+): SuggestionItem[] {
+  if (!reasons || !Object.keys(reasons).length) return [...items];
+  return items.map((i) => {
+    const reason = reasons[i.id]?.trim();
+    return reason ? { ...i, reason } : i;
+  });
+}
 
 /**
  * Index of the next current change after `current` is gone or moved: the same key if still

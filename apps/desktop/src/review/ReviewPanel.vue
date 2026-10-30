@@ -8,6 +8,7 @@
  * one id) is one change.
  */
 import EmptyState from '../shells/EmptyState.vue';
+import ReasonLine from '../shells/ReasonLine.vue';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { Decision, SuggestionItem } from '@coauthor/editor';
 import {
@@ -307,6 +308,9 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
             parts(c.author).note
           }}</span>
           <span class="pill">{{ authorKind(c.author) }}</span>
+        </div>
+        <div v-if="authorKind(c.author) === 'Bot' && c.reason" class="reason" @click.stop>
+          <ReasonLine :reason="c.reason" />
         </div>
         <p class="q">
           <span v-if="c.del" class="del" data-test="del">{{ c.del }}</span

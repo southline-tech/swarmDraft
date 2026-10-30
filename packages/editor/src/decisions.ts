@@ -29,6 +29,8 @@ export interface SuggestionItem {
   ts: string;
   /** Text covered by the suggestion, joined across text nodes in reading order (incl. notes). */
   text: string;
+  /** Bot rationale from suggest_edit (optional; stored on mark attrs when present). */
+  reason?: string;
 }
 
 export type DecisionScope =

@@ -308,6 +308,8 @@ export async function saveManuscriptCopy(title: string, bytes: Uint8Array): Prom
 export interface SectionReviewMeta {
   comments: import('@coauthor/editor').CommentRow[];
   authorSavedNames: Record<string, string>;
+  /** Open suggestion id → bot rationale for review cards (#60). */
+  suggestionReasons: Record<string, string>;
 }
 
 export async function manuscriptReviewDecisions(
@@ -335,7 +337,7 @@ export async function saveSectionReviewDecisions(
 }
 
 export async function sectionReviewMeta(sectionId: string): Promise<SectionReviewMeta> {
-  if (!isTauri()) return { comments: [], authorSavedNames: {} };
+  if (!isTauri()) return { comments: [], authorSavedNames: {}, suggestionReasons: {} };
   return invoke<SectionReviewMeta>('section_review_meta', { sectionId });
 }
 
