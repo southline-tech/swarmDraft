@@ -188,4 +188,38 @@ describe('review sidebar polish (#47)', () => {
     expect(who.find('[data-test=agent-note]').text()).toBe(REMOVED_NOTE);
     w.unmount();
   });
+
+  it('shows bot rationale on review cards through the editor (#60)', async () => {
+    const content: JSONContent = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              marks: [
+                {
+                  type: 'suggestion_insert',
+                  attrs: { id: 's1', author: 'agent:a1', ts: 't' },
+                },
+              ],
+              text: 'guttered',
+            },
+          ],
+        },
+      ],
+    };
+    setAgents([agent('a1', 'Draft Helper')]);
+    const w = mount(ManuscriptEditor, {
+      props: { content, suggestionReasons: { s1: 'Stronger verb.' } },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    expect(w.get('[data-test=reason-line]').text()).toContain('Stronger verb.');
+    const card = w.get('[data-test=item]').element;
+    expect(card.querySelector('.who')?.nextElementSibling?.classList.contains('q')).toBe(true);
+    expect(card.querySelector('.q')?.nextElementSibling?.classList.contains('reason')).toBe(true);
+    w.unmount();
+  });
 });

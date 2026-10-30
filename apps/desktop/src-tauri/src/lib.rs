@@ -459,6 +459,7 @@ struct ReviewCommentRow {
 struct SectionReviewMeta {
     comments: Vec<ReviewCommentRow>,
     author_saved_names: std::collections::HashMap<String, String>,
+    suggestion_reasons: std::collections::HashMap<String, String>,
 }
 
 fn review_comment_row(c: manuscripts::Comment) -> ReviewCommentRow {
@@ -529,9 +530,16 @@ async fn section_review_meta(
                 author_saved_names.insert(format!("agent:{}", c.author.id), c.author.name.clone());
             }
         }
+        let mut suggestion_reasons = std::collections::HashMap::new();
+        for sug in &suggestions {
+            if let Some(r) = sug.rationale.as_ref().filter(|s| !s.is_empty()) {
+                suggestion_reasons.insert(sug.id.clone(), r.clone());
+            }
+        }
         Ok(SectionReviewMeta {
             comments: comments.into_iter().map(review_comment_row).collect(),
             author_saved_names,
+            suggestion_reasons,
         })
     })
     .await

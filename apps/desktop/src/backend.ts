@@ -308,6 +308,8 @@ export async function saveManuscriptCopy(title: string, bytes: Uint8Array): Prom
 export interface SectionReviewMeta {
   comments: import('@coauthor/editor').CommentRow[];
   authorSavedNames: Record<string, string>;
+  /** Open suggestion id → bot rationale for review cards (#60). */
+  suggestionReasons: Record<string, string>;
 }
 
 export async function manuscriptReviewDecisions(
@@ -334,8 +336,23 @@ export async function saveSectionReviewDecisions(
   await invoke('section_save_review_decisions', { manuscriptId, sectionId, records });
 }
 
+const webSectionReviewMeta = new Map<string, SectionReviewMeta>();
+
+function emptySectionReviewMeta(): SectionReviewMeta {
+  return { comments: [], authorSavedNames: {}, suggestionReasons: {} };
+}
+
+/** Mirror persisted section review meta in browser mode (tests and dev harnesses, #60). */
+export function setWebSectionReviewMeta(sectionId: string, meta: SectionReviewMeta): void {
+  webSectionReviewMeta.set(sectionId, meta);
+}
+
+export function clearWebSectionReviewMeta(): void {
+  webSectionReviewMeta.clear();
+}
+
 export async function sectionReviewMeta(sectionId: string): Promise<SectionReviewMeta> {
-  if (!isTauri()) return { comments: [], authorSavedNames: {} };
+  if (!isTauri()) return webSectionReviewMeta.get(sectionId) ?? emptySectionReviewMeta();
   return invoke<SectionReviewMeta>('section_review_meta', { sectionId });
 }
 

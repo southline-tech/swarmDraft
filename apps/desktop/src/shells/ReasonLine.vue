@@ -44,4 +44,8 @@ const long = () => props.reason.length > (props.limit ?? 90);
   text-decoration: underline;
   cursor: pointer;
 }
+.rl__more:focus-visible {
+  outline: var(--ct-focus-outline);
+  outline-offset: var(--ct-focus-offset);
+}
 </style>

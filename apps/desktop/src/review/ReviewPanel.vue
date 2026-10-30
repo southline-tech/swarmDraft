@@ -8,6 +8,7 @@
  * one id) is one change.
  */
 import EmptyState from '../shells/EmptyState.vue';
+import ReasonLine from '../shells/ReasonLine.vue';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { Decision, SuggestionItem } from '@coauthor/editor';
 import {
@@ -313,6 +314,9 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
           ><template v-if="c.del && c.ins">{{ ' ' }}</template
           ><span v-if="c.ins" class="ins" data-test="ins">{{ c.ins }}</span>
         </p>
+        <div v-if="authorKind(c.author) === 'Bot' && c.reason" class="reason" @click.stop>
+          <ReasonLine :reason="c.reason" />
+        </div>
         <div class="actions">
           <button
             type="button"
@@ -611,7 +615,7 @@ button.secondary {
   font-weight: var(--ct-weight-semibold);
 }
 .card .q {
-  margin: var(--ct-space-2) 0 var(--ct-space-3);
+  margin: var(--ct-space-2) 0 var(--ct-space-2);
   font-family: var(--ct-font-manuscript);
   font-size: var(--ct-text-md);
   line-height: 1.5;
@@ -627,6 +631,9 @@ button.secondary {
   color: var(--ct-suggest-delete-text);
   background: var(--ct-suggest-delete-bg);
   text-decoration: line-through 2px var(--ct-suggest-delete-strike) !important;
+}
+.card .reason {
+  margin-bottom: var(--ct-space-3);
 }
 .actions .primary,
 .actions .secondary {

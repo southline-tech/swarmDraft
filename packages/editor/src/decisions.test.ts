@@ -78,6 +78,7 @@ describe('listSuggestions / selectTargets', () => {
       ['s3', I, 'Bot A', 'fell'],
     ]);
   });
+
   it('includes suggestions inside footnote content', () => {
     const withNote: DocNode = {
       type: 'doc',
