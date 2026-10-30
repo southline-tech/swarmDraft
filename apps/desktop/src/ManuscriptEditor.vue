@@ -78,6 +78,7 @@ import {
   AuthorLabels,
   AuthorSuggestionColors,
   FindHighlight,
+  FormatTrackChanges,
   HumanTrackChanges,
   collectReviewItems,
   listSuggestions,
@@ -680,6 +681,10 @@ const options: Partial<EditorOptions> = {
       active: () => tracking.value,
       author: () => writerProfile.value.name,
     }),
+    FormatTrackChanges.configure({
+      active: () => tracking.value,
+      author: () => writerProfile.value.name,
+    }),
     AuthorLabels.configure({
       label: authorLabel,
       authorVisible: (author) => authorVisibleInFilter(filter.value, author),
@@ -765,6 +770,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
   comment_anchor: 'Comment',
   suggestion_insert: 'Insert',
   suggestion_delete: 'Delete',
+  format_change: 'Format',
 };
 </script>
 
@@ -1217,6 +1223,15 @@ const LABELS: Record<ReviewItem['type'], string> = {
 }
 .tiptap del.suggestion-delete:has(.suggestion-filter-hidden-delete) [data-suggester] {
   color: var(--ct-text-muted);
+}
+.tiptap span.format-change [data-suggester] {
+  background: var(--ct-suggest-format-bg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ct-suggest-format-outline) 45%, transparent);
+  border-radius: 2px;
+}
+.tiptap span.format-change:has(.suggestion-filter-hidden-format) [data-suggester] {
+  background: none;
+  box-shadow: none;
 }
 .tiptap .comment-anchor {
   background: var(--ct-comment-bg);

@@ -42,6 +42,27 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(w.findAll('[data-test=item]')[1]!.find('.pill').text()).toBe('Person');
   });
 
+  it('shows a format suggestion as a labeled card (#160)', () => {
+    const fmt: SuggestionItem[] = [
+      {
+        id: 'f1',
+        kind: 'format_change',
+        author: 'Kim',
+        ts: 't',
+        text: 'word',
+        target: 'bold',
+        before: '0',
+        after: '1',
+      },
+    ];
+    const w = mount(ReviewPanel, {
+      props: { items: fmt, labels: (a) => ({ name: a, agent: false }) },
+    });
+    expect(w.findAll('[data-test=item]')).toHaveLength(1);
+    expect(w.find('[data-test=format]').text()).toBe('Add bold');
+    expect(w.find('[data-test=del]').exists()).toBe(false);
+  });
+
   it('shows a replacement as one card with an inline diff that decides both parts', async () => {
     const repl: SuggestionItem[] = [
       { id: 'r1', kind: 'suggestion_delete', author: 'agent:a', ts: 't', text: 'flickered' },

@@ -90,3 +90,10 @@ export * from './author-labels';
 export * from './author-suggestion-colors';
 export * from './find-replace';
 export * from './human-track';
+export * from './format-track';
+export {
+  formatChangeSummary,
+  PARAGRAPH_STYLE_TARGET,
+  formatChangeAttrs,
+  type TrackedInlineFormat,
+} from './format-change';

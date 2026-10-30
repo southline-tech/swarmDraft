@@ -8,6 +8,7 @@
  */
 import {
   targetKey,
+  formatChangeSummary,
   type DecisionRecord,
   type SuggestionItem,
   type SuggestionTarget,
@@ -64,6 +65,8 @@ export interface ReviewChange {
   author: string;
   del?: string;
   ins?: string;
+  /** Format suggestion summary for the card (#160). */
+  format?: { target: string; before: string; after: string; label: string };
   /** Bot rationale shown on the review card (#60). */
   reason?: string;
   targets: SuggestionTarget[];
@@ -86,8 +89,15 @@ export function groupChanges(items: readonly SuggestionItem[]): ReviewChange[] {
     let c = out.get(key);
     if (!c) out.set(key, (c = { key, id: i.id, author: i.author, targets: [] }));
     c.targets.push({ kind: i.kind, id: i.id });
-    if (i.kind === 'suggestion_delete') c.del = (c.del ?? '') + i.text;
-    else c.ins = (c.ins ?? '') + i.text;
+    if (i.kind === 'format_change' && i.target != null && i.before != null && i.after != null) {
+      c.format = {
+        target: i.target,
+        before: i.before,
+        after: i.after,
+        label: formatChangeSummary(i.target, i.before, i.after),
+      };
+    } else if (i.kind === 'suggestion_delete') c.del = (c.del ?? '') + i.text;
+    else if (i.kind === 'suggestion_insert') c.ins = (c.ins ?? '') + i.text;
     c.reason = mergeReason(c.reason, i.reason);
   }
   return [...out.values()];

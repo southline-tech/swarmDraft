@@ -159,6 +159,22 @@ describe('review state (RAD-258)', () => {
     expect(groupChanges(items)[0]?.reason).toBe('Part one. Part two.');
   });
 
+  it('groupChanges labels format suggestions (#160)', () => {
+    const items: SuggestionItem[] = [
+      {
+        id: 'f1',
+        kind: 'format_change',
+        author: 'Kim',
+        ts: 't',
+        text: 'word',
+        target: 'bold',
+        before: '0',
+        after: '1',
+      },
+    ];
+    expect(groupChanges(items)[0]?.format).toMatchObject({ label: 'Add bold' });
+  });
+
   it('withSuggestionReasons attaches rationales by suggestion id (#60)', () => {
     const base: SuggestionItem[] = [
       {

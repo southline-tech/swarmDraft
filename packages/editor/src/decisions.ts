@@ -13,13 +13,15 @@
 import type {
   BlockNode,
   DocNode,
+  FormatChangeAttrs,
   InlineNode,
   Mark,
   ParagraphNode,
   TextNode,
 } from '@coauthor/schema';
+import { inlineFormatOnBefore, PARAGRAPH_STYLE_TARGET } from './format-change';
 
-export type SuggestionKind = 'suggestion_insert' | 'suggestion_delete';
+export type SuggestionKind = 'suggestion_insert' | 'suggestion_delete' | 'format_change';
 export type Decision = 'accept' | 'reject';
 
 export interface SuggestionItem {
@@ -29,6 +31,10 @@ export interface SuggestionItem {
   ts: string;
   /** Text covered by the suggestion, joined across text nodes in reading order (incl. notes). */
   text: string;
+  /** Format suggestion target (#160). */
+  target?: string;
+  before?: string;
+  after?: string;
   /** Bot rationale from suggest_edit (optional; stored on mark attrs when present). */
   reason?: string;
 }
@@ -55,7 +61,11 @@ export interface DecisionRecord {
   decidedBy: string;
 }
 
-const DECISION_KINDS: readonly SuggestionKind[] = ['suggestion_insert', 'suggestion_delete'];
+const DECISION_KINDS: readonly SuggestionKind[] = [
+  'suggestion_insert',
+  'suggestion_delete',
+  'format_change',
+];
 const DECISION_STATUSES = ['accepted', 'rejected'] as const;
 
 /** Narrow persisted JSON to a decision record (#51). */
@@ -110,7 +120,10 @@ export interface ReviewTransactionPort {
 }
 
 type SuggestionMark = Extract<Mark, { type: SuggestionKind }>;
+type InsertDeleteMark = Extract<Mark, { type: 'suggestion_insert' | 'suggestion_delete' }>;
 const isSuggestion = (m: Mark): m is SuggestionMark =>
+  m.type === 'suggestion_insert' || m.type === 'suggestion_delete' || m.type === 'format_change';
+const isInsertDelete = (m: Mark): m is InsertDeleteMark =>
   m.type === 'suggestion_insert' || m.type === 'suggestion_delete';
 export const targetKey = (t: SuggestionTarget) => `${t.kind}\u0000${t.id}`;
 
@@ -143,6 +156,13 @@ export function listSuggestions(doc: DocNode): SuggestionItem[] {
             author: m.attrs.author,
             ts: m.attrs.ts,
             text: node.text,
+            ...(m.type === 'format_change'
+              ? {
+                  target: m.attrs.target,
+                  before: m.attrs.before,
+                  after: m.attrs.after,
+                }
+              : {}),
           });
       }
     });
@@ -162,6 +182,30 @@ export function selectTargets(items: SuggestionItem[], scope: DecisionScope): Su
 
 export interface DecisionResult extends PortResult {
   doc: DocNode;
+}
+
+function applyParagraphStyleReject(block: BlockNode, keys: ReadonlySet<string>): BlockNode {
+  if (block.type !== 'paragraph') return block;
+  let style = block.attrs.style;
+  for (const node of block.content ?? []) {
+    if (node.type !== 'text') continue;
+    for (const m of node.marks ?? []) {
+      if (m.type !== 'format_change') continue;
+      if (!keys.has(targetKey({ kind: 'format_change', id: m.attrs.id }))) continue;
+      if (m.attrs.target === PARAGRAPH_STYLE_TARGET) style = m.attrs.before as typeof style;
+    }
+  }
+  if (style === block.attrs.style) return block;
+  return { ...block, attrs: { ...block.attrs, style } };
+}
+
+function revertInlineMarks(marks: Mark[], attrs: FormatChangeAttrs): Mark[] {
+  const target = attrs.target;
+  if (target === PARAGRAPH_STYLE_TARGET) return marks;
+  const on = inlineFormatOnBefore(target, attrs.before);
+  const rest = marks.filter((m) => m.type !== target && m.type !== 'format_change');
+  if (on) return [...rest, { type: target } as Mark];
+  return rest;
 }
 
 function transformInline(
@@ -188,14 +232,20 @@ function transformInline(
       continue;
     }
     let remove = false;
+    let revert: FormatChangeAttrs | undefined;
     const marks = (node.marks ?? []).filter((m) => {
-      if (!isSuggestion(m) || !keys.has(targetKey({ kind: m.type, id: m.attrs.id }))) return true;
+      if (m.type === 'format_change' && keys.has(targetKey({ kind: m.type, id: m.attrs.id }))) {
+        if (decision === 'reject') revert = m.attrs;
+        return false;
+      }
+      if (!isInsertDelete(m) || !keys.has(targetKey({ kind: m.type, id: m.attrs.id }))) return true;
       if ((m.type === 'suggestion_insert') !== (decision === 'accept')) remove = true;
       return false;
     });
     if (remove) continue;
+    const nextMarks = revert ? revertInlineMarks(marks, revert) : marks;
     const next: TextNode = { type: 'text', text: node.text };
-    if (marks.length) next.marks = marks;
+    if (nextMarks.length) next.marks = nextMarks;
     const prev = out[out.length - 1];
     if (prev?.type === 'text' && sameMarks(prev.marks, next.marks))
       out[out.length - 1] = { ...prev, text: prev.text + next.text };
@@ -217,10 +267,11 @@ export function decideSuggestions(doc: DocNode, op: DecisionOp): DecisionResult 
     .filter((i) => keys.has(targetKey(i)))
     .map(({ kind, id }) => ({ kind, id }));
   const content = doc.content.map((block): BlockNode => {
-    const inline = inlineOf(block);
-    if (!inline) return block;
+    const styled = op.decision === 'reject' ? applyParagraphStyleReject(block, keys) : block;
+    const inline = inlineOf(styled);
+    if (!inline) return styled;
     const out = transformInline(inline, keys, op.decision);
-    const nb = { ...block } as BlockNode & { content?: InlineNode[] };
+    const nb = { ...styled } as BlockNode & { content?: InlineNode[] };
     if (out.length) nb.content = out;
     else delete nb.content;
     return nb;

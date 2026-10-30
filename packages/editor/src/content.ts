@@ -33,8 +33,17 @@ export const PARAGRAPH_STYLE_LABELS: Record<ParagraphStyle, string> = {
 /** Marks a writer applies while drafting. */
 export const FORMAT_MARKS = ['bold', 'italic', 'smallcaps', 'underline', 'strike', 'link'] as const;
 /** Review marks: comments and tracked changes. Shown in the editor, never edited there. */
-export const REVIEW_MARKS = ['comment_anchor', 'suggestion_insert', 'suggestion_delete'] as const;
-export const SUGGESTION_MARKS = ['suggestion_insert', 'suggestion_delete'] as const;
+export const REVIEW_MARKS = [
+  'comment_anchor',
+  'suggestion_insert',
+  'suggestion_delete',
+  'format_change',
+] as const;
+export const SUGGESTION_MARKS = [
+  'suggestion_insert',
+  'suggestion_delete',
+  'format_change',
+] as const;
 export type ReviewMarkType = (typeof REVIEW_MARKS)[number];
 
 export interface JSONMark {

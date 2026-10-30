@@ -33,6 +33,11 @@ const textOf = (d: DocNode) =>
 const t = (kind: SuggestionKind, id: string) => ({ kind, id });
 const I = 'suggestion_insert' as const;
 const D = 'suggestion_delete' as const;
+const F = 'format_change' as const;
+const fmt = (id: string, author: string, target: string, before: string, after: string): Mark => ({
+  type: 'format_change',
+  attrs: { id, author, ts: '2026-10-25T00:00:00Z', target, before, after },
+});
 const op = (
   decision: 'accept' | 'reject',
   ...targets: { kind: SuggestionKind; id: string }[]
@@ -177,6 +182,47 @@ describe('decideSuggestions (reference model)', () => {
       op('accept', t(I, 's1')),
     );
     expect(a.doc).toEqual(b.doc);
+  });
+
+  it('accept format_change keeps inline marks; reject restores before', () => {
+    const styled: DocNode = {
+      type: 'doc',
+      content: [
+        para({
+          text: 'word',
+          marks: [fmt('f1', 'Kim', 'bold', '0', '1'), { type: 'bold' }],
+        }),
+      ],
+    };
+    let r = decideSuggestions(styled, op('accept', t(F, 'f1')));
+    expect(listSuggestions(r.doc)).toHaveLength(0);
+    expect(r.doc.content[0]).toMatchObject({
+      content: [{ text: 'word', marks: [{ type: 'bold' }] }],
+    });
+    r = decideSuggestions(styled, op('reject', t(F, 'f1')));
+    expect(r.doc.content[0]).toMatchObject({ content: [{ text: 'word' }] });
+  });
+
+  it('reject format_change restores paragraph style', () => {
+    const docStyle: DocNode = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          attrs: { style: 'centered' },
+          content: [
+            {
+              type: 'text',
+              text: 'Line',
+              marks: [fmt('p1', 'Kim', 'paragraph_style', 'body', 'centered')],
+            },
+          ],
+        },
+      ],
+    };
+    const r = decideSuggestions(docStyle, op('reject', t(F, 'p1')));
+    expect(r.doc.content[0]).toMatchObject({ attrs: { style: 'body' } });
+    expect(listSuggestions(r.doc)).toHaveLength(0);
   });
 });
 

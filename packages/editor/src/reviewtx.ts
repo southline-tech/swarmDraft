@@ -5,9 +5,11 @@
  * panel listed the suggestions are kept. Only reachable through `@coauthor/editor/trusted`.
  */
 import type { EditorState, Transaction } from '@tiptap/pm/state';
-import type { Node as PMNode } from '@tiptap/pm/model';
+import type { Mark as PMMark, Node as PMNode } from '@tiptap/pm/model';
+import type { ParagraphStyle } from '@coauthor/schema';
+import { inlineFormatOnBefore, PARAGRAPH_STYLE_TARGET, readFormatAttrs } from './format-change';
 
-export type SuggestionMarkType = 'suggestion_insert' | 'suggestion_delete';
+export type SuggestionMarkType = 'suggestion_insert' | 'suggestion_delete' | 'format_change';
 export interface ReviewTarget {
   kind: SuggestionMarkType;
   id: string;
@@ -42,8 +44,8 @@ interface JsonPara {
 
 const keyOf = (kind: string, id: unknown) => `${kind}\u0000${String(id)}`;
 
-/** Whether text carrying this suggestion is removed by the decision. */
-const removes = (kind: string, decision: ReviewDecision) =>
+/** Whether text carrying this insert/delete suggestion is removed by the decision. */
+const removesInsertDelete = (kind: string, decision: ReviewDecision) =>
   (kind === 'suggestion_insert') !== (decision === 'accept');
 
 function noteText(content: JsonPara[]): string {
@@ -69,14 +71,26 @@ function decideNoteInline(
       continue;
     }
     let drop = false;
+    let revertAttrs: ReturnType<typeof readFormatAttrs> | undefined;
     const marks = (node.marks ?? []).filter((m) => {
-      if (!keys.has(keyOf(m.type, m.attrs?.id))) return true;
-      if (removes(m.type, decision)) drop = true;
+      const k = keyOf(m.type, m.attrs?.id);
+      if (!keys.has(k)) return true;
+      if (m.type === 'format_change') {
+        if (decision === 'reject') revertAttrs = readFormatAttrs(m.attrs ?? {});
+        return false;
+      }
+      if (removesInsertDelete(m.type, decision)) drop = true;
       return false;
     });
     if (drop) continue;
+    let nextMarks = marks;
+    if (revertAttrs && revertAttrs.target !== PARAGRAPH_STYLE_TARGET) {
+      const on = inlineFormatOnBefore(revertAttrs.target, revertAttrs.before);
+      nextMarks = marks.filter((m) => m.type !== revertAttrs!.target);
+      if (on) nextMarks = [...nextMarks, { type: revertAttrs.target }];
+    }
     const next: JsonInline = { type: 'text', text: node.text };
-    if (marks.length) next.marks = marks;
+    if (nextMarks.length) next.marks = nextMarks;
     const prev = out[out.length - 1];
     if (
       prev?.type === 'text' &&
@@ -96,6 +110,23 @@ function noteHasTarget(content: JsonPara[], keys: ReadonlySet<string>): boolean 
   );
 }
 
+function applyInlineFormatReject(
+  tr: Transaction,
+  schema: EditorState['schema'],
+  from: number,
+  to: number,
+  attrs: NonNullable<ReturnType<typeof readFormatAttrs>>,
+  mark: PMMark,
+): Transaction {
+  if (attrs.target === PARAGRAPH_STYLE_TARGET) return tr;
+  const type = schema.marks[attrs.target];
+  if (!type) return tr.removeMark(from, to, mark);
+  const on = inlineFormatOnBefore(attrs.target, attrs.before);
+  if (on) tr = tr.addMark(from, to, type.create());
+  else tr = tr.removeMark(from, to, type);
+  return tr.removeMark(from, to, mark);
+}
+
 /**
  * Build the decision transaction against `state` (the live doc). Ranges are collected by
  * (kind, attrs.id), then applied as mark removals and deletions mapped through the transaction,
@@ -109,9 +140,16 @@ export function buildReviewTransaction(
   trust: ReviewTrust,
 ): Transaction | null {
   const keys = new Set(op.targets.map((t) => keyOf(t.kind, t.id)));
-  const unmark: { from: number; to: number; mark: PMNode['marks'][number] }[] = [];
+  const unmark: { from: number; to: number; mark: PMMark }[] = [];
   const cut: { from: number; to: number }[] = [];
   const notes: { pos: number; node: PMNode }[] = [];
+  const paragraphStyleReject = new Map<number, ParagraphStyle>();
+  const formatReject: {
+    from: number;
+    to: number;
+    attrs: NonNullable<ReturnType<typeof readFormatAttrs>>;
+    mark: PMMark;
+  }[] = [];
 
   state.doc.descendants((node, pos) => {
     if (node.type.name === 'footnote') {
@@ -119,19 +157,53 @@ export function buildReviewTransaction(
       if (noteHasTarget(content, keys)) notes.push({ pos, node });
       return false;
     }
+    if (node.type.name === 'paragraph' && op.decision === 'reject') {
+      node.forEach((child) => {
+        if (!child.isText) return;
+        for (const mark of child.marks) {
+          if (mark.type.name !== 'format_change') continue;
+          if (!keys.has(keyOf('format_change', mark.attrs.id))) continue;
+          const attrs = readFormatAttrs(mark.attrs);
+          if (attrs?.target === PARAGRAPH_STYLE_TARGET)
+            paragraphStyleReject.set(pos, attrs.before as ParagraphStyle);
+        }
+      });
+    }
     if (!node.isText) return true;
     let drop = false;
     for (const mark of node.marks) {
-      if (!keys.has(keyOf(mark.type.name, mark.attrs.id))) continue;
-      if (removes(mark.type.name, op.decision)) drop = true;
+      const k = keyOf(mark.type.name, mark.attrs.id);
+      if (!keys.has(k)) continue;
+      if (mark.type.name === 'format_change') {
+        if (op.decision === 'accept') unmark.push({ from: pos, to: pos + node.nodeSize, mark });
+        else {
+          const attrs = readFormatAttrs(mark.attrs);
+          if (attrs?.target === PARAGRAPH_STYLE_TARGET)
+            unmark.push({ from: pos, to: pos + node.nodeSize, mark });
+          else if (attrs) formatReject.push({ from: pos, to: pos + node.nodeSize, attrs, mark });
+        }
+        continue;
+      }
+      if (removesInsertDelete(mark.type.name, op.decision)) drop = true;
       else unmark.push({ from: pos, to: pos + node.nodeSize, mark });
     }
     if (drop) cut.push({ from: pos, to: pos + node.nodeSize });
     return false;
   });
 
-  if (!unmark.length && !cut.length && !notes.length) return null;
-  const tr = state.tr;
+  if (
+    !unmark.length &&
+    !cut.length &&
+    !notes.length &&
+    !paragraphStyleReject.size &&
+    !formatReject.length
+  )
+    return null;
+  let tr = state.tr;
+  for (const [pos, style] of paragraphStyleReject)
+    tr = tr.setNodeMarkup(pos, undefined, { ...state.doc.nodeAt(pos)!.attrs, style });
+  for (const f of formatReject)
+    tr = applyInlineFormatReject(tr, state.schema, f.from, f.to, f.attrs, f.mark);
   for (const u of unmark) tr.removeMark(u.from, u.to, u.mark);
   for (const n of notes) {
     const content = ((n.node.attrs.content ?? []) as JsonPara[]).map((p) => {
@@ -143,7 +215,6 @@ export function buildReviewTransaction(
     });
     tr.setNodeMarkup(n.pos, undefined, { ...n.node.attrs, content, text: noteText(content) });
   }
-  // Delete from the end so earlier ranges stay valid; map through earlier steps anyway.
   for (const c of [...cut].sort((a, b) => b.from - a.from)) {
     tr.delete(tr.mapping.map(c.from), tr.mapping.map(c.to));
   }
