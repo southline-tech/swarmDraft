@@ -382,16 +382,19 @@ describe('App', () => {
     const { w } = await withManuscript();
     const nav = w.find('[data-test="tb-navigator"]');
     const sidebar = () => w.findComponent({ name: 'SectionNav' });
+    const rail = () => w.findComponent({ name: 'OutlineRail' });
     expect(nav.attributes('aria-pressed')).toBe('true');
     expect(sidebar().isVisible()).toBe(true);
+    expect(rail().exists()).toBe(true);
+    expect(rail().isVisible()).toBe(false);
     await nav.trigger('click');
     expect(nav.attributes('aria-pressed')).toBe('false');
     expect(sidebar().isVisible()).toBe(false);
-    // The grid collapses so the editor takes the full width, not the old 18rem column.
+    expect(rail().isVisible()).toBe(true);
     const ws = w.find('[data-test="workspace"]');
-    expect(ws.classes()).toContain('grid-cols-1');
+    expect(ws.classes()).toContain('grid-cols-[var(--ct-rail-w)_1fr]');
     expect(ws.classes()).not.toContain('grid-cols-[18rem_1fr]');
-    expect(nav.attributes('aria-controls')).toBe(sidebar().attributes('id'));
+    expect(nav.attributes('aria-controls')).toBe('chapter-navigator-rail');
     await nav.trigger('click');
     expect(nav.attributes('aria-pressed')).toBe('true');
     expect(sidebar().isVisible()).toBe(true);
@@ -1969,7 +1972,7 @@ describe('App UI shells (Part of #36)', () => {
         .find(`[data-test="section-${chapter.id}"] [data-test="word-count"]`)
         .attributes('aria-label'),
     ).toBe(`${words} words`);
-    expect(w.find('[data-test="new-chapter"]').exists()).toBe(false);
+    expect(w.find('[data-test="new-chapter"]').attributes('aria-disabled')).toBe('true');
     w.unmount();
   });
 

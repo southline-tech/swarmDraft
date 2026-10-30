@@ -9,11 +9,14 @@
  */
 import EmptyState from '../shells/EmptyState.vue';
 import ReasonLine from '../shells/ReasonLine.vue';
+import PanelRail from '../desk/PanelRail.vue';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { Decision, SuggestionItem } from '@coauthor/editor';
 import {
   authorKind,
   authorsOf,
+  authorVisibleInFilter,
+  filterSummary,
   groupChanges,
   REVIEW_SHORTCUTS,
   visibleItems,
@@ -54,6 +57,8 @@ const emit = defineEmits<{
   /** Keys are locked when the confirmation opens, so later arrivals are not included. */
   'decide-visible': [decision: Decision, keys: string[]];
   'toggle-collapsed': [];
+  /** wp8 (#67): multi-author filter toggles (raw id). */
+  'toggle-author': [author: string];
 }>();
 
 const changes = computed(() => groupChanges(props.items));
@@ -138,30 +143,24 @@ function confirm() {
   if (c) emit('decide-visible', c.decision, c.keys);
   confirming.value = null;
 }
+function onAuthorFilterChange(e: Event) {
+  const t = e.target;
+  if (!(t instanceof HTMLInputElement) || t.type !== 'checkbox') return;
+  const author = t.dataset.author;
+  if (author) emit('toggle-author', author);
+}
 const tip = (text: string, keys: string) => `${text} (${keys})`;
 </script>
 
 <template>
-  <aside
+  <PanelRail
     v-if="collapsed"
-    class="review-rail"
-    aria-label="Review changes (collapsed)"
+    side="right"
+    expand-label="Show review panel"
+    :badge="visible.length"
     data-test="review-rail"
-  >
-    <button
-      type="button"
-      class="icon"
-      data-test="expand"
-      :title="tip('Show review panel', REVIEW_SHORTCUTS.toggle)"
-      aria-label="Show review panel"
-      @click="emit('toggle-collapsed')"
-    >
-      ‹
-    </button>
-    <span class="badge" data-test="badge" :aria-label="`${visible.length} open changes`">{{
-      visible.length
-    }}</span>
-  </aside>
+    @expand="emit('toggle-collapsed')"
+  />
   <aside v-else class="review-panel" aria-label="Review changes" data-test="review-panel">
     <header class="head">
       <h2>Review changes</h2>
@@ -273,6 +272,29 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
       </ul>
     </div>
 
+    <fieldset
+      v-if="authors.length > 1"
+      class="author-filter"
+      data-test="step-authors"
+      @change="onAuthorFilterChange"
+    >
+      <legend class="lbl">Show changes from</legend>
+      <p class="author-filter__summary" data-test="filter-summary">
+        {{ filterSummary(authors, filter) }}
+      </p>
+      <label v-for="a in authors" :key="`af-${a}`" class="author-filter__row">
+        <input
+          type="checkbox"
+          data-test="author-filter"
+          :data-author="a"
+          :checked="authorVisibleInFilter(filter, a)"
+        />
+        <span class="av sm" :style="hue(a)" aria-hidden="true">{{ initial(a) }}</span>
+        <bdi class="name" dir="auto">{{ parts(a).name }}</bdi>
+        <span class="cnt">{{ countOf(a) }}</span>
+      </label>
+    </fieldset>
+
     <p v-if="!changes.length && loadFailed" class="muted" data-test="empty-load-failed">
       Suggestions couldn't be loaded for this section.
     </p>
@@ -367,8 +389,7 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
 </template>
 
 <style scoped>
-.review-panel,
-.review-rail {
+.review-panel {
   background: var(--ct-surface);
   border-left: 1px solid var(--ct-border);
   color: var(--ct-text);
@@ -386,15 +407,28 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
   position: relative;
   overflow: visible;
 }
-.review-rail {
-  width: 40px;
-  box-sizing: border-box;
+.author-filter {
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-md);
+  margin: 0;
+  padding: var(--ct-space-2);
+}
+.author-filter__summary {
+  margin: 0 0 var(--ct-space-2);
+  color: var(--ct-text-muted);
+  font-size: var(--ct-text-xs);
+}
+.author-filter__row {
   display: flex;
-  flex-direction: column;
   align-items: center;
   gap: var(--ct-space-2);
-  padding-top: var(--ct-space-2);
-  overflow: auto;
+  padding: 2px 0;
+  cursor: pointer;
+}
+.author-filter__row .cnt {
+  margin-left: auto;
+  color: var(--ct-text-muted);
+  font-size: var(--ct-text-xs);
 }
 .head {
   display: flex;

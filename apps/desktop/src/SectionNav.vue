@@ -954,7 +954,15 @@ const rovingTabKey = computed(() => {
         </li>
       </template>
       <li ref="contentNewMenuWrap" role="none" class="outline-new outline-new--split">
-        <div class="outline-new__split">
+        <p
+          class="outline-new-chapter"
+          data-test="new-chapter"
+          aria-disabled="true"
+          title="Add chapter (coming soon)"
+        >
+          + New chapter
+        </p>
+        <div class="outline-new__split outline-new__split--deferred">
           <button
             type="button"
             class="outline-new__btn outline-new__btn--main"
@@ -1447,6 +1455,23 @@ const rovingTabKey = computed(() => {
 .outline-new {
   position: relative;
   margin: var(--ct-space-2) var(--ct-space-2) 0;
+}
+.outline-new-chapter {
+  margin: 0 0 var(--ct-space-2);
+  padding: 0.25rem 0.5rem;
+  color: var(--ct-text-muted);
+  font-size: var(--ct-text-sm);
+}
+.outline-new__split--deferred {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 .outline-new__btn {
   width: 100%;

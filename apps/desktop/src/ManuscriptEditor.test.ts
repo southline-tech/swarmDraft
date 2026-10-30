@@ -581,4 +581,59 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     expect(w.find('[data-test="counter"]').text()).toBe('1 of 1');
     w.unmount();
   });
+
+  it('wp8 step-through counter follows multi-author checkboxes (#67)', async () => {
+    const doc = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              marks: [
+                {
+                  type: 'suggestion_insert',
+                  attrs: { id: 's1', author: 'agent:a', ts: 't' },
+                },
+              ],
+              text: 'one',
+            },
+            { type: 'text', text: ' ' },
+            {
+              type: 'text',
+              marks: [
+                {
+                  type: 'suggestion_insert',
+                  attrs: { id: 's2', author: 'agent:b', ts: 't' },
+                },
+              ],
+              text: 'two',
+            },
+            { type: 'text', text: ' ' },
+            {
+              type: 'text',
+              marks: [
+                {
+                  type: 'suggestion_insert',
+                  attrs: { id: 's3', author: 'agent:a', ts: 't' },
+                },
+              ],
+              text: 'three',
+            },
+          ],
+        },
+      ],
+    };
+    const w = mount(ManuscriptEditor, { props: { content: doc }, attachTo: document.body });
+    await flushPromises();
+    expect(w.find('[data-test="counter"]').text()).toBe('1 of 3');
+    expect(w.find('[data-test="step-authors"]').exists()).toBe(true);
+    const boxes = w.findAll('[data-test="author-filter"]');
+    expect(boxes).toHaveLength(2);
+    await boxes[0]!.setValue(false);
+    await flushPromises();
+    expect(w.find('[data-test="counter"]').text()).toBe('1 of 1');
+    w.unmount();
+  });
 });

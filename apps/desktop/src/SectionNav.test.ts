@@ -75,7 +75,7 @@ describe('SectionNav', () => {
     ]);
     expect(w.find('[data-test="add-scene"]').exists()).toBe(false);
     expect(w.find('[data-test="move-up"]').exists()).toBe(false);
-    expect(w.find('[data-test="new-chapter"]').exists()).toBe(false);
+    expect(w.find('[data-test="new-chapter"]').attributes('aria-disabled')).toBe('true');
     w.unmount();
   });
 

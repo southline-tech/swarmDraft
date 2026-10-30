@@ -24,6 +24,7 @@ const props = withDefaults(
     reviewOpen?: boolean;
     /** Whether the chapter navigator is showing (owned by App.vue). */
     navigatorOpen?: boolean;
+    navigatorControls?: string;
     /** Comments and Find land in later issues (RAD-257/259); until wired they show disabled. */
     commentEnabled?: boolean;
     /** Why the editor is read-only (e.g. 'document failed to load', 'restore in progress'). */
@@ -33,6 +34,7 @@ const props = withDefaults(
   {
     reviewOpen: true,
     navigatorOpen: true,
+    navigatorControls: 'chapter-navigator',
     readOnlyReason: '',
     commentEnabled: false,
     findEnabled: false,
@@ -218,7 +220,7 @@ const btn =
       title="Chapters"
       :aria-pressed="props.navigatorOpen"
       :aria-expanded="props.navigatorOpen"
-      aria-controls="chapter-navigator"
+      :aria-controls="props.navigatorControls"
       @click="emit('toggle-navigator')"
     >
       <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
