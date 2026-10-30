@@ -236,3 +236,4 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-29 · #50 · PM review (#154) · mixed-author suggestion text hidden whenever any author filter was active · show when `authors.some(authorVisible)`; neutral token when author ids disagree
 - 2026-10-29 · #50 · Designer review (#154) · filtered-out deletes looked like normal body text · `suggestion-filter-hidden-delete` uses `--ct-text-muted`; inserts stay `color: inherit`
 - 2026-10-29 · #50 · Designer review (#154) · filter listbox lacked Space/arrow keyboard · roving focus on `[role=option]` like ContextMenu; Space activates focused row
+- 2026-10-29 · #50 · Designer re-review (#154) · hidden delete still showed author strike · `:has(.suggestion-filter-hidden-*) [data-suggester]` overrides after per-author paint; focus first option when filter menu opens

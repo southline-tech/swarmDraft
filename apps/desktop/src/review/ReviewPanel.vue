@@ -8,7 +8,7 @@
  * one id) is one change.
  */
 import EmptyState from '../shells/EmptyState.vue';
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { Decision, SuggestionItem } from '@coauthor/editor';
 import {
   authorKind,
@@ -105,11 +105,12 @@ function onFilterMenuKeydown(e: KeyboardEvent) {
 function onDocDown(e: MouseEvent) {
   if (root.value && !root.value.contains(e.target as Node)) menuOpen.value = false;
 }
-watch(menuOpen, (open) =>
-  open
-    ? document.addEventListener('mousedown', onDocDown)
-    : document.removeEventListener('mousedown', onDocDown),
-);
+watch(menuOpen, (open) => {
+  if (open) {
+    document.addEventListener('mousedown', onDocDown);
+    void nextTick(() => filterMenuOptions()[0]?.focus());
+  } else document.removeEventListener('mousedown', onDocDown);
+});
 onBeforeUnmount(() => document.removeEventListener('mousedown', onDocDown));
 /** Theme-aware author color: a --ct-collab-N token keyed by the raw author id, never the name. */
 const hue = (a: string) => ({ '--ct-suggester': collabColor(a) });

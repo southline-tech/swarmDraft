@@ -1163,6 +1163,18 @@ const LABELS: Record<ReviewItem['type'], string> = {
   background: var(--ct-suggest-delete-bg);
   text-decoration: line-through 2px var(--ct-suggest-delete-strike);
 }
+/* Filtered-out authors: beat per-author paint on nested decorations (#50). */
+.tiptap ins.suggestion-insert:has(.suggestion-filter-hidden-insert) [data-suggester],
+.tiptap del.suggestion-delete:has(.suggestion-filter-hidden-delete) [data-suggester] {
+  background: none;
+  text-decoration: none;
+}
+.tiptap ins.suggestion-insert:has(.suggestion-filter-hidden-insert) [data-suggester] {
+  color: inherit;
+}
+.tiptap del.suggestion-delete:has(.suggestion-filter-hidden-delete) [data-suggester] {
+  color: var(--ct-text-muted);
+}
 .tiptap .comment-anchor {
   background: var(--ct-comment-bg);
   color: inherit;

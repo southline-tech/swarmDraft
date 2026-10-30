@@ -55,6 +55,8 @@ describe('ReviewPanel (RAD-258)', () => {
   it('moves focus and selects filter options with arrow keys and Space', async () => {
     const w = mount(ReviewPanel, { props: { items, labels }, attachTo: document.body });
     await w.find('[data-test=filter-toggle]').trigger('click');
+    await w.vm.$nextTick();
+    expect(document.activeElement).toBe(w.find('[data-test=filter-all]').element);
     const menu = w.find('[data-test=filter-menu]');
     const opts = w.findAll('[data-test=filter-option]');
     (w.find('[data-test=filter-all]').element as HTMLElement).focus();

@@ -454,7 +454,13 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     muted.style.color = 'var(--ct-text-muted)';
     document.body.appendChild(muted);
     expect(getComputedStyle(delWrap).textDecorationLine).not.toMatch(/line-through/);
+    expect(getComputedStyle(delText).textDecorationLine).not.toMatch(/line-through/);
     expect(getComputedStyle(delText).color).toBe(getComputedStyle(muted).color);
+    for (const el of delWrap.querySelectorAll('[data-suggester]')) {
+      const s = getComputedStyle(el as HTMLElement);
+      expect(s.textDecorationLine).not.toMatch(/line-through/);
+      expect(s.backgroundColor).toBe('rgba(0, 0, 0, 0)');
+    }
     muted.remove();
     w.unmount();
   });
