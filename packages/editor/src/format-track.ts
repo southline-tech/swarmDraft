@@ -5,7 +5,7 @@
 import { Extension } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey, type EditorState, type Transaction } from '@tiptap/pm/state';
-import { AddMarkStep, RemoveMarkStep, type Step } from '@tiptap/pm/transform';
+import { AddMarkStep, Mapping, RemoveMarkStep, type Step } from '@tiptap/pm/transform';
 import {
   formatChangeAttrs,
   PARAGRAPH_STYLE_TARGET,
@@ -65,6 +65,33 @@ function paragraphTextRange(doc: PMNode, pos: number): { from: number; to: numbe
   return { from, to: from + node.content.size };
 }
 
+function docChangeMapping(transactions: readonly Transaction[]): Mapping {
+  const mapping = new Mapping();
+  for (const t of transactions) {
+    if (skipFormatTrack(t)) continue;
+    for (const step of t.steps) {
+      mapping.appendMap(step.getMap());
+    }
+  }
+  return mapping;
+}
+
+/** Match a new-doc paragraph to its old-doc counterpart, or null when structure changed. */
+function oldParagraphForNewNode(
+  oldDoc: PMNode,
+  inv: Mapping,
+  newPos: number,
+  newNode: PMNode,
+): PMNode | null {
+  const oldStart = inv.map(newPos, -1);
+  const oldEnd = inv.map(newPos + newNode.nodeSize, 1);
+  if (oldStart < 0 || oldEnd <= oldStart || oldStart > oldDoc.content.size) return null;
+  if (oldEnd - oldStart !== newNode.nodeSize) return null;
+  const oldNode = oldDoc.nodeAt(oldStart);
+  if (!oldNode || oldNode.type.name !== 'paragraph') return null;
+  return oldNode;
+}
+
 /**
  * After a direct format edit lands, annotate it with `format_change` in the same history step.
  */
@@ -102,10 +129,12 @@ export function formatTrackAppendTransaction(
     applyStep(src.steps[i]!);
   }
 
+  const inv = docChangeMapping(transactions).invert();
+
   newState.doc.descendants((node, pos) => {
     if (node.type.name !== 'paragraph') return;
-    const oldNode = oldState.doc.nodeAt(pos);
-    if (!oldNode || oldNode.type.name !== 'paragraph') return;
+    const oldNode = oldParagraphForNewNode(oldState.doc, inv, pos, node);
+    if (!oldNode) return;
     const before = String(oldNode.attrs.style ?? 'body');
     const after = String(node.attrs.style ?? 'body');
     if (before === after) return;

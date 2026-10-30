@@ -99,6 +99,28 @@ describe('format track changes (#160)', () => {
     });
   });
 
+  it('does not throw when paste adds paragraphs alongside human track (#163)', () => {
+    const e = editor();
+    editors.push(e);
+    const pos = e.state.doc.content.size - 1;
+    e.commands.insertContentAt(pos, [
+      {
+        type: 'paragraph',
+        attrs: { style: 'body' },
+        content: [{ type: 'text', text: 'Para A.' }],
+      },
+      {
+        type: 'paragraph',
+        attrs: { style: 'body' },
+        content: [{ type: 'text', text: 'Para B.' }],
+      },
+    ]);
+    const formats = listSuggestions(e.getJSON() as DocNode).filter(
+      (i) => i.kind === 'format_change',
+    );
+    expect(formats).toHaveLength(0);
+  });
+
   it('round-trips format_change through Yjs', () => {
     const e = editor();
     editors.push(e);
