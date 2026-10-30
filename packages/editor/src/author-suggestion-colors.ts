@@ -16,6 +16,15 @@ export type SuggestionAuthorVisible = (author: string) => boolean;
 
 const SUGGESTION = new Set(['suggestion_insert', 'suggestion_delete']);
 
+function hiddenClasses(marks: { type: { name: string } }[]): string {
+  const classes = ['suggestion-filter-hidden'];
+  if (marks.some((m) => m.type.name === 'suggestion_insert'))
+    classes.push('suggestion-filter-hidden-insert');
+  if (marks.some((m) => m.type.name === 'suggestion_delete'))
+    classes.push('suggestion-filter-hidden-delete');
+  return classes.join(' ');
+}
+
 function decorate(
   doc: PMNode,
   colorFor: SuggestionColor,
@@ -28,10 +37,10 @@ function decorate(
     if (!marks.length) return false;
     const authors = [...new Set(marks.map((m) => String(m.attrs.author ?? '').trim()))];
     const author = authors.length === 1 ? authors[0]! : '';
-    if (!authorVisible(author)) {
+    if (!authors.some((a) => authorVisible(a))) {
       decos.push(
         Decoration.inline(pos, pos + node.nodeSize, {
-          class: 'suggestion-filter-hidden',
+          class: hiddenClasses(marks),
         }),
       );
       return false;

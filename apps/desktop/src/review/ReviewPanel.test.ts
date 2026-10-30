@@ -52,6 +52,25 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(w.emitted('decide-one')).toEqual([[key(repl[0]!), 'accept']]);
   });
 
+  it('moves focus and selects filter options with arrow keys and Space', async () => {
+    const w = mount(ReviewPanel, { props: { items, labels }, attachTo: document.body });
+    await w.find('[data-test=filter-toggle]').trigger('click');
+    const menu = w.find('[data-test=filter-menu]');
+    const opts = w.findAll('[data-test=filter-option]');
+    (w.find('[data-test=filter-all]').element as HTMLElement).focus();
+    await menu.trigger('keydown', { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(opts[0]!.element);
+    await menu.trigger('keydown', { key: ' ' });
+    expect(w.emitted('show-only')).toEqual([['agent:a']]);
+
+    await w.find('[data-test=filter-toggle]').trigger('click');
+    const optsAgain = w.findAll('[data-test=filter-option]');
+    (optsAgain[1]!.element as HTMLElement).focus();
+    await w.find('[data-test=filter-menu]').trigger('keydown', { key: 'ArrowUp' });
+    expect((document.activeElement as HTMLElement).dataset.filterAuthor).toBe('agent:a');
+    w.unmount();
+  });
+
   it('filters from a dropdown defaulting to All, keyed on the raw id', async () => {
     const all = mount(ReviewPanel, { props: { items, labels }, attachTo: document.body });
     expect(all.find('[data-test=filter-current]').text()).toBe('All');

@@ -1133,15 +1133,23 @@ const LABELS: Record<ReviewItem['type'], string> = {
 .smallcaps {
   font-variant: small-caps;
 }
-/* Filtered-out authors: display-only plain text; marks stay in the doc (#50). */
-.tiptap ins.suggestion-insert:has(.suggestion-filter-hidden),
-.tiptap del.suggestion-delete:has(.suggestion-filter-hidden) {
+/* Filtered-out authors: display-only; marks stay in the doc (#50). */
+.tiptap ins.suggestion-insert:has(.suggestion-filter-hidden-insert),
+.tiptap del.suggestion-delete:has(.suggestion-filter-hidden-delete) {
   text-decoration: none;
+  background: none;
 }
 .tiptap .suggestion-filter-hidden {
-  color: inherit;
+  pointer-events: none;
+  user-select: none;
   background: none;
   text-decoration: none;
+}
+.tiptap .suggestion-filter-hidden-insert {
+  color: inherit;
+}
+.tiptap .suggestion-filter-hidden-delete {
+  color: var(--ct-text-muted);
 }
 /* Paint on the decoration node: --ct-suggest-* resolve from its --ct-suggester, not the page. */
 .tiptap ins.suggestion-insert [data-suggester] {

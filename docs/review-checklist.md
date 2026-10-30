@@ -233,3 +233,6 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-29 · #57 · PM review (#149) · "We used your computer's name" only when `app_info.computerName` is wired through App → editor; alternate copy in browser/tests
 - 2026-10-29 · #76 · PM review (#151) · `create_agent` cleared primary when a new agent matched the default display name · assign primary only when no active primary row exists; never clear primary in `create_agent`
 - 2026-10-29 · #50 · author filter hid review cards but inline suggestion marks stayed visible · wire `authorVisibleInFilter` into AuthorSuggestionColors and AuthorLabels, refresh decorations on filter change, neutral `.suggestion-filter-hidden` CSS (#50)
+- 2026-10-29 · #50 · PM review (#154) · mixed-author suggestion text hidden whenever any author filter was active · show when `authors.some(authorVisible)`; neutral token when author ids disagree
+- 2026-10-29 · #50 · Designer review (#154) · filtered-out deletes looked like normal body text · `suggestion-filter-hidden-delete` uses `--ct-text-muted`; inserts stay `color: inherit`
+- 2026-10-29 · #50 · Designer review (#154) · filter listbox lacked Space/arrow keyboard · roving focus on `[role=option]` like ContextMenu; Space activates focused row

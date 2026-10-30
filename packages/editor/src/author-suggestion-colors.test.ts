@@ -147,12 +147,51 @@ describe('AuthorSuggestionColors (#48)', () => {
     });
     const suggesterCount = () => root!.querySelectorAll('[data-suggester]').length;
     const hiddenCount = () => root!.querySelectorAll('.suggestion-filter-hidden').length;
-    expect(suggesterCount()).toBeGreaterThanOrEqual(1);
-    expect(hiddenCount()).toBeGreaterThanOrEqual(1);
+    expect(suggesterCount()).toBe(2);
+    expect(hiddenCount()).toBe(2);
     visible = new Set(['agent:a', 'agent:b']);
     refreshSuggestionColors(editor.view);
-    expect(suggesterCount()).toBeGreaterThanOrEqual(2);
+    expect(suggesterCount()).toBe(4);
     expect(hiddenCount()).toBe(0);
+    editor.destroy();
+    root.remove();
+  });
+
+  it('shows mixed-author text when any author is visible (#50)', () => {
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    const visible = new Set(['agent:b']);
+    const editor = createManuscriptEditor({
+      element: root,
+      content: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'text',
+                marks: [
+                  { type: 'suggestion_insert', attrs: { id: 'x1', ...by('agent:a') } },
+                  { type: 'suggestion_delete', attrs: { id: 'y1', ...by('agent:b') } },
+                ],
+                text: 'bright',
+              },
+            ],
+          },
+        ],
+      },
+      extensions: [
+        AuthorSuggestionColors.configure({
+          colorFor: (a) => (a ? 'var(--ct-collab-1)' : 'var(--ct-text-muted)'),
+          authorVisible: (a) => visible.has(a),
+        }),
+      ],
+    });
+    expect(root!.querySelector('.suggestion-filter-hidden')).toBeNull();
+    const el = root!.querySelector('[data-suggester]') as HTMLElement;
+    expect(el).toBeTruthy();
+    expect(el.style.getPropertyValue('--ct-suggester')).toBe('var(--ct-text-muted)');
     editor.destroy();
     root.remove();
   });

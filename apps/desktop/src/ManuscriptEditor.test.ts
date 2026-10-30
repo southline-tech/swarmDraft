@@ -408,6 +408,57 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     w.unmount();
   });
 
+  it('renders filtered-out deletions as muted plain text (#50)', async () => {
+    const doc = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              marks: [
+                {
+                  type: 'suggestion_delete',
+                  attrs: { id: 's1', author: 'agent:a', ts: 't' },
+                },
+              ],
+              text: 'gone',
+            },
+            { type: 'text', text: ' ' },
+            {
+              type: 'text',
+              marks: [
+                {
+                  type: 'suggestion_insert',
+                  attrs: { id: 's2', author: 'agent:b', ts: 't' },
+                },
+              ],
+              text: 'stay',
+            },
+          ],
+        },
+      ],
+    };
+    const w = mount(ManuscriptEditor, { props: { content: doc }, attachTo: document.body });
+    await flushPromises();
+    await w.find('[data-test="filter-toggle"]').trigger('click');
+    await w.findAll('[data-test="filter-option"]')[1]!.trigger('click');
+    await flushPromises();
+    const hiddenDel = w.find('.tiptap .suggestion-filter-hidden-delete');
+    expect(hiddenDel.exists()).toBe(true);
+    expect(w.find('.tiptap .suggestion-filter-hidden-insert').exists()).toBe(false);
+    const delWrap = w.find('.tiptap del.suggestion-delete').element as HTMLElement;
+    const delText = hiddenDel.element as HTMLElement;
+    const muted = document.createElement('span');
+    muted.style.color = 'var(--ct-text-muted)';
+    document.body.appendChild(muted);
+    expect(getComputedStyle(delWrap).textDecorationLine).not.toMatch(/line-through/);
+    expect(getComputedStyle(delText).color).toBe(getComputedStyle(muted).color);
+    muted.remove();
+    w.unmount();
+  });
+
   it('hides inline marks for filtered-out authors and restores them on All (#50)', async () => {
     const doc = {
       type: 'doc',
