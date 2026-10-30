@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { JSONContent } from '@tiptap/core';
-import { AuthorSuggestionColors, createManuscriptEditor } from './index';
+import { AuthorSuggestionColors, createManuscriptEditor, refreshSuggestionColors } from './index';
 
 const by = (author: string) => ({ author, ts: '2026-10-25T00:00:00Z' });
 
@@ -126,5 +126,73 @@ describe('AuthorSuggestionColors (#48)', () => {
     expect(el).toBeTruthy();
     expect(el.style.getPropertyValue('--ct-suggester')).toBe('var(--ct-text-muted)');
     editor.destroy();
+  });
+
+  it('hides paint decorations for filtered-out authors (#50)', () => {
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    let visible = new Set(['agent:a']);
+    const editor = createManuscriptEditor({
+      element: root,
+      content: docWithSuggestions([
+        { id: 's1', author: 'agent:a', del: 'old', ins: 'new' },
+        { id: 's2', author: 'agent:b', del: 'x', ins: 'y' },
+      ]),
+      extensions: [
+        AuthorSuggestionColors.configure({
+          colorFor: () => 'var(--ct-collab-1)',
+          authorVisible: (a) => visible.has(a),
+        }),
+      ],
+    });
+    const suggesterCount = () => root!.querySelectorAll('[data-suggester]').length;
+    const hiddenCount = () => root!.querySelectorAll('.suggestion-filter-hidden').length;
+    expect(suggesterCount()).toBe(2);
+    expect(hiddenCount()).toBe(2);
+    visible = new Set(['agent:a', 'agent:b']);
+    refreshSuggestionColors(editor.view);
+    expect(suggesterCount()).toBe(4);
+    expect(hiddenCount()).toBe(0);
+    editor.destroy();
+    root.remove();
+  });
+
+  it('shows mixed-author text when any author is visible (#50)', () => {
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    const visible = new Set(['agent:b']);
+    const editor = createManuscriptEditor({
+      element: root,
+      content: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'text',
+                marks: [
+                  { type: 'suggestion_insert', attrs: { id: 'x1', ...by('agent:a') } },
+                  { type: 'suggestion_delete', attrs: { id: 'y1', ...by('agent:b') } },
+                ],
+                text: 'bright',
+              },
+            ],
+          },
+        ],
+      },
+      extensions: [
+        AuthorSuggestionColors.configure({
+          colorFor: (a) => (a ? 'var(--ct-collab-1)' : 'var(--ct-text-muted)'),
+          authorVisible: (a) => visible.has(a),
+        }),
+      ],
+    });
+    expect(root!.querySelector('.suggestion-filter-hidden')).toBeNull();
+    const el = root!.querySelector('[data-suggester]') as HTMLElement;
+    expect(el).toBeTruthy();
+    expect(el.style.getPropertyValue('--ct-suggester')).toBe('var(--ct-text-muted)');
+    editor.destroy();
+    root.remove();
   });
 });

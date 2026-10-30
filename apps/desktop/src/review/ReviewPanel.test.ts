@@ -52,6 +52,27 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(w.emitted('decide-one')).toEqual([[key(repl[0]!), 'accept']]);
   });
 
+  it('moves focus and selects filter options with arrow keys and Space', async () => {
+    const w = mount(ReviewPanel, { props: { items, labels }, attachTo: document.body });
+    await w.find('[data-test=filter-toggle]').trigger('click');
+    await w.vm.$nextTick();
+    expect(document.activeElement).toBe(w.find('[data-test=filter-all]').element);
+    const menu = w.find('[data-test=filter-menu]');
+    const opts = w.findAll('[data-test=filter-option]');
+    (w.find('[data-test=filter-all]').element as HTMLElement).focus();
+    await menu.trigger('keydown', { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(opts[0]!.element);
+    await menu.trigger('keydown', { key: ' ' });
+    expect(w.emitted('show-only')).toEqual([['agent:a']]);
+
+    await w.find('[data-test=filter-toggle]').trigger('click');
+    const optsAgain = w.findAll('[data-test=filter-option]');
+    (optsAgain[1]!.element as HTMLElement).focus();
+    await w.find('[data-test=filter-menu]').trigger('keydown', { key: 'ArrowUp' });
+    expect((document.activeElement as HTMLElement).dataset.filterAuthor).toBe('agent:a');
+    w.unmount();
+  });
+
   it('filters from a dropdown defaulting to All, keyed on the raw id', async () => {
     const all = mount(ReviewPanel, { props: { items, labels }, attachTo: document.body });
     expect(all.find('[data-test=filter-current]').text()).toBe('All');
@@ -157,6 +178,15 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(card.find('h3').text()).toBe('Nothing to review');
     expect(card.text()).toContain('keep or skip');
     expect(w.find('[data-test=counter]').text()).toBe('0 of 0');
+  });
+
+  it('Accept all locks only visible changes when an author filter is active (#50)', async () => {
+    const w = mount(ReviewPanel, { props: { items, labels, filter: new Set(['brett']) } });
+    await w.find('[data-test=accept-all]').trigger('click');
+    expect(w.find('[data-test=confirm]').text()).toMatch(/Accept 1 change from Mara/);
+    await w.find('[data-test=confirm-yes]').trigger('click');
+    expect(w.emitted('decide-visible')).toEqual([['accept', [key(items[1]!)]]]);
+    w.unmount();
   });
 
   it('keeps a short line, not the empty card, when the author filter hides every change', () => {

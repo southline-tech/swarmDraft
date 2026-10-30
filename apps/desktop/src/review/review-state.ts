@@ -28,6 +28,11 @@ export function visibleItems<T extends { author: string }>(
   return filter ? items.filter((i) => filter.has(i.author)) : [...items];
 }
 
+/** True when inline suggestion marks for this author should show (matches panel filter). */
+export function authorVisibleInFilter(filter: AuthorFilter, author: string): boolean {
+  return filter ? filter.has(author) : true;
+}
+
 /** Trigger label: "All", or "2 of 3". */
 export function filterSummary(authors: readonly string[], filter: AuthorFilter): string {
   if (!filter) return 'All';

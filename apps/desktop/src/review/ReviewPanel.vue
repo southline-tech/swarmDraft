@@ -8,7 +8,7 @@
  * one id) is one change.
  */
 import EmptyState from '../shells/EmptyState.vue';
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { Decision, SuggestionItem } from '@coauthor/editor';
 import {
   authorKind,
@@ -78,14 +78,39 @@ function choose(a: string | null) {
   if (a === null) emit('show-all');
   else emit('show-only', a);
 }
+function filterMenuOptions(): HTMLElement[] {
+  const menu = root.value?.querySelector('[data-test=filter-menu]');
+  if (!menu) return [];
+  return [...menu.querySelectorAll('[role=option]')] as HTMLElement[];
+}
+function activateFilterOption(el: HTMLElement) {
+  if (el.dataset.test === 'filter-all') choose(null);
+  else if (el.dataset.filterAuthor) choose(el.dataset.filterAuthor);
+}
+function onFilterMenuKeydown(e: KeyboardEvent) {
+  const items = filterMenuOptions();
+  if (!items.length) return;
+  const active = document.activeElement as HTMLElement;
+  const i = items.indexOf(active);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
+  } else if (e.key === ' ') {
+    if (i >= 0) {
+      e.preventDefault();
+      activateFilterOption(active);
+    }
+  }
+}
 function onDocDown(e: MouseEvent) {
   if (root.value && !root.value.contains(e.target as Node)) menuOpen.value = false;
 }
-watch(menuOpen, (open) =>
-  open
-    ? document.addEventListener('mousedown', onDocDown)
-    : document.removeEventListener('mousedown', onDocDown),
-);
+watch(menuOpen, (open) => {
+  if (open) {
+    document.addEventListener('mousedown', onDocDown);
+    void nextTick(() => filterMenuOptions()[0]?.focus());
+  } else document.removeEventListener('mousedown', onDocDown);
+});
 onBeforeUnmount(() => document.removeEventListener('mousedown', onDocDown));
 /** Theme-aware author color: a --ct-collab-N token keyed by the raw author id, never the name. */
 const hue = (a: string) => ({ '--ct-suggester': collabColor(a) });
@@ -206,6 +231,7 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
         role="listbox"
         aria-labelledby="show-from"
         data-test="filter-menu"
+        @keydown="onFilterMenuKeydown"
       >
         <li
           role="option"
@@ -228,6 +254,7 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
           class="fo"
           :class="{ sel: only(a) }"
           data-test="filter-option"
+          :data-filter-author="a"
           :aria-selected="only(a)"
           tabindex="0"
           @click="choose(a)"
