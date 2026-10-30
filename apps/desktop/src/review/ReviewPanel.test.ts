@@ -207,7 +207,32 @@ describe('ReviewPanel (RAD-258)', () => {
       'Matches the date in Chapter 3.',
     );
     expect(cards[1]!.find('[data-test=reason-line]').exists()).toBe(false);
+    const botCard = cards[0]!.element;
+    expect(botCard.querySelector('.who')?.nextElementSibling?.classList.contains('q')).toBe(true);
+    expect(botCard.querySelector('.q')?.nextElementSibling?.classList.contains('reason')).toBe(
+      true,
+    );
+    expect(
+      botCard.querySelector('.reason')?.nextElementSibling?.classList.contains('actions'),
+    ).toBe(true);
     w.unmount();
+
+    const longReason = 'x'.repeat(120);
+    const longItems: SuggestionItem[] = [
+      {
+        id: 's9',
+        kind: 'suggestion_insert',
+        author: 'agent:a',
+        ts: 't',
+        text: 'word',
+        reason: longReason,
+      },
+    ];
+    const long = mount(ReviewPanel, { props: { items: longItems, labels } });
+    expect(long.get('[data-test=reason-more]').text()).toBe('More');
+    await long.get('[data-test=reason-more]').trigger('click');
+    expect(long.get('[data-test=reason-more]').text()).toBe('Less');
+    long.unmount();
   });
 
   it('reason line styles use --ct-* tokens for light and dark themes (#60)', () => {
