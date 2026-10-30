@@ -159,6 +159,15 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(w.find('[data-test=counter]').text()).toBe('0 of 0');
   });
 
+  it('Accept all locks only visible changes when an author filter is active (#50)', async () => {
+    const w = mount(ReviewPanel, { props: { items, labels, filter: new Set(['brett']) } });
+    await w.find('[data-test=accept-all]').trigger('click');
+    expect(w.find('[data-test=confirm]').text()).toMatch(/Accept 1 change from Mara/);
+    await w.find('[data-test=confirm-yes]').trigger('click');
+    expect(w.emitted('decide-visible')).toEqual([['accept', [key(items[1]!)]]]);
+    w.unmount();
+  });
+
   it('keeps a short line, not the empty card, when the author filter hides every change', () => {
     const w = mount(ReviewPanel, { props: { items, filter: new Set(['nobody']) } });
     expect(w.find('.es').exists()).toBe(false);

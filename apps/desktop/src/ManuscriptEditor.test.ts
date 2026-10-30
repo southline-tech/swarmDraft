@@ -407,4 +407,113 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     sheet.remove();
     w.unmount();
   });
+
+  it('hides inline marks for filtered-out authors and restores them on All (#50)', async () => {
+    const doc = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              marks: [
+                {
+                  type: 'suggestion_insert',
+                  attrs: { id: 's1', author: 'agent:a', ts: 't' },
+                },
+              ],
+              text: 'alpha',
+            },
+            { type: 'text', text: ' ' },
+            {
+              type: 'text',
+              marks: [
+                {
+                  type: 'suggestion_insert',
+                  attrs: { id: 's2', author: 'agent:b', ts: 't' },
+                },
+              ],
+              text: 'beta',
+            },
+          ],
+        },
+      ],
+    };
+    const w = mount(ManuscriptEditor, { props: { content: doc }, attachTo: document.body });
+    await flushPromises();
+    const suggesters = () =>
+      w.findAll(
+        '.tiptap ins.suggestion-insert [data-suggester], .tiptap del.suggestion-delete [data-suggester]',
+      );
+    const hidden = () => w.findAll('.tiptap .suggestion-filter-hidden');
+    expect(suggesters()).toHaveLength(2);
+    expect(hidden()).toHaveLength(0);
+
+    await w.find('[data-test="filter-toggle"]').trigger('click');
+    await w.findAll('[data-test="filter-option"]')[0]!.trigger('click');
+    await flushPromises();
+    expect(w.findAll('[data-test="item"]')).toHaveLength(1);
+    expect(suggesters()).toHaveLength(1);
+    expect(hidden()).toHaveLength(1);
+    expect(w.find('.tiptap ins.suggestion-insert').text()).toContain('alpha');
+
+    await w.find('[data-test="filter-toggle"]').trigger('click');
+    await w.find('[data-test="filter-all"]').trigger('click');
+    await flushPromises();
+    expect(suggesters()).toHaveLength(2);
+    expect(hidden()).toHaveLength(0);
+    w.unmount();
+  });
+
+  it('Previous/Next and Accept all skip filtered-out authors (#50)', async () => {
+    const doc = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              marks: [
+                {
+                  type: 'suggestion_insert',
+                  attrs: { id: 's1', author: 'agent:a', ts: 't' },
+                },
+              ],
+              text: 'first',
+            },
+            { type: 'text', text: ' ' },
+            {
+              type: 'text',
+              marks: [
+                {
+                  type: 'suggestion_insert',
+                  attrs: { id: 's2', author: 'agent:b', ts: 't' },
+                },
+              ],
+              text: 'second',
+            },
+          ],
+        },
+      ],
+    };
+    const w = mount(ManuscriptEditor, { props: { content: doc }, attachTo: document.body });
+    await flushPromises();
+    expect(w.find('[data-test="counter"]').text()).toBe('1 of 2');
+
+    await w.find('[data-test="filter-toggle"]').trigger('click');
+    await w.findAll('[data-test="filter-option"]')[1]!.trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test="counter"]').text()).toBe('1 of 1');
+    expect(w.findAll('[data-test="item"]')[0]!.text()).toContain('second');
+
+    await w.find('[data-test="next"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test="counter"]').text()).toBe('1 of 1');
+    await w.find('[data-test="prev"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test="counter"]').text()).toBe('1 of 1');
+    w.unmount();
+  });
 });

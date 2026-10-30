@@ -12,15 +12,21 @@ import type { Node as PMNode } from '@tiptap/pm/model';
 
 export const authorLabelsKey = new PluginKey<DecorationSet>('coauthorAuthorLabels');
 export type AuthorLabel = (author: string) => string;
+export type AuthorLabelVisible = (author: string) => boolean;
 
 const KIND: Record<string, string> = { suggestion_insert: 'Added', suggestion_delete: 'Deleted' };
 
-function decorate(doc: PMNode, label: AuthorLabel): DecorationSet {
+function decorate(
+  doc: PMNode,
+  label: AuthorLabel,
+  authorVisible: AuthorLabelVisible,
+): DecorationSet {
   const decos: Decoration[] = [];
   doc.descendants((node, pos) => {
     if (!node.isText) return true;
     const titles = node.marks
       .filter((m) => KIND[m.type.name])
+      .filter((m) => authorVisible(String(m.attrs.author ?? '')))
       .map((m) => `${KIND[m.type.name]} by ${label(String(m.attrs.author ?? ''))}`);
     if (titles.length)
       decos.push(Decoration.inline(pos, pos + node.nodeSize, { title: titles.join('\n') }));
@@ -29,18 +35,24 @@ function decorate(doc: PMNode, label: AuthorLabel): DecorationSet {
   return DecorationSet.create(doc, decos);
 }
 
-export const AuthorLabels = Extension.create<{ label: AuthorLabel }>({
+export const AuthorLabels = Extension.create<{
+  label: AuthorLabel;
+  authorVisible: AuthorLabelVisible;
+}>({
   name: 'authorLabels',
-  addOptions: () => ({ label: (a: string) => a }),
+  addOptions: () => ({ label: (a: string) => a, authorVisible: () => true }),
   addProseMirrorPlugins() {
     const label: AuthorLabel = (a) => this.options.label(a);
+    const authorVisible: AuthorLabelVisible = (a) => this.options.authorVisible(a);
     return [
       new Plugin<DecorationSet>({
         key: authorLabelsKey,
         state: {
-          init: (_, state: EditorState) => decorate(state.doc, label),
+          init: (_, state: EditorState) => decorate(state.doc, label, authorVisible),
           apply: (tr, old) =>
-            tr.docChanged || tr.getMeta(authorLabelsKey) ? decorate(tr.doc, label) : old,
+            tr.docChanged || tr.getMeta(authorLabelsKey)
+              ? decorate(tr.doc, label, authorVisible)
+              : old,
         },
         props: { decorations: (state) => authorLabelsKey.getState(state) },
       }),

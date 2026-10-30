@@ -41,6 +41,7 @@ import {
   saveCollapsed,
   step,
   visibleItems,
+  authorVisibleInFilter,
   type AuthorFilter,
 } from './review/review-state';
 import FindPanel from './shells/FindPanel.vue';
@@ -367,7 +368,17 @@ function refreshReview(e: Editor) {
   currentIndex = i;
   currentKey.value = i >= 0 ? visible.value[i]!.key : null;
 }
-watch(filter, () => editor.value && refreshReview(editor.value));
+function refreshAuthorFilterDecorations() {
+  const e = editor.value;
+  if (e && !e.isDestroyed) {
+    refreshSuggestionColors(e.view);
+    refreshAuthorLabels(e.view);
+  }
+}
+watch(filter, () => {
+  refreshAuthorFilterDecorations();
+  if (editor.value) refreshReview(editor.value);
+});
 
 /** First text position of a suggestion, found by (mark type, attrs.id). */
 function rangeOf(e: Editor, t: SuggestionTarget): { from: number; to: number } | null {
@@ -629,8 +640,14 @@ const options: Partial<EditorOptions> = {
       active: () => tracking.value,
       author: () => writerProfile.value.name,
     }),
-    AuthorLabels.configure({ label: authorLabel }),
-    AuthorSuggestionColors.configure({ colorFor: collabColor }),
+    AuthorLabels.configure({
+      label: authorLabel,
+      authorVisible: (author) => authorVisibleInFilter(filter.value, author),
+    }),
+    AuthorSuggestionColors.configure({
+      colorFor: collabColor,
+      authorVisible: (author) => authorVisibleInFilter(filter.value, author),
+    }),
     FindHighlight,
   ],
   onContentError: ({ error }) => {
@@ -1115,6 +1132,16 @@ const LABELS: Record<ReviewItem['type'], string> = {
 }
 .smallcaps {
   font-variant: small-caps;
+}
+/* Filtered-out authors: display-only plain text; marks stay in the doc (#50). */
+.tiptap ins.suggestion-insert:has(.suggestion-filter-hidden),
+.tiptap del.suggestion-delete:has(.suggestion-filter-hidden) {
+  text-decoration: none;
+}
+.tiptap .suggestion-filter-hidden {
+  color: inherit;
+  background: none;
+  text-decoration: none;
 }
 /* Paint on the decoration node: --ct-suggest-* resolve from its --ct-suggester, not the page. */
 .tiptap ins.suggestion-insert [data-suggester] {

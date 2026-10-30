@@ -7,6 +7,7 @@ import {
   reviewActionFor,
   REVIEW_SHORTCUTS,
   step,
+  authorVisibleInFilter,
   toggleAuthor,
   visibleItems,
 } from './review-state';
@@ -27,6 +28,13 @@ describe('review state (RAD-258)', () => {
     expect(filterSummary(authors, onlyB)).toBe('1 of 2');
     expect(toggleAuthor(authors, onlyB, 'a')).toBeNull();
     expect(filterSummary(authors, null)).toBe('All');
+  });
+
+  it('authorVisibleInFilter matches visibleItems (#50)', () => {
+    const onlyB = new Set(['b']);
+    expect(authorVisibleInFilter(null, 'a')).toBe(true);
+    expect(authorVisibleInFilter(onlyB, 'a')).toBe(false);
+    expect(authorVisibleInFilter(onlyB, 'b')).toBe(true);
   });
 
   it('steps with wraparound and auto-advances to the change at the old position', () => {

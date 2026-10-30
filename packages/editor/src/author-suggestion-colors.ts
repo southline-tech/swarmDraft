@@ -11,10 +11,16 @@ import type { Node as PMNode } from '@tiptap/pm/model';
 
 export const suggestionColorsKey = new PluginKey<DecorationSet>('coauthorSuggestionColors');
 export type SuggestionColor = (author: string) => string;
+/** When false, suggestion marks render as plain text (display only; doc unchanged). */
+export type SuggestionAuthorVisible = (author: string) => boolean;
 
 const SUGGESTION = new Set(['suggestion_insert', 'suggestion_delete']);
 
-function decorate(doc: PMNode, colorFor: SuggestionColor): DecorationSet {
+function decorate(
+  doc: PMNode,
+  colorFor: SuggestionColor,
+  authorVisible: SuggestionAuthorVisible,
+): DecorationSet {
   const decos: Decoration[] = [];
   doc.descendants((node, pos) => {
     if (!node.isText) return true;
@@ -22,6 +28,14 @@ function decorate(doc: PMNode, colorFor: SuggestionColor): DecorationSet {
     if (!marks.length) return false;
     const authors = [...new Set(marks.map((m) => String(m.attrs.author ?? '').trim()))];
     const author = authors.length === 1 ? authors[0]! : '';
+    if (!authorVisible(author)) {
+      decos.push(
+        Decoration.inline(pos, pos + node.nodeSize, {
+          class: 'suggestion-filter-hidden',
+        }),
+      );
+      return false;
+    }
     const token = colorFor(author);
     decos.push(
       Decoration.inline(pos, pos + node.nodeSize, {
@@ -34,20 +48,27 @@ function decorate(doc: PMNode, colorFor: SuggestionColor): DecorationSet {
   return DecorationSet.create(doc, decos);
 }
 
-export const AuthorSuggestionColors = Extension.create<{ colorFor: SuggestionColor }>({
+export const AuthorSuggestionColors = Extension.create<{
+  colorFor: SuggestionColor;
+  authorVisible: SuggestionAuthorVisible;
+}>({
   name: 'authorSuggestionColors',
   addOptions: () => ({
     colorFor: (author: string) => (author ? `var(--ct-collab-1)` : `var(--ct-text-muted)`),
+    authorVisible: () => true,
   }),
   addProseMirrorPlugins() {
     const colorFor: SuggestionColor = (a) => this.options.colorFor(a);
+    const authorVisible: SuggestionAuthorVisible = (a) => this.options.authorVisible(a);
     return [
       new Plugin<DecorationSet>({
         key: suggestionColorsKey,
         state: {
-          init: (_, state: EditorState) => decorate(state.doc, colorFor),
+          init: (_, state: EditorState) => decorate(state.doc, colorFor, authorVisible),
           apply: (tr, old) =>
-            tr.docChanged || tr.getMeta(suggestionColorsKey) ? decorate(tr.doc, colorFor) : old,
+            tr.docChanged || tr.getMeta(suggestionColorsKey)
+              ? decorate(tr.doc, colorFor, authorVisible)
+              : old,
         },
         props: { decorations: (state) => suggestionColorsKey.getState(state) },
       }),
