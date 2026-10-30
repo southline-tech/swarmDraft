@@ -154,6 +154,8 @@ const props = defineProps<{
   computerName?: string;
   /** Persisted accept/reject records for this section (#51). */
   decisionRecords?: readonly DecisionRecord[];
+  /** Designer evidence (#55 / wp5): start in focus mode for screenshot harness. */
+  initialFocusMode?: boolean;
 }>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
@@ -179,7 +181,7 @@ const findOpen = shallowRef(false);
 const findFocusReplace = shallowRef(false);
 const menuAt = shallowRef<{ x: number; y: number } | null>(null);
 const shortcutsOpen = shallowRef(false);
-const focusMode = shallowRef(false);
+const focusMode = shallowRef(Boolean(props.initialFocusMode));
 const prefStore = () => props.storage ?? globalThis.localStorage;
 /** Track changes (#57): persisted on/off; first enable may show the tc3 name prompt. */
 const tracking = shallowRef(loadTracking(prefStore()));
@@ -221,14 +223,16 @@ function onNameColorPromptClose() {
   writerProfile.value = loadProfile(prefStore());
   if (tracking.value && !loadTrackPromptSeen(prefStore())) dismissNamePrompt();
 }
-watch(focusMode, (on) => {
+function syncFocusMode(on: boolean) {
   emit('focus-mode', on);
-  // #87 QA: focus mode hides the toolbar, so a toolbar button that started it would drop focus
-  // to <body>. Move focus into the page, and listen on window for the exit keys while active.
   if (on) {
     window.addEventListener('keydown', onWindowKey);
     void nextTick(() => editor.value?.view.focus());
   } else window.removeEventListener('keydown', onWindowKey);
+}
+watch(focusMode, syncFocusMode);
+onMounted(() => {
+  if (focusMode.value) syncFocusMode(true);
 });
 onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKey));
 const rootEl = useTemplateRef<HTMLElement>('root');
