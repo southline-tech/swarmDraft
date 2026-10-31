@@ -1,4 +1,6 @@
 node_modules/
+.pnpm-store/
+.worktrees/
 dist/
 *.log
 .DS_Store
