@@ -134,18 +134,6 @@ fn row_agent(r: &rusqlite::Row) -> rusqlite::Result<Agent> {
 
 const AGENT_COLS: &str = "id, name, color, created_at, revoked_at, is_primary, last_seen_at";
 
-/// Agents visible to the app: active rows plus revoked agents that still have open review items
-/// (#192). Revoked agents with no pending comments or suggestions are omitted entirely.
-const LIST_AGENTS_WHERE: &str = "WHERE revoked_at IS NULL
-    OR EXISTS (
-        SELECT 1 FROM comments c
-        WHERE c.author_kind = 'agent' AND c.author_id = agents.id AND c.resolved_at IS NULL
-    )
-    OR EXISTS (
-        SELECT 1 FROM suggestions s
-        WHERE s.author_kind = 'agent' AND s.author_id = agents.id AND s.status = 'open'
-    )";
-
 fn row_token(r: &rusqlite::Row) -> rusqlite::Result<TokenInfo> {
     let scopes: String = r.get(3)?;
     Ok(TokenInfo {
@@ -364,7 +352,7 @@ impl Store {
     pub fn list_agents(&self) -> Result<Vec<Agent>, StorageError> {
         self.with_conn(|c| {
             let mut st = c.prepare(&format!(
-                "SELECT {AGENT_COLS} FROM agents {LIST_AGENTS_WHERE} ORDER BY created_at, id"
+                "SELECT {AGENT_COLS} FROM agents ORDER BY created_at, id"
             ))?;
             let rows = st.query_map([], row_agent)?.collect::<Result<_, _>>()?;
             Ok(rows)
@@ -769,58 +757,7 @@ mod tests {
         assert!(s.authenticate(&t1.token).unwrap().is_none());
         assert!(s.authenticate(&t2.token).unwrap().is_none());
         assert!(s.create_token(&a.id, None).is_err());
-        assert!(
-            s.list_agents().unwrap().is_empty(),
-            "revoked agents with no open review drop off the list"
-        );
-    }
-
-    #[test]
-    fn list_agents_keeps_revoked_agent_with_open_suggestion() {
-        use crate::manuscripts::{Author, ImportSection, Suggestion};
-
-        let tmp = tempfile::tempdir().unwrap();
-        let s = Store::open(tmp.path()).unwrap();
-        let agent = s.create_agent("Line Bot", "#3366ff").unwrap();
-        let (m, secs) = s
-            .import_manuscript(
-                "Harbor",
-                &[ImportSection {
-                    id: Some("c1".into()),
-                    parent_id: None,
-                    kind: "chapter".into(),
-                    title: "One".into(),
-                    doc: serde_json::json!({"type":"doc","content":[{"type":"paragraph","attrs":{"style":"body"},
-                        "content":[{"type":"text","text":"Text."}]}]}),
-                }],
-            )
-            .unwrap();
-        let sid = secs[0].id.clone();
-        s.insert_suggestion(
-            &m.id,
-            &Suggestion {
-                id: "s1".into(),
-                section_id: sid,
-                block_id: None,
-                kind: "replace".into(),
-                quote: Some("Text".into()),
-                replacement: Some("Words".into()),
-                rationale: None,
-                author: Author {
-                    kind: "agent".into(),
-                    id: agent.id.clone(),
-                    name: agent.name.clone(),
-                },
-                status: "open".into(),
-                created_at: "2026-01-01T00:00:00.000Z".into(),
-            },
-        )
-        .unwrap();
-        s.revoke_agent(&agent.id).unwrap();
-        let listed = s.list_agents().unwrap();
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].id, agent.id);
-        assert!(listed[0].revoked_at.is_some());
+        assert!(s.list_agents().unwrap()[0].revoked_at.is_some());
     }
 
     #[test]
