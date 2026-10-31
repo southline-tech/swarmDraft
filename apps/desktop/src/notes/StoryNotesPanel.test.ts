@@ -2,67 +2,24 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import StoryNotesPanel from './StoryNotesPanel.vue';
 import { addNote, createNotesDoc, updateNoteTitle } from './doc';
-import { watchNotesDoc } from './persist';
-
-vi.mock('../backend', async (importOriginal) => {
-  const orig = await importOriginal<typeof import('../backend')>();
-  return { ...orig, notesApplyUpdate: vi.fn() };
-
-  it('shows Saving then Saved in the note detail header', async () => {
-    vi.useFakeTimers();
-    vi.mocked(notesApplyUpdate).mockResolvedValue(undefined);
-    const notesDoc = createNotesDoc();
-    const meta = addNote(notesDoc, { kind: 'human', id: 'h', name: 'Sample Person' }, 'Note');
-    watchNotesDoc('ms-1', notesDoc, { debounceMs: 100 });
-    updateNoteTitle(notesDoc, meta.id, 'Edited');
-    const w = mount(StoryNotesPanel, {
-      props: {
-        notesDoc,
-        outline: [],
-        humanAuthor: { id: 'h', name: 'Sample Person' },
-      },
-    });
-    await flushPromises();
-    expect(w.get('[data-test=notes-save-status]').attributes('data-state')).toBe('saving');
-    await vi.advanceTimersByTimeAsync(100);
-    await flushPromises();
-    expect(w.get('[data-test=notes-save-status]').attributes('data-state')).toBe('saved');
-    w.unmount();
-  });
-
-});
-
-import { notesApplyUpdate } from '../backend';
+import { readNotesSaveStatus, watchNotesDoc } from './persist';
 
 afterEach(() => {
   vi.useRealTimers();
-  vi.clearAllMocks();
-
-  it('shows Saving then Saved in the note detail header', async () => {
-    vi.useFakeTimers();
-    vi.mocked(notesApplyUpdate).mockResolvedValue(undefined);
-    const notesDoc = createNotesDoc();
-    const meta = addNote(notesDoc, { kind: 'human', id: 'h', name: 'Sample Person' }, 'Note');
-    watchNotesDoc('ms-1', notesDoc, { debounceMs: 100 });
-    updateNoteTitle(notesDoc, meta.id, 'Edited');
-    const w = mount(StoryNotesPanel, {
-      props: {
-        notesDoc,
-        outline: [],
-        humanAuthor: { id: 'h', name: 'Sample Person' },
-      },
-    });
-    await flushPromises();
-    expect(w.get('[data-test=notes-save-status]').attributes('data-state')).toBe('saving');
-    await vi.advanceTimersByTimeAsync(100);
-    await flushPromises();
-    expect(w.get('[data-test=notes-save-status]').attributes('data-state')).toBe('saved');
-    w.unmount();
-  });
-
 });
 
 describe('StoryNotesPanel', () => {
+  it('watchNotesDoc reports saved after applyUpdate hook succeeds', async () => {
+    const applyUpdate = vi.fn().mockResolvedValue(undefined);
+    const notesDoc = createNotesDoc();
+    const meta = addNote(notesDoc, { kind: 'human', id: 'h', name: 'Sample Person' }, 'Note');
+    const persister = watchNotesDoc('ms-1', notesDoc, { applyUpdate, debounceMs: 60_000 });
+    updateNoteTitle(notesDoc, meta.id, 'Edited');
+    await persister.flush();
+    expect(applyUpdate).toHaveBeenCalled();
+    expect(readNotesSaveStatus(notesDoc).phase).toBe('saved');
+  });
+
   it('shows empty state then lists human and agent notes with badges', async () => {
     const notesDoc = createNotesDoc();
     addNote(notesDoc, { kind: 'human', id: 'h', name: 'Sample Person' }, 'Human note');
@@ -128,11 +85,10 @@ describe('StoryNotesPanel', () => {
   });
 
   it('shows Saving then Saved in the note detail header', async () => {
-    vi.useFakeTimers();
-    vi.mocked(notesApplyUpdate).mockResolvedValue(undefined);
+    const applyUpdate = vi.fn().mockResolvedValue(undefined);
     const notesDoc = createNotesDoc();
     const meta = addNote(notesDoc, { kind: 'human', id: 'h', name: 'Sample Person' }, 'Note');
-    watchNotesDoc('ms-1', notesDoc, { debounceMs: 100 });
+    const persister = watchNotesDoc('ms-1', notesDoc, { debounceMs: 100, applyUpdate });
     updateNoteTitle(notesDoc, meta.id, 'Edited');
     const w = mount(StoryNotesPanel, {
       props: {
@@ -143,10 +99,55 @@ describe('StoryNotesPanel', () => {
     });
     await flushPromises();
     expect(w.get('[data-test=notes-save-status]').attributes('data-state')).toBe('saving');
-    await vi.advanceTimersByTimeAsync(100);
-    await flushPromises();
-    expect(w.get('[data-test=notes-save-status]').attributes('data-state')).toBe('saved');
+    await persister.flush();
+    expect(readNotesSaveStatus(notesDoc).phase).toBe('saved');
     w.unmount();
   });
 
+  it('shows error copy and Retry after a failed save', async () => {
+    const applyUpdate = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('disk full'))
+      .mockResolvedValue(undefined);
+    const notesDoc = createNotesDoc();
+    const meta = addNote(notesDoc, { kind: 'human', id: 'h', name: 'Sample Person' }, 'Note');
+    const persister = watchNotesDoc('ms-1', notesDoc, { debounceMs: 50, applyUpdate });
+    updateNoteTitle(notesDoc, meta.id, 'Edited');
+    await persister.flush().catch(() => {});
+    const w = mount(StoryNotesPanel, {
+      props: {
+        notesDoc,
+        outline: [],
+        humanAuthor: { id: 'h', name: 'Sample Person' },
+      },
+    });
+    await flushPromises();
+    expect(w.get('[data-test=notes-save-status]').attributes('data-state')).toBe('error');
+    expect(w.find('[data-test=notes-save-retry]').exists()).toBe(true);
+    await w.get('[data-test=notes-save-retry]').trigger('click');
+    await flushPromises();
+    expect(applyUpdate).toHaveBeenCalledTimes(2);
+    w.unmount();
+  });
+
+  it('shows Saved just now after the Saved check clears', async () => {
+    vi.useFakeTimers();
+    const applyUpdate = vi.fn().mockResolvedValue(undefined);
+    const notesDoc = createNotesDoc();
+    const meta = addNote(notesDoc, { kind: 'human', id: 'h', name: 'Sample Person' }, 'Note');
+    const persister = watchNotesDoc('ms-1', notesDoc, { debounceMs: 10, applyUpdate });
+    updateNoteTitle(notesDoc, meta.id, 'Edited');
+    await persister.flush();
+    vi.advanceTimersByTime(3000);
+    const w = mount(StoryNotesPanel, {
+      props: {
+        notesDoc,
+        outline: [],
+        humanAuthor: { id: 'h', name: 'Sample Person' },
+      },
+    });
+    await flushPromises();
+    expect(w.get('[data-test=notes-save-status]').text()).toContain('Saved just now');
+    w.unmount();
+  });
 });

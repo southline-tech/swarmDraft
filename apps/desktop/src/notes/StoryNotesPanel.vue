@@ -2,7 +2,7 @@
 /**
  * Story notes under the draft (#38): ordered notes with title, rich body, optional chapter link.
  */
-import { computed, onUnmounted, ref, shallowRef, watch, watchEffect } from 'vue';
+import { computed, onUnmounted, ref, shallowRef, watch } from 'vue';
 import type { Section } from '@coauthor/schema';
 import type * as Y from 'yjs';
 import EmptyState from '../shells/EmptyState.vue';
@@ -19,7 +19,8 @@ import {
   type NoteMeta,
 } from './doc';
 import {
-  notesSaveStatus,
+  notesSaveStatusTick,
+  readNotesSaveStatus,
   retryNotesSave,
   type NotesSavePhase,
 } from './persist';
@@ -110,19 +111,15 @@ const sectionOptions = computed(() =>
   props.outline.filter((s) => s.kind === 'chapter' || s.kind === 'front_matter'),
 );
 
-const saveStatus = ref<{ phase: NotesSavePhase; savedAt: number | null }>({
-  phase: 'idle',
-  savedAt: null,
-});
-watchEffect(() => {
-  const v = notesSaveStatus(props.notesDoc).value;
-  saveStatus.value = { phase: v.phase, savedAt: v.savedAt };
+const savePhase = computed(() => {
+  void notesSaveStatusTick();
+  return readNotesSaveStatus(props.notesDoc).phase;
 });
 const nowMs = ref(Date.now());
 let saveTick: ReturnType<typeof setInterval> | undefined;
 watch(
-  () => saveStatus.value.phase,
-  (phase) => {
+  () => [notesSaveStatusTick(), readNotesSaveStatus(props.notesDoc).phase] as const,
+  ([, phase]) => {
     if (saveTick) clearInterval(saveTick);
     saveTick = undefined;
     if (phase === 'saved' || phase === 'saving') {
@@ -138,9 +135,11 @@ onUnmounted(() => {
   if (saveTick) clearInterval(saveTick);
 });
 
-const saveLabel = computed(() =>
-  saveStatusLabel(saveStatus.value.phase, saveStatus.value.savedAt, nowMs.value),
-);
+const saveLabel = computed(() => {
+  void notesSaveStatusTick();
+  const v = readNotesSaveStatus(props.notesDoc);
+  return saveStatusLabel(v.phase, v.savedAt, nowMs.value);
+});
 </script>
 
 <template>
@@ -204,7 +203,7 @@ const saveLabel = computed(() =>
             role="status"
             aria-live="polite"
             data-test="notes-save-status"
-            :data-state="saveStatus.phase"
+            :data-state="savePhase"
           >
             <template v-if="saveLabel.kind === 'saving' || saveLabel.kind === 'relative'">
               <span class="story-notes__save-text story-notes__save-text--muted">{{

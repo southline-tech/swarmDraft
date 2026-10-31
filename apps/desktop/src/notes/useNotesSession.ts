@@ -2,9 +2,15 @@ import { markRaw, onBeforeUnmount, type ShallowRef } from 'vue';
 import * as Y from 'yjs';
 import { loadNotesState, pollUpdates } from '../backend';
 import { createNotesDoc } from './doc';
-import { notesSaveStatus, retryNotesSave, watchNotesDoc, type NotesSaveStatus } from './persist';
+import {
+  notesSaveStatusTick,
+  readNotesSaveStatus,
+  retryNotesSave,
+  watchNotesDoc,
+  type NotesSaveStatus,
+} from './persist';
 
-export { notesSaveStatus, retryNotesSave, type NotesSaveStatus };
+export { notesSaveStatusTick, readNotesSaveStatus, retryNotesSave, type NotesSaveStatus };
 import {
   followUpdates,
   LIVE_POLL_MS,
@@ -43,7 +49,6 @@ export async function openNotesSession(
   };
 }
 
-/** Apply a remote/agent note write in tests without persisting. */
 export function applyRemoteNotesUpdate(doc: Y.Doc, update: Uint8Array) {
   Y.applyUpdate(doc, update, REMOTE_ORIGIN);
 }

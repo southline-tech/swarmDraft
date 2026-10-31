@@ -2,7 +2,6 @@
  * Persist story notes Y.Doc edits through the Rust store (#38).
  * Save status for the notes detail header (#185).
  */
-import { ref, type Ref } from 'vue';
 import * as Y from 'yjs';
 import { notesApplyUpdate } from '../backend';
 import {
@@ -36,29 +35,35 @@ export type NotesSaveStatus = {
   savedAt: number | null;
 };
 
+const SAVE = Symbol('coauthorNotesSaveState');
 const FLUSH = Symbol('coauthorNotesFlush');
 
 type DocWithSave = Y.Doc & {
+  [SAVE]?: NotesSaveStatus;
   [FLUSH]?: () => Promise<void>;
 };
 
 const IDLE: NotesSaveStatus = { phase: 'idle', savedAt: null };
 
-type GlobalNotesSave = { refs: WeakMap<Y.Doc, Ref<NotesSaveStatus>> };
-const g = globalThis as typeof globalThis & { __coauthorNotesSave?: GlobalNotesSave };
-if (!g.__coauthorNotesSave) g.__coauthorNotesSave = { refs: new WeakMap() };
+const g = globalThis as typeof globalThis & { __coauthorNotesSaveTick?: number };
+if (g.__coauthorNotesSaveTick == null) g.__coauthorNotesSaveTick = 0;
 
-function statusRef(doc: Y.Doc): Ref<NotesSaveStatus> {
-  let r = g.__coauthorNotesSave!.refs.get(doc);
-  if (!r) {
-    r = ref({ ...IDLE });
-    g.__coauthorNotesSave!.refs.set(doc, r);
-  }
-  return r;
+function bumpSaveStatus() {
+  g.__coauthorNotesSaveTick! += 1;
 }
 
-export function notesSaveStatus(doc: Y.Doc): Ref<NotesSaveStatus> {
-  return statusRef(doc);
+/** Bumped whenever any watched notes doc save status changes (for Vue computed deps). */
+export function notesSaveStatusTick(): number {
+  return g.__coauthorNotesSaveTick!;
+}
+
+export function readNotesSaveStatus(doc: Y.Doc): NotesSaveStatus {
+  return (doc as DocWithSave)[SAVE] ?? IDLE;
+}
+
+function writeStatus(doc: Y.Doc, next: NotesSaveStatus) {
+  (doc as DocWithSave)[SAVE] = next;
+  bumpSaveStatus();
 }
 
 export function retryNotesSave(doc: Y.Doc) {
@@ -72,6 +77,7 @@ export function watchNotesDoc(
     debounceMs?: number;
     onError?: (err: unknown) => void;
     onSaved?: () => void;
+    applyUpdate?: (manuscriptId: string, update: Uint8Array) => Promise<void>;
   },
 ) {
   let pending: Uint8Array[] = [];
@@ -81,11 +87,12 @@ export function watchNotesDoc(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let inflight: Promise<void> = Promise.resolve();
 
-  const status = statusRef(doc);
+  const applyUpdate = hooks?.applyUpdate ?? notesApplyUpdate;
 
   const markSaving = () => {
-    if (status.value.phase === 'error') return;
-    status.value = { phase: 'saving', savedAt: status.value.savedAt };
+    const cur = readNotesSaveStatus(doc);
+    if (cur.phase === 'error') return;
+    writeStatus(doc, { phase: 'saving', savedAt: cur.savedAt });
   };
 
   const schedule = (ms: number) => {
@@ -100,18 +107,18 @@ export function watchNotesDoc(
       const batch = pending;
       pending = [];
       if (!dirtyFull && !batch.length) return;
-      if (status.value.phase !== 'error') markSaving();
+      if (readNotesSaveStatus(doc).phase !== 'error') markSaving();
       const update = dirtyFull ? Y.encodeStateAsUpdate(doc) : Y.mergeUpdates(batch);
       try {
-        await withTimeout(notesApplyUpdate(manuscriptId, update), SAVE_TIMEOUT_MS);
+        await withTimeout(applyUpdate(manuscriptId, update), SAVE_TIMEOUT_MS);
         dirtyFull = false;
         failures = 0;
-        status.value = { phase: 'saved', savedAt: Date.now() };
+        writeStatus(doc, { phase: 'saved', savedAt: Date.now() });
         hooks?.onSaved?.();
       } catch (err) {
         dirtyFull = true;
         failures += 1;
-        status.value = { phase: 'error', savedAt: status.value.savedAt };
+        writeStatus(doc, { phase: 'error', savedAt: readNotesSaveStatus(doc).savedAt });
         hooks?.onError?.(err);
         schedule(Math.min(RETRY_MAX_MS, 500 * 2 ** failures));
         throw err;
