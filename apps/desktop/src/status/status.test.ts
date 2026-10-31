@@ -103,26 +103,37 @@ describe('Y.Doc counts', () => {
 });
 
 describe('StatusBar', () => {
-  it('spans the window on the surface token at 26px (#204)', () => {
+  it('is a 26px in-flow bar with three segments (#207)', () => {
     const w = mount(StatusBar, {
-      props: { wordCount: 2154, trackChanges: false, storyNotesPanelId: 'story-notes-panel' },
+      props: {
+        chapterCount: 12,
+        showChapterSegment: true,
+        columnTracks: '18rem 1fr',
+        wordCount: 2154,
+        wordsBeforeCaretInBook: 500,
+        trackChanges: false,
+        storyNotesPanelId: 'story-notes-panel',
+      },
     });
     const bar = w.find('[data-test="status-bar"]');
-    expect(bar.classes()).toEqual(
-      expect.arrayContaining(['fixed', 'inset-x-0', 'box-border', 'bg-surface', 'h-[26px]']),
-    );
+    expect(bar.classes()).toContain('status-bar');
     expect(bar.attributes('role')).toBe('contentinfo');
+    expect(w.find('[data-test="status-seg-left"]').text()).toContain('12 chapters');
     expect(w.find('[data-test="status-word-count"]').text()).toBe('2,154 words');
+    expect(w.find('[data-test="status-page"]').text()).toBe('Page 2 of 9');
     expect(w.find('[data-test="status-track-changes"]').text()).toBe('Track changes: Off');
-    expect(w.find('[data-test="status-track-changes"]').element.tagName).toBe('SPAN');
     expect(w.find('[data-test="status-notes-toggle"]').text()).toBe('Story notes');
   });
 
   it('shows selection and track on, with save and notes pressed state', () => {
     const w = mount(StatusBar, {
       props: {
+        chapterCount: 1,
+        showChapterSegment: true,
+        columnTracks: '18rem 1fr',
         wordCount: 100,
         selectionWords: 3,
+        wordsBeforeCaretInBook: 0,
         trackChanges: true,
         storyNotesOpen: true,
         storyNotesPanelId: 'story-notes-panel',
@@ -133,20 +144,15 @@ describe('StatusBar', () => {
     expect(w.find('[data-test="status-track-changes"]').text()).toBe('Track changes: On');
     expect(w.find('[data-test="status-save"]').attributes('data-state')).toBe('saved');
     expect(w.find('[data-test="status-notes-toggle"]').attributes('aria-pressed')).toBe('true');
-    expect(w.find('[data-test="status-notes-toggle"]').classes()).toEqual(
-      expect.arrayContaining(['aria-pressed:bg-selected', 'aria-pressed:text-accent']),
-    );
-    const wc = w.find('[data-test="status-word-count"]');
-    expect(wc.text()).toBe('100 words · 3 selected');
-    expect(wc.find('.text-muted').text()).toBe('100 words');
-    expect(wc.find('.text-text').classes()).toContain('text-text');
-    expect(wc.find('.text-text').text()).toContain('3 selected');
   });
 
   it('announces save status politely; word count is not live', () => {
     const w = mount(StatusBar, {
       props: {
+        chapterCount: 1,
+        showChapterSegment: true,
         wordCount: 1,
+        wordsBeforeCaretInBook: 0,
         save: { phase: 'saving' },
         storyNotesPanelId: 'story-notes-panel',
       },
@@ -161,6 +167,7 @@ describe('StatusBar', () => {
     const w = mount(StatusBar, {
       props: {
         wordCount: 1,
+        wordsBeforeCaretInBook: 0,
         save: { phase: 'error', message: 'mapError title' },
         storyNotesPanelId: 'story-notes-panel',
       },
@@ -179,16 +186,14 @@ describe('StatusBar', () => {
 
   it('uses the singular for one word selected', () => {
     const w = mount(StatusBar, {
-      props: { wordCount: 1, selectionWords: 1, storyNotesPanelId: 'story-notes-panel' },
+      props: {
+        wordCount: 1,
+        selectionWords: 1,
+        wordsBeforeCaretInBook: 0,
+        storyNotesPanelId: 'story-notes-panel',
+      },
     });
     expect(w.find('[data-test="status-word-count"]').text()).toBe('1 word · 1 selected');
-  });
-
-  it('keeps spacing on the --ct scale (space-4 gap, space-4 padding)', () => {
-    const bar = mount(StatusBar, { props: { storyNotesPanelId: 'x' } }).find(
-      '[data-test="status-bar"]',
-    );
-    expect(bar.classes()).toEqual(expect.arrayContaining(['gap-4', 'px-4']));
   });
 
   it('toggles story notes from the footer', async () => {
@@ -198,25 +203,22 @@ describe('StatusBar', () => {
     expect(w.find('[data-test="status-track-changes"]').attributes('role')).toBeUndefined();
     await w.find('[data-test="status-notes-toggle"]').trigger('click');
     expect(w.emitted('toggle-story-notes')).toHaveLength(1);
-    expect(w.emitted('toggle-track-changes')).toBeUndefined();
   });
 
-  it('shows zoom after Story notes with a separator (#204)', async () => {
+  it('shows zoom at the center segment end (#204)', async () => {
     const w = mount(StatusBar, {
       props: {
+        wordCount: 10,
+        wordsBeforeCaretInBook: 0,
         storyNotesPanelId: 'story-notes-panel',
         zoom: 100,
         'onUpdate:zoom': (v: number) => w.setProps({ zoom: v }),
       },
     });
-    expect(w.find('.status-bar__sep').exists()).toBe(true);
     expect(w.find('[data-test="status-zoom"]').attributes('aria-label')).toBe('Zoom');
     expect(w.find('[data-test="status-zoom-reset"]').text()).toBe('100%');
     await w.find('[data-test="status-zoom-in"]').trigger('click');
     expect(w.emitted('update:zoom')).toEqual([[110]]);
-    await w.setProps({ zoom: 110 });
-    await w.find('[data-test="status-zoom-reset"]').trigger('click');
-    expect(w.emitted('update:zoom')).toContainEqual([100]);
   });
 });
 

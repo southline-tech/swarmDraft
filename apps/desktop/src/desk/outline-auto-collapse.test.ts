@@ -300,7 +300,7 @@ describe('no room for the outline while notes show (#98)', () => {
     const app = readFileSync(resolve(__dirname, '../App.vue'), 'utf8');
     expect(app).toContain("'grid-cols-[18rem_1fr]'");
     expect(app).toContain("'grid-cols-[var(--ct-rail-w)_1fr]'");
-    expect(app).toMatch(/class="workspace grid gap-4/);
+    expect(app).toMatch(/class="workspace grid min-h-0 flex-1 gap-4/);
     expect(OUTLINE_ROOM).toBe(18 * 16 + 16);
   });
 });

@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  provide,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue';
 import {
   createBackup,
   getAppInfo,
@@ -76,6 +85,8 @@ import type { DecisionRecord } from '@coauthor/editor';
 import { mergeLoadedDecisionRecords } from './review/decision-records-load';
 import { docWordCount, outlineDocs, sectionTreeDocs } from './status/wordcount';
 import type { ManuscriptSaveView } from './status/save-status';
+import StatusBar from './status/StatusBar.vue';
+import { APP_FOOTER_EDITOR_KEY, type AppFooterEditorState } from './status/app-footer';
 import {
   importAndOpen,
   openStored,
@@ -877,6 +888,33 @@ const workspaceGridClass = computed(() => {
   if (focusMode.value) return 'grid-cols-1';
   return navigatorOpen.value ? 'grid-cols-[18rem_1fr]' : 'grid-cols-[var(--ct-rail-w)_1fr]';
 });
+const footerColumnTracks = computed(() =>
+  focusMode.value ? undefined : navigatorOpen.value ? '18rem 1fr' : 'var(--ct-rail-w) 1fr',
+);
+const chapterCount = computed(
+  () => session.value?.outline.value.filter((s) => s.kind === 'chapter').length ?? 0,
+);
+const footerEditor = shallowRef<AppFooterEditorState>({});
+provide(APP_FOOTER_EDITOR_KEY, footerEditor);
+const wordsBeforeCaretInBook = ref(0);
+watch(
+  () => session.value?.id,
+  () => {
+    footerEditor.value = {};
+    wordsBeforeCaretInBook.value = 0;
+  },
+);
+function onWordsBeforeCaret(n: number) {
+  wordsBeforeCaretInBook.value = n;
+}
+function onFooterZoom(z: number) {
+  if (footerEditor.value.zoom === z) return;
+  editorPane.value?.setZoom(z);
+}
+const statusWordCount = computed(() => footerEditor.value.wordCount);
+const statusSelectionWords = computed(() => footerEditor.value.selectionWords);
+const statusTrackChanges = computed(() => footerEditor.value.trackChanges);
+const statusZoom = computed(() => footerEditor.value.zoom);
 
 async function ensureNotesSession() {
   const id = session.value?.id;
@@ -920,385 +958,406 @@ defineExpose({ open, closeSession });
   <Rad55FocusModeEvidence v-else-if="evidence === 'rad55'" class="shell shell--focus-mode" />
   <ShellsPreview v-else-if="preview" class="shell" :initial="preview" @close="preview = null" />
   <main v-else class="shell" :class="{ 'shell--focus-mode': focusMode }">
-    <PairingPrompt v-if="info && isTauri()" />
-    <header v-show="!focusMode" class="topbar">
-      <details ref="appMenu" class="topbar__menu" data-test="app-menu" @toggle="onAppMenuToggle">
-        <summary
-          class="topbar__trigger"
-          data-test="app-menu-trigger"
-          aria-label="Book menu"
-          title="Book menu"
-          aria-haspopup="menu"
-        >
-          <AppIcon name="menu" class="topbar__hamburger" />
-          <AppLogo :size="24" />
-        </summary>
-        <div class="topbar__menu-list sh-menu" role="menu">
-          <button
-            type="button"
-            class="sh-mi"
-            role="menuitem"
-            data-test="app-menu-new"
-            :aria-disabled="importing ? 'true' : undefined"
-            @click="
-              () => {
-                if (importing) return;
-                chooseFile();
-                closeBookMenu();
-              }
-            "
+    <div class="shell__main">
+      <PairingPrompt v-if="info && isTauri()" />
+      <header v-show="!focusMode" class="topbar">
+        <details ref="appMenu" class="topbar__menu" data-test="app-menu" @toggle="onAppMenuToggle">
+          <summary
+            class="topbar__trigger"
+            data-test="app-menu-trigger"
+            aria-label="Book menu"
+            title="Book menu"
+            aria-haspopup="menu"
           >
-            <span class="sh-mi-lead" aria-hidden="true"
-              ><AppIcon name="plus" class="app-menu-icon"
-            /></span>
-            New<span v-if="appMenuShortcuts.new" class="sh-k">{{ appMenuShortcuts.new }}</span>
-          </button>
-          <button
-            type="button"
-            class="sh-mi topbar__open"
-            role="menuitem"
-            data-test="app-menu-open"
-            @click="
-              () => {
-                openBookPicker();
-                closeBookMenu();
-              }
-            "
-          >
-            <span class="sh-mi-lead" aria-hidden="true"
-              ><AppIcon name="folder" class="app-menu-icon"
-            /></span>
-            Open<span class="sh-k">{{ appMenuShortcuts.open }}</span>
-          </button>
-          <div
-            class="topbar__recent"
-            @mouseenter="recentOpen = true"
-            @mouseleave="recentOpen = false"
-          >
+            <AppIcon name="menu" class="topbar__hamburger" />
+            <AppLogo :size="24" />
+          </summary>
+          <div class="topbar__menu-list sh-menu" role="menu">
             <button
               type="button"
               class="sh-mi"
               role="menuitem"
-              aria-haspopup="menu"
-              :aria-expanded="recentOpen"
-              data-test="app-menu-recent"
-              :aria-disabled="!recentBooks.length ? 'true' : undefined"
-              @click.stop="recentBooks.length && (recentOpen = !recentOpen)"
+              data-test="app-menu-new"
+              :aria-disabled="importing ? 'true' : undefined"
+              @click="
+                () => {
+                  if (importing) return;
+                  chooseFile();
+                  closeBookMenu();
+                }
+              "
             >
               <span class="sh-mi-lead" aria-hidden="true"
-                ><AppIcon name="clock" class="app-menu-icon"
+                ><AppIcon name="plus" class="app-menu-icon"
               /></span>
-              Recent<span class="sh-k">›</span>
+              New<span v-if="appMenuShortcuts.new" class="sh-k">{{ appMenuShortcuts.new }}</span>
+            </button>
+            <button
+              type="button"
+              class="sh-mi topbar__open"
+              role="menuitem"
+              data-test="app-menu-open"
+              @click="
+                () => {
+                  openBookPicker();
+                  closeBookMenu();
+                }
+              "
+            >
+              <span class="sh-mi-lead" aria-hidden="true"
+                ><AppIcon name="folder" class="app-menu-icon"
+              /></span>
+              Open<span class="sh-k">{{ appMenuShortcuts.open }}</span>
             </button>
             <div
-              v-if="recentOpen && recentBooks.length"
-              class="topbar__menu-list sh-menu sh-sub topbar__submenu"
-              role="menu"
-              aria-label="Recent books"
-              @click.stop
+              class="topbar__recent"
+              @mouseenter="recentOpen = true"
+              @mouseleave="recentOpen = false"
             >
               <button
-                v-for="m in recentBooks"
-                :key="m.id"
                 type="button"
                 class="sh-mi"
                 role="menuitem"
-                :data-test="`app-menu-recent-${m.id}`"
-                @click="openRecentBook(m.id)"
+                aria-haspopup="menu"
+                :aria-expanded="recentOpen"
+                data-test="app-menu-recent"
+                :aria-disabled="!recentBooks.length ? 'true' : undefined"
+                @click.stop="recentBooks.length && (recentOpen = !recentOpen)"
               >
-                {{ m.title || 'Untitled' }}
+                <span class="sh-mi-lead" aria-hidden="true"
+                  ><AppIcon name="clock" class="app-menu-icon"
+                /></span>
+                Recent<span class="sh-k">›</span>
               </button>
+              <div
+                v-if="recentOpen && recentBooks.length"
+                class="topbar__menu-list sh-menu sh-sub topbar__submenu"
+                role="menu"
+                aria-label="Recent books"
+                @click.stop
+              >
+                <button
+                  v-for="m in recentBooks"
+                  :key="m.id"
+                  type="button"
+                  class="sh-mi"
+                  role="menuitem"
+                  :data-test="`app-menu-recent-${m.id}`"
+                  @click="openRecentBook(m.id)"
+                >
+                  {{ m.title || 'Untitled' }}
+                </button>
+              </div>
             </div>
+            <div class="sh-sep" role="separator" />
+            <button
+              v-if="session && !choosingBook && isTauri()"
+              type="button"
+              class="sh-mi"
+              role="menuitemcheckbox"
+              data-test="app-menu-story-notes"
+              :aria-checked="storyNotesOpen ? 'true' : 'false'"
+              @click="
+                () => {
+                  void toggleStoryNotes();
+                  closeBookMenu();
+                }
+              "
+            >
+              <span class="sh-mi-lead" aria-hidden="true"
+                ><AppIcon name="sparkle" class="app-menu-icon"
+              /></span>
+              Story notes
+            </button>
+            <button
+              ref="settingsButton"
+              type="button"
+              class="sh-mi"
+              role="menuitem"
+              data-test="settings-open"
+              :aria-expanded="settingsOpen"
+              @click="
+                () => {
+                  settingsOpen = !settingsOpen;
+                  closeBookMenu();
+                }
+              "
+            >
+              <span class="sh-mi-lead" aria-hidden="true"
+                ><AppIcon name="settings" class="app-menu-icon"
+              /></span>
+              Settings<span class="sh-k">{{ appMenuShortcuts.settings }}</span>
+            </button>
+            <button
+              v-if="isTauri()"
+              type="button"
+              class="sh-mi"
+              role="menuitem"
+              data-test="app-menu-quit"
+              @click="
+                () => {
+                  void quitApp();
+                  closeBookMenu();
+                }
+              "
+            >
+              <span class="sh-mi-lead" aria-hidden="true"
+                ><AppIcon name="power" class="app-menu-icon"
+              /></span>
+              Quit<span class="sh-k">{{ appMenuShortcuts.quit }}</span>
+            </button>
           </div>
-          <div class="sh-sep" role="separator" />
-          <button
-            v-if="session && !choosingBook && isTauri()"
-            type="button"
-            class="sh-mi"
-            role="menuitemcheckbox"
-            data-test="app-menu-story-notes"
-            :aria-checked="storyNotesOpen ? 'true' : 'false'"
-            @click="
-              () => {
-                void toggleStoryNotes();
-                closeBookMenu();
-              }
-            "
-          >
-            <span class="sh-mi-lead" aria-hidden="true"
-              ><AppIcon name="sparkle" class="app-menu-icon"
-            /></span>
-            Story notes
-          </button>
-          <button
-            ref="settingsButton"
-            type="button"
-            class="sh-mi"
-            role="menuitem"
-            data-test="settings-open"
-            :aria-expanded="settingsOpen"
-            @click="
-              () => {
-                settingsOpen = !settingsOpen;
-                closeBookMenu();
-              }
-            "
-          >
-            <span class="sh-mi-lead" aria-hidden="true"
-              ><AppIcon name="settings" class="app-menu-icon"
-            /></span>
-            Settings<span class="sh-k">{{ appMenuShortcuts.settings }}</span>
-          </button>
-          <button
-            v-if="isTauri()"
-            type="button"
-            class="sh-mi"
-            role="menuitem"
-            data-test="app-menu-quit"
-            @click="
-              () => {
-                void quitApp();
-                closeBookMenu();
-              }
-            "
-          >
-            <span class="sh-mi-lead" aria-hidden="true"
-              ><AppIcon name="power" class="app-menu-icon"
-            /></span>
-            Quit<span class="sh-k">{{ appMenuShortcuts.quit }}</span>
-          </button>
-        </div>
-      </details>
-      <span class="topbar__brand">
-        <span class="topbar__name">{{
-          session && !choosingBook ? session.title : PRODUCT_NAME
-        }}</span>
-      </span>
-    </header>
-    <MigrationNoticeBanner :notices="migrationNotices" @dismiss="dismissMigration" />
-    <SettingsScreen
-      v-if="settingsOpen"
-      :info="info"
-      :backup-status="backupStatus"
-      :confirming-restore="confirmingRestore"
-      :tokens-notice="tokensNotice"
-      :book-open="!!session && !choosingBook"
-      :book-title="session?.title"
-      :numbering-style="session?.numberingStyle.value"
-      :manuscript-id="session?.id"
-      @close="settingsOpen = false"
-      @numbering-style="onNumberingStyle"
-      @open-previews="openPreview('all')"
-      @backup="onBackup"
-      @ask-restore="confirmingRestore = true"
-      @confirm-restore="onRestore"
-      @cancel-restore="confirmingRestore = false"
-      @dismiss-notice="tokensNotice = null"
-    />
-    <p v-if="askBotRequested" class="visually-hidden" data-test="ask-bot-requested" role="status">
-      Ask bot requested
-    </p>
-    <div v-if="recoveryNotices.length" role="alert" data-test="recovery-notice">
-      <p>
-        A restore was interrupted. Some attachments may be missing. {{ PRODUCT_NAME }} didn't delete
-        anything.
-      </p>
-      <div v-for="(n, i) in recoveryNotices" :key="n.id || i" data-test="recovery-notice-item">
-        <p v-if="n.folder && n.moved.length">
-          Moved to <code>{{ n.folder }}</code
-          >: {{ n.moved.join(', ') }}. To get an attachment back, copy it from that folder into
-          <code>{{ n.filesDir }}</code
-          >.
-        </p>
-        <p v-if="n.snapshot">
-          Or restore the backup taken just before the restore: <code>{{ n.snapshot }}</code
-          >.
-        </p>
-        <p v-if="n.retryPending">
-          {{ PRODUCT_NAME }} couldn't finish and will try again the next time it starts.
-        </p>
-        <p v-if="n.corruptFile" data-test="recovery-notice-corrupt">
-          An earlier notice couldn't be read. It was kept, not deleted, at
-          <code>{{ n.corruptFile }}</code
-          >.
-        </p>
-        <p v-if="n.saveError" data-test="recovery-notice-save-error">
-          This notice couldn't be saved and won't show again after you close {{ PRODUCT_NAME }}.
-          {{ errorLine(n.saveError, 'save') }}
-        </p>
-      </div>
-      <button type="button" data-test="recovery-notice-dismiss" @click="dismissRecovery">
-        Dismiss
-      </button>
-      <p v-if="recoveryDismissError">{{ recoveryDismissError }}</p>
-    </div>
-    <!-- Always mounted so screen readers know the region before an error lands in it (#79). -->
-    <div
-      class="editor-error-region"
-      role="alert"
-      aria-live="assertive"
-      data-test="load-error-region"
-    >
-      <p
-        v-if="editorLoadError && session && !choosingBook"
-        class="load-error"
-        data-test="load-error"
-      >
-        {{ SECTION_LOAD_ERROR_COPY }}
-        <button type="button" class="sh-btn" data-test="reload" @click="reloadSection">
-          Reload section
-        </button>
-      </p>
-    </div>
-    <input
-      ref="fileInput"
-      class="visually-hidden"
-      data-test="open-docx"
-      type="file"
-      accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-      tabindex="-1"
-      aria-hidden="true"
-      :disabled="importing"
-      @change="onFile"
-    />
-    <p v-if="fatalError" role="alert" data-test="fatal-error">{{ fatalError }}</p>
-    <p v-if="openError" role="alert" data-test="open-error">{{ openError }}</p>
-    <SaveFailureBanner
-      v-if="saveFailure.failing"
-      data-test="save-error"
-      :state="saveFailure"
-      :save-copy="saveCopyOfOpen"
-    />
-    <!-- Always mounted so the live region exists before its text (#79). -->
-    <div class="open-toast" data-test="open-toast" :style="toastStyle ?? undefined">
-      <!-- #98: the no-room cue shares this one polite region with the open-book toast. -->
-      <AppToast
-        :open="(!!openToast || noRoomToast) && !!session"
-        :lead="noRoomToast ? undefined : 'Your book is open.'"
-        :message="noRoomToast ? NO_ROOM_COPY : openToast"
-        :action="noRoomToast ? 'Hide notes' : undefined"
-        :icon="noRoomToast ? 'alert' : 'check'"
-        @dismiss="noRoomToast ? hideNotesForOutline() : dismissToast()"
-      />
-    </div>
-    <HomeScreen
-      v-if="(!session || choosingBook) && !openingVisible && !openingError"
-      ref="home"
-      data-test="no-manuscript"
-      :step="welcomed ? 'open' : 'welcome'"
-      :busy="importing"
-      :can-cancel="!!session"
-      @cancel="choosingBook = false"
-      @get-started="getStarted"
-      @choose="chooseFile"
-      @drop-file="importFile"
-    />
-    <div
-      v-if="(!session || choosingBook) && (openingVisible || openingError)"
-      class="opening-shell"
-      data-test="opening-shell"
-    >
-      <OpeningProgress
-        v-if="openingVisible && opening"
-        :title="opening.title"
-        :found="opening.found"
-        :progress="opening.progress"
-      />
-      <div v-else-if="openingError" role="alert" aria-live="assertive" data-test="opening-error">
-        <ErrorCard
-          :icon="errorCardIcon(openingError.code)"
-          :tone="openingError.tone"
-          :title="openingError.title"
-          :text="openingError.message"
-          :action="openingError.actionLabel"
-          @action="onOpeningErrorAction"
-        />
-      </div>
-    </div>
-    <!-- #84: full-width toolbar row under the title bar; the side panels start below it. -->
-    <div
-      v-if="session && !choosingBook"
-      id="toolbar-row"
-      class="toolbar-row"
-      data-test="toolbar-row"
-    />
-    <div
-      v-if="session && !choosingBook"
-      class="workspace grid gap-4 p-4"
-      :class="workspaceGridClass"
-      data-test="workspace"
-    >
-      <SectionNav
-        v-show="navigatorOpen && !focusMode"
-        id="chapter-navigator"
-        class="min-h-0 overflow-auto"
-        :sections="session.outline.value"
-        :manuscript-id="session.id"
-        :selected-id="selectedId"
-        :save="session.save"
-        :word-counts="wordCounts"
-        :numbering-style="session.numberingStyle.value"
-        @select="selectedId = $event"
-        @activate="focusEditor"
+        </details>
+        <span class="topbar__brand">
+          <span class="topbar__name">{{
+            session && !choosingBook ? session.title : PRODUCT_NAME
+          }}</span>
+        </span>
+      </header>
+      <MigrationNoticeBanner :notices="migrationNotices" @dismiss="dismissMigration" />
+      <SettingsScreen
+        v-if="settingsOpen"
+        :info="info"
+        :backup-status="backupStatus"
+        :confirming-restore="confirmingRestore"
+        :tokens-notice="tokensNotice"
+        :book-open="!!session && !choosingBook"
+        :book-title="session?.title"
+        :numbering-style="session?.numberingStyle.value"
+        :manuscript-id="session?.id"
+        @close="settingsOpen = false"
         @numbering-style="onNumberingStyle"
+        @open-previews="openPreview('all')"
+        @backup="onBackup"
+        @ask-restore="confirmingRestore = true"
+        @confirm-restore="onRestore"
+        @cancel-restore="confirmingRestore = false"
+        @dismiss-notice="tokensNotice = null"
       />
-      <OutlineRail v-show="!navigatorOpen && !focusMode" @expand="outlineAuto.toggleByHand()" />
-      <div class="editor-stack min-h-0 min-w-0">
-        <ContinuousManuscript
-          ref="editorPane"
-          class="editor-stack__page min-h-0 min-w-0 flex-1"
-          :outline="session.outline.value"
-          :sections="session.sections"
-          :selected-id="selectedId"
-          :reload-token="reloads"
-          :readonly="session.closed || restoreInProgress"
-          :read-only-reason="restoreInProgress ? 'restore in progress' : undefined"
-          :navigator-open="navigatorOpen"
-          :navigator-controls="chapterNavControls"
-          :chapter-title="selected?.title"
-          :section-labels="sectionLabels"
-          :book-docs="outlineDocs(session.outline.value, session.sections)"
-          :chapter-docs="
-            selectedId
-              ? sectionTreeDocs(session.outline.value, selectedId, session.sections)
-              : undefined
-          "
-          :manuscript-save="manuscriptSave"
-          :story-notes-open="storyNotesOpen"
-          story-notes-panel-id="story-notes-panel"
-          :author-labels="markAuthorLabel"
-          toolbar-target="#toolbar-row"
-          external-load-error
-          :outline-forced="outlineForced"
-          :notes-hidden="notesHidden"
-          :computer-name="info?.computerName"
-          :decision-records-by-section="decisionRecordsBySection"
-          :manuscript-id="session.id"
-          @update:selected-id="selectedId = $event"
-          @load-error="editorLoadError = $event"
-          @reload="reloadSection"
-          @toggle-navigator="outlineAuto.toggleByHand()"
-          @decisions="onSectionDecisions"
-          @layout="onEditorLayout"
-          @focus-mode="focusMode = $event"
-          @ask-bot="onAskBotFromEditor"
-          @toggle-story-notes="toggleStoryNotes"
-          @save-retry="onManuscriptSaveRetry"
-        />
-        <StoryNotesPanel
-          v-if="storyNotesOpen && notesSession && !focusMode"
-          id="story-notes-panel"
-          class="editor-stack__notes"
-          :notes-doc="notesSession.doc"
-          :outline="session.outline.value"
-          :human-author="humanNotesAuthor"
-          :readonly="session.closed || restoreInProgress"
-          data-test="story-notes-panel"
-          @select-section="focusEditor"
-          @close="storyNotesOpen = false"
+      <p v-if="askBotRequested" class="visually-hidden" data-test="ask-bot-requested" role="status">
+        Ask bot requested
+      </p>
+      <div v-if="recoveryNotices.length" role="alert" data-test="recovery-notice">
+        <p>
+          A restore was interrupted. Some attachments may be missing. {{ PRODUCT_NAME }} didn't
+          delete anything.
+        </p>
+        <div v-for="(n, i) in recoveryNotices" :key="n.id || i" data-test="recovery-notice-item">
+          <p v-if="n.folder && n.moved.length">
+            Moved to <code>{{ n.folder }}</code
+            >: {{ n.moved.join(', ') }}. To get an attachment back, copy it from that folder into
+            <code>{{ n.filesDir }}</code
+            >.
+          </p>
+          <p v-if="n.snapshot">
+            Or restore the backup taken just before the restore: <code>{{ n.snapshot }}</code
+            >.
+          </p>
+          <p v-if="n.retryPending">
+            {{ PRODUCT_NAME }} couldn't finish and will try again the next time it starts.
+          </p>
+          <p v-if="n.corruptFile" data-test="recovery-notice-corrupt">
+            An earlier notice couldn't be read. It was kept, not deleted, at
+            <code>{{ n.corruptFile }}</code
+            >.
+          </p>
+          <p v-if="n.saveError" data-test="recovery-notice-save-error">
+            This notice couldn't be saved and won't show again after you close {{ PRODUCT_NAME }}.
+            {{ errorLine(n.saveError, 'save') }}
+          </p>
+        </div>
+        <button type="button" data-test="recovery-notice-dismiss" @click="dismissRecovery">
+          Dismiss
+        </button>
+        <p v-if="recoveryDismissError">{{ recoveryDismissError }}</p>
+      </div>
+      <!-- Always mounted so screen readers know the region before an error lands in it (#79). -->
+      <div
+        class="editor-error-region"
+        role="alert"
+        aria-live="assertive"
+        data-test="load-error-region"
+      >
+        <p
+          v-if="editorLoadError && session && !choosingBook"
+          class="load-error"
+          data-test="load-error"
+        >
+          {{ SECTION_LOAD_ERROR_COPY }}
+          <button type="button" class="sh-btn" data-test="reload" @click="reloadSection">
+            Reload section
+          </button>
+        </p>
+      </div>
+      <input
+        ref="fileInput"
+        class="visually-hidden"
+        data-test="open-docx"
+        type="file"
+        accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        tabindex="-1"
+        aria-hidden="true"
+        :disabled="importing"
+        @change="onFile"
+      />
+      <p v-if="fatalError" role="alert" data-test="fatal-error">{{ fatalError }}</p>
+      <p v-if="openError" role="alert" data-test="open-error">{{ openError }}</p>
+      <SaveFailureBanner
+        v-if="saveFailure.failing"
+        data-test="save-error"
+        :state="saveFailure"
+        :save-copy="saveCopyOfOpen"
+      />
+      <!-- Always mounted so the live region exists before its text (#79). -->
+      <div class="open-toast" data-test="open-toast" :style="toastStyle ?? undefined">
+        <!-- #98: the no-room cue shares this one polite region with the open-book toast. -->
+        <AppToast
+          :open="(!!openToast || noRoomToast) && !!session"
+          :lead="noRoomToast ? undefined : 'Your book is open.'"
+          :message="noRoomToast ? NO_ROOM_COPY : openToast"
+          :action="noRoomToast ? 'Hide notes' : undefined"
+          :icon="noRoomToast ? 'alert' : 'check'"
+          @dismiss="noRoomToast ? hideNotesForOutline() : dismissToast()"
         />
       </div>
+      <HomeScreen
+        v-if="(!session || choosingBook) && !openingVisible && !openingError"
+        ref="home"
+        data-test="no-manuscript"
+        :step="welcomed ? 'open' : 'welcome'"
+        :busy="importing"
+        :can-cancel="!!session"
+        @cancel="choosingBook = false"
+        @get-started="getStarted"
+        @choose="chooseFile"
+        @drop-file="importFile"
+      />
+      <div
+        v-if="(!session || choosingBook) && (openingVisible || openingError)"
+        class="opening-shell"
+        data-test="opening-shell"
+      >
+        <OpeningProgress
+          v-if="openingVisible && opening"
+          :title="opening.title"
+          :found="opening.found"
+          :progress="opening.progress"
+        />
+        <div v-else-if="openingError" role="alert" aria-live="assertive" data-test="opening-error">
+          <ErrorCard
+            :icon="errorCardIcon(openingError.code)"
+            :tone="openingError.tone"
+            :title="openingError.title"
+            :text="openingError.message"
+            :action="openingError.actionLabel"
+            @action="onOpeningErrorAction"
+          />
+        </div>
+      </div>
+      <!-- #84: full-width toolbar row under the title bar; the side panels start below it. -->
+      <div
+        v-if="session && !choosingBook"
+        id="toolbar-row"
+        class="toolbar-row"
+        data-test="toolbar-row"
+      />
+      <div
+        v-if="session && !choosingBook"
+        class="workspace grid min-h-0 flex-1 gap-4 overflow-hidden p-4"
+        :class="workspaceGridClass"
+        data-test="workspace"
+      >
+        <SectionNav
+          v-show="navigatorOpen && !focusMode"
+          id="chapter-navigator"
+          class="min-h-0 overflow-auto"
+          :sections="session.outline.value"
+          :manuscript-id="session.id"
+          :selected-id="selectedId"
+          :save="session.save"
+          :word-counts="wordCounts"
+          :numbering-style="session.numberingStyle.value"
+          @select="selectedId = $event"
+          @activate="focusEditor"
+          @numbering-style="onNumberingStyle"
+        />
+        <OutlineRail v-show="!navigatorOpen && !focusMode" @expand="outlineAuto.toggleByHand()" />
+        <div class="editor-stack min-h-0 min-w-0">
+          <ContinuousManuscript
+            ref="editorPane"
+            class="editor-stack__page min-h-0 min-w-0 flex-1"
+            :outline="session.outline.value"
+            :sections="session.sections"
+            :selected-id="selectedId"
+            :reload-token="reloads"
+            :readonly="session.closed || restoreInProgress"
+            :read-only-reason="restoreInProgress ? 'restore in progress' : undefined"
+            :navigator-open="navigatorOpen"
+            :navigator-controls="chapterNavControls"
+            :chapter-title="selected?.title"
+            :section-labels="sectionLabels"
+            :book-docs="outlineDocs(session.outline.value, session.sections)"
+            :chapter-docs="
+              selectedId
+                ? sectionTreeDocs(session.outline.value, selectedId, session.sections)
+                : undefined
+            "
+            :manuscript-save="manuscriptSave"
+            :story-notes-open="storyNotesOpen"
+            story-notes-panel-id="story-notes-panel"
+            :author-labels="markAuthorLabel"
+            toolbar-target="#toolbar-row"
+            external-load-error
+            :outline-forced="outlineForced"
+            :notes-hidden="notesHidden"
+            :computer-name="info?.computerName"
+            :decision-records-by-section="decisionRecordsBySection"
+            :manuscript-id="session.id"
+            @update:selected-id="selectedId = $event"
+            @load-error="editorLoadError = $event"
+            @reload="reloadSection"
+            @toggle-navigator="outlineAuto.toggleByHand()"
+            @decisions="onSectionDecisions"
+            @layout="onEditorLayout"
+            @focus-mode="focusMode = $event"
+            @ask-bot="onAskBotFromEditor"
+            @toggle-story-notes="toggleStoryNotes"
+            @save-retry="onManuscriptSaveRetry"
+            @words-before-caret="onWordsBeforeCaret"
+          />
+          <StoryNotesPanel
+            v-if="storyNotesOpen && notesSession && !focusMode"
+            id="story-notes-panel"
+            class="editor-stack__notes"
+            :notes-doc="notesSession.doc"
+            :outline="session.outline.value"
+            :human-author="humanNotesAuthor"
+            :readonly="session.closed || restoreInProgress"
+            data-test="story-notes-panel"
+            @select-section="focusEditor"
+            @close="storyNotesOpen = false"
+          />
+        </div>
+      </div>
     </div>
+    <StatusBar
+      v-if="session && !choosingBook && !focusMode"
+      class="shell__status"
+      :chapter-count="chapterCount"
+      :show-chapter-segment="navigatorOpen"
+      :column-tracks="footerColumnTracks"
+      :word-count="statusWordCount"
+      :selection-words="statusSelectionWords"
+      :words-before-caret-in-book="wordsBeforeCaretInBook"
+      :track-changes="statusTrackChanges"
+      :save="manuscriptSave"
+      :story-notes-open="storyNotesOpen"
+      story-notes-panel-id="story-notes-panel"
+      :zoom="statusZoom"
+      @toggle-story-notes="toggleStoryNotes"
+      @save-retry="onManuscriptSaveRetry"
+      @update:zoom="onFooterZoom"
+    />
   </main>
 </template>
 
@@ -1321,17 +1380,25 @@ body {
   margin: 0;
 }
 .shell {
-  /* One window-height column: the content ends above the fixed status footer (26px). */
   box-sizing: border-box;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 26px;
+  height: 100dvh;
+  height: 100vh;
+  overflow: hidden;
+}
+.shell.shell--focus-mode {
+  grid-template-rows: minmax(0, 1fr);
+}
+.shell__main {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  overflow: auto;
-  padding-bottom: 26px;
+  min-height: 0;
+  overflow: hidden;
 }
-/* #55 wp5: status bar is hidden in focus mode; drop the reserved strip. */
-.shell.shell--focus-mode {
-  padding-bottom: 0;
+.shell__status {
+  padding-left: var(--ct-space-4);
+  padding-right: var(--ct-space-4);
 }
 .toolbar-row {
   flex: none;
@@ -1344,8 +1411,9 @@ body {
   margin: var(--ct-space-2) var(--ct-space-4) 0;
 }
 .shell > .workspace {
-  flex: 1 0 20rem;
+  flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 .editor-stack {
   display: flex;

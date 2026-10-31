@@ -4,6 +4,15 @@
 @import 'tailwindcss/utilities.css' layer(utilities);
 @import './tokens.css'; /* @font-face + raw --ct-* vars, light + [data-theme=dark] */
 
+@layer base {
+  html,
+  body,
+  #app {
+    height: 100%;
+    overflow: hidden;
+  }
+}
+
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
 @theme inline {

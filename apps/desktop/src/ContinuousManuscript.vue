@@ -16,7 +16,7 @@ import type { AgentName } from './agent-names';
 import type { DecisionRecord } from '@coauthor/editor';
 
 const REVIEW_RAIL = '#continuous-review-rail';
-const STATUS_RAIL = '#continuous-status-rail';
+import { docWordCount } from './status/wordcount';
 
 const props = defineProps<{
   outline: Section[];
@@ -85,6 +85,7 @@ const emit = defineEmits<{
   'ask-bot': [];
   'toggle-story-notes': [];
   'save-retry': [];
+  'words-before-caret': [count: number];
 }>();
 
 const ordered = computed(() => sectionsInReadingOrder(props.outline));
@@ -157,11 +158,28 @@ function focusSection(id: string) {
   editors.value.get(id)?.focusBody();
 }
 
+function onCaretWords(sectionId: string, inDoc: number) {
+  if (sectionId !== props.selectedId) return;
+  let before = 0;
+  for (const sec of ordered.value) {
+    if (sec.id === sectionId) break;
+    const d = props.sections.get(sec.docId);
+    if (d) before += docWordCount(d);
+  }
+  emit('words-before-caret', before + inDoc);
+}
+
+function setZoom(z: number) {
+  const id = props.selectedId;
+  if (id) editors.value.get(id)?.setZoom(z);
+}
+
 defineExpose({
   focusBody() {
     if (props.selectedId) focusSection(props.selectedId);
   },
   focusSection,
+  setZoom,
 });
 
 onMounted(async () => {
@@ -206,7 +224,6 @@ onBeforeUnmount(() => observer?.disconnect());
             :slice-mode="sec.id !== selectedId"
             :toolbar-target="sec.id === selectedId ? toolbarTarget : undefined"
             :review-target="sec.id === selectedId ? REVIEW_RAIL : undefined"
-            :status-target="sec.id === selectedId ? STATUS_RAIL : undefined"
             :chapter-title="sec.id === selectedId ? chapterTitle : undefined"
             :chapter-label="sectionLabels?.get(sec.id)"
             :book-docs="sec.id === selectedId ? bookDocs : undefined"
@@ -233,6 +250,7 @@ onBeforeUnmount(() => observer?.disconnect());
             @ask-bot="emit('ask-bot')"
             @toggle-story-notes="emit('toggle-story-notes')"
             @save-retry="emit('save-retry')"
+            @caret-words="(n) => onCaretWords(sec.id, n)"
           />
         </div>
       </div>
@@ -242,11 +260,6 @@ onBeforeUnmount(() => observer?.disconnect());
         data-test="continuous-review-rail"
       />
     </div>
-    <div
-      id="continuous-status-rail"
-      class="continuous-status-rail"
-      data-test="continuous-status-rail"
-    />
   </div>
 </template>
 

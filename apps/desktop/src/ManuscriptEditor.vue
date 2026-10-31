@@ -9,6 +9,7 @@
  */
 import {
   computed,
+  inject,
   nextTick,
   onBeforeUnmount,
   onMounted,
@@ -27,9 +28,10 @@ import type * as Y from 'yjs';
 import EditorToolbar from './toolbar/EditorToolbar.vue';
 import StatusBar from './status/StatusBar.vue';
 import type { ManuscriptSaveView } from './status/save-status';
+import { APP_FOOTER_EDITOR_KEY } from './status/app-footer';
 import { countWords, watchBookWords } from './status/wordcount';
 import { agentDirectory, authorLabel, markAuthorLabel, type AgentName } from './agent-names';
-import { loadZoom, saveZoom } from './desk/zoom';
+import { clampZoom, loadZoom, saveZoom } from './desk/zoom';
 import ReviewPanel from './review/ReviewPanel.vue';
 import EmptyState from './shells/EmptyState.vue';
 import {
@@ -192,7 +194,11 @@ const emit = defineEmits<{
   'ask-bot': [];
   'toggle-story-notes': [];
   'save-retry': [];
+  /** Words before the caret in this section doc (lead editor → parent book page estimate). */
+  'caret-words': [count: number];
 }>();
+
+const appFooterEditor = inject(APP_FOOTER_EDITOR_KEY, null);
 
 /* UI shells for the audit review (Part of #36). Local view state only: none of these change the
    manuscript, the Y.Doc, the selection or the undo history. */
@@ -634,6 +640,14 @@ function countSelection(e: Editor) {
   const { from, to, empty } = e.state.selection;
   selectionWords.value = empty ? 0 : countWords(e.state.doc.textBetween(from, to, ' ', ' '));
 }
+function wordsBeforeCaretInDoc(e: Editor): number {
+  const { from } = e.state.selection;
+  return countWords(e.state.doc.textBetween(0, from, ' ', ' '));
+}
+function reportCaretWords(e: Editor) {
+  const n = wordsBeforeCaretInDoc(e);
+  emit('caret-words', n);
+}
 const bookWords = shallowRef<number>();
 let stopBook = () => {};
 let stopChapter = () => {};
@@ -739,7 +753,10 @@ function focusBody() {
 function reportLoadError() {
   emit('load-error', loadError.value);
 }
-defineExpose({ focusBody, reportLoadError });
+function setZoom(next: number) {
+  zoom.value = clampZoom(next);
+}
+defineExpose({ focusBody, reportLoadError, setZoom });
 
 /** Set when the content does not fit the schema; the editor is then read-only and never emits. */
 const loadError = shallowRef<string>('');
@@ -784,12 +801,16 @@ const options: Partial<EditorOptions> = {
   onCreate: ({ editor }) => {
     refreshReview(editor);
     countChapter(editor);
+    reportCaretWords(editor);
     // A bound doc may render its content just after create; try again once it has.
     if (!placeCursorInBody(editor))
       cursorTimer = setTimeout(() => !editor.isDestroyed && placeCursorInBody(editor));
     if (focusPending) setTimeout(focusBody);
   },
-  onSelectionUpdate: ({ editor }) => countSelection(editor),
+  onSelectionUpdate: ({ editor }) => {
+    countSelection(editor);
+    reportCaretWords(editor);
+  },
   onUpdate: ({ editor }) => {
     refreshReview(editor);
     scheduleCount(editor);
@@ -809,9 +830,45 @@ watch(editor, (e) => {
   if (e) {
     refreshReview(e);
     countChapter(e);
+    reportCaretWords(e);
     refreshSuggestionColors(e.view);
   }
 });
+watch(
+  () =>
+    [
+      bookWords.value,
+      chapterWords.value,
+      selectionWords.value,
+      tracking.value,
+      zoom.value,
+      editor.value,
+      props.sliceMode,
+      props.bookDocs,
+    ] as const,
+  () => {
+    if (!appFooterEditor || props.sliceMode || !props.bookDocs?.length) return;
+    const e = editor.value;
+    const next: typeof appFooterEditor.value = {
+      wordCount: bookWords.value ?? chapterWords.value,
+      selectionWords: selectionWords.value || undefined,
+      trackChanges: tracking.value,
+      zoom: zoom.value,
+      wordsBeforeInDoc: e && !e.isDestroyed ? wordsBeforeCaretInDoc(e) : 0,
+    };
+    const cur = appFooterEditor.value;
+    if (
+      cur.wordCount === next.wordCount &&
+      cur.selectionWords === next.selectionWords &&
+      cur.trackChanges === next.trackChanges &&
+      cur.zoom === next.zoom &&
+      cur.wordsBeforeInDoc === next.wordsBeforeInDoc
+    )
+      return;
+    appFooterEditor.value = next;
+  },
+  { flush: 'post' },
+);
 watch(
   writerProfile,
   () => {
@@ -1125,13 +1182,13 @@ const LABELS: Record<ReviewItem['type'], string> = {
       defer
     >
       <StatusBar
-        v-if="!focusMode && !sliceMode"
+        v-if="!appFooterEditor && !focusMode && !sliceMode"
+        v-model:zoom="zoom"
         :word-count="bookWords ?? chapterWords"
         :selection-words="selectionWords || undefined"
         :track-changes="tracking"
         :save="manuscriptSave"
         :story-notes-open="storyNotesOpen"
-        v-model:zoom="zoom"
         :story-notes-panel-id="storyNotesPanelId"
         @toggle-story-notes="emit('toggle-story-notes')"
         @save-retry="emit('save-retry')"

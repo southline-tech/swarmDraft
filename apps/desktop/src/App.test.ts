@@ -2000,7 +2000,7 @@ describe('full-width toolbar (#84)', () => {
   // The toolbar row sits between the title bar and the panel row, as a sibling of both, so it
   // spans the window and the outline / review panels start below it.
   const order = (w: ReturnType<typeof mount>) => {
-    const main = w.get('main.shell').element;
+    const main = w.get('.shell__main').element;
     const kids = [...main.children];
     return {
       topbar: kids.indexOf(w.get('.topbar').element),
@@ -2167,16 +2167,28 @@ describe('focus mode screen reader (#55)', () => {
     w.unmount();
   });
 
-  it('drops the status-bar padding strip on the app shell while focus mode is on', async () => {
+  it('hides the in-flow status bar while focus mode is on', async () => {
     const { w } = await withManuscript();
     const shell = () => w.get('main.shell');
     expect(shell().classes()).not.toContain('shell--focus-mode');
+    expect(w.find('[data-test="status-bar"]').exists()).toBe(true);
     await w.get('[data-test="focus-mode"]').trigger('click');
     await settle();
     expect(shell().classes()).toContain('shell--focus-mode');
+    expect(w.find('[data-test="status-bar"]').exists()).toBe(false);
     await w.get('[data-test="focus-exit"]').trigger('click');
     await settle();
     expect(shell().classes()).not.toContain('shell--focus-mode');
+    expect(w.find('[data-test="status-bar"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('does not scroll the app shell for a loaded book (#209)', async () => {
+    const { w } = await withManuscript();
+    const shell = w.get('main.shell').element;
+    expect(shell.scrollHeight).toBeLessThanOrEqual(shell.clientHeight + 1);
+    const stage = w.find('[data-test="continuous-manuscript"]');
+    expect(stage.exists()).toBe(true);
     w.unmount();
   });
 });
