@@ -43,7 +43,7 @@ pub async fn start_with(scopes: &[&str], tune: impl FnOnce(&mut mcp::McpConfig))
     let mut cfg = mcp::McpConfig::new(addr.port());
     cfg.auth_failure_floor = std::time::Duration::from_millis(20);
     tune(&mut cfg);
-    let (app, stats) = mcp::router_with_stats(store.clone(), cfg);
+    let (app, stats) = mcp::router_with_stats(store.clone(), cfg, None);
     let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     Server {
@@ -962,11 +962,14 @@ async fn body_limit_applies_to_mcp() {
     assert_refused_early(post_result(&s.url, Some(&s.token), body).await, 413);
     assert_nothing_happened(&s, &sid, &before).await;
     assert!(s.store.open_comments(&sid).unwrap().is_empty());
-    // Without a valid token the body is never read: plain 401.
-    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"pad": "y".repeat(mcp::MAX_BODY_BYTES)}});
+    // Unauthenticated non-pairing calls: 401 without touching the manuscript.
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}});
     let before = refusal_snapshot(&s, &sid);
     assert_refused_early(post_result(&s.url, None, body).await, 401);
     assert_nothing_happened(&s, &sid, &before).await;
+    // Oversized unauthenticated bodies are still refused at the body limit.
+    let huge = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"pad": "y".repeat(mcp::MAX_BODY_BYTES)}});
+    assert_refused_early(post_result(&s.url, None, huge).await, 413);
 }
 
 /// What a refused request must leave untouched: audit rows, raw doc updates, suggestions.

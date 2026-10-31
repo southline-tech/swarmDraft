@@ -23,8 +23,9 @@ pub mod save_copy;
 pub mod storage;
 
 use serde::Serialize;
-use tauri::Manager;
+use std::sync::Arc;
 use tauri::Emitter;
+use tauri::Manager;
 
 use dictionary::{
     spell_dictionary_add, spell_dictionary_ignore, spell_dictionary_list, spell_dictionary_remove,
@@ -722,7 +723,14 @@ pub fn run() {
                 return Ok(());
             };
             tauri::async_runtime::spawn(async move {
-                let result = mcp::serve_on(store, listener).await;
+                let emit_handle = handle.clone();
+                let hook: mcp::PairingRequestedHook = Arc::new(move |pairing_id: String| {
+                    let _ = emit_handle.emit(
+                        "pairing-requested",
+                        serde_json::json!({ "pairingId": pairing_id }),
+                    );
+                });
+                let result = mcp::serve_on(store, listener, Some(hook)).await;
                 let state = handle.state::<std::sync::Mutex<McpStatus>>();
                 let mut st = state.lock().expect("status poisoned");
                 match result {

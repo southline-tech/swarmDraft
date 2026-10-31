@@ -401,4 +401,14 @@ mod tests {
         let r = s.request_pairing("You", None, None).unwrap();
         assert!(s.approve_pairing(&r.pairing_id, None).is_err());
     }
+
+    #[test]
+    fn rate_limits_pairing_requests_per_minute() {
+        let (_t, s) = store();
+        for i in 0..5 {
+            let r = s.request_pairing(&format!("Bot {i}"), None, None).unwrap();
+            s.deny_pairing(&r.pairing_id).unwrap();
+        }
+        assert!(s.request_pairing("One too many", None, None).is_err());
+    }
 }
