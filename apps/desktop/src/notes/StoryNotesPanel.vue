@@ -202,7 +202,7 @@ const saveLabel = computed(() => {
             class="story-notes__save"
             role="status"
             aria-live="polite"
-            data-test="notes-save-status"
+            data-test="note-save"
             :data-state="savePhase"
           >
             <template v-if="saveLabel.kind === 'saving' || saveLabel.kind === 'relative'">
@@ -214,7 +214,7 @@ const saveLabel = computed(() => {
               <svg class="story-notes__save-check" viewBox="0 0 16 16" aria-hidden="true">
                 <path d="M3.5 8.5l3 3 6-7" />
               </svg>
-              <span class="story-notes__save-text story-notes__save-text--ok">{{
+              <span class="story-notes__save-text story-notes__save-text--muted">{{
                 saveLabel.text
               }}</span>
             </template>
@@ -225,7 +225,7 @@ const saveLabel = computed(() => {
               <button
                 type="button"
                 class="story-notes__retry"
-                data-test="notes-save-retry"
+                data-test="note-save-retry"
                 @click="retryNotesSave(notesDoc)"
               >
                 Retry
@@ -372,10 +372,6 @@ const saveLabel = computed(() => {
 .story-notes__save-text--muted {
   color: var(--ct-text-muted);
 }
-.story-notes__save-text--ok {
-  color: var(--ct-success);
-  font-weight: var(--ct-weight-medium);
-}
 .story-notes__save-text--err {
   color: var(--ct-danger);
 }
@@ -383,7 +379,7 @@ const saveLabel = computed(() => {
   width: 14px;
   height: 14px;
   fill: none;
-  stroke: var(--ct-success);
+  stroke: var(--ct-text-muted);
   stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;

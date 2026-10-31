@@ -98,7 +98,7 @@ describe('StoryNotesPanel', () => {
       },
     });
     await flushPromises();
-    expect(w.get('[data-test=notes-save-status]').attributes('data-state')).toBe('saving');
+    expect(w.get('[data-test=note-save]').attributes('data-state')).toBe('saving');
     await persister.flush();
     expect(readNotesSaveStatus(notesDoc).phase).toBe('saved');
     w.unmount();
@@ -122,9 +122,9 @@ describe('StoryNotesPanel', () => {
       },
     });
     await flushPromises();
-    expect(w.get('[data-test=notes-save-status]').attributes('data-state')).toBe('error');
-    expect(w.find('[data-test=notes-save-retry]').exists()).toBe(true);
-    await w.get('[data-test=notes-save-retry]').trigger('click');
+    expect(w.get('[data-test=note-save]').attributes('data-state')).toBe('error');
+    expect(w.find('[data-test=note-save-retry]').exists()).toBe(true);
+    await w.get('[data-test=note-save-retry]').trigger('click');
     await flushPromises();
     expect(applyUpdate).toHaveBeenCalledTimes(2);
     w.unmount();
@@ -147,7 +147,7 @@ describe('StoryNotesPanel', () => {
       },
     });
     await flushPromises();
-    expect(w.get('[data-test=notes-save-status]').text()).toContain('Saved just now');
+    expect(w.get('[data-test=note-save]').text()).toContain('Saved just now');
     w.unmount();
   });
 });
