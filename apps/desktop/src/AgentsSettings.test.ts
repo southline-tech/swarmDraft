@@ -385,10 +385,18 @@ describe('AgentsSettings', () => {
       expect(w.find('[data-test="removed-agent"]').exists()).toBe(false);
       await w.find('[data-test="removed-toggle"]').trigger('click');
       expect(w.find('[data-test="removed-toggle"]').attributes('aria-expanded')).toBe('true');
+      expect(w.get('[data-test="removed-toggle"]').attributes('id')).toBe('ag-removed-toggle');
+      const panel = w.get('#ag-removed-panel');
+      expect(panel.attributes('role')).toBe('region');
+      expect(panel.attributes('aria-labelledby')).toBe('ag-removed-toggle');
       const row = w.get('[data-test="removed-agent"]');
       expect(row.text()).toContain('Retired');
       expect(row.text()).toContain('Removed Oct 30');
       expect(w.text()).toContain(REMOVED_HELP);
+      const help = w.get('.ag__removed-help');
+      expect(row.element.compareDocumentPosition(help.element)).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      );
       expect(row.find('[data-test="mcp-status"]').exists()).toBe(false);
       expect(row.find('[data-test="mint"]').exists()).toBe(false);
     });

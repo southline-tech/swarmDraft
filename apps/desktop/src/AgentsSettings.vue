@@ -37,6 +37,7 @@ const props = withDefaults(
 const agents = ref<Agent[]>([]);
 const tokens = ref<Record<string, TokenInfo[]>>({});
 const removedOpen = ref(false);
+const removedToggleId = 'ag-removed-toggle';
 const removedPanelId = 'ag-removed-panel';
 const name = ref('Grok Bot');
 const color = ref('#3366ff');
@@ -345,6 +346,7 @@ onBeforeUnmount(() => {
       </ul>
       <div v-if="removedAgents.length" class="ag__removed">
         <button
+          :id="removedToggleId"
           type="button"
           class="ag__removed-toggle"
           data-test="removed-toggle"
@@ -357,8 +359,13 @@ onBeforeUnmount(() => {
           <span class="ag__removed-chevron" aria-hidden="true">{{ removedOpen ? '▾' : '▸' }}</span>
           Removed agents ({{ removedAgents.length }})
         </button>
-        <div v-if="removedOpen" :id="removedPanelId" class="ag__removed-panel">
-          <p class="st-muted st-desc ag__removed-help">{{ REMOVED_HELP }}</p>
+        <div
+          v-if="removedOpen"
+          :id="removedPanelId"
+          class="ag__removed-panel"
+          role="region"
+          :aria-labelledby="removedToggleId"
+        >
           <ul class="ag__list ag__list--removed">
             <li
               v-for="a in removedAgents"
@@ -377,6 +384,7 @@ onBeforeUnmount(() => {
               </div>
             </li>
           </ul>
+          <p class="st-muted st-desc ag__removed-help">{{ REMOVED_HELP }}</p>
         </div>
       </div>
     </section>
@@ -567,7 +575,8 @@ onBeforeUnmount(() => {
   margin-top: var(--ct-space-2);
 }
 .ag__removed-help {
-  margin-bottom: var(--ct-space-2);
+  margin-top: var(--ct-space-2);
+  margin-bottom: 0;
 }
 .ag__list--removed .ag__agent--removed {
   border-top-color: var(--ct-border);
