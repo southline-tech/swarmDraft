@@ -36,6 +36,19 @@ describe('StoryNotesPanel', () => {
     expect(w.find('[data-test="note-detail"]').exists()).toBe(true);
   });
 
+  it('emits close when the header close control is activated', async () => {
+    const notesDoc = createNotesDoc();
+    const w = mount(StoryNotesPanel, {
+      props: {
+        notesDoc,
+        outline: [],
+        humanAuthor: { id: 'h', name: 'Sample Person' },
+      },
+    });
+    await w.get('[data-test=story-notes-close]').trigger('click');
+    expect(w.emitted('close')).toHaveLength(1);
+  });
+
   it('names the note body editor for assistive tech', async () => {
     const notesDoc = createNotesDoc();
     addNote(notesDoc, { kind: 'human', id: 'h', name: 'Sample Person' }, 'Note');

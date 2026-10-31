@@ -88,6 +88,8 @@ import { loadProfile } from './settings/prefs';
 const info = ref<AppInfo | null>(null);
 const session = shallowRef<ManuscriptSession | null>(null);
 const notesSession = shallowRef<NotesSession | null>(null);
+/** #38: story notes dock under the editor; off until the writer opens them from the book menu. */
+const storyNotesOpen = ref(false);
 const selectedId = ref<string>();
 const editorPane = ref<InstanceType<typeof ContinuousManuscript> | null>(null);
 /** Outline row clicked (#36): scroll to the section and put the caret in its body (#107). */
@@ -619,6 +621,7 @@ function closeSession() {
   void notesSession.value?.close({ discard: true });
   session.value = null;
   notesSession.value = null;
+  storyNotesOpen.value = false;
   saveStatusShown.value = false;
   decisionRecordsBySection.value = {};
   selectedId.value = undefined;
@@ -650,13 +653,7 @@ function open(next: ManuscriptSession) {
   choosingBook.value = false;
   session.value = next;
   notesSession.value = null;
-  if (isTauri()) {
-    void openNotesSession(next.id)
-      .then((ns) => {
-        if (session.value?.id === next.id) notesSession.value = ns;
-      })
-      .catch((err) => console.error('Could not load story notes', err));
-  }
+  storyNotesOpen.value = false;
   decisionRecordsBySection.value = {};
   void loadDecisionRecords(next.id);
   syncWindowTitle(next.title || PRODUCT_NAME);
@@ -850,14 +847,27 @@ const outlineForced = computed(() => outlineAuto.manual.value && navigatorOpen.v
 /** wp2 (#67): full outline, collapsed rail, or hidden in focus mode. */
 const workspaceGridClass = computed(() => {
   if (focusMode.value) return 'grid-cols-1';
-  const notesCol = notesSession.value ? '20rem' : '';
-  if (notesCol) {
-    return navigatorOpen.value
-      ? `grid-cols-[18rem_${notesCol}_1fr]`
-      : `grid-cols-[var(--ct-rail-w)_${notesCol}_1fr]`;
-  }
   return navigatorOpen.value ? 'grid-cols-[18rem_1fr]' : 'grid-cols-[var(--ct-rail-w)_1fr]';
 });
+
+async function ensureNotesSession() {
+  const id = session.value?.id;
+  if (!id || notesSession.value || !isTauri()) return;
+  notesSession.value = await openNotesSession(id);
+}
+
+async function toggleStoryNotes() {
+  if (storyNotesOpen.value) {
+    storyNotesOpen.value = false;
+    return;
+  }
+  try {
+    await ensureNotesSession();
+    if (notesSession.value) storyNotesOpen.value = true;
+  } catch (err) {
+    console.error('Could not load story notes', err);
+  }
+}
 const chapterNavControls = computed(() =>
   navigatorOpen.value ? 'chapter-navigator' : 'chapter-navigator-rail',
 );
@@ -972,6 +982,25 @@ defineExpose({ open, closeSession });
             </div>
           </div>
           <div class="sh-sep" role="separator" />
+          <button
+            v-if="session && !choosingBook && isTauri()"
+            type="button"
+            class="sh-mi"
+            role="menuitemcheckbox"
+            data-test="app-menu-story-notes"
+            :aria-checked="storyNotesOpen ? 'true' : 'false'"
+            @click="
+              () => {
+                void toggleStoryNotes();
+                closeBookMenu();
+              }
+            "
+          >
+            <span class="sh-mi-lead" aria-hidden="true"
+              ><AppIcon name="sparkle" class="app-menu-icon"
+            /></span>
+            Story notes
+          </button>
           <button
             ref="settingsButton"
             type="button"
@@ -1185,51 +1214,56 @@ defineExpose({ open, closeSession });
         @numbering-style="onNumberingStyle"
       />
       <OutlineRail v-show="!navigatorOpen && !focusMode" @expand="outlineAuto.toggleByHand()" />
-      <StoryNotesPanel
-        v-if="notesSession && session && !focusMode"
-        :notes-doc="notesSession.doc"
-        :outline="session.outline.value"
-        :human-author="humanNotesAuthor"
-        :readonly="session.closed || restoreInProgress"
-        data-test="story-notes-panel"
-        @select-section="focusEditor"
-      />
-      <ContinuousManuscript
-        ref="editorPane"
-        :outline="session.outline.value"
-        :sections="session.sections"
-        :selected-id="selectedId"
-        :reload-token="reloads"
-        :readonly="session.closed || restoreInProgress"
-        :read-only-reason="restoreInProgress ? 'restore in progress' : undefined"
-        :navigator-open="navigatorOpen"
-        :navigator-controls="chapterNavControls"
-        :chapter-title="selected?.title"
-        :section-labels="sectionLabels"
-        :book-docs="outlineDocs(session.outline.value, session.sections)"
-        :chapter-docs="
-          selectedId
-            ? sectionTreeDocs(session.outline.value, selectedId, session.sections)
-            : undefined
-        "
-        :save-state="saveStatus"
-        :author-labels="markAuthorLabel"
-        toolbar-target="#toolbar-row"
-        external-load-error
-        :outline-forced="outlineForced"
-        :notes-hidden="notesHidden"
-        :computer-name="info?.computerName"
-        :decision-records-by-section="decisionRecordsBySection"
-        :manuscript-id="session.id"
-        @update:selected-id="selectedId = $event"
-        @load-error="editorLoadError = $event"
-        @reload="reloadSection"
-        @toggle-navigator="outlineAuto.toggleByHand()"
-        @decisions="onSectionDecisions"
-        @layout="onEditorLayout"
-        @focus-mode="focusMode = $event"
-        @ask-bot="onAskBotFromEditor"
-      />
+      <div class="editor-stack min-h-0 min-w-0">
+        <ContinuousManuscript
+          ref="editorPane"
+          class="editor-stack__page min-h-0 min-w-0 flex-1"
+          :outline="session.outline.value"
+          :sections="session.sections"
+          :selected-id="selectedId"
+          :reload-token="reloads"
+          :readonly="session.closed || restoreInProgress"
+          :read-only-reason="restoreInProgress ? 'restore in progress' : undefined"
+          :navigator-open="navigatorOpen"
+          :navigator-controls="chapterNavControls"
+          :chapter-title="selected?.title"
+          :section-labels="sectionLabels"
+          :book-docs="outlineDocs(session.outline.value, session.sections)"
+          :chapter-docs="
+            selectedId
+              ? sectionTreeDocs(session.outline.value, selectedId, session.sections)
+              : undefined
+          "
+          :save-state="saveStatus"
+          :author-labels="markAuthorLabel"
+          toolbar-target="#toolbar-row"
+          external-load-error
+          :outline-forced="outlineForced"
+          :notes-hidden="notesHidden"
+          :computer-name="info?.computerName"
+          :decision-records-by-section="decisionRecordsBySection"
+          :manuscript-id="session.id"
+          @update:selected-id="selectedId = $event"
+          @load-error="editorLoadError = $event"
+          @reload="reloadSection"
+          @toggle-navigator="outlineAuto.toggleByHand()"
+          @decisions="onSectionDecisions"
+          @layout="onEditorLayout"
+          @focus-mode="focusMode = $event"
+          @ask-bot="onAskBotFromEditor"
+        />
+        <StoryNotesPanel
+          v-if="storyNotesOpen && notesSession && !focusMode"
+          class="editor-stack__notes"
+          :notes-doc="notesSession.doc"
+          :outline="session.outline.value"
+          :human-author="humanNotesAuthor"
+          :readonly="session.closed || restoreInProgress"
+          data-test="story-notes-panel"
+          @select-section="focusEditor"
+          @close="storyNotesOpen = false"
+        />
+      </div>
     </div>
   </main>
 </template>
@@ -1279,6 +1313,29 @@ body {
 .shell > .workspace {
   flex: 1 0 20rem;
   min-height: 0;
+}
+.editor-stack {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.editor-stack__page {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.editor-stack__notes {
+  flex: none;
+  max-height: min(40vh, 20rem);
+  min-height: 10rem;
+  overflow: hidden;
+}
+.editor-stack__notes :deep(.story-notes) {
+  max-height: 100%;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
 }
 .topbar {
   display: flex;
