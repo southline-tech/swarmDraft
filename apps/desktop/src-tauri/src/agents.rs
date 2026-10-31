@@ -33,6 +33,8 @@ pub struct Agent {
     pub revoked_at: Option<String>,
     /// Built-in P1 bot; at most one row is primary. Drives a fixed collab-1 color by agent id.
     pub primary: bool,
+    /// Last authenticated MCP activity (#188); throttled writes.
+    pub last_seen_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,7 +95,7 @@ pub fn hash_token(token: &str) -> String {
         .collect()
 }
 
-fn normalize_scopes(scopes: Option<&[String]>) -> Result<Vec<String>, StorageError> {
+pub(crate) fn normalize_scopes(scopes: Option<&[String]>) -> Result<Vec<String>, StorageError> {
     let Some(scopes) = scopes else {
         return Ok(SCOPES.iter().map(|s| s.to_string()).collect());
     };
@@ -126,10 +128,11 @@ fn row_agent(r: &rusqlite::Row) -> rusqlite::Result<Agent> {
         created_at: r.get(3)?,
         revoked_at: r.get(4)?,
         primary: r.get::<_, i64>(5)? != 0,
+        last_seen_at: r.get(6)?,
     })
 }
 
-const AGENT_COLS: &str = "id, name, color, created_at, revoked_at, is_primary";
+const AGENT_COLS: &str = "id, name, color, created_at, revoked_at, is_primary, last_seen_at";
 
 fn row_token(r: &rusqlite::Row) -> rusqlite::Result<TokenInfo> {
     let scopes: String = r.get(3)?;
@@ -200,65 +203,110 @@ fn name_key(name: &str) -> String {
 
 const TOKEN_COLS: &str = "id, agent_id, prefix, scopes, created_at, last_used_at, revoked_at";
 
+/// Insert an agent row on an open connection (used by pairing approve in one transaction).
+pub(crate) fn insert_agent(
+    c: &rusqlite::Connection,
+    name: &str,
+    color: &str,
+) -> Result<Agent, StorageError> {
+    let name = clean_name(name);
+    let name = name.as_str();
+    if name.is_empty() || name.chars().count() > 64 {
+        return Err(StorageError::Invalid("name must be 1-64 characters".into()));
+    }
+    let key = name_key(name);
+    if !valid_color(color) {
+        return Err(StorageError::Invalid("color must look like #rrggbb".into()));
+    }
+    let id = new_id();
+    let user_display_name: Option<String> = c
+        .query_row(
+            "SELECT value FROM app_meta WHERE key = ?1",
+            [USER_DISPLAY_NAME_META_KEY],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if reserved_name(name, user_display_name.as_deref()) {
+        return Err(StorageError::Invalid(format!(
+            "\"{name}\" is reserved; choose another agent name"
+        )));
+    }
+    let taken = {
+        let mut st = c.prepare("SELECT name FROM agents")?;
+        let names = st
+            .query_map([], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        names.iter().any(|n| name_key(n) == key)
+    };
+    if taken {
+        return Err(StorageError::Invalid(format!(
+            "an agent named \"{name}\" already exists; choose another name"
+        )));
+    }
+    let has_primary = c
+        .query_row(
+            "SELECT 1 FROM agents WHERE is_primary = 1 AND revoked_at IS NULL LIMIT 1",
+            [],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    let make_primary = !has_primary && name_key(name) == name_key(DEFAULT_AGENT_NAME);
+    c.execute(
+        &format!(
+            "INSERT INTO agents (id, name, color, created_at, is_primary)
+             VALUES (?1, ?2, ?3, {NOW}, ?4)"
+        ),
+        params![id, name, color, i64::from(make_primary)],
+    )?;
+    Ok(c.query_row(
+        &format!("SELECT {AGENT_COLS} FROM agents WHERE id = ?1"),
+        [&id],
+        row_agent,
+    )?)
+}
+
+/// Mint a token on an open connection (plaintext returned once; hash stored).
+pub(crate) fn insert_token(
+    c: &rusqlite::Connection,
+    agent_id: &str,
+    scopes: Option<&[String]>,
+) -> Result<NewToken, StorageError> {
+    let scopes = normalize_scopes(scopes)?;
+    let token = format!(
+        "{TOKEN_PREFIX}{}",
+        URL_SAFE_NO_PAD.encode(random_bytes::<32>())
+    );
+    let prefix: String = token.chars().take(TOKEN_PREFIX.len() + 6).collect();
+    let id = new_id();
+    let active: Option<i64> = c
+        .query_row(
+            "SELECT 1 FROM agents WHERE id = ?1 AND revoked_at IS NULL",
+            [agent_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if active.is_none() {
+        return Err(StorageError::NotFound(format!("active agent {agent_id}")));
+    }
+    c.execute(
+        &format!(
+            "INSERT INTO agent_tokens (id, agent_id, token_hash, prefix, scopes, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, {NOW})"
+        ),
+        params![id, agent_id, hash_token(&token), prefix, scopes.join(" ")],
+    )?;
+    let info = c.query_row(
+        &format!("SELECT {TOKEN_COLS} FROM agent_tokens WHERE id = ?1"),
+        [&id],
+        row_token,
+    )?;
+    Ok(NewToken { token, info })
+}
+
 impl Store {
     pub fn create_agent(&self, name: &str, color: &str) -> Result<Agent, StorageError> {
-        let name = clean_name(name);
-        let name = name.as_str();
-        if name.is_empty() || name.chars().count() > 64 {
-            return Err(StorageError::Invalid("name must be 1-64 characters".into()));
-        }
-        let key = name_key(name);
-        if !valid_color(color) {
-            return Err(StorageError::Invalid("color must look like #rrggbb".into()));
-        }
-        let id = new_id();
-        self.with_conn(|c| {
-            let user_display_name: Option<String> = c
-                .query_row(
-                    "SELECT value FROM app_meta WHERE key = ?1",
-                    [USER_DISPLAY_NAME_META_KEY],
-                    |r| r.get(0),
-                )
-                .optional()?;
-            if reserved_name(name, user_display_name.as_deref()) {
-                return Err(StorageError::Invalid(format!(
-                    "\"{name}\" is reserved; choose another agent name"
-                )));
-            }
-            let taken = {
-                let mut st = c.prepare("SELECT name FROM agents")?;
-                let names = st
-                    .query_map([], |r| r.get::<_, String>(0))?
-                    .collect::<Result<Vec<_>, _>>()?;
-                names.iter().any(|n| name_key(n) == key)
-            };
-            if taken {
-                return Err(StorageError::Invalid(format!(
-                    "an agent named \"{name}\" already exists; choose another name"
-                )));
-            }
-            let has_primary = c
-                .query_row(
-                    "SELECT 1 FROM agents WHERE is_primary = 1 AND revoked_at IS NULL LIMIT 1",
-                    [],
-                    |_| Ok(()),
-                )
-                .optional()?
-                .is_some();
-            let make_primary = !has_primary && name_key(name) == name_key(DEFAULT_AGENT_NAME);
-            c.execute(
-                &format!(
-                    "INSERT INTO agents (id, name, color, created_at, is_primary)
-                     VALUES (?1, ?2, ?3, {NOW}, ?4)"
-                ),
-                params![id, name, color, i64::from(make_primary)],
-            )?;
-            Ok(c.query_row(
-                &format!("SELECT {AGENT_COLS} FROM agents WHERE id = ?1"),
-                [&id],
-                row_agent,
-            )?)
-        })
+        self.with_conn(|c| insert_agent(c, name, color))
     }
 
     /// Persist the writer display name from Settings (#45). Rejects names that collide with an
@@ -348,38 +396,7 @@ impl Store {
         agent_id: &str,
         scopes: Option<&[String]>,
     ) -> Result<NewToken, StorageError> {
-        let scopes = normalize_scopes(scopes)?;
-        let token = format!(
-            "{TOKEN_PREFIX}{}",
-            URL_SAFE_NO_PAD.encode(random_bytes::<32>())
-        );
-        let prefix: String = token.chars().take(TOKEN_PREFIX.len() + 6).collect();
-        let id = new_id();
-        self.with_conn(|c| {
-            let active: Option<i64> = c
-                .query_row(
-                    "SELECT 1 FROM agents WHERE id = ?1 AND revoked_at IS NULL",
-                    [agent_id],
-                    |r| r.get(0),
-                )
-                .optional()?;
-            if active.is_none() {
-                return Err(StorageError::NotFound(format!("active agent {agent_id}")));
-            }
-            c.execute(
-                &format!(
-                    "INSERT INTO agent_tokens (id, agent_id, token_hash, prefix, scopes, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, {NOW})"
-                ),
-                params![id, agent_id, hash_token(&token), prefix, scopes.join(" ")],
-            )?;
-            let info = c.query_row(
-                &format!("SELECT {TOKEN_COLS} FROM agent_tokens WHERE id = ?1"),
-                [&id],
-                row_token,
-            )?;
-            Ok(NewToken { token, info })
-        })
+        self.with_conn(|c| insert_token(c, agent_id, scopes))
     }
 
     pub fn list_tokens(&self, agent_id: &str) -> Result<Vec<TokenInfo>, StorageError> {
@@ -450,6 +467,14 @@ impl Store {
                               OR last_used_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-60 seconds'))"
                     ),
                     [&p.token_id],
+                );
+                let _ = c.execute(
+                    &format!(
+                        "UPDATE agents SET last_seen_at = {NOW} WHERE id = ?1
+                         AND (last_seen_at IS NULL
+                              OR last_seen_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-30 seconds'))"
+                    ),
+                    [&p.agent_id],
                 );
             }
             if p.is_none() {

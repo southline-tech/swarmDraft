@@ -32,7 +32,7 @@ async fn start() -> Server {
     let token = store.create_token(&agent.id, Some(&scopes)).unwrap().token;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let (app, _) = mcp::router_with_stats(store.clone(), mcp::McpConfig::new(addr.port()));
+    let (app, _) = mcp::router_with_stats(store.clone(), mcp::McpConfig::new(addr.port()), None);
     let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     Server {

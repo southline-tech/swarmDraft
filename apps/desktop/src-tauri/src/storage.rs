@@ -157,6 +157,42 @@ const MIGRATIONS: &[&str] = &[
         finished_at TEXT
      );
      CREATE INDEX export_jobs_manuscript ON export_jobs(manuscript_id, created_at);",
+    // #188: MCP pairing requests and agent activity for connection status.
+    "ALTER TABLE agents ADD COLUMN last_seen_at TEXT;
+     CREATE TABLE agent_pairings (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        color TEXT NOT NULL,
+        requested_scopes TEXT NOT NULL,
+        secret_hash TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending','approved','denied','expired')),
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        resolved_at TEXT,
+        agent_id TEXT REFERENCES agents(id),
+        approved_scopes TEXT,
+        delivery_token TEXT
+     );
+     CREATE INDEX agent_pairings_status ON agent_pairings(status, expires_at);",
+    // #188: short-lived claim while approve runs agent + token in one transaction.
+    "CREATE TABLE agent_pairings_claim (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        color TEXT NOT NULL,
+        requested_scopes TEXT NOT NULL,
+        secret_hash TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending','approving','approved','denied','expired')),
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        resolved_at TEXT,
+        agent_id TEXT REFERENCES agents(id),
+        approved_scopes TEXT,
+        delivery_token TEXT
+     );
+     INSERT INTO agent_pairings_claim SELECT * FROM agent_pairings;
+     DROP TABLE agent_pairings;
+     ALTER TABLE agent_pairings_claim RENAME TO agent_pairings;
+     CREATE INDEX agent_pairings_status ON agent_pairings(status, expires_at);",
 ];
 
 /// How long a statement waits on a locked database before failing.
@@ -216,6 +252,15 @@ impl Store {
     ) -> Result<T, StorageError> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         Ok(f(&mut conn)?)
+    }
+
+    /// Like `with_conn_mut`, for closures returning `StorageError`.
+    pub(crate) fn with_conn_mut_storage<T>(
+        &self,
+        f: impl FnOnce(&mut Connection) -> Result<T, StorageError>,
+    ) -> Result<T, StorageError> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        f(&mut conn)
     }
 
     /// Prepare a staged database file for restore: migrate it, stamp `restore_id` into
@@ -367,7 +412,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         {
             let mut conn = Connection::open(tmp.path().join("coauthor.db")).unwrap();
-            migrate_with(&mut conn, &MIGRATIONS[..MIGRATIONS.len() - 4]).unwrap();
+            migrate_with(&mut conn, &MIGRATIONS[..5]).unwrap();
             conn.execute(
                 "INSERT INTO agents (id, name, color, created_at) VALUES (?1, ?2, ?3, ?4)",
                 rusqlite::params!["a1", "Line Editor", "#3366ff", "2026-01-01T00:00:00Z"],

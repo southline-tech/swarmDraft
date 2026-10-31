@@ -35,6 +35,13 @@ use crate::storage::Store;
 use tokio::sync::Semaphore;
 pub use tools::CoauthorMcp;
 
+/// Called when a bot opens an MCP pairing request (#188).
+pub type PairingRequestedHook = Arc<dyn Fn(String) + Send + Sync>;
+
+/// Set on unauthenticated MCP requests allowed to reach pairing tools only.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PairingGuest;
+
 pub const DEFAULT_HOST: &str = "127.0.0.1";
 pub const DEFAULT_PORT: u16 = 7337;
 /// Requests allowed per token per window.
@@ -196,10 +203,38 @@ fn bearer(req: &Request) -> Option<String> {
     (scheme.eq_ignore_ascii_case("bearer") && !token.is_empty()).then(|| token.to_string())
 }
 
+/// MCP methods reachable without a bearer token (#188). Every other call must 401.
+pub(crate) fn unauthenticated_mcp_allowed(body: &[u8]) -> bool {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return false;
+    };
+    let Some(method) = v.get("method").and_then(|m| m.as_str()) else {
+        return false;
+    };
+    match method {
+        "initialize" | "notifications/initialized" | "ping" => true,
+        "tools/call" => v
+            .get("params")
+            .and_then(|p| p.get("name"))
+            .and_then(|n| n.as_str())
+            .is_some_and(|n| n == "request_pairing" || n == "poll_pairing"),
+        _ => false,
+    }
+}
+
 async fn auth(State(gate): State<Gate>, mut req: Request, next: Next) -> Response {
     let deadline = tokio::time::Instant::now() + gate.cfg.auth_failure_floor;
-    // No token: plain 401, not counted, so a web page can't use it to lock out agents.
     let Some(token) = bearer(&req) else {
+        let (parts, body) = req.into_parts();
+        let bytes = match axum::body::to_bytes(body, MAX_BODY_BYTES).await {
+            Ok(b) => b,
+            Err(_) => return too_large(),
+        };
+        if unauthenticated_mcp_allowed(&bytes) {
+            req = Request::from_parts(parts, axum::body::Body::from(bytes));
+            req.extensions_mut().insert(PairingGuest);
+            return next.run(req).await;
+        }
         tokio::time::sleep_until(deadline).await;
         return unauthorized();
     };
@@ -264,7 +299,7 @@ async fn auth(State(gate): State<Gate>, mut req: Request, next: Next) -> Respons
     next.run(req).await
 }
 
-/// Largest accepted request body. Checked after auth, so unauthenticated bodies are never read.
+/// Largest accepted request body. Checked before auth so pairing handshakes can be inspected safely.
 pub const MAX_BODY_BYTES: usize = 1024 * 1024;
 
 /// The MCP service reads raw bodies (not through axum extractors), so axum's default limit
@@ -294,12 +329,17 @@ fn too_large() -> Response {
     (StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response()
 }
 
-/// The `/mcp` router plus its counters. Layers run outermost first: Host/Origin guard, then
-/// auth and throttling, then the MCP service (which repeats its own Origin check).
-pub fn router_with_stats(store: Store, cfg: McpConfig) -> (axum::Router, Arc<GateStats>) {
+/// The `/mcp` router plus its counters. Layers run outermost first: Host/Origin guard, body limit,
+/// then auth (pairing bypass reads the buffered body), then the MCP service.
+pub fn router_with_stats(
+    store: Store,
+    cfg: McpConfig,
+    pairing_hook: Option<PairingRequestedHook>,
+) -> (axum::Router, Arc<GateStats>) {
     let mcp_store = store.clone();
+    let hook = pairing_hook.clone();
     let service = StreamableHttpService::new(
-        move || Ok(CoauthorMcp::new(mcp_store.clone())),
+        move || Ok(CoauthorMcp::new(mcp_store.clone(), hook.clone())),
         Arc::new(NeverSessionManager::default()),
         StreamableHttpServerConfig::default()
             .with_legacy_session_mode(false)
@@ -329,14 +369,18 @@ pub fn router_with_stats(store: Store, cfg: McpConfig) -> (axum::Router, Arc<Gat
     let stats = gate.stats.clone();
     let app = axum::Router::new()
         .nest_service("/mcp", service)
-        .layer(axum::middleware::from_fn(body_limit))
         .layer(axum::middleware::from_fn_with_state(gate.clone(), auth))
+        .layer(axum::middleware::from_fn(body_limit))
         .layer(axum::middleware::from_fn_with_state(gate, host_guard));
     (app, stats)
 }
 
-pub fn router(store: Store, cfg: McpConfig) -> axum::Router {
-    router_with_stats(store, cfg).0
+pub fn router(
+    store: Store,
+    cfg: McpConfig,
+    pairing_hook: Option<PairingRequestedHook>,
+) -> axum::Router {
+    router_with_stats(store, cfg, pairing_hook).0
 }
 
 /// When another program holds the MCP port and it is not the legacy desktop app.
@@ -385,10 +429,11 @@ pub fn bind(port: u16) -> std::io::Result<std::net::TcpListener> {
 pub async fn serve_on(
     store: Store,
     listener: std::net::TcpListener,
+    pairing_hook: Option<PairingRequestedHook>,
 ) -> std::io::Result<SocketAddr> {
     let listener = tokio::net::TcpListener::from_std(listener)?;
     let addr = listener.local_addr()?;
-    let app = router(store, McpConfig::new(addr.port()));
+    let app = router(store, McpConfig::new(addr.port()), pairing_hook);
     tokio::spawn(async move {
         let app = app.into_make_service_with_connect_info::<SocketAddr>();
         if let Err(e) = axum::serve(listener, app).await {
@@ -399,6 +444,10 @@ pub async fn serve_on(
 }
 
 /// Bind on loopback and serve until the process exits. Returns the bound address.
-pub async fn serve(store: Store, port: u16) -> std::io::Result<SocketAddr> {
-    serve_on(store, bind(port)?).await
+pub async fn serve(
+    store: Store,
+    port: u16,
+    pairing_hook: Option<PairingRequestedHook>,
+) -> std::io::Result<SocketAddr> {
+    serve_on(store, bind(port)?, pairing_hook).await
 }

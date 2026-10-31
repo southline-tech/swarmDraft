@@ -90,6 +90,7 @@ pub(crate) enum Output {
 #[derive(Clone)]
 pub struct CoauthorMcp {
     pub(crate) store: Store,
+    pairing_hook: Option<crate::mcp::PairingRequestedHook>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -193,6 +194,19 @@ pub struct GetExportArgs {
     pub export_id: String,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RequestPairingArgs {
+    pub name: String,
+    pub color: Option<String>,
+    pub scopes: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PollPairingArgs {
+    pub pairing_id: String,
+    pub pairing_secret: String,
+}
+
 pub const PARAGRAPH_STYLES: &[&str] = &[
     "body",
     "first",
@@ -218,10 +232,21 @@ fn principal(parts: &Parts) -> Result<AgentPrincipal, ErrorData> {
         .ok_or_else(|| ErrorData::invalid_request("unauthenticated", None))
 }
 
+fn pairing_access(parts: &Parts) -> Result<(), ErrorData> {
+    if parts.extensions.get::<crate::mcp::PairingGuest>().is_some()
+        || parts.extensions.get::<AgentPrincipal>().is_some()
+    {
+        Ok(())
+    } else {
+        Err(ErrorData::invalid_request("unauthenticated", None))
+    }
+}
+
 impl CoauthorMcp {
-    pub fn new(store: Store) -> Self {
+    pub fn new(store: Store, pairing_hook: Option<crate::mcp::PairingRequestedHook>) -> Self {
         Self {
             store,
+            pairing_hook,
             tool_router: Self::tool_router(),
         }
     }
@@ -894,6 +919,66 @@ impl CoauthorMcp {
             },
         )
     }
+
+    #[tool(
+        description = "Request author approval to connect as an agent. Returns a pairing id and secret; poll with poll_pairing until approved or denied."
+    )]
+    async fn request_pairing(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(a): Parameters<RequestPairingArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        pairing_access(&parts)?;
+        check_len("name", &a.name, 64).map_err(|e| ErrorData::invalid_params(e.message, None))?;
+        if let Some(c) = &a.color {
+            check_len("color", c, MAX_ID)
+                .map_err(|e| ErrorData::invalid_params(e.message, None))?;
+        }
+        let result =
+            match self
+                .store
+                .request_pairing(&a.name, a.color.as_deref(), a.scopes.as_deref())
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    return Ok(CallToolResult::error(vec![ContentBlock::text(
+                        e.to_string(),
+                    )]));
+                }
+            };
+        if let Some(hook) = &self.pairing_hook {
+            hook(result.pairing_id.clone());
+        }
+        Ok(CallToolResult::structured(json!({
+            "pairingId": result.pairing_id,
+            "pairingSecret": result.pairing_secret,
+            "status": result.status,
+        })))
+    }
+
+    #[tool(
+        description = "Poll a pairing request; returns pending, denied, expired, or approved with a bearer token once."
+    )]
+    async fn poll_pairing(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(a): Parameters<PollPairingArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        pairing_access(&parts)?;
+        check_ids(&[
+            ("pairing_id", Some(&a.pairing_id)),
+            ("pairing_secret", Some(&a.pairing_secret)),
+        ])
+        .map_err(|e| ErrorData::invalid_params(e.message, None))?;
+        let result = self
+            .store
+            .poll_pairing(&a.pairing_id, &a.pairing_secret)
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        Ok(CallToolResult::structured(json!({
+            "status": result.status,
+            "token": result.token,
+        })))
+    }
 }
 
 const REVIEW_MARKS: &[&str] = &[
@@ -1348,7 +1433,7 @@ mod tests {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let mcp = CoauthorMcp::new(store.clone());
+        let mcp = CoauthorMcp::new(store.clone(), None);
         let before = counts(&store);
         for tool in 0..3 {
             // A fresh, valid token for each call: auth passes and the tool runs its checks.
@@ -1450,7 +1535,7 @@ mod tests {
         let scopes = vec!["read".to_string(), "suggest".to_string()];
         let tok = store.create_token(&agent.id, Some(&scopes)).unwrap();
         let principal = store.authenticate(&tok.token).unwrap().unwrap();
-        let mcp = CoauthorMcp::new(store.clone());
+        let mcp = CoauthorMcp::new(store.clone(), None);
         let edit = |quote: &str| {
             let (mut parts, ()) = axum::http::Request::new(()).into_parts();
             parts.extensions.insert(principal.clone());
