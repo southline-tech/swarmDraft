@@ -62,6 +62,7 @@ describe('profile name sync (#45)', () => {
     expect(
       profileNameSaveError('"Grok Bot" is already used by an agent; choose another name'),
     ).toContain('already used by an agent');
+    expect(profileNameSaveError('"You" is reserved; choose another name')).toContain('reserved');
     expect(profileNameSaveError(new Error('db exploded'))).toContain("Couldn't save");
   });
 });

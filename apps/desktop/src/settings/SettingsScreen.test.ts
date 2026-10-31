@@ -197,6 +197,36 @@ describe('Your name & color (#99)', () => {
     expect(loadProfile().name).toBe('Author');
   });
 
+  it('shows a clear error when the name is reserved (#184)', async () => {
+    const w = mount(NameColorSection, {
+      props: {
+        syncDisplayName: async () => {
+          throw '"You" is reserved; choose another name';
+        },
+      },
+    });
+    await w.get('[data-test="settings-name"]').setValue('You');
+    await w.get('[data-test="settings-save"]').trigger('click');
+    await flushPromises();
+    expect(w.get('[data-test="settings-name-status"]').text()).toContain('reserved');
+    expect(loadProfile().name).toBe('Author');
+  });
+
+  it('shows reserved when Grok Bot is not an agent yet (#184, Windows QA)', async () => {
+    const w = mount(NameColorSection, {
+      props: {
+        syncDisplayName: async () => {
+          throw '"Grok Bot" is reserved; choose another name';
+        },
+      },
+    });
+    await w.get('[data-test="settings-name"]').setValue('Grok Bot');
+    await w.get('[data-test="settings-save"]').trigger('click');
+    await flushPromises();
+    expect(w.get('[data-test="settings-name-status"]').text()).toContain('reserved');
+    expect(loadProfile().name).toBe('Author');
+  });
+
   it('unsaved edits are not kept; a broken stored value falls back to the default', async () => {
     const w = mount(NameColorSection);
     await w.get('[data-test="settings-name"]').setValue('Unsaved');

@@ -13,6 +13,8 @@ import { pinPrimaryAgent } from './author-colors';
 export const AGENT_PREFIX = 'agent:';
 export const REMOVED_AGENT = 'Removed agent';
 export const UNNAMED_AGENT = 'Unnamed agent';
+/** Built-in P1 agent label in Settings → Agents; writer display names may not use it (#184). */
+export const DEFAULT_AGENT_NAME = 'Grok Bot';
 export const REVOKED_NOTE = '(revoked)';
 export const REMOVED_NOTE = '(removed)';
 
