@@ -112,9 +112,7 @@ export function invalidateSpellBlock(editor: Editor, blockPos: number): void {
   const view = editor.view;
   if (view.isDestroyed) return;
   view.dispatch(
-    view.state.tr
-      .setMeta(spellcheckKey, { invalidate: blockPos })
-      .setMeta('addToHistory', false),
+    view.state.tr.setMeta(spellcheckKey, { invalidate: blockPos }).setMeta('addToHistory', false),
   );
 }
 

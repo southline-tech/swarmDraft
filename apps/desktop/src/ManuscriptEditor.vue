@@ -992,12 +992,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
           data-test="margin-notes"
           aria-label="Suggestion notes"
         >
-          <div
-            v-for="c in changes"
-            :key="`m-${c.key}`"
-            class="sh-callout"
-            data-test="margin-note"
-          >
+          <div v-for="c in changes" :key="`m-${c.key}`" class="sh-callout" data-test="margin-note">
             <b
               ><bdi dir="auto">{{ c.author ? labelAuthor(c.author).name : 'Suggestion' }}</bdi></b
             >
