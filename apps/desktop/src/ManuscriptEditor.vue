@@ -107,6 +107,11 @@ import { loadSpellPrefs, spellcheckEnabled } from './settings/prefs';
 import { applyReviewDecision } from './review/apply';
 import { collabColor, setWriterProfileForColors } from './author-colors';
 import { commentRowLabel, primaryCommentByThread } from './review/review-sidebar';
+import { parseBookChangeKey, scopeBookChangeKey } from './review/review-book';
+import type { BookChapterGroup } from './review/review-book';
+import { scrollBehavior, scrollElementCenterInRoot } from './review/review-scroll';
+import { CONTINUOUS_REVIEW_NAV, CONTINUOUS_SCROLL_ROOT } from './continuous-review-nav';
+import type { ReviewChange } from './review/review-state';
 import { SECTION_LOAD_ERROR_COPY } from './errors/map-error';
 import type { DocNode } from '@coauthor/schema';
 import { useDeferredValue } from './a11y/deferred';
@@ -175,6 +180,13 @@ const props = defineProps<{
   decisionRecords?: readonly DecisionRecord[];
   /** Designer evidence (#55 / wp5): start in focus mode for screenshot harness. */
   initialFocusMode?: boolean;
+  /** Section id for continuous book-wide review (#210). */
+  sectionId?: string;
+  /** Book-wide merged changes for the review rail (lead section only). */
+  bookChanges?: readonly ReviewChange[];
+  bookChapterGroups?: readonly BookChapterGroup[];
+  reviewActiveScrollKey?: string | null;
+  reviewFollow?: boolean;
 }>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
@@ -198,9 +210,14 @@ const emit = defineEmits<{
   'caret-words': [count: number];
   /** Writer placed the caret (click or key); scroll-based page estimate stops (#216). */
   'caret-placed': [];
+  /** Open suggestions in this section for book-wide aggregation (#210). */
+  'open-suggestions': [items: SuggestionItem[]];
+  'update:reviewFollow': [on: boolean];
 }>();
 
 const appFooterEditor = inject(APP_FOOTER_EDITOR_KEY, null);
+const continuousNav = inject(CONTINUOUS_REVIEW_NAV, null);
+const continuousScroll = inject(CONTINUOUS_SCROLL_ROOT, null);
 
 /* UI shells for the audit review (Part of #36). Local view state only: none of these change the
    manuscript, the Y.Doc, the selection or the undo history. */
@@ -450,7 +467,11 @@ const currentKey = shallowRef<string | null>(null);
 let currentIndex = -1;
 const collapsed = shallowRef(loadCollapsed());
 watch(collapsed, (v) => saveCollapsed(v));
-const changes = computed(() => groupChanges(suggestions.value));
+const changes = computed(() =>
+  props.reviewTarget && props.bookChanges != null
+    ? [...props.bookChanges]
+    : groupChanges(suggestions.value),
+);
 const visible = computed(() => visibleItems(changes.value, filter.value));
 const log = new DecisionLog();
 watch(
@@ -474,6 +495,7 @@ function refreshReview(e: Editor) {
   const i = resolveCurrent(visible.value, currentKey.value, currentIndex);
   currentIndex = i;
   currentKey.value = i >= 0 ? visible.value[i]!.key : null;
+  emit('open-suggestions', suggestions.value);
 }
 function refreshAuthorFilterDecorations() {
   const e = editor.value;
@@ -507,7 +529,36 @@ function rangeOf(e: Editor, t: SuggestionTarget): { from: number; to: number } |
   });
   return from < 0 ? null : { from, to };
 }
+function scrollSelectionIntoManuscriptColumn(e: Editor, r: { from: number; to: number }) {
+  const root = continuousScroll?.root.value;
+  if (!root || !props.sectionId) {
+    e.chain().setTextSelection(r).scrollIntoView().run();
+    return;
+  }
+  e.chain().setTextSelection(r).run();
+  void nextTick(() => {
+    const dom = e.view.domAtPos(r.from).node;
+    const el =
+      dom instanceof Element
+        ? dom.closest(
+            'ins[data-suggestion], del[data-suggestion], span[data-format-change], span.comment-anchor',
+          )
+        : dom.parentElement?.closest(
+            'ins[data-suggestion], del[data-suggestion], span[data-format-change], span.comment-anchor',
+          );
+    if (el) scrollElementCenterInRoot(root, el, scrollBehavior());
+  });
+}
+
 function select(key: string) {
+  const parsed = parseBookChangeKey(key);
+  if (parsed && continuousNav) {
+    currentKey.value = key;
+    currentIndex = visible.value.findIndex((v) => v.key === key);
+    void continuousNav.navigateToChange(key, { follow: true, suppressSync: true });
+    emit('update:reviewFollow', true);
+    return;
+  }
   const e = editor.value;
   const item = visible.value.find((v) => v.key === key);
   if (!e || !item) return;
@@ -519,7 +570,45 @@ function select(key: string) {
     from: Math.min(...parts.map((p) => p.from)),
     to: Math.max(...parts.map((p) => p.to)),
   };
-  e.chain().setTextSelection(r).scrollIntoView().run();
+  scrollSelectionIntoManuscriptColumn(e, r);
+}
+
+function selectLocalChange(changeKey: string, displayKey?: string) {
+  const e = editor.value;
+  if (!e) return;
+  const listKey =
+    displayKey ?? (props.sectionId ? scopeBookChangeKey(props.sectionId, changeKey) : changeKey);
+  const item =
+    visible.value.find((v) => v.key === listKey) ??
+    visible.value.find((v) => parseBookChangeKey(v.key)?.changeKey === changeKey) ??
+    changes.value.find((c) => c.key === changeKey);
+  if (!item) return;
+  currentKey.value = listKey;
+  currentIndex = visible.value.findIndex((v) => v.key === listKey);
+  const parts = item.targets.map((t) => rangeOf(e, t)).filter((r) => !!r);
+  if (!parts.length) return;
+  const r = {
+    from: Math.min(...parts.map((p) => p.from)),
+    to: Math.max(...parts.map((p) => p.to)),
+  };
+  e.chain().setTextSelection(r).run();
+}
+
+function focusComment(item: ReviewItem) {
+  const e = editor.value;
+  if (!e) return;
+  let from = -1;
+  let to = -1;
+  e.state.doc.descendants((n, pos) => {
+    if (!n.isText) return true;
+    if (n.marks.some((m) => m.type.name === 'comment_anchor' && String(m.attrs.id) === item.id)) {
+      if (from < 0) from = pos;
+      to = pos + n.nodeSize;
+    }
+    return true;
+  });
+  if (from < 0) return;
+  scrollSelectionIntoManuscriptColumn(e, { from, to });
 }
 function move(dir: 1 | -1) {
   const list = visible.value;
@@ -547,13 +636,28 @@ function decide(targets: SuggestionTarget[], decision: Decision) {
   // Auto-advance: the change now at the old position becomes current.
   if (currentKey.value) select(currentKey.value);
 }
-const targetOf = (key: string | null) => changes.value.find((c) => c.key === key)?.targets ?? [];
+const targetOf = (key: string | null) => {
+  if (!key) return [];
+  const parsed = parseBookChangeKey(key);
+  const local = parsed?.changeKey ?? key;
+  return changes.value.find((c) => c.key === key || c.key === local)?.targets ?? [];
+};
 const decideCurrent = (d: Decision) => decide(targetOf(currentKey.value), d);
 const decideOne = (key: string, d: Decision) => {
+  const parsed = parseBookChangeKey(key);
+  if (parsed && continuousNav && parsed.sectionId !== props.sectionId) {
+    continuousNav.decideInSection(parsed.sectionId, parsed.changeKey, d);
+    return;
+  }
   currentKey.value = key;
   currentIndex = visible.value.findIndex((v) => v.key === key);
-  decide(targetOf(key), d);
+  decide(targetOf(parsed?.changeKey ?? key), d);
 };
+
+function decideLocalChange(changeKey: string, decision: Decision) {
+  currentKey.value = props.sectionId ? scopeBookChangeKey(props.sectionId, changeKey) : changeKey;
+  decide(targetOf(changeKey), decision);
+}
 /** Bulk decision over the change keys locked when the confirmation opened. */
 const decideVisible = (d: Decision, keys: readonly string[]) =>
   decide(
@@ -773,7 +877,14 @@ function reportLoadError() {
 function setZoom(next: number) {
   zoom.value = clampZoom(next);
 }
-defineExpose({ focusBody, reportLoadError, setZoom, wordsBeforeClientY });
+defineExpose({
+  focusBody,
+  reportLoadError,
+  setZoom,
+  wordsBeforeClientY,
+  selectLocalChange,
+  decideLocalChange,
+});
 
 /** Set when the content does not fit the schema; the editor is then read-only and never emits. */
 const loadError = shallowRef<string>('');
@@ -1103,6 +1214,10 @@ const LABELS: Record<ReviewItem['type'], string> = {
         >
           <ReviewPanel
             :items="suggestions"
+            :book-changes="reviewTarget ? bookChanges : undefined"
+            :chapter-groups="reviewTarget ? bookChapterGroups : undefined"
+            :active-scroll-key="reviewTarget ? reviewActiveScrollKey : undefined"
+            :follow="reviewTarget ? (reviewFollow ?? true) : true"
             :load-failed="!!loadError"
             :filter="filter"
             :current-key="currentKey"
@@ -1116,6 +1231,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
             @decide-visible="decideVisible"
             @toggle-collapsed="collapsed = !collapsed"
             @toggle-author="onToggleAuthor"
+            @update:follow="emit('update:reviewFollow', $event)"
           />
           <EmptyState
             v-if="!collapsed && !comments.length && !loadError"
@@ -1125,10 +1241,24 @@ const LABELS: Record<ReviewItem['type'], string> = {
             title="No comments yet"
             text="Select some text and choose Comment to leave yourself a note."
           />
-          <section v-else-if="!collapsed && comments.length" class="comments" aria-label="Comments">
+          <section
+            v-else-if="!collapsed && comments.length"
+            class="comments"
+            aria-label="Comments"
+            data-test="comments-list"
+          >
             <h3>Comments</h3>
-            <ul>
-              <li v-for="r in comments" :key="r.id" data-test="review-item">
+            <ul role="listbox">
+              <li
+                v-for="r in comments"
+                :key="r.id"
+                role="option"
+                tabindex="0"
+                data-test="comment-row"
+                @click="focusComment(r)"
+                @keydown.enter.prevent="focusComment(r)"
+                @keydown.space.prevent="focusComment(r)"
+              >
                 <div class="review-comment-head">
                   <strong>{{ LABELS[r.type] }}</strong>
                   <span

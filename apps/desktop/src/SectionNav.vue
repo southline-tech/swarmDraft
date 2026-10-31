@@ -40,6 +40,8 @@ const props = defineProps<{
   save?: (next: Section[]) => void | Promise<void>;
   /** Words per section id, read-only (#52); omitted hides the count column. */
   wordCounts?: Record<string, number>;
+  /** Open tracked-change counts per section (#210); hide when 0. */
+  changeCounts?: Record<string, number>;
   /** Book-wide numbering display (#111); shown in the outline menu when set. */
   numberingStyle?: NumberingStyle;
 }>();
@@ -851,6 +853,13 @@ const rovingTabKey = computed(() => {
           />
           <span v-else class="title">{{ entry.section.title || 'Untitled' }}</span>
           <span
+            v-if="changeCounts?.[entry.section.id]"
+            class="change-count"
+            data-test="chapter-change-count"
+            :aria-label="`${changeCounts[entry.section.id]} open tracked changes`"
+            >{{ changeCounts[entry.section.id] }}</span
+          >
+          <span
             v-if="wordCounts"
             class="count"
             data-test="word-count"
@@ -948,6 +957,13 @@ const rovingTabKey = computed(() => {
             @blur="commitRename"
           />
           <span v-else class="title">{{ entry.section.title || 'Untitled' }}</span>
+          <span
+            v-if="changeCounts?.[entry.section.id]"
+            class="change-count"
+            data-test="chapter-change-count"
+            :aria-label="`${changeCounts[entry.section.id]} open tracked changes`"
+            >{{ changeCounts[entry.section.id] }}</span
+          >
           <span
             v-if="wordCounts"
             class="count"
@@ -1091,6 +1107,13 @@ const rovingTabKey = computed(() => {
             @blur="commitRename"
           />
           <span v-else class="title">{{ entry.section.title || 'Untitled' }}</span>
+          <span
+            v-if="changeCounts?.[entry.section.id]"
+            class="change-count"
+            data-test="chapter-change-count"
+            :aria-label="`${changeCounts[entry.section.id]} open tracked changes`"
+            >{{ changeCounts[entry.section.id] }}</span
+          >
           <span
             v-if="wordCounts"
             class="count"
@@ -1557,6 +1580,27 @@ const rovingTabKey = computed(() => {
   font-size: var(--ct-text-xs);
   color: var(--ct-text-muted);
   font-variant-numeric: tabular-nums;
+}
+.change-count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  border: 1px solid var(--ct-border);
+  background: var(--ct-bg);
+  color: var(--ct-text-muted);
+  font: 600 10.5px var(--ct-font-ui);
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  margin-left: var(--ct-space-2);
+}
+.row.selected .change-count {
+  color: var(--ct-accent);
+  border-color: color-mix(in srgb, var(--ct-accent) 45%, var(--ct-border));
+  background: color-mix(in srgb, var(--ct-accent) 12%, var(--ct-bg));
 }
 .row:focus-visible {
   outline: var(--ct-focus-outline);

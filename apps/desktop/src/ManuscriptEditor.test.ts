@@ -100,7 +100,7 @@ describe('ManuscriptEditor', () => {
     expect(cards[0]!.find('[data-test=del]').text()).toBe('flickered');
     expect(cards[0]!.find('[data-test=ins]').text()).toBe('guttered');
     expect(w.find('[data-test="counter"]').text()).toBe('1 of 1');
-    const items = w.findAll('[data-test="review-item"]').map((i) => i.text());
+    const items = w.findAll('[data-test="comment-row"]').map((i) => i.text());
     expect(items).toHaveLength(1);
     expect(items[0]).toContain('Comment');
     // Comments stay read-only; only suggestions get Accept/Reject.

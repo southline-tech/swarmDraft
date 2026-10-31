@@ -67,7 +67,7 @@ describe('review sidebar polish (#47)', () => {
     const el = review.element as HTMLElement;
     const lastChild = el.lastElementChild;
     expect(lastChild?.classList.contains('comments')).toBe(true);
-    expect(w.findAll('[data-test="review-item"]').length).toBe(1);
+    expect(w.findAll('[data-test="comment-row"]').length).toBe(1);
     expect(w.findAll('[data-test="item"]').length).toBe(18);
     w.unmount();
   });
@@ -105,7 +105,7 @@ describe('review sidebar polish (#47)', () => {
       attachTo: document.body,
     });
     await flushPromises();
-    const item = w.get('[data-test="review-item"]');
+    const item = w.get('[data-test="comment-row"]');
     expect(item.find('[data-test="review-author"]').text()).toContain('Line Editor');
     expect(item.find('[data-test="agent-tag"]').text()).toBe('Bot');
     expect(item.find('.review-comment-head').text()).toMatch(/Comment\s*·\s*Line Editor/);
@@ -131,7 +131,7 @@ describe('review sidebar polish (#47)', () => {
     };
     const w = mount(ManuscriptEditor, { props: { content }, attachTo: document.body });
     await flushPromises();
-    const item = w.get('[data-test="review-item"]');
+    const item = w.get('[data-test="comment-row"]');
     expect(item.find('[data-test="review-author"]').exists()).toBe(false);
     expect(item.text()).not.toContain('Unknown');
     expect(item.find('.review-comment-quote').text()).toBe('rain');

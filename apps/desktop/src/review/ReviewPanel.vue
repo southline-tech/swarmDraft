@@ -10,7 +10,7 @@
 import EmptyState from '../shells/EmptyState.vue';
 import ReasonLine from '../shells/ReasonLine.vue';
 import PanelRail from '../desk/PanelRail.vue';
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { Decision, SuggestionItem } from '@coauthor/editor';
 import {
   authorKind,
@@ -21,7 +21,10 @@ import {
   REVIEW_SHORTCUTS,
   visibleItems,
   type AuthorFilter,
+  type ReviewChange,
 } from './review-state';
+import type { BookChapterGroup } from './review-book';
+import { scrollListRowToTop } from './review-scroll';
 import { authorName, type AgentName } from '../agent-names';
 import { collabColor } from '../author-colors';
 import { REVIEW_CHANGES_REGION_ID } from './review-panel-a11y';
@@ -39,6 +42,14 @@ const props = withDefaults(
     labels?: (author: string) => AgentName;
     /** The section failed to load: never claim it is empty (that would look like data loss). */
     loadFailed?: boolean;
+    /** Book-wide rail (#210): pre-merged changes with scoped keys. */
+    bookChanges?: readonly ReviewChange[] | null;
+    /** Sticky chapter headers in reading order; omit empty chapters. */
+    chapterGroups?: readonly BookChapterGroup[] | null;
+    /** Scroll-sync active row (#217); distinct from click selection (`currentKey`). */
+    activeScrollKey?: string | null;
+    /** When true, list follows manuscript scroll position. */
+    follow?: boolean;
   }>(),
   {
     filter: null,
@@ -47,6 +58,10 @@ const props = withDefaults(
     busy: false,
     labels: authorName,
     loadFailed: false,
+    bookChanges: null,
+    chapterGroups: null,
+    activeScrollKey: null,
+    follow: true,
   },
 );
 const emit = defineEmits<{
@@ -59,9 +74,12 @@ const emit = defineEmits<{
   'toggle-collapsed': [];
   /** wp8 (#67): multi-author filter toggles (raw id). */
   'toggle-author': [author: string];
+  'update:follow': [on: boolean];
 }>();
 
-const changes = computed(() => groupChanges(props.items));
+const changes = computed(() =>
+  props.bookChanges != null ? [...props.bookChanges] : groupChanges(props.items),
+);
 const authors = computed(() => authorsOf(changes.value));
 const visible = computed(() => visibleItems(changes.value, props.filter));
 const countOf = (a: string) => changes.value.filter((c) => c.author === a).length;
@@ -122,6 +140,102 @@ function onAuthorFilterChange(e: Event) {
   if (author) emit('toggle-author', author);
 }
 const tip = (text: string, keys: string) => `${text} (${keys})`;
+
+const changeByKey = computed(() => new Map(visible.value.map((c) => [c.key, c])));
+
+const groupedVisible = computed(() => {
+  if (!props.chapterGroups?.length) return null;
+  const vis = changeByKey.value;
+  return props.chapterGroups
+    .map((g) => ({
+      ...g,
+      changes: g.changeKeys
+        .map((k) => vis.get(k))
+        .filter((c): c is (typeof visible.value)[0] => !!c),
+    }))
+    .filter((g) => g.changes.length);
+});
+
+const listEl = ref<HTMLElement | null>(null);
+const rowRefs = new Map<string, HTMLElement>();
+function setRowRef(key: string, el: unknown) {
+  if (el instanceof HTMLElement) rowRefs.set(key, el);
+  else rowRefs.delete(key);
+}
+
+let programmaticListScroll = false;
+let followResumeTimer: ReturnType<typeof setTimeout> | undefined;
+let pointerOverList = false;
+
+function scrollListToActive(key: string | null | undefined) {
+  if (!key || !props.follow || !listEl.value) return;
+  const row = rowRefs.get(key);
+  if (!row) return;
+  programmaticListScroll = true;
+  scrollListRowToTop(listEl.value, row, 8);
+  requestAnimationFrame(() => {
+    programmaticListScroll = false;
+  });
+}
+
+watch(
+  () => props.activeScrollKey,
+  (key) => {
+    if (props.follow) void nextTick(() => scrollListToActive(key));
+  },
+);
+
+function pauseFollowFromUser() {
+  if (programmaticListScroll) return;
+  if (props.follow) emit('update:follow', false);
+  clearTimeout(followResumeTimer);
+  followResumeTimer = setTimeout(() => {
+    if (!pointerOverList) emit('update:follow', true);
+  }, 4000);
+}
+
+function onListPointerEnter() {
+  pointerOverList = true;
+  clearTimeout(followResumeTimer);
+}
+function onListPointerLeave() {
+  pointerOverList = false;
+  pauseFollowFromUser();
+}
+
+function resumeFollow() {
+  emit('update:follow', true);
+  void nextTick(() => scrollListToActive(props.activeScrollKey ?? props.currentKey));
+}
+
+function onListKeydown(e: KeyboardEvent) {
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'PageUp' || e.key === 'PageDown') {
+    pauseFollowFromUser();
+  }
+  if (e.key === 'Enter') {
+    const t = e.target;
+    if (t instanceof HTMLElement) {
+      const row = t.closest('[data-review-row-key]');
+      const key = row?.getAttribute('data-review-row-key');
+      if (key) {
+        e.preventDefault();
+        emit('select', key);
+      }
+    }
+  }
+}
+
+function cardClasses(c: { key: string }) {
+  return {
+    current: c.key === props.currentKey,
+    active: c.key === props.activeScrollKey,
+  };
+}
+
+onMounted(() => {
+  if (props.follow && props.activeScrollKey) scrollListToActive(props.activeScrollKey);
+});
+onBeforeUnmount(() => clearTimeout(followResumeTimer));
 </script>
 
 <template>
@@ -254,61 +368,172 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
     <p v-else-if="!visible.length" class="muted" data-test="empty-filtered">
       No suggestions from this author. Choose All to see the rest.
     </p>
-    <ul v-else class="cards">
-      <li
-        v-for="c in visible"
-        :key="c.key"
-        class="card"
-        :class="{ current: c.key === currentKey }"
-        :style="hue(c.author)"
-        data-suggester
-        data-test="item"
-        :aria-current="c.key === currentKey ? 'true' : undefined"
-        @click="emit('select', c.key)"
+    <div
+      v-else
+      ref="listEl"
+      class="cards-scroll"
+      role="listbox"
+      aria-label="Tracked changes"
+      data-test="review-list"
+      @wheel.passive="pauseFollowFromUser"
+      @pointerdown="pauseFollowFromUser"
+      @pointerenter="onListPointerEnter"
+      @pointerleave="onListPointerLeave"
+      @keydown="onListKeydown"
+    >
+      <template v-if="groupedVisible">
+        <section
+          v-for="g in groupedVisible"
+          :key="g.sectionId"
+          class="chapter-group"
+          data-test="review-chapter-group"
+        >
+          <h3 class="chapter-head">{{ g.label }}</h3>
+          <ul class="cards">
+            <li
+              v-for="c in g.changes"
+              :key="c.key"
+              :ref="(el) => setRowRef(c.key, el)"
+              class="card"
+              :class="cardClasses(c)"
+              :style="hue(c.author)"
+              data-suggester
+              data-test="item"
+              :data-review-row-key="c.key"
+              role="option"
+              :aria-selected="c.key === currentKey ? 'true' : 'false'"
+              :aria-current="c.key === props.activeScrollKey ? 'true' : undefined"
+              tabindex="-1"
+              @click="emit('select', c.key)"
+            >
+              <span
+                v-if="c.key === props.activeScrollKey"
+                class="visually-hidden"
+                data-test="review-row-active"
+                aria-hidden="true"
+              />
+              <div class="who">
+                <span class="av" aria-hidden="true">{{ initial(c.author) }}</span>
+                <bdi class="name" dir="auto" data-test="agent-name" :title="name(c.author)">{{
+                  parts(c.author).name
+                }}</bdi>
+                <span v-if="parts(c.author).note" class="note" data-test="agent-note">{{
+                  parts(c.author).note
+                }}</span>
+                <span class="pill">{{ authorKind(c.author) }}</span>
+              </div>
+              <p v-if="c.format" class="format" data-test="format">{{ c.format.label }}</p>
+              <p v-else class="q">
+                <span v-if="c.del" class="del" data-test="del">{{ c.del }}</span
+                ><template v-if="c.del && c.ins">{{ ' ' }}</template
+                ><span v-if="c.ins" class="ins" data-test="ins">{{ c.ins }}</span>
+              </p>
+              <div v-if="authorKind(c.author) === 'Bot' && c.reason" class="reason" @click.stop>
+                <ReasonLine :reason="c.reason" />
+              </div>
+              <div class="actions">
+                <button
+                  type="button"
+                  class="primary"
+                  data-test="accept"
+                  :disabled="busy"
+                  :title="tip('Accept change', REVIEW_SHORTCUTS.accept)"
+                  @click.stop="emit('decide-one', c.key, 'accept')"
+                >
+                  Accept
+                </button>
+                <button
+                  type="button"
+                  class="secondary"
+                  data-test="reject"
+                  :disabled="busy"
+                  :title="tip('Reject change', REVIEW_SHORTCUTS.reject)"
+                  @click.stop="emit('decide-one', c.key, 'reject')"
+                >
+                  Reject
+                </button>
+              </div>
+            </li>
+          </ul>
+        </section>
+      </template>
+      <ul v-else class="cards">
+        <li
+          v-for="c in visible"
+          :key="c.key"
+          :ref="(el) => setRowRef(c.key, el)"
+          class="card"
+          :class="cardClasses(c)"
+          :style="hue(c.author)"
+          data-suggester
+          data-test="item"
+          :data-review-row-key="c.key"
+          role="option"
+          :aria-selected="c.key === currentKey ? 'true' : 'false'"
+          :aria-current="c.key === props.activeScrollKey ? 'true' : undefined"
+          tabindex="-1"
+          @click="emit('select', c.key)"
+        >
+          <span
+            v-if="c.key === props.activeScrollKey"
+            class="visually-hidden"
+            data-test="review-row-active"
+            aria-hidden="true"
+          />
+          <div class="who">
+            <span class="av" aria-hidden="true">{{ initial(c.author) }}</span>
+            <bdi class="name" dir="auto" data-test="agent-name" :title="name(c.author)">{{
+              parts(c.author).name
+            }}</bdi>
+            <span v-if="parts(c.author).note" class="note" data-test="agent-note">{{
+              parts(c.author).note
+            }}</span>
+            <span class="pill">{{ authorKind(c.author) }}</span>
+          </div>
+          <p v-if="c.format" class="format" data-test="format">{{ c.format.label }}</p>
+          <p v-else class="q">
+            <span v-if="c.del" class="del" data-test="del">{{ c.del }}</span
+            ><template v-if="c.del && c.ins">{{ ' ' }}</template
+            ><span v-if="c.ins" class="ins" data-test="ins">{{ c.ins }}</span>
+          </p>
+          <div v-if="authorKind(c.author) === 'Bot' && c.reason" class="reason" @click.stop>
+            <ReasonLine :reason="c.reason" />
+          </div>
+          <div class="actions">
+            <button
+              type="button"
+              class="primary"
+              data-test="accept"
+              :disabled="busy"
+              :title="tip('Accept change', REVIEW_SHORTCUTS.accept)"
+              @click.stop="emit('decide-one', c.key, 'accept')"
+            >
+              Accept
+            </button>
+            <button
+              type="button"
+              class="secondary"
+              data-test="reject"
+              :disabled="busy"
+              :title="tip('Reject change', REVIEW_SHORTCUTS.reject)"
+              @click.stop="emit('decide-one', c.key, 'reject')"
+            >
+              Reject
+            </button>
+          </div>
+        </li>
+      </ul>
+      <button
+        v-if="!follow && props.activeScrollKey"
+        type="button"
+        class="follow-chip"
+        data-test="review-follow"
+        aria-label="Resume following manuscript"
+        @click="resumeFollow"
       >
-        <div class="who">
-          <span class="av" aria-hidden="true">{{ initial(c.author) }}</span>
-          <bdi class="name" dir="auto" data-test="agent-name" :title="name(c.author)">{{
-            parts(c.author).name
-          }}</bdi>
-          <span v-if="parts(c.author).note" class="note" data-test="agent-note">{{
-            parts(c.author).note
-          }}</span>
-          <span class="pill">{{ authorKind(c.author) }}</span>
-        </div>
-        <p v-if="c.format" class="format" data-test="format">{{ c.format.label }}</p>
-        <p v-else class="q">
-          <span v-if="c.del" class="del" data-test="del">{{ c.del }}</span
-          ><template v-if="c.del && c.ins">{{ ' ' }}</template
-          ><span v-if="c.ins" class="ins" data-test="ins">{{ c.ins }}</span>
-        </p>
-        <div v-if="authorKind(c.author) === 'Bot' && c.reason" class="reason" @click.stop>
-          <ReasonLine :reason="c.reason" />
-        </div>
-        <div class="actions">
-          <button
-            type="button"
-            class="primary"
-            data-test="accept"
-            :disabled="busy"
-            :title="tip('Accept change', REVIEW_SHORTCUTS.accept)"
-            @click.stop="emit('decide-one', c.key, 'accept')"
-          >
-            Accept
-          </button>
-          <button
-            type="button"
-            class="secondary"
-            data-test="reject"
-            :disabled="busy"
-            :title="tip('Reject change', REVIEW_SHORTCUTS.reject)"
-            @click.stop="emit('decide-one', c.key, 'reject')"
-          >
-            Reject
-          </button>
-        </div>
-      </li>
-    </ul>
+        Follow manuscript
+      </button>
+    </div>
 
     <footer v-if="visible.length" class="bulk">
       <button type="button" data-test="accept-all" :disabled="busy" @click="openConfirm('accept')">
@@ -359,7 +584,8 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
   flex-direction: column;
   gap: var(--ct-space-3);
   position: relative;
-  overflow: visible;
+  overflow: hidden;
+  min-height: 0;
 }
 .author-filter {
   border: 1px solid var(--ct-border);
@@ -586,6 +812,52 @@ button.secondary {
   white-space: nowrap;
   min-width: 0;
 }
+.cards-scroll {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-space-2);
+}
+.chapter-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-space-2);
+}
+.chapter-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0;
+  padding: var(--ct-space-1) 0;
+  font-size: var(--ct-text-xs);
+  font-weight: var(--ct-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ct-text-muted);
+  background: var(--ct-surface);
+  border-bottom: 1px solid var(--ct-border-subtle);
+}
+.card.active {
+  box-shadow: inset 2px 0 0 var(--ct-accent);
+}
+.follow-chip {
+  position: sticky;
+  bottom: var(--ct-space-2);
+  align-self: center;
+  margin-top: auto;
+  font-size: var(--ct-text-sm);
+  font-weight: var(--ct-weight-semibold);
+  padding: var(--ct-space-1) var(--ct-space-3);
+  border-radius: var(--ct-radius-full);
+  border: 1px solid var(--ct-border);
+  background: color-mix(in srgb, var(--ct-surface-raised) 88%, transparent);
+  color: var(--ct-text);
+  box-shadow: var(--ct-elevation-2);
+  cursor: pointer;
+}
 .cards {
   list-style: none;
   margin: 0;
@@ -595,6 +867,7 @@ button.secondary {
   gap: var(--ct-space-2);
 }
 .card {
+  position: relative;
   border: 1px solid var(--ct-border);
   border-left: 3px solid var(--ct-suggester);
   border-radius: var(--ct-radius-md);
@@ -605,7 +878,8 @@ button.secondary {
 .card.current {
   border-color: var(--ct-accent);
   border-left-color: var(--ct-suggester);
-  background: var(--ct-selected-bg);
+  background: color-mix(in srgb, var(--ct-accent) 12%, var(--ct-selected-bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ct-accent) 35%, transparent);
 }
 .who {
   display: flex;

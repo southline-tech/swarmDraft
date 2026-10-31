@@ -270,4 +270,44 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(css).toMatch(/color:\s*var\(--ct-accent\)/);
     expect(css).not.toMatch(/#[0-9a-f]{3,8}/i);
   });
+
+  it('groups book-wide changes under sticky chapter headers (#210)', () => {
+    const groups = [
+      { sectionId: 'a', label: 'Chapter 1 · One', changeKeys: ['a\u0002brett\u0000s1'] },
+    ];
+    const w = mount(ReviewPanel, {
+      props: {
+        items: [],
+        bookChanges: [
+          {
+            key: 'a\u0002brett\u0000s1',
+            id: 's1',
+            author: 'brett',
+            ins: 'word',
+            targets: [{ kind: 'suggestion_insert', id: 's1' }],
+          },
+        ],
+        chapterGroups: groups,
+        labels,
+      },
+    });
+    expect(w.find('[data-test="review-chapter-group"]').exists()).toBe(true);
+    expect(w.find('.chapter-head').text()).toBe('Chapter 1 · One');
+    w.unmount();
+  });
+
+  it('shows Follow manuscript when follow is off (#217)', async () => {
+    const w = mount(ReviewPanel, {
+      props: {
+        items,
+        labels,
+        follow: false,
+        activeScrollKey: key(items[0]!),
+      },
+    });
+    expect(w.find('[data-test="review-follow"]').exists()).toBe(true);
+    await w.find('[data-test="review-follow"]').trigger('click');
+    expect(w.emitted('update:follow')).toEqual([[true]]);
+    w.unmount();
+  });
 });

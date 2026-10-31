@@ -29,6 +29,11 @@ vi.mock('./backend', async (importOriginal) => {
     openLatestManuscript: async () => null,
     listenOpeningProgress: async () => () => {},
     spellLintParagraph: async () => [],
+    sectionReviewMeta: async () => ({
+      comments: [],
+      authorSavedNames: {},
+      suggestionReasons: {},
+    }),
   };
 });
 vi.mock('./close-flush', () => ({
