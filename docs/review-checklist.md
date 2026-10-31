@@ -86,9 +86,7 @@ Run this consolidated pass in order; do not hand off until every line that appli
 
 Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
 
-Format: `YYYY-MM-DD · #PR · finding · rule`
-
-- 2026-10-26 · #33 · reserved/duplicate name check bypassed with zero-width and fullwidth chars · normalize (strip invisibles, NFKC, fold) before comparing names
+- 2026-10-31 · #200 · name save errors used muted `.st-status` and no invalid input a11y · validation errors use `var(--ct-danger)`, `role="alert"`, and `aria-invalid`/`aria-describedby` on the name field
 - 2026-10-26 · #33 · `--color-muted` not defined, notes not muted · use only `--ct-*` tokens that exist in tokens.css
 - 2026-10-26 · #44 · review shortcuts fired while typing in settings · scope global shortcuts to the panel and editor focus
 - 2026-10-26 · #46 · outline click inserted a paragraph (doc edit + undo step) · navigation never changes the document

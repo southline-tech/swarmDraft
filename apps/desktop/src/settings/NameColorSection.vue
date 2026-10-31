@@ -24,9 +24,11 @@ const saved = loadProfile(store());
 const name = ref(saved.name);
 const color = ref(saved.color);
 const status = ref('');
+const nameError = ref('');
 
 async function save() {
   status.value = '';
+  nameError.value = '';
   const kept = normalizeProfile({ name: name.value, color: color.value });
   try {
     if (props.syncDisplayName) {
@@ -40,13 +42,14 @@ async function save() {
     status.value = 'Saved.';
   } catch (e) {
     console.error('Profile save failed', e);
-    status.value = profileNameSaveError(e);
+    nameError.value = profileNameSaveError(e);
   }
 }
 function reset() {
   name.value = DEFAULT_PROFILE.name;
   color.value = DEFAULT_PROFILE.color;
   status.value = '';
+  nameError.value = '';
 }
 </script>
 
@@ -66,6 +69,8 @@ function reset() {
         class="nc__input"
         maxlength="64"
         data-test="settings-name"
+        :aria-invalid="nameError ? true : undefined"
+        :aria-describedby="nameError ? 'nc-name-error' : undefined"
       />
       <span v-if="name === DEFAULT_PROFILE.name" class="nc__kind">Default</span>
     </div>
@@ -120,6 +125,15 @@ function reset() {
         Reset to default
       </button>
     </div>
+    <p
+      v-if="nameError"
+      id="nc-name-error"
+      role="alert"
+      class="nc__error"
+      data-test="settings-name-error"
+    >
+      {{ nameError }}
+    </p>
     <p role="status" class="st-status" data-test="settings-name-status">{{ status }}</p>
   </div>
 </template>
@@ -233,5 +247,12 @@ function reset() {
   display: flex;
   gap: var(--ct-space-3);
   margin-top: var(--ct-space-8);
+}
+.nc__error {
+  min-height: 1.5em;
+  margin: var(--ct-space-4) 0 0;
+  color: var(--ct-danger);
+  font-size: var(--ct-text-sm);
+  overflow-wrap: anywhere;
 }
 </style>

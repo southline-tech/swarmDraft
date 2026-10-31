@@ -166,6 +166,11 @@ fn reserved_name(name: &str, user_display_name: Option<&str>) -> bool {
         .any(|r| name_key(r) == key)
 }
 
+/// Writer display names that must stay distinct from agents and UI labels (#184).
+fn reserved_user_display_name(name: &str) -> bool {
+    reserved_name(name, None) || name_key(name) == name_key(DEFAULT_AGENT_NAME)
+}
+
 /// Zero-width characters and bidi controls, invisible in labels; stripped before comparing.
 fn invisible(c: char) -> bool {
     matches!(
@@ -317,7 +322,7 @@ impl Store {
         if name.is_empty() || name.chars().count() > 64 {
             return Err(StorageError::Invalid("name must be 1-64 characters".into()));
         }
-        if reserved_name(name, None) {
+        if reserved_user_display_name(name) {
             return Err(StorageError::Invalid(format!(
                 "\"{name}\" is reserved; choose another name"
             )));
@@ -573,6 +578,31 @@ mod tests {
             "{e:?}"
         );
         s.create_agent("Helper", "#3366ff").unwrap();
+    }
+
+    #[test]
+    fn set_user_display_name_rejects_default_agent_name_without_agent() {
+        let (_t, s) = store();
+        for bad in [DEFAULT_AGENT_NAME, "  GROK bot ", "Gro\u{200B}k Bot"] {
+            let e = s.set_user_display_name(bad).unwrap_err();
+            assert!(
+                matches!(e, StorageError::Invalid(ref m) if m.contains("reserved")),
+                "{bad:?}: {e:?}"
+            );
+        }
+        assert!(s.create_agent(DEFAULT_AGENT_NAME, "#3366ff").is_ok());
+    }
+
+    #[test]
+    fn set_user_display_name_rejects_reserved_ui_labels() {
+        let (_t, s) = store();
+        for bad in ["You", "  UNNAMED agent ", "Removed agent"] {
+            let e = s.set_user_display_name(bad).unwrap_err();
+            assert!(
+                matches!(e, StorageError::Invalid(ref m) if m.contains("reserved")),
+                "{bad}: {e:?}"
+            );
+        }
     }
 
     #[test]
