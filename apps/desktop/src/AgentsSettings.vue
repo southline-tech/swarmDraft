@@ -3,7 +3,7 @@
  * Settings → Agents (RAD-205, #99 layout): create agents, mint keys (shown once), turn keys off.
  * User-facing copy says "key"; code identifiers keep "token".
  */
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { isTauri } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { setAgents } from './agent-names';
@@ -36,6 +36,9 @@ const props = withDefaults(
 
 const agents = ref<Agent[]>([]);
 const tokens = ref<Record<string, TokenInfo[]>>({});
+const removedOpen = ref(false);
+const removedToggleId = 'ag-removed-toggle';
+const removedPanelId = 'ag-removed-panel';
 const name = ref('Grok Bot');
 const color = ref('#3366ff');
 const scopes = ref<AgentScope[]>([...AGENT_SCOPES]);
@@ -104,10 +107,26 @@ async function guard(fn: () => Promise<void>) {
 async function refresh() {
   agents.value = await props.api.list();
   setAgents(agents.value); // names in the editor and review UI follow this list live
+  const active = agents.value.filter((a) => !a.revokedAt);
   const entries = await Promise.all(
-    agents.value.map(async (a) => [a.id, await props.api.tokens(a.id)] as const),
+    active.map(async (a) => [a.id, await props.api.tokens(a.id)] as const),
   );
   tokens.value = Object.fromEntries(entries);
+}
+
+const activeAgents = computed(() => agents.value.filter((a) => !a.revokedAt));
+const removedAgents = computed(() => agents.value.filter((a) => a.revokedAt));
+
+const REMOVED_HELP =
+  'Removed agents stay listed only while they still have suggestions or comments in your books. Name and color stay so old marks keep their attribution.';
+
+/** User-facing "Removed Oct 30" from an ISO revoked_at timestamp (#192). */
+function formatRemovedDate(revokedAt: string | null): string {
+  if (!revokedAt) return 'Removed';
+  const ms = Date.parse(revokedAt);
+  if (Number.isNaN(ms)) return 'Removed';
+  const label = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(ms);
+  return `Removed ${label}`;
 }
 
 const create = () =>
@@ -278,9 +297,11 @@ onBeforeUnmount(() => {
     </section>
     <section class="st-card" aria-labelledby="ag-list">
       <h2 id="ag-list" class="st-h2">Your agents</h2>
-      <p v-if="!agents.length" class="st-muted st-desc">No agents yet.</p>
+      <p v-if="!activeAgents.length && !removedAgents.length" class="st-muted st-desc">
+        No agents yet.
+      </p>
       <ul class="ag__list">
-        <li v-for="a in agents" :key="a.id" class="ag__agent" data-test="agent">
+        <li v-for="a in activeAgents" :key="a.id" class="ag__agent" data-test="agent">
           <div class="ag__head">
             <span class="ag__av" :style="{ background: a.color }" aria-hidden="true">{{
               a.name.charAt(0)
@@ -288,29 +309,21 @@ onBeforeUnmount(() => {
             <b class="ag__name"
               ><bdi dir="auto">{{ a.name }}</bdi></b
             >
-            <p
-              v-if="!a.revokedAt"
-              class="ag__mcp"
-              :class="`ag__mcp--${agentMcpStatus(a).tone}`"
-              data-test="mcp-status"
-            >
+            <p class="ag__mcp" :class="`ag__mcp--${agentMcpStatus(a).tone}`" data-test="mcp-status">
               <span class="ag__mcp-dot" aria-hidden="true" />
               <span>{{ agentMcpStatus(a).text }}</span>
             </p>
-            <em v-if="a.revokedAt" class="st-muted">Removed</em>
-            <template v-else>
-              <button type="button" class="st-btn st-btn--s" data-test="mint" @click="mint(a.id)">
-                New key
-              </button>
-              <button
-                type="button"
-                class="st-btn st-btn--s st-btn--link ag__danger"
-                data-test="revoke-agent"
-                @click="revokeAgent(a.id)"
-              >
-                Remove agent
-              </button>
-            </template>
+            <button type="button" class="st-btn st-btn--s" data-test="mint" @click="mint(a.id)">
+              New key
+            </button>
+            <button
+              type="button"
+              class="st-btn st-btn--s st-btn--link ag__danger"
+              data-test="revoke-agent"
+              @click="revokeAgent(a.id)"
+            >
+              Remove agent
+            </button>
           </div>
           <ul class="ag__tokens">
             <li v-for="t in tokens[a.id] ?? []" :key="t.id" class="ag__tok" data-test="token">
@@ -331,6 +344,49 @@ onBeforeUnmount(() => {
           </ul>
         </li>
       </ul>
+      <div v-if="removedAgents.length" class="ag__removed">
+        <button
+          :id="removedToggleId"
+          type="button"
+          class="ag__removed-toggle"
+          data-test="removed-toggle"
+          :aria-expanded="removedOpen"
+          :aria-controls="removedPanelId"
+          @click="removedOpen = !removedOpen"
+          @keydown.enter.prevent="removedOpen = !removedOpen"
+          @keydown.space.prevent="removedOpen = !removedOpen"
+        >
+          <span class="ag__removed-chevron" aria-hidden="true">{{ removedOpen ? '▾' : '▸' }}</span>
+          Removed agents ({{ removedAgents.length }})
+        </button>
+        <div
+          v-if="removedOpen"
+          :id="removedPanelId"
+          class="ag__removed-panel"
+          role="region"
+          :aria-labelledby="removedToggleId"
+        >
+          <ul class="ag__list ag__list--removed">
+            <li
+              v-for="a in removedAgents"
+              :key="a.id"
+              class="ag__agent ag__agent--removed"
+              data-test="removed-agent"
+            >
+              <div class="ag__head">
+                <span class="ag__av" :style="{ background: a.color }" aria-hidden="true">{{
+                  a.name.charAt(0)
+                }}</span>
+                <b class="ag__name"
+                  ><bdi dir="auto">{{ a.name }}</bdi></b
+                >
+                <span class="st-muted ag__removed-date">{{ formatRemovedDate(a.revokedAt) }}</span>
+              </div>
+            </li>
+          </ul>
+          <p class="st-muted st-desc ag__removed-help">{{ REMOVED_HELP }}</p>
+        </div>
+      </div>
     </section>
   </div>
 </template>
@@ -448,6 +504,9 @@ onBeforeUnmount(() => {
 .ag__mcp--connected {
   color: var(--ct-success);
 }
+.ag__mcp--muted {
+  color: var(--ct-text-muted);
+}
 .ag__mcp-dot {
   width: var(--ct-space-2);
   height: var(--ct-space-2);
@@ -486,5 +545,48 @@ onBeforeUnmount(() => {
 }
 .ag__sp {
   flex: 1;
+}
+.ag__removed {
+  margin-top: var(--ct-space-3);
+  padding-top: var(--ct-space-3);
+  border-top: 1px solid var(--ct-border);
+}
+.ag__removed-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-space-2);
+  width: 100%;
+  padding: var(--ct-space-1) 0;
+  border: 0;
+  background: none;
+  color: var(--ct-text-muted);
+  font: inherit;
+  font-size: var(--ct-text-sm);
+  font-weight: var(--ct-weight-semibold);
+  text-align: left;
+  cursor: pointer;
+}
+.ag__removed-toggle:focus-visible {
+  outline: 0;
+  box-shadow: var(--ct-focus-ring);
+  border-radius: var(--ct-radius-sm);
+}
+.ag__removed-panel {
+  margin-top: var(--ct-space-2);
+}
+.ag__removed-help {
+  margin-top: var(--ct-space-2);
+  margin-bottom: 0;
+}
+.ag__list--removed .ag__agent--removed {
+  border-top-color: var(--ct-border);
+}
+.ag__agent--removed .ag__head {
+  color: var(--ct-text-muted);
+}
+.ag__removed-date {
+  margin-left: auto;
+  font-size: var(--ct-text-sm);
+  font-style: normal;
 }
 </style>

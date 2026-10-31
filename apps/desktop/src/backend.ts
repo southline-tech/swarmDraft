@@ -49,6 +49,7 @@ export interface NewToken {
 }
 
 export const agentsApi = {
+  /** Active agents plus revoked agents that still have open comments or suggestions (#192). */
   list: () => invoke<Agent[]>('agents_list'),
   /** Active primary agent id, if any; revoked primaries are omitted. */
   primaryId: () => invoke<string | null>('agents_primary_id'),
