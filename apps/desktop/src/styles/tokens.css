@@ -81,6 +81,8 @@
   /* Panel widths (#90) */
   --ct-panel-w: 400px;
   --ct-panel-w-narrow: 320px;
+  /* Story notes side column (#207 footer track) */
+  --ct-story-notes-w: var(--ct-panel-w-narrow);
   /* Collapsed sidebar rails (wp2, #67) */
   --ct-rail-w: 40px;
 

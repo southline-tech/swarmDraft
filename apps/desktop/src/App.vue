@@ -886,11 +886,16 @@ const outlineForced = computed(() => outlineAuto.manual.value && navigatorOpen.v
 /** wp2 (#67): full outline, collapsed rail, or hidden in focus mode. */
 const workspaceGridClass = computed(() => {
   if (focusMode.value) return 'grid-cols-1';
-  return navigatorOpen.value ? 'grid-cols-[18rem_1fr]' : 'grid-cols-[var(--ct-rail-w)_1fr]';
+  const notes = 'var(--ct-story-notes-w)';
+  return navigatorOpen.value
+    ? `grid-cols-[18rem_minmax(0,1fr)_${notes}]`
+    : `grid-cols-[var(--ct-rail-w)_minmax(0,1fr)_${notes}]`;
 });
-const footerColumnTracks = computed(() =>
-  focusMode.value ? undefined : navigatorOpen.value ? '18rem 1fr' : 'var(--ct-rail-w) 1fr',
-);
+const footerColumnTracks = computed(() => {
+  if (focusMode.value) return undefined;
+  const left = navigatorOpen.value ? '18rem' : 'var(--ct-rail-w)';
+  return `${left} minmax(0, 1fr) var(--ct-story-notes-w)`;
+});
 const chapterCount = computed(
   () => session.value?.outline.value.filter((s) => s.kind === 'chapter').length ?? 0,
 );
@@ -1263,7 +1268,7 @@ defineExpose({ open, closeSession });
       />
       <div
         v-if="session && !choosingBook"
-        class="workspace grid min-h-0 flex-1 gap-4 overflow-hidden p-4"
+        class="workspace grid min-h-0 flex-1 gap-0 overflow-hidden p-4"
         :class="workspaceGridClass"
         data-test="workspace"
       >
@@ -1325,10 +1330,16 @@ defineExpose({ open, closeSession });
             @save-retry="onManuscriptSaveRetry"
             @words-before-caret="onWordsBeforeCaret"
           />
+        </div>
+        <div
+          v-if="!focusMode"
+          class="story-notes-col min-h-0 min-w-0 overflow-hidden"
+          data-test="story-notes-col"
+        >
           <StoryNotesPanel
-            v-if="storyNotesOpen && notesSession && !focusMode"
+            v-if="storyNotesOpen && notesSession"
             id="story-notes-panel"
-            class="editor-stack__notes"
+            class="story-notes-col__panel"
             :notes-doc="notesSession.doc"
             :outline="session.outline.value"
             :human-author="humanNotesAuthor"
@@ -1398,7 +1409,6 @@ body {
 }
 .shell__status {
   padding-left: var(--ct-space-4);
-  padding-right: var(--ct-space-4);
 }
 .toolbar-row {
   flex: none;
@@ -1425,18 +1435,19 @@ body {
   flex: 1 1 auto;
   min-height: 0;
 }
-.editor-stack__notes {
-  flex: none;
-  max-height: min(40vh, 20rem);
-  min-height: 10rem;
-  overflow: hidden;
+.story-notes-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
-.editor-stack__notes :deep(.story-notes) {
-  max-height: 100%;
-  border-radius: 0;
-  border-left: none;
-  border-right: none;
-  border-bottom: none;
+.story-notes-col__panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.story-notes-col__panel :deep(.story-notes) {
+  height: 100%;
+  min-height: 0;
+  border-radius: var(--ct-radius-md);
 }
 .topbar {
   display: flex;

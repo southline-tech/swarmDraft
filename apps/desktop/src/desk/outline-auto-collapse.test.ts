@@ -296,11 +296,11 @@ describe('no room for the outline while notes show (#98)', () => {
     expect(a.nav.value).toBe(true);
   });
 
-  it('OUTLINE_ROOM matches the 18rem outline column plus the gap-4 workspace gap', () => {
+  it('OUTLINE_ROOM matches the 18rem outline column (flush workspace grid, #207)', () => {
     const app = readFileSync(resolve(__dirname, '../App.vue'), 'utf8');
-    expect(app).toContain("'grid-cols-[18rem_1fr]'");
-    expect(app).toContain("'grid-cols-[var(--ct-rail-w)_1fr]'");
-    expect(app).toMatch(/class="workspace grid min-h-0 flex-1 gap-4/);
-    expect(OUTLINE_ROOM).toBe(18 * 16 + 16);
+    expect(app).toContain('18rem_minmax(0,1fr)_');
+    expect(app).toContain('--ct-story-notes-w');
+    expect(app).toMatch(/class="workspace grid min-h-0 flex-1 gap-0/);
+    expect(OUTLINE_ROOM).toBe(18 * 16);
   });
 });

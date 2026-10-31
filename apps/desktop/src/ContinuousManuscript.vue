@@ -70,6 +70,7 @@ watch(
       authorSavedNames.value = {};
       suggestionReasons.value = {};
     }
+    if (!caretPlaced.value) scheduleScrollPageEstimate();
   },
   { immediate: true },
 );
@@ -87,6 +88,60 @@ const emit = defineEmits<{
   'save-retry': [];
   'words-before-caret': [count: number];
 }>();
+
+const caretPlaced = ref(false);
+let scrollTimer: ReturnType<typeof setTimeout> | undefined;
+
+function bookWordsBeforeSection(sectionId: string): number {
+  let before = 0;
+  for (const sec of ordered.value) {
+    if (sec.id === sectionId) break;
+    const d = props.sections.get(sec.docId);
+    if (d) before += docWordCount(d);
+  }
+  return before;
+}
+
+function emitWordsBeforeCaret(inDoc: number, sectionId: string) {
+  emit('words-before-caret', bookWordsBeforeSection(sectionId) + inDoc);
+}
+
+function reportScrollPageEstimate() {
+  if (caretPlaced.value) return;
+  const root = scrollRoot.value;
+  if (!root) return;
+  const centerY = root.getBoundingClientRect().top + root.clientHeight / 2;
+  for (const sec of ordered.value) {
+    const anchor = root.querySelector(`[data-section-anchor="${sec.id}"]`);
+    if (!anchor) continue;
+    const rect = anchor.getBoundingClientRect();
+    if (centerY < rect.top) break;
+    if (centerY <= rect.bottom) {
+      const ed = editors.value.get(sec.id);
+      const inDoc = ed?.wordsBeforeClientY(centerY) ?? 0;
+      emit('words-before-caret', bookWordsBeforeSection(sec.id) + inDoc);
+      return;
+    }
+  }
+  emit('words-before-caret', 0);
+}
+
+function scheduleScrollPageEstimate() {
+  clearTimeout(scrollTimer);
+  scrollTimer = setTimeout(reportScrollPageEstimate, 80);
+}
+
+function onCaretPlaced() {
+  caretPlaced.value = true;
+}
+
+watch(
+  () => props.manuscriptId,
+  () => {
+    caretPlaced.value = false;
+    scheduleScrollPageEstimate();
+  },
+);
 
 const ordered = computed(() => sectionsInReadingOrder(props.outline));
 const scrollRoot = shallowRef<HTMLElement | null>(null);
@@ -159,14 +214,8 @@ function focusSection(id: string) {
 }
 
 function onCaretWords(sectionId: string, inDoc: number) {
-  if (sectionId !== props.selectedId) return;
-  let before = 0;
-  for (const sec of ordered.value) {
-    if (sec.id === sectionId) break;
-    const d = props.sections.get(sec.docId);
-    if (d) before += docWordCount(d);
-  }
-  emit('words-before-caret', before + inDoc);
+  if (!caretPlaced.value || sectionId !== props.selectedId) return;
+  emitWordsBeforeCaret(inDoc, sectionId);
 }
 
 function setZoom(z: number) {
@@ -185,14 +234,21 @@ defineExpose({
 onMounted(async () => {
   await nextTick();
   bindObserver();
+  scrollRoot.value?.addEventListener('scroll', scheduleScrollPageEstimate, { passive: true });
+  scheduleScrollPageEstimate();
 });
 
 watch(ordered, async () => {
   await nextTick();
   bindObserver();
+  scheduleScrollPageEstimate();
 });
 
-onBeforeUnmount(() => observer?.disconnect());
+onBeforeUnmount(() => {
+  observer?.disconnect();
+  scrollRoot.value?.removeEventListener('scroll', scheduleScrollPageEstimate);
+  clearTimeout(scrollTimer);
+});
 </script>
 
 <template>
@@ -251,6 +307,7 @@ onBeforeUnmount(() => observer?.disconnect());
             @toggle-story-notes="emit('toggle-story-notes')"
             @save-retry="emit('save-retry')"
             @caret-words="(n) => onCaretWords(sec.id, n)"
+            @caret-placed="onCaretPlaced"
           />
         </div>
       </div>

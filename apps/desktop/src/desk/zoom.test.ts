@@ -74,6 +74,12 @@ describe('StatusBarZoom', () => {
     for (const el of w.findAll('[title]')) expect(el.attributes('title')).not.toMatch(/Ctrl/);
     w.unmount();
   });
+
+  it('compact mode exposes menu popup semantics (#207)', () => {
+    const w = mount(StatusBarZoom, { props: { modelValue: 100, compact: true } });
+    expect(w.find('[data-test="status-zoom-reset"]').attributes('aria-haspopup')).toBe('menu');
+    w.unmount();
+  });
 });
 
 describe('page on desk', () => {

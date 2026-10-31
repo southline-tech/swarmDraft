@@ -108,21 +108,36 @@ describe('StatusBar', () => {
       props: {
         chapterCount: 12,
         showChapterSegment: true,
-        columnTracks: '18rem 1fr',
+        columnTracks: '18rem minmax(0, 1fr) var(--ct-story-notes-w)',
         wordCount: 2154,
         wordsBeforeCaretInBook: 500,
         trackChanges: false,
+        storyNotesOpen: true,
         storyNotesPanelId: 'story-notes-panel',
       },
     });
     const bar = w.find('[data-test="status-bar"]');
     expect(bar.classes()).toContain('status-bar');
     expect(bar.attributes('role')).toBe('contentinfo');
-    expect(w.find('[data-test="status-seg-left"]').text()).toContain('12 chapters');
+    expect(w.find('[data-test="status-chapter-count"]').text()).toContain('12 chapters');
     expect(w.find('[data-test="status-word-count"]').text()).toBe('2,154 words');
     expect(w.find('[data-test="status-page"]').text()).toBe('Page 2 of 9');
     expect(w.find('[data-test="status-track-changes"]').text()).toBe('Track changes: Off');
     expect(w.find('[data-test="status-notes-toggle"]').text()).toBe('Story notes');
+  });
+
+  it('hides track changes in the right segment when Story notes is closed (fb4)', () => {
+    const w = mount(StatusBar, {
+      props: {
+        wordCount: 10,
+        wordsBeforeCaretInBook: 0,
+        trackChanges: true,
+        storyNotesOpen: false,
+        storyNotesPanelId: 'story-notes-panel',
+      },
+    });
+    expect(w.find('[data-test="status-track-changes"]').exists()).toBe(false);
+    expect(w.find('[data-test="status-notes-toggle"]').exists()).toBe(true);
   });
 
   it('shows selection and track on, with save and notes pressed state', () => {
@@ -198,9 +213,13 @@ describe('StatusBar', () => {
 
   it('toggles story notes from the footer', async () => {
     const w = mount(StatusBar, {
-      props: { trackChanges: false, storyNotesPanelId: 'story-notes-panel' },
+      props: {
+        trackChanges: false,
+        storyNotesOpen: true,
+        storyNotesPanelId: 'story-notes-panel',
+      },
     });
-    expect(w.find('[data-test="status-track-changes"]').attributes('role')).toBeUndefined();
+    expect(w.find('[data-test="status-track-changes"]').exists()).toBe(true);
     await w.find('[data-test="status-notes-toggle"]').trigger('click');
     expect(w.emitted('toggle-story-notes')).toHaveLength(1);
   });

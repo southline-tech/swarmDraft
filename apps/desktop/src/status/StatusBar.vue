@@ -78,6 +78,13 @@ const pageReadout = computed(() => {
   return pageStatusLabel(current, total, centerNarrow.value);
 });
 
+const showTrackChangesReadout = computed(
+  () =>
+    props.trackChanges !== undefined &&
+    !centerNarrow.value &&
+    (!props.storyNotesPanelId || props.storyNotesOpen),
+);
+
 const chapterLabel = computed(() => {
   const n = props.chapterCount ?? 0;
   return `${formatCount(n)} ${n === 1 ? 'chapter' : 'chapters'}`;
@@ -101,89 +108,86 @@ const footerStyle = computed(() =>
       class="status-seg status-seg-left"
       data-test="status-seg-left"
     >
-      <span class="status-bar__muted tabular-nums">{{ chapterLabel }}</span>
+      <span class="status-bar__muted tabular-nums" data-test="status-chapter-count">{{
+        chapterLabel
+      }}</span>
     </div>
-    <div
-      class="status-seg status-seg-main"
-      :class="{ 'status-seg-main--solo': !showChapterSegment }"
-    >
-      <div ref="centerSeg" class="status-seg status-seg-center" data-test="status-seg-center">
-        <span
-          v-if="wordCount !== undefined"
-          class="status-bar__cluster tabular-nums"
-          data-test="status-word-count"
-        >
-          <span class="status-bar__muted">{{ words(wordCount) }}</span
-          ><span v-if="selectionWords" class="status-bar__text">{{ selectionSuffix }}</span>
-        </span>
-        <span
-          v-if="wordCount !== undefined"
-          class="status-bar__page status-bar__muted tabular-nums"
-          data-test="status-page"
-          :title="PAGE_ESTIMATE_TOOLTIP"
-          :aria-label="pageReadout.ariaLabel"
-        >
-          {{ pageReadout.visible }}
-        </span>
-        <span
-          v-if="save && save.phase !== 'idle'"
-          role="status"
-          aria-live="polite"
-          class="status-bar__cluster status-bar__save"
-          data-test="status-save"
-          :data-state="save.phase"
-        >
-          <template v-if="save.phase === 'error'">
-            <span class="status-bar__danger">{{ saveLabel }}</span>
-            <button
-              type="button"
-              class="status-bar__retry"
-              data-test="status-save-retry"
-              @click="emit('save-retry')"
-            >
-              Retry
-            </button>
-          </template>
-          <template v-else>
-            <svg
-              v-if="save.phase === 'saved'"
-              class="status-bar__check"
-              viewBox="0 0 16 16"
-              aria-hidden="true"
-            >
-              <path d="M3.5 8.5l3 3 6-7" />
-            </svg>
-            <span class="status-bar__muted">{{ saveLabel }}</span>
-          </template>
-        </span>
-        <span class="status-seg-center__spacer" aria-hidden="true" />
-        <StatusBarZoom
-          v-if="zoom !== undefined"
-          :model-value="zoom"
-          :compact="centerNarrow"
-          @update:model-value="emit('update:zoom', $event)"
-        />
-      </div>
-      <div class="status-seg status-seg-right" data-test="status-seg-right">
-        <span
-          v-if="trackChanges !== undefined && !centerNarrow"
-          class="status-bar__muted"
-          data-test="status-track-changes"
-        >
-          {{ trackLabel }}
-        </span>
-        <button
-          v-if="storyNotesPanelId"
-          type="button"
-          class="status-bar__notes-toggle"
-          data-test="status-notes-toggle"
-          :aria-pressed="storyNotesOpen ? 'true' : 'false'"
-          :aria-controls="storyNotesPanelId"
-          @click="emit('toggle-story-notes')"
-        >
-          Story notes
-        </button>
-      </div>
+    <div ref="centerSeg" class="status-seg status-seg-center" data-test="status-seg-center">
+      <span
+        v-if="wordCount !== undefined"
+        class="status-bar__cluster tabular-nums"
+        data-test="status-word-count"
+      >
+        <span class="status-bar__muted">{{ words(wordCount) }}</span
+        ><span v-if="selectionWords" class="status-bar__text">{{ selectionSuffix }}</span>
+      </span>
+      <span
+        v-if="wordCount !== undefined"
+        class="status-bar__page status-bar__muted tabular-nums"
+        data-test="status-page"
+        :title="PAGE_ESTIMATE_TOOLTIP"
+        :aria-label="pageReadout.ariaLabel"
+      >
+        {{ pageReadout.visible }}
+      </span>
+      <span
+        v-if="save && save.phase !== 'idle'"
+        role="status"
+        aria-live="polite"
+        class="status-bar__cluster status-bar__save"
+        data-test="status-save"
+        :data-state="save.phase"
+      >
+        <template v-if="save.phase === 'error'">
+          <span class="status-bar__danger">{{ saveLabel }}</span>
+          <button
+            type="button"
+            class="status-bar__retry"
+            data-test="status-save-retry"
+            @click="emit('save-retry')"
+          >
+            Retry
+          </button>
+        </template>
+        <template v-else>
+          <svg
+            v-if="save.phase === 'saved'"
+            class="status-bar__check"
+            viewBox="0 0 16 16"
+            aria-hidden="true"
+          >
+            <path d="M3.5 8.5l3 3 6-7" />
+          </svg>
+          <span class="status-bar__muted">{{ saveLabel }}</span>
+        </template>
+      </span>
+      <span class="status-seg-center__spacer" aria-hidden="true" />
+      <StatusBarZoom
+        v-if="zoom !== undefined"
+        :model-value="zoom"
+        :compact="centerNarrow"
+        @update:model-value="emit('update:zoom', $event)"
+      />
+    </div>
+    <div class="status-seg status-seg-right" data-test="status-seg-right">
+      <span
+        v-if="showTrackChangesReadout"
+        class="status-bar__muted"
+        data-test="status-track-changes"
+      >
+        {{ trackLabel }}
+      </span>
+      <button
+        v-if="storyNotesPanelId"
+        type="button"
+        class="status-bar__notes-toggle"
+        data-test="status-notes-toggle"
+        :aria-pressed="storyNotesOpen ? 'true' : 'false'"
+        :aria-controls="storyNotesPanelId"
+        @click="emit('toggle-story-notes')"
+      >
+        Story notes
+      </button>
     </div>
   </footer>
 </template>
@@ -212,14 +216,6 @@ const footerStyle = computed(() =>
 .status-seg-left {
   padding: 0 var(--ct-space-4);
   border-right: 1px solid var(--ct-border);
-}
-.status-seg-main {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  min-width: 0;
-}
-.status-seg-main--solo {
-  grid-column: 1 / -1;
 }
 .status-seg-center {
   gap: var(--ct-space-4);

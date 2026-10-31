@@ -196,6 +196,8 @@ const emit = defineEmits<{
   'save-retry': [];
   /** Words before the caret in this section doc (lead editor → parent book page estimate). */
   'caret-words': [count: number];
+  /** Writer placed the caret (click or key); scroll-based page estimate stops (#216). */
+  'caret-placed': [];
 }>();
 
 const appFooterEditor = inject(APP_FOOTER_EDITOR_KEY, null);
@@ -648,6 +650,21 @@ function reportCaretWords(e: Editor) {
   const n = wordsBeforeCaretInDoc(e);
   emit('caret-words', n);
 }
+let caretPlaced = false;
+function noteCaretPlaced() {
+  if (caretPlaced || props.sliceMode) return;
+  caretPlaced = true;
+  emit('caret-placed');
+}
+function wordsBeforeClientY(clientY: number): number {
+  const e = editor.value;
+  if (!e || e.isDestroyed || props.sliceMode) return 0;
+  const page = e.view.dom.closest('.page') as HTMLElement | null;
+  const rect = (page ?? e.view.dom).getBoundingClientRect();
+  const coords = e.view.posAtCoords({ left: rect.left + rect.width / 2, top: clientY });
+  if (!coords) return 0;
+  return countWords(e.state.doc.textBetween(0, coords.pos, ' ', ' '));
+}
 const bookWords = shallowRef<number>();
 let stopBook = () => {};
 let stopChapter = () => {};
@@ -756,7 +773,7 @@ function reportLoadError() {
 function setZoom(next: number) {
   zoom.value = clampZoom(next);
 }
-defineExpose({ focusBody, reportLoadError, setZoom });
+defineExpose({ focusBody, reportLoadError, setZoom, wordsBeforeClientY });
 
 /** Set when the content does not fit the schema; the editor is then read-only and never emits. */
 const loadError = shallowRef<string>('');
@@ -792,6 +809,18 @@ const options: Partial<EditorOptions> = {
       lint: (text) => lintBlockText(props.manuscriptId, text),
     }),
   ],
+  editorProps: {
+    handleDOMEvents: {
+      mousedown: () => {
+        noteCaretPlaced();
+        return false;
+      },
+      keydown: (_view, event: KeyboardEvent) => {
+        if (!event.metaKey && !event.ctrlKey && !event.altKey) noteCaretPlaced();
+        return false;
+      },
+    },
+  },
   onContentError: ({ error }) => {
     const raw = String((error as Error & { cause?: unknown }).cause ?? error.message);
     // Technical detail is for logs only; the banner shows SECTION_LOAD_ERROR_COPY (#89).

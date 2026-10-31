@@ -260,3 +260,10 @@ Implementor: add one line here for every review, design or QA finding, in the sa
 - 2026-10-31 · #204 · Designer review (#206) · whole word-count line was muted · base count `--ct-text-muted`; ` · N selected` suffix `--ct-text`
 - 2026-10-31 · #204 · Designer review (#206) · Story notes footer toggle lacked pressed accent · `aria-pressed:bg-selected` + `aria-pressed:text-accent`; test when open
 - 2026-10-31 · #204 · Designer review (#206) · zoom on toolbar not Word-style footer · `StatusBarZoom` after Story notes (`status-zoom-*`); − / % / + only; toolbar control removed
+- 2026-10-31 · #219 · review 5725177562 · Track changes visible when Story notes closed · gate `status-track-changes` on `storyNotesOpen && !centerNarrow` (fb4)
+- 2026-10-31 · #219 · review 5725177562 · footer two-track nested center|right · flat three grid tracks + `--ct-story-notes-w` side column in App workspace (fb1)
+- 2026-10-31 · #219 · review 5725177562 · Story notes toggle 28px from window edge · drop `.shell__status` padding-right; keep 12px on `status-seg-right`
+- 2026-10-31 · #219 · review 5725177562 · missing `status-chapter-count` · on `{n} chapters` readout in left segment
+- 2026-10-31 · #219 · review 5725177562 · compact zoom menu missing popup hint · `aria-haspopup="menu"` on compact `<summary>` in `StatusBarZoom`
+- 2026-10-31 · #219 · review 5725177562 · workspace gap-4 misaligned center footer divider · `gap-0` workspace; `OUTLINE_ROOM` without gap (#207)
+- 2026-10-31 · #219 · review 5725177562 · page stuck at 1 before caret click · scroll-center estimate in `ContinuousManuscript` until `caret-placed` (#216)

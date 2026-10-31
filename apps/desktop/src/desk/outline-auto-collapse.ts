@@ -12,14 +12,14 @@ export const MARGIN_NOTES_GAP = 16;
 /** Desk room the notes take beside the page: column plus its gap (--ct-page-notes-room). */
 export const NOTES_ROOM = MARGIN_NOTES_W + MARGIN_NOTES_GAP;
 /**
- * #98: desk room the open outline takes: its 18rem grid column plus the workspace gap-4 (1rem).
+ * #98: desk room the open outline takes: its 18rem grid column (workspace columns are flush; #207).
  * The desk is this much wider while the outline is closed, so we can tell whether reopening fits.
  */
-export const OUTLINE_ROOM = 18 * 16 + 16;
+export const OUTLINE_ROOM = 18 * 16;
 /** Matches `--ct-rail-w` in tokens.css (40px). */
 export const OUTLINE_RAIL_W = 40;
-/** Room the collapsed chapter rail takes: `--ct-rail-w` plus the workspace gap-4 (1rem). */
-export const OUTLINE_RAIL_ROOM = OUTLINE_RAIL_W + 16;
+/** Room the collapsed chapter rail takes (`--ct-rail-w`). */
+export const OUTLINE_RAIL_ROOM = OUTLINE_RAIL_W;
 /** Page floor while the writer forces the outline open (#96); mirrors `--ct-page-forced-min-w`. */
 export const PAGE_FORCED_MIN_W = 320;
 

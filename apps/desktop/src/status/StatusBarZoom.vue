@@ -58,6 +58,7 @@ const btn =
       <summary
         class="min-w-9 list-none rounded-sm border-0 bg-transparent px-0.5 font-ui text-xs text-muted tabular-nums cursor-pointer hover:bg-selected hover:text-text"
         data-test="status-zoom-reset"
+        aria-haspopup="menu"
         :aria-label="`Zoom ${zoom}%`"
       >
         {{ zoom }}%

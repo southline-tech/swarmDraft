@@ -392,13 +392,17 @@ describe('App', () => {
     expect(sidebar().isVisible()).toBe(false);
     expect(rail().isVisible()).toBe(true);
     const ws = w.find('[data-test="workspace"]');
-    expect(ws.classes()).toContain('grid-cols-[var(--ct-rail-w)_1fr]');
-    expect(ws.classes()).not.toContain('grid-cols-[18rem_1fr]');
+    expect(ws.classes()).toContain(
+      'grid-cols-[var(--ct-rail-w)_minmax(0,1fr)_var(--ct-story-notes-w)]',
+    );
+    expect(ws.classes()).not.toContain('grid-cols-[18rem_minmax(0,1fr)_var(--ct-story-notes-w)]');
     expect(nav.attributes('aria-controls')).toBe('chapter-navigator-rail');
     await nav.trigger('click');
     expect(nav.attributes('aria-pressed')).toBe('true');
     expect(sidebar().isVisible()).toBe(true);
-    expect(w.find('[data-test="workspace"]').classes()).toContain('grid-cols-[18rem_1fr]');
+    expect(w.find('[data-test="workspace"]').classes()).toContain(
+      'grid-cols-[18rem_minmax(0,1fr)_var(--ct-story-notes-w)]',
+    );
     w.unmount();
   });
 
