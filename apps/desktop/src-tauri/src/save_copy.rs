@@ -120,6 +120,27 @@ pub fn check_write_dest(
     Ok(real)
 }
 
+/// Strip Win32 verbatim prefixes for user-visible paths (#183).
+///
+/// `\\?\C:\…` and `\\.\C:\…` become `C:\…`. `\\?\UNC\server\share` becomes `\\server\share`.
+pub fn display_path(path: &Path) -> String {
+    display_path_str(&path.display().to_string())
+}
+
+pub fn display_path_str(raw: &str) -> String {
+    let s = raw.replace('/', "\\");
+    if s.len() >= 8 && s[..8].eq_ignore_ascii_case(r"\\?\UNC\") {
+        return format!("\\\\{}", &s[8..]);
+    }
+    if let Some(rest) = s.strip_prefix("\\\\?\\") {
+        return rest.to_string();
+    }
+    if let Some(rest) = s.strip_prefix("\\\\.\\") {
+        return rest.to_string();
+    }
+    s
+}
+
 /// Write `bytes` to `dest` atomically after [`check_dest`]. Needs the shared
 /// [`crate::backup::OpLock`] guard, so a copy never runs alongside a backup or restore (#100).
 pub fn write_copy(
@@ -471,5 +492,25 @@ mod tests {
         assert_eq!(default_file_name("My Book"), "My Book (copy).docx");
         assert_eq!(default_file_name("../a\\b:c"), "a b c (copy).docx");
         assert_eq!(default_file_name("  "), "Manuscript (copy).docx");
+    }
+
+    #[test]
+    fn display_path_strips_verbatim_prefixes() {
+        assert_eq!(
+            display_path_str(r"\\?\C:\Users\a\book (copy).docx"),
+            r"C:\Users\a\book (copy).docx"
+        );
+        assert_eq!(
+            display_path_str(r"\\.\C:\Users\a\book (copy).docx"),
+            r"C:\Users\a\book (copy).docx"
+        );
+        assert_eq!(
+            display_path_str(r"\\?\UNC\server\share\book (copy).docx"),
+            r"\\server\share\book (copy).docx"
+        );
+        assert_eq!(
+            display_path_str(r"C:/Users/a/book (copy).docx"),
+            r"C:\Users\a\book (copy).docx"
+        );
     }
 }

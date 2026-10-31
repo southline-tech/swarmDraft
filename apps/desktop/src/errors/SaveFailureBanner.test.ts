@@ -36,6 +36,19 @@ describe('SaveFailureBanner', () => {
     expect(w.find('[data-test="save-copy-result"]').text()).toBe('Copy saved to D:\\b.docx.');
   });
 
+  it('never shows verbatim Win32 prefixes in the success line (#183)', async () => {
+    const save = vi.fn(async (): Promise<SaveCopyResult> => ({
+      status: 'saved',
+      path: String.raw`C:\Users\a\book (copy).docx`,
+    }));
+    const w = mountWith(save);
+    await w.find('[data-test="save-copy"]').trigger('click');
+    await flushPromises();
+    const line = w.find('[data-test="save-copy-result"]').text();
+    expect(line).toBe(String.raw`Copy saved to C:\Users\a\book (copy).docx.`);
+    expect(line).not.toMatch(/\\\\\?\\|\\\\\.\\/);
+  });
+
   it('shows the shared busy notice when a backup, restore or copy is running (#100)', async () => {
     const w = mountWith(async () => ({ status: 'busy' }));
     await w.find('[data-test="save-copy"]').trigger('click');

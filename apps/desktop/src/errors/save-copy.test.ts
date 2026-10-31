@@ -6,6 +6,7 @@ import type { Section } from '@coauthor/schema';
 import {
   buildCopy,
   commentsForExport,
+  displayUserPath,
   manuscriptDocx,
   saveCopy,
   type BuildCopyDeps,
@@ -167,6 +168,20 @@ describe('comments in the copy', () => {
   });
 });
 
+describe('displayUserPath', () => {
+  it('strips Win32 verbatim prefixes (#183)', () => {
+    expect(displayUserPath(String.raw`\\?\C:\Users\a\book (copy).docx`)).toBe(
+      String.raw`C:\Users\a\book (copy).docx`,
+    );
+    expect(displayUserPath(String.raw`\\.\C:\Users\a\book (copy).docx`)).toBe(
+      String.raw`C:\Users\a\book (copy).docx`,
+    );
+    expect(displayUserPath(String.raw`\\?\UNC\server\share\book (copy).docx`)).toBe(
+      String.raw`\\server\share\book (copy).docx`,
+    );
+  });
+});
+
 describe('saveCopy', () => {
   it('reports busy, not a failure, when the backend lock is held (#100)', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -177,6 +192,12 @@ describe('saveCopy', () => {
     expect(r).toEqual({ status: 'busy' });
     expect(log).not.toHaveBeenCalled();
     log.mockRestore();
+  });
+
+  it('strips verbatim prefixes from the saved path (#183)', async () => {
+    const save = vi.fn(async () => String.raw`\\?\C:\Copies\book.docx`);
+    const r = await saveCopy(session(), { save, build: noComments });
+    expect(r).toEqual({ status: 'saved', path: String.raw`C:\Copies\book.docx` });
   });
 
   it('sends only the title and bytes; the backend picks the path', async () => {

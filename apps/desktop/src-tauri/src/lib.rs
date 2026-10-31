@@ -248,7 +248,7 @@ async fn save_manuscript_copy(
         };
         let dest = picked.into_path().map_err(|e| format!("io: {e}"))?;
         save_copy::write_copy(&held, &data_dirs, &dest, &bytes)
-            .map(|p| Some(p.display().to_string()))
+            .map(|p| Some(save_copy::display_path(&p)))
             .map_err(|e| format!("io: {e}"))
     })
     .await

@@ -180,6 +180,32 @@ describe('sessionFromStored', () => {
     expect(firstText(d).toString()).toContain('SLOW ');
     await s.close();
   });
+
+  it('logs mapped autosave diagnostics on flush failure (#183)', async () => {
+    const stored = storedFixture();
+    const sec = stored.sections[1]!;
+    const save = vi.fn(async () => {
+      throw new Error('database is locked');
+    });
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const s = sessionFromStored(stored, null, { save, debounceMs: 60_000 });
+    firstText(s.sections.get(sec.docId)!).insert(0, 'X');
+    await expect(s.flush()).rejects.toBeInstanceOf(UnsavedEditsError);
+    expect(log).toHaveBeenCalledWith(
+      'Autosave failed',
+      expect.objectContaining({
+        code: 'file-locked',
+        sectionIds: [sec.id],
+      }),
+    );
+    const payload = log.mock.calls.find(([msg]) => msg === 'Autosave failed')?.[1] as {
+      message: string;
+    };
+    expect(payload.message).toContain('open in another program');
+    expect(payload.message).not.toMatch(/database is locked/);
+    log.mockRestore();
+    await s.close({ discard: true });
+  });
 });
 
 describe('outline saves (RAD-263)', () => {
