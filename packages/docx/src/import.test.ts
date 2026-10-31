@@ -253,3 +253,97 @@ describe('.docx round trip', () => {
     expect(yDocToDoc(docToYDoc(s.content))).toEqual(s.content);
   });
 });
+
+describe('back matter epilogue (#214)', () => {
+  const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const styles = strToU8(
+    `<w:styles xmlns:w="${W}"><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/></w:style></w:styles>`,
+  );
+  const mini = (body: string) =>
+    importDocx(
+      zipSync({
+        'word/document.xml': strToU8(
+          `<w:document xmlns:w="${W}"><w:body>${body}</w:body></w:document>`,
+        ),
+        'word/styles.xml': styles,
+      }),
+      { manuscriptId: 'm1' },
+    );
+
+  it('imports Heading 1 Epilogue as back matter', () => {
+    const m = mini(
+      `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Chapter 1</w:t></w:r></w:p>` +
+        `<w:p><w:r><w:t>Body</w:t></w:r></w:p>` +
+        `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Epilogue</w:t></w:r></w:p>` +
+        `<w:p><w:r><w:t>End</w:t></w:r></w:p>`,
+    );
+    expect(blocks(m, 'back_matter').map((s) => s.title)).toEqual(['Epilogue']);
+    expect(m.report.summary.backMatter).toBe(1);
+  });
+
+  it('imports display-style Epilogue and Epilog variants', () => {
+    for (const title of ['Epilog', 'Epilogue: What Happened Next']) {
+      const m = mini(
+        `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Chapter 1</w:t></w:r></w:p>` +
+          `<w:p><w:r><w:t>Body</w:t></w:r></w:p>` +
+          `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>${title}</w:t></w:r></w:p>` +
+          `<w:p><w:r><w:t>End</w:t></w:r></w:p>`,
+      );
+      expect(blocks(m, 'back_matter')[0]?.title).toBe(title);
+    }
+  });
+});
+
+describe('import title resolution (#215)', () => {
+  const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const styles = strToU8(
+    `<w:styles xmlns:w="${W}"><w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/></w:style><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/></w:style></w:styles>`,
+  );
+  const docx = (body: string, extra: Record<string, Uint8Array> = {}) =>
+    zipSync({
+      'word/document.xml': strToU8(
+        `<w:document xmlns:w="${W}"><w:body>${body}</w:body></w:document>`,
+      ),
+      'word/styles.xml': styles,
+      ...extra,
+    });
+
+  it('uses Title style, Title Page, core.xml, prominent front line, then filename stem', () => {
+    expect(
+      importDocx(
+        docx(
+          `<w:p><w:pPr><w:pStyle w:val="Title"/></w:pPr><w:r><w:t>Style Title</w:t></w:r></w:p>`,
+        ),
+        { manuscriptId: 'm1' },
+      ).title,
+    ).toBe('Style Title');
+
+    expect(
+      importDocx(
+        docx(
+          `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:t>THE HARBOR</w:t></w:r></w:p>` +
+            `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Chapter 1</w:t></w:r></w:p>`,
+        ),
+        { manuscriptId: 'm1' },
+      ).title,
+    ).toBe('THE HARBOR');
+
+    expect(
+      importDocx(docx(`<w:p><w:r><w:t>Only body</w:t></w:r></w:p>`), {
+        manuscriptId: 'm1',
+        fileNameStem: 'From File',
+      }).title,
+    ).toBe('From File');
+
+    expect(
+      importDocx(
+        docx(`<w:p><w:r><w:t>Only body</w:t></w:r></w:p>`, {
+          'docProps/core.xml': strToU8(
+            `<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Core Title</dc:title></cp:coreProperties>`,
+          ),
+        }),
+        { manuscriptId: 'm1' },
+      ).title,
+    ).toBe('Core Title');
+  });
+});

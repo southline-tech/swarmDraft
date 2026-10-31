@@ -34,6 +34,13 @@ export function titleFromDocxName(fileName: string): string {
   return base || fileName;
 }
 
+/** Opening label once the importer has resolved a manuscript title (#215). */
+export function openingTitleAfterImport(manuscriptTitle: string, fileName: string): string {
+  const t = manuscriptTitle.trim();
+  if (t && t !== 'Untitled') return t;
+  return titleFromDocxName(fileName);
+}
+
 /** Stored import bytes for opening-error "Try again" (#80). */
 export type OpeningRetry =
   | { kind: 'reopen-latest'; title: string }

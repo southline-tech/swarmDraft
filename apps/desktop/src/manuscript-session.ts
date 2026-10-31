@@ -551,9 +551,14 @@ export async function importAndOpen(
   bytes: Uint8Array,
   persistHooks?: Pick<SectionPersister, 'onError' | 'onSaved'>,
   current?: ManuscriptSession | null,
+  importMeta?: { fileName?: string; onParsedTitle?: (title: string) => void },
 ): Promise<ManuscriptSession> {
   const id = crypto.randomUUID();
-  const imported = importDocx(bytes, { manuscriptId: id });
+  const fileNameStem = importMeta?.fileName
+    ? importMeta.fileName.replace(/\.docx$/i, '').trim() || importMeta.fileName
+    : undefined;
+  const imported = importDocx(bytes, { manuscriptId: id, fileNameStem });
+  importMeta?.onParsedTitle?.(imported.title);
   const payload = importPayload(imported);
   await current?.close();
   const saved = await persistImport(payload);
