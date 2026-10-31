@@ -1,10 +1,10 @@
 //! MCP agent pairing (#188): pending requests approved in-app, token delivered once via poll.
 
-use crate::agents::{hash_token, normalize_scopes, Agent, NewToken};
+use crate::agents::{hash_token, insert_agent, insert_token, normalize_scopes, Agent, NewToken};
 use crate::storage::{StorageError, Store};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
 pub const PAIRING_SECRET_PREFIX: &str = "pair_";
@@ -89,7 +89,7 @@ fn expire_stale(c: &rusqlite::Connection) -> Result<(), StorageError> {
     c.execute(
         &format!(
             "UPDATE agent_pairings SET status = 'expired', resolved_at = {NOW}
-             WHERE status = 'pending' AND expires_at < {NOW}"
+             WHERE status IN ('pending', 'approving') AND expires_at < {NOW}"
         ),
         [],
     )?;
@@ -197,7 +197,7 @@ impl Store {
                 return Ok(PollPairingResult::denied());
             }
             match status.as_str() {
-                "pending" => {
+                "pending" | "approving" => {
                     let expired: bool = c
                         .query_row(
                             "SELECT 1 WHERE ?1 < strftime('%Y-%m-%dT%H:%M:%fZ','now')",
@@ -279,11 +279,20 @@ impl Store {
         pairing_id: &str,
         scopes: Option<&[String]>,
     ) -> Result<(Agent, NewToken), StorageError> {
-        let pending = self.with_conn(|c| {
-            expire_stale(c)?;
-            c.query_row(
+        let mut approved = normalize_scopes(scopes)?;
+        self.with_conn_mut_storage(|c| {
+            let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            expire_stale(&tx)?;
+            let claimed = tx.execute(
+                "UPDATE agent_pairings SET status = 'approving' WHERE id = ?1 AND status = 'pending'",
+                [pairing_id],
+            )?;
+            if claimed == 0 {
+                return Err(StorageError::NotFound(format!("pairing {pairing_id}")));
+            }
+            let (name, color, requested) = tx.query_row(
                 "SELECT name, color, requested_scopes FROM agent_pairings
-                 WHERE id = ?1 AND status = 'pending'",
+                 WHERE id = ?1 AND status = 'approving'",
                 [pairing_id],
                 |r| {
                     Ok((
@@ -292,36 +301,34 @@ impl Store {
                         r.get::<_, String>(2)?,
                     ))
                 },
-            )
-            .optional()
-            .map_err(StorageError::from)
-        })?;
-        let Some((name, color, requested)) = pending else {
-            return Err(StorageError::NotFound(format!("pairing {pairing_id}")));
-        };
-        let req_scopes: Vec<String> = requested.split(' ').map(str::to_string).collect();
-        let mut approved = normalize_scopes(scopes)?;
-        approved.retain(|s| req_scopes.iter().any(|r| r == s));
-        if approved.is_empty() {
-            approved = req_scopes;
-        }
-        let agent = self.create_agent(&name, &color)?;
-        let token = self.create_token(&agent.id, Some(&approved))?;
-        self.with_conn(|c| {
-            let n = c.execute(
+            )?;
+            let req_scopes: Vec<String> = requested.split(' ').map(str::to_string).collect();
+            if approved.is_empty() {
+                approved = req_scopes.clone();
+            } else {
+                approved.retain(|s| req_scopes.iter().any(|r| r == s));
+                if approved.is_empty() {
+                    approved = req_scopes;
+                }
+            }
+            let agent = insert_agent(&tx, &name, &color)?;
+            let token = insert_token(&tx, &agent.id, Some(&approved))?;
+            let n = tx.execute(
                 &format!(
                     "UPDATE agent_pairings SET status = 'approved', resolved_at = {NOW},
                      agent_id = ?2, approved_scopes = ?3, delivery_token = ?4
-                     WHERE id = ?1 AND status = 'pending'"
+                     WHERE id = ?1 AND status = 'approving'"
                 ),
                 params![pairing_id, agent.id, approved.join(" "), token.token],
             )?;
             if n == 0 {
-                return Err(StorageError::Invalid("pairing is no longer pending".into()));
+                return Err(StorageError::Invalid(
+                    "pairing is no longer pending".into(),
+                ));
             }
-            Ok(())
-        })?;
-        Ok((agent, token))
+            tx.commit()?;
+            Ok((agent, token))
+        })
     }
 }
 
@@ -406,5 +413,46 @@ mod tests {
             s.deny_pairing(&r.pairing_id).unwrap();
         }
         assert!(s.request_pairing("One too many", None, None).is_err());
+    }
+
+    #[test]
+    fn at_most_three_pending_pairings() {
+        let (_t, s) = store();
+        let _a = s.request_pairing("A", None, None).unwrap();
+        let _b = s.request_pairing("B", None, None).unwrap();
+        let _c = s.request_pairing("C", None, None).unwrap();
+        let err = s.request_pairing("D", None, None).unwrap_err();
+        assert!(matches!(err, StorageError::Invalid(ref m) if m.contains("pending")));
+    }
+
+    #[test]
+    fn user_display_name_collision_rejected_at_approve() {
+        let (_t, s) = store();
+        s.set_user_display_name("Writer").unwrap();
+        let r = s.request_pairing("Writer", None, None).unwrap();
+        assert!(s.approve_pairing(&r.pairing_id, None).is_err());
+        assert_eq!(s.list_agents().unwrap().len(), 0);
+        assert_eq!(
+            s.poll_pairing(&r.pairing_id, &r.pairing_secret)
+                .unwrap()
+                .status,
+            "pending"
+        );
+    }
+
+    #[test]
+    fn concurrent_approve_creates_one_agent() {
+        let (_t, s) = store();
+        let r = s.request_pairing("Race Bot", None, None).unwrap();
+        let id1 = r.pairing_id.clone();
+        let id2 = r.pairing_id;
+        let s1 = s.clone();
+        let s2 = s.clone();
+        let h1 = std::thread::spawn(move || s1.approve_pairing(&id1, None));
+        let h2 = std::thread::spawn(move || s2.approve_pairing(&id2, None));
+        let r1 = h1.join().unwrap();
+        let r2 = h2.join().unwrap();
+        assert_ne!(r1.is_ok(), r2.is_ok());
+        assert_eq!(s.list_agents().unwrap().len(), 1);
     }
 }
