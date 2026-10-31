@@ -29,7 +29,6 @@ const emit = defineEmits<{ 'select-section': [sectionId: string] }>();
 
 const notes = shallowRef<NoteMeta[]>([]);
 const selectedId = ref<string>();
-const root = ref<HTMLElement>();
 
 const refresh = () => {
   notes.value = listNotes(props.notesDoc);
