@@ -72,8 +72,8 @@ async function removeWord(word: string) {
   <div data-test="settings-spelling">
     <h1 class="st-h1">Spelling &amp; grammar</h1>
     <p class="st-muted st-sub">
-      See spelling and grammar issues as you write. Checking runs on this device only—your
-      manuscript text is never sent elsewhere.
+      Check this manuscript as you write. Checking runs on your computer; nothing leaves the
+      machine.
     </p>
     <section class="st-card" aria-labelledby="st-spell-toggles">
       <h2 id="st-spell-toggles" class="st-h2">Checking</h2>
@@ -91,7 +91,7 @@ async function removeWord(word: string) {
           @change="persistPrefs"
         />
       </div>
-      <p class="st-muted st-desc">Red wavy underline on possible misspellings.</p>
+      <p class="st-muted st-desc">Red wavy underline on words that aren't in the dictionary</p>
       <div class="st-row st-row--toggle">
         <span id="spell-grammar-label" class="st-row__k">Grammar</span>
         <input
@@ -106,16 +106,17 @@ async function removeWord(word: string) {
           @change="persistPrefs"
         />
       </div>
-      <p class="st-muted st-desc">Green wavy underline on possible grammar issues.</p>
+      <p class="st-muted st-desc">Green wavy underline on grammar issues</p>
     </section>
     <section v-if="manuscriptId && backendAvailable" class="st-card" aria-labelledby="st-dict">
       <h2 id="st-dict" class="st-h2">Dictionary for this manuscript</h2>
       <p v-if="!loading && !words.length" class="st-muted st-desc" data-test="dict-empty">
-        No custom words yet.
+        No words in this manuscript's dictionary yet. Add character names, places, and invented
+        terms so they aren't flagged.
       </p>
       <p v-else-if="words.length" class="st-muted st-desc">
-        Words you add here apply only to this book. Character names and invented terms won't be
-        flagged.
+        Words you add stop being flagged as spelling mistakes. The dictionary applies only to this
+        manuscript.
       </p>
       <form class="st-row st-row--add" @submit.prevent="submitAddWord">
         <label class="st-row__k" for="dict-add">Add word</label>

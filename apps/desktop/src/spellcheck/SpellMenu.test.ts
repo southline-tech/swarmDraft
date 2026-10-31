@@ -66,13 +66,13 @@ describe('SpellMenu (#159)', () => {
     expect(document.activeElement).toBe(editor);
 
     editor.blur();
-    w.get('[data-test=spell-ignore]').element.focus();
+    (w.get('[data-test=spell-ignore]').element as HTMLElement).focus();
     await w.get('[data-test=spell-ignore]').trigger('click');
     await flushPromises();
     expect(document.activeElement).toBe(editor);
 
     editor.blur();
-    w.get('[data-test=spell-dictionary]').element.focus();
+    (w.get('[data-test=spell-dictionary]').element as HTMLElement).focus();
     await w.get('[data-test=spell-dictionary]').trigger('click');
     await flushPromises();
     expect(document.activeElement).toBe(editor);

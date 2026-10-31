@@ -27,9 +27,9 @@ describe('DictionarySection (#159)', () => {
       props: { manuscriptId: 'book-1', backendAvailable: true },
     });
     const text = w.get('[data-test=settings-spelling]').text();
-    expect(text).toContain('Checking runs on this device only');
-    expect(text).toContain('Red wavy underline on possible misspellings.');
-    expect(text).toContain('Green wavy underline on possible grammar issues.');
+    expect(text).toContain('Check this manuscript as you write');
+    expect(text).toContain("Red wavy underline on words that aren't in the dictionary");
+    expect(text).toContain('Green wavy underline on grammar issues');
   });
 
   it('shows sc5 empty dictionary copy before the add-word field', async () => {
@@ -38,7 +38,9 @@ describe('DictionarySection (#159)', () => {
       props: { manuscriptId: 'book-1', backendAvailable: true },
     });
     await flushPromises();
-    expect(w.get('[data-test=dict-empty]').text()).toBe('No custom words yet.');
+    expect(w.get('[data-test=dict-empty]').text()).toContain(
+      "No words in this manuscript's dictionary yet",
+    );
     expect(w.find('[data-test=dict-list]').exists()).toBe(false);
   });
 
