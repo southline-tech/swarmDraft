@@ -740,12 +740,14 @@ impl Store {
             let mut st = c.prepare(
                 "SELECT u.seq, u.doc_id, u.data FROM doc_updates u
                  WHERE u.seq > ?2
-                   AND u.doc_id IN (SELECT doc_id FROM sections WHERE manuscript_id = ?1)
+                   AND (u.doc_id IN (SELECT doc_id FROM sections WHERE manuscript_id = ?1)
+                        OR u.doc_id = ?4)
                  ORDER BY u.seq LIMIT ?3",
             )?;
+            let notes_id = crate::notes::notes_doc_id(manuscript_id);
             let mut cursor = after;
             let updates = st
-                .query_map(params![manuscript_id, after, UPDATES_PAGE], |r| {
+                .query_map(params![manuscript_id, after, UPDATES_PAGE, notes_id], |r| {
                     Ok((r.get::<_, i64>(0)?, r.get(1)?, r.get(2)?))
                 })?
                 .map(|row| {

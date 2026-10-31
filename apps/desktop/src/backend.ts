@@ -216,6 +216,25 @@ export async function pollUpdates(
   return invoke<UpdatesSince>('manuscript_updates_since', { manuscriptId, after });
 }
 
+/** Story notes doc state for a manuscript (#38). */
+export interface NotesState {
+  state: number[];
+  updatesCursor: number;
+}
+
+export async function loadNotesState(manuscriptId: string): Promise<NotesState | null> {
+  if (!isTauri()) return null;
+  return invoke<NotesState>('notes_load', { manuscriptId });
+}
+
+export async function notesApplyUpdate(manuscriptId: string, update: Uint8Array): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('notes_apply_update', {
+    manuscriptId,
+    update: Array.from(update),
+  });
+}
+
 /** The import payload the backend persists: one entry per section, in outline order. */
 export interface ImportPayload {
   title: string;

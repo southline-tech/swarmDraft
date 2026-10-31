@@ -50,6 +50,7 @@ import ShellsPreview from './shells/ShellsPreview.vue';
 import Rad60ReviewEvidence from './evidence/Rad60ReviewEvidence.vue';
 import Rad67EditorChromeEvidence from './evidence/Rad67EditorChromeEvidence.vue';
 import Rad55FocusModeEvidence from './evidence/Rad55FocusModeEvidence.vue';
+import Rad38NotesEvidence from './evidence/Rad38NotesEvidence.vue';
 import { readEvidenceQuery } from './evidence/evidence-routes';
 import AppToast from './shells/AppToast.vue';
 import OpeningProgress from './shells/OpeningProgress.vue';
@@ -80,9 +81,13 @@ import {
   UnsavedEditsError,
   type ManuscriptSession,
 } from './manuscript-session';
+import StoryNotesPanel from './notes/StoryNotesPanel.vue';
+import { openNotesSession, type NotesSession } from './notes/useNotesSession';
+import { loadProfile } from './settings/prefs';
 
 const info = ref<AppInfo | null>(null);
 const session = shallowRef<ManuscriptSession | null>(null);
+const notesSession = shallowRef<NotesSession | null>(null);
 const selectedId = ref<string>();
 const editorPane = ref<InstanceType<typeof ContinuousManuscript> | null>(null);
 /** Outline row clicked (#36): scroll to the section and put the caret in its body (#107). */
@@ -611,7 +616,9 @@ function syncWindowTitle(title: string) {
 function closeSession() {
   // Storage was replaced: drop pending edits rather than write them into the restored data.
   void session.value?.close({ discard: true });
+  void notesSession.value?.close({ discard: true });
   session.value = null;
+  notesSession.value = null;
   saveStatusShown.value = false;
   decisionRecordsBySection.value = {};
   selectedId.value = undefined;
@@ -642,6 +649,14 @@ function open(next: ManuscriptSession) {
   markWelcomed();
   choosingBook.value = false;
   session.value = next;
+  notesSession.value = null;
+  if (isTauri()) {
+    void openNotesSession(next.id)
+      .then((ns) => {
+        if (session.value?.id === next.id) notesSession.value = ns;
+      })
+      .catch((err) => console.error('Could not load story notes', err));
+  }
   decisionRecordsBySection.value = {};
   void loadDecisionRecords(next.id);
   syncWindowTitle(next.title || PRODUCT_NAME);
@@ -818,6 +833,11 @@ onBeforeUnmount(() => {
   clearTimeout(countTimer);
 });
 
+const humanNotesAuthor = computed(() => {
+  const profile = loadProfile();
+  const name = profile.name.trim() || info.value?.computerName || 'Author';
+  return { id: `human:${name}`, name };
+});
 /** Focus mode (#55 / wp5): hides the app chrome; local UI state only. */
 const focusMode = ref(false);
 /** Set when the writer chooses Ask bot from the editor menu (#54 wiring to App). */
@@ -830,6 +850,12 @@ const outlineForced = computed(() => outlineAuto.manual.value && navigatorOpen.v
 /** wp2 (#67): full outline, collapsed rail, or hidden in focus mode. */
 const workspaceGridClass = computed(() => {
   if (focusMode.value) return 'grid-cols-1';
+  const notesCol = notesSession.value ? '20rem' : '';
+  if (notesCol) {
+    return navigatorOpen.value
+      ? `grid-cols-[18rem_${notesCol}_1fr]`
+      : `grid-cols-[var(--ct-rail-w)_${notesCol}_1fr]`;
+  }
   return navigatorOpen.value ? 'grid-cols-[18rem_1fr]' : 'grid-cols-[var(--ct-rail-w)_1fr]';
 });
 const chapterNavControls = computed(() =>
@@ -851,6 +877,7 @@ defineExpose({ open, closeSession });
 
 <template>
   <Rad60ReviewEvidence v-if="evidence === 'rad60-review'" class="shell" />
+  <Rad38NotesEvidence v-else-if="evidence === '38-notes'" class="shell" />
   <Rad67EditorChromeEvidence v-else-if="evidence === 'rad67'" class="shell" />
   <Rad55FocusModeEvidence v-else-if="evidence === 'rad55'" class="shell shell--focus-mode" />
   <ShellsPreview v-else-if="preview" class="shell" :initial="preview" @close="preview = null" />
@@ -1157,6 +1184,15 @@ defineExpose({ open, closeSession });
         @numbering-style="onNumberingStyle"
       />
       <OutlineRail v-show="!navigatorOpen && !focusMode" @expand="outlineAuto.toggleByHand()" />
+      <StoryNotesPanel
+        v-if="notesSession && session && !focusMode"
+        :notes-doc="notesSession.doc"
+        :outline="session.outline.value"
+        :human-author="humanNotesAuthor"
+        :readonly="session.closed || restoreInProgress"
+        data-test="story-notes-panel"
+        @select-section="focusEditor"
+      />
       <ContinuousManuscript
         ref="editorPane"
         :outline="session.outline.value"
