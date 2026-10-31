@@ -214,10 +214,14 @@ const saveLabel = computed(() => {
               <svg class="story-notes__save-check" viewBox="0 0 16 16" aria-hidden="true">
                 <path d="M3.5 8.5l3 3 6-7" />
               </svg>
-              <span class="story-notes__save-text story-notes__save-text--ok">{{ saveLabel.text }}</span>
+              <span class="story-notes__save-text story-notes__save-text--ok">{{
+                saveLabel.text
+              }}</span>
             </template>
             <template v-else-if="saveLabel.kind === 'error'">
-              <span class="story-notes__save-text story-notes__save-text--err">{{ saveLabel.text }}</span>
+              <span class="story-notes__save-text story-notes__save-text--err">{{
+                saveLabel.text
+              }}</span>
               <button
                 type="button"
                 class="story-notes__retry"
