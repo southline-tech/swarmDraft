@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script>
+      const q = new URLSearchParams(location.search);
+      if (q.get('theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+    </script>
+    <meta charset="utf-8" />
+    <title>Removed agents evidence (#192 ap4)</title>
+    <link rel="stylesheet" href="../../../apps/desktop/src/styles/tokens.css" />
+    <link rel="stylesheet" href="../../../apps/desktop/src/settings/settings.css" />
+    <style>
+      body {
+        margin: 24px;
+        width: 640px;
+        font-family: var(--ct-font-ui);
+        color: var(--ct-text);
+        background: var(--ct-bg);
+      }
+      .ag__list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .ag__agent {
+        padding: var(--ct-space-3) 0;
+        border-top: 1px solid var(--ct-border);
+      }
+      .ag__agent:first-child {
+        border-top: 0;
+      }
+      .ag__head {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--ct-space-3);
+      }
+      .ag__av {
+        display: grid;
+        flex: none;
+        place-items: center;
+        width: var(--ct-space-8);
+        height: var(--ct-space-8);
+        border-radius: var(--ct-radius-full);
+        color: var(--ct-accent-contrast);
+        font-size: var(--ct-text-sm);
+        font-weight: var(--ct-weight-semibold);
+      }
+      .ag__name {
+        flex: 1;
+        min-width: 0;
+      }
+      .ag__mcp {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--ct-space-2);
+        flex: 1 1 100%;
+        margin: 0;
+        padding-left: calc(var(--ct-space-8) + var(--ct-space-3));
+        font-size: var(--ct-text-sm);
+        color: var(--ct-success);
+      }
+      .ag__mcp-dot {
+        width: var(--ct-space-2);
+        height: var(--ct-space-2);
+        border-radius: var(--ct-radius-full);
+        background: var(--ct-success);
+      }
+      .ag__removed {
+        margin-top: var(--ct-space-3);
+        padding-top: var(--ct-space-3);
+        border-top: 1px solid var(--ct-border);
+      }
+      .ag__removed-toggle {
+        display: flex;
+        align-items: center;
+        gap: var(--ct-space-2);
+        width: 100%;
+        padding: var(--ct-space-1) 0;
+        border: 0;
+        background: none;
+        color: var(--ct-text-muted);
+        font: inherit;
+        font-size: var(--ct-text-sm);
+        font-weight: var(--ct-weight-semibold);
+        text-align: left;
+      }
+      .ag__removed-panel {
+        margin-top: var(--ct-space-2);
+      }
+      .ag__agent--removed .ag__head {
+        color: var(--ct-text-muted);
+      }
+      .ag__removed-date {
+        margin-left: auto;
+        font-size: var(--ct-text-sm);
+      }
+      .st-btn {
+        display: inline-flex;
+        align-items: center;
+        min-height: var(--ct-space-10);
+        padding: 0 var(--ct-space-3);
+        border: 1px solid var(--ct-border-strong);
+        border-radius: var(--ct-radius-md);
+        background: var(--ct-surface);
+        font-size: var(--ct-text-sm);
+        font-weight: var(--ct-weight-semibold);
+      }
+      .st-btn--link {
+        border: 0;
+        background: none;
+        text-decoration: underline;
+      }
+      .ag__danger {
+        color: var(--ct-danger);
+      }
+    </style>
+  </head>
+  <body>
+    <section class="st-card" aria-labelledby="ag-list">
+      <h2 id="ag-list" class="st-h2">Your agents</h2>
+      <ul class="ag__list">
+        <li class="ag__agent">
+          <div class="ag__head">
+            <span class="ag__av" style="background: #3366ff">G</span>
+            <b class="ag__name">Grok Bot</b>
+            <p class="ag__mcp">
+              <span class="ag__mcp-dot"></span>
+              <span>MCP connected</span>
+            </p>
+            <button type="button" class="st-btn">New key</button>
+            <button type="button" class="st-btn st-btn--link ag__danger">Remove agent</button>
+          </div>
+        </li>
+      </ul>
+      <div class="ag__removed">
+        <button
+          type="button"
+          class="ag__removed-toggle"
+          id="toggle"
+          aria-expanded="false"
+          aria-controls="removed-panel"
+        >
+          <span id="chev" aria-hidden="true">▸</span>
+          Removed agents (2)
+        </button>
+        <div id="removed-panel" class="ag__removed-panel" hidden>
+          <p class="st-muted st-desc">
+            Removed agents stay listed only while they still have suggestions or comments in your
+            books. Name and color stay so old marks keep their attribution.
+          </p>
+          <ul class="ag__list">
+            <li class="ag__agent ag__agent--removed">
+              <div class="ag__head">
+                <span class="ag__av" style="background: #a1452a">L</span>
+                <b class="ag__name">Line Editor</b>
+                <span class="st-muted ag__removed-date">Removed Oct 30</span>
+              </div>
+            </li>
+            <li class="ag__agent ag__agent--removed">
+              <div class="ag__head">
+                <span class="ag__av" style="background: #2d794d">C</span>
+                <b class="ag__name">Copy Bot</b>
+                <span class="st-muted ag__removed-date">Removed Oct 28</span>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
+    <script>
+      const expanded = new URLSearchParams(location.search).get('scene') === 'expanded';
+      const toggle = document.getElementById('toggle');
+      const panel = document.getElementById('removed-panel');
+      const chev = document.getElementById('chev');
+      if (expanded) {
+        toggle.setAttribute('aria-expanded', 'true');
+        chev.textContent = '▾';
+        panel.hidden = false;
+      }
+    </script>
+  </body>
+</html>

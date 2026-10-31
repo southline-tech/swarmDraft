@@ -24,7 +24,7 @@ function fakeApi() {
       return a;
     }),
     revoke: vi.fn(async (id: string) => {
-      agents.find((a) => a.id === id)!.revokedAt = 't';
+      agents.find((a) => a.id === id)!.revokedAt = '2026-10-30T12:00:00.000Z';
     }),
     tokens: vi.fn(async (id: string) => tokens.filter((t) => t.agentId === id)),
     createToken: vi.fn(async (agentId: string, scopes = []) => {
@@ -65,7 +65,12 @@ describe('AgentsSettings', () => {
     await flushPromises();
     await w.find('[data-test="revoke-agent"]').trigger('click');
     await flushPromises();
-    expect(w.get('[data-test="agent"]').text()).toContain('Removed');
+    expect(w.findAll('[data-test="agent"]')).toHaveLength(0);
+    expect(w.find('[data-test="removed-toggle"]').text()).toContain('Removed agents (1)');
+    expect(w.find('[data-test="removed-toggle"]').attributes('aria-expanded')).toBe('false');
+    await w.find('[data-test="removed-toggle"]').trigger('click');
+    expect(w.get('[data-test="removed-agent"]').text()).toContain('Removed Oct 30');
+    expect(w.get('[data-test="removed-agent"]').text()).not.toContain('New key');
     const visible = w
       .text()
       .replace(/cat_abcdef/g, '')
@@ -325,6 +330,81 @@ describe('AgentsSettings', () => {
       expect(el.selectionStart).toBe(0);
       expect(el.selectionEnd).toBe('cat_abcdefSECRET'.length);
       w.unmount();
+    });
+  });
+
+  describe('Removed agents accordion (#192)', () => {
+    const REMOVED_HELP =
+      'Removed agents stay listed only while they still have suggestions or comments in your books. Name and color stay so old marks keep their attribution.';
+
+    async function mountWithRemoved() {
+      const api = fakeApi();
+      api.list = vi.fn(async () => [
+        {
+          id: 'a0',
+          name: 'Old Helper',
+          color: '#a1452a',
+          createdAt: 't',
+          revokedAt: '2026-10-30T15:00:00.000Z',
+          primary: false,
+          lastSeenAt: null,
+        },
+      ]);
+      const w = mount(AgentsSettings, { props: { api } });
+      await flushPromises();
+      return { w, api };
+    }
+
+    it('keeps active agents separate and hides removed rows until expanded', async () => {
+      const api = fakeApi();
+      api.list = vi.fn(async () => [
+        {
+          id: 'a0',
+          name: 'Active',
+          color: '#3366ff',
+          createdAt: 't',
+          revokedAt: null,
+          primary: false,
+          lastSeenAt: null,
+        },
+        {
+          id: 'a1',
+          name: 'Retired',
+          color: '#2d794d',
+          createdAt: 't',
+          revokedAt: '2026-10-30T12:00:00.000Z',
+          primary: false,
+          lastSeenAt: null,
+        },
+      ]);
+      const w = mount(AgentsSettings, { props: { api } });
+      await flushPromises();
+      expect(w.findAll('[data-test="agent"]')).toHaveLength(1);
+      expect(w.get('[data-test="agent"]').text()).toContain('Active');
+      expect(w.find('[data-test="removed-toggle"]').attributes('aria-expanded')).toBe('false');
+      expect(w.find('[data-test="removed-agent"]').exists()).toBe(true);
+      expect(w.find('[data-test="removed-agent"]').isVisible()).toBe(false);
+      await w.find('[data-test="removed-toggle"]').trigger('click');
+      expect(w.find('[data-test="removed-toggle"]').attributes('aria-expanded')).toBe('true');
+      const row = w.get('[data-test="removed-agent"]');
+      expect(row.text()).toContain('Retired');
+      expect(row.text()).toContain('Removed Oct 30');
+      expect(w.text()).toContain(REMOVED_HELP);
+      expect(row.find('[data-test="mcp-status"]').exists()).toBe(false);
+      expect(row.find('[data-test="mint"]').exists()).toBe(false);
+    });
+
+    it('does not fetch keys for removed agents', async () => {
+      const { api } = await mountWithRemoved();
+      expect(api.tokens).not.toHaveBeenCalled();
+    });
+
+    it('is keyboard operable on the accordion control', async () => {
+      const { w } = await mountWithRemoved();
+      const toggle = w.get('[data-test="removed-toggle"]');
+      await toggle.trigger('keydown.enter');
+      expect(toggle.attributes('aria-expanded')).toBe('true');
+      expect(w.find('[data-test="removed-agent"]').exists()).toBe(true);
     });
   });
 
