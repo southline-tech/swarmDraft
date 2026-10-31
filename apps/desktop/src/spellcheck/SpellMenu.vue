@@ -17,14 +17,33 @@ const emit = defineEmits<{
 
 const root = ref<HTMLElement>();
 
-onMounted(() => void nextTick(() => root.value?.focus()));
+function menuItems() {
+  return [...(root.value?.querySelectorAll<HTMLElement>('[role=menuitem]') ?? [])];
+}
 
 function onKey(e: KeyboardEvent) {
+  const active = document.activeElement as HTMLElement | null;
+  const items = menuItems();
+  const i = items.indexOf(active as HTMLElement);
+
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const next = e.key === 'ArrowDown' ? Math.min(i + 1, items.length - 1) : Math.max(i - 1, 0);
+    items[next]?.focus();
+    return;
+  }
+  if (e.key === 'Enter' && active?.dataset.action === 'suggest') {
+    e.preventDefault();
+    emit('suggest', active.dataset.suggest ?? '');
+    return;
+  }
   if (e.key === 'Escape') {
     e.stopPropagation();
     emit('close');
   }
 }
+
+onMounted(() => void nextTick(() => menuItems()[0]?.focus()));
 
 const kindLabel = props.issue.kind === 'spelling' ? 'Spelling' : 'Grammar';
 </script>
@@ -32,9 +51,9 @@ const kindLabel = props.issue.kind === 'spelling' ? 'Spelling' : 'Grammar';
 <template>
   <div
     ref="root"
-    class="spell-menu"
+    class="sh-menu spell-menu"
     role="menu"
-    tabindex="-1"
+    aria-label="Spelling and grammar"
     data-test="spell-menu"
     :style="{ left: `${x}px`, top: `${y}px` }"
     @keydown="onKey"
@@ -48,55 +67,54 @@ const kindLabel = props.issue.kind === 'spelling' ? 'Spelling' : 'Grammar';
       :key="s"
       type="button"
       role="menuitem"
-      class="spell-menu__item"
+      tabindex="-1"
+      class="sh-mi"
+      data-action="suggest"
+      :data-suggest="s"
       :data-test="i === 0 ? 'spell-suggest-primary' : undefined"
       @click="emit('suggest', s)"
     >
-      {{ s }}
+      {{ s }}<span v-if="i === 0" class="sh-k">Enter</span>
     </button>
+    <div class="sh-sep" role="separator" />
     <button
+      v-if="issue.kind === 'spelling'"
       type="button"
       role="menuitem"
-      class="spell-menu__item"
-      data-test="spell-ignore"
-      @click="emit('ignore')"
-    >
-      Ignore
-    </button>
-    <button
-      type="button"
-      role="menuitem"
-      class="spell-menu__item"
+      tabindex="-1"
+      class="sh-mi"
       data-test="spell-dictionary"
       @click="emit('dictionary')"
     >
       Add to dictionary
+    </button>
+    <button
+      type="button"
+      role="menuitem"
+      tabindex="-1"
+      class="sh-mi"
+      data-test="spell-ignore"
+      @click="emit('ignore')"
+    >
+      Ignore
     </button>
   </div>
 </template>
 
 <style scoped>
 .spell-menu {
-  position: fixed;
-  z-index: 6;
-  min-width: 220px;
+  min-width: 260px;
   max-width: 320px;
   padding: var(--ct-space-2) 0;
-  border: 1px solid var(--ct-border-strong);
-  border-radius: var(--ct-radius-md);
-  background: var(--ct-surface-raised);
-  box-shadow: var(--ct-elevation-2);
-  font-family: var(--ct-font-ui);
-  font-size: var(--ct-text-sm);
-  color: var(--ct-text);
-}
-.spell-menu:focus {
-  outline: 0;
+  z-index: 6;
 }
 .spell-menu__head {
   margin: 0;
   padding: var(--ct-space-2) var(--ct-space-4) var(--ct-space-3);
   border-bottom: 1px solid var(--ct-border);
+  font-family: var(--ct-font-ui);
+  font-size: var(--ct-text-sm);
+  line-height: 1.4;
 }
 .spell-menu__kind {
   display: block;
@@ -109,24 +127,6 @@ const kindLabel = props.issue.kind === 'spelling' ? 'Spelling' : 'Grammar';
 .spell-menu__msg {
   display: block;
   margin-top: var(--ct-space-1);
-}
-.spell-menu__item {
-  display: block;
-  width: 100%;
-  min-height: var(--ct-space-12);
-  padding: 0 var(--ct-space-4);
-  border: 0;
-  background: none;
   color: var(--ct-text);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.spell-menu__item:hover {
-  background: var(--ct-hover-bg);
-}
-.spell-menu__item:focus-visible {
-  outline: 0;
-  box-shadow: inset var(--ct-focus-ring);
 }
 </style>

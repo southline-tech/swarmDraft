@@ -345,12 +345,16 @@ export async function spellLintParagraph(
   checkGrammar: boolean,
 ): Promise<SpellLintIssue[]> {
   if (!isTauri() || (!checkSpelling && !checkGrammar) || !text.trim()) return [];
-  return invoke<SpellLintIssue[]>('spell_lint_paragraph', {
-    manuscriptId: manuscriptId ?? null,
-    text,
-    checkSpelling,
-    checkGrammar,
-  });
+  try {
+    return await invoke<SpellLintIssue[]>('spell_lint_paragraph', {
+      manuscriptId: manuscriptId ?? null,
+      text,
+      checkSpelling,
+      checkGrammar,
+    });
+  } catch {
+    return [];
+  }
 }
 
 export async function spellDictionaryList(manuscriptId: string, query?: string): Promise<string[]> {

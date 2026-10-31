@@ -161,7 +161,12 @@ export const Spellcheck = Extension.create<SpellcheckOptions>({
           issues = mergeIssuesForBlock(view.state.doc, issues, blockPos, []);
           continue;
         }
-        const results = await opts.lint(text, blockPos);
+        let results: SpellLintResult[] | null;
+        try {
+          results = await opts.lint(text, blockPos);
+        } catch {
+          continue;
+        }
         if (gen !== lintGeneration || view.isDestroyed) return;
         if (results === null) continue;
         const blockIssues = resultsToIssues(view.state.doc, blockPos, map, results);
@@ -182,11 +187,6 @@ export const Spellcheck = Extension.create<SpellcheckOptions>({
       timer = setTimeout(() => void runLint(viewRef!), opts.debounceMs ?? 450);
     };
 
-    const markDirty = (view: EditorView, from: number, to: number) => {
-      for (const p of blocksInRange(view.state.doc, from, to)) dirtyBlocks.add(p);
-      schedule();
-    };
-
     return [
       new Plugin<SpellPluginState>({
         key: spellcheckKey,
@@ -205,6 +205,12 @@ export const Spellcheck = Extension.create<SpellcheckOptions>({
               schedule();
             }
             if (tr.docChanged) {
+              tr.mapping.maps.forEach((map) => {
+                map.forEach((_oldStart, _oldEnd, newStart, newEnd) => {
+                  for (const p of blocksInRange(tr.doc, newStart, newEnd)) dirtyBlocks.add(p);
+                });
+              });
+              schedule();
               return {
                 issues: prev.issues,
                 decorations: prev.decorations.map(tr.mapping, tr.doc),
@@ -223,12 +229,7 @@ export const Spellcheck = Extension.create<SpellcheckOptions>({
           });
           schedule();
           return {
-            update(v, prevState) {
-              if (!opts.enabled()) return;
-              if (v.state.doc.eq(prevState.doc)) return;
-              const { from, to } = v.state.selection;
-              markDirty(v, from, to);
-            },
+            update() {},
             destroy() {
               clearTimeout(timer);
               viewRef = null;

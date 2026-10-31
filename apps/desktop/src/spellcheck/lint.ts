@@ -8,5 +8,9 @@ export async function lintBlockText(
 ): Promise<SpellLintResult[]> {
   const prefs = loadSpellPrefs();
   if (!spellcheckEnabled(prefs)) return [];
-  return spellLintParagraph(manuscriptId, text, prefs.spelling, prefs.grammar);
+  try {
+    return await spellLintParagraph(manuscriptId, text, prefs.spelling, prefs.grammar);
+  } catch {
+    return [];
+  }
 }

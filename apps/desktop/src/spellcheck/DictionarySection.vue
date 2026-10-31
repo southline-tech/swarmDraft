@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** Settings → Spelling (#159 sc4–sc6): toggles and per-manuscript dictionary. */
 import { computed, ref, watch } from 'vue';
-import { spellDictionaryList, spellDictionaryRemove } from '../backend';
+import { spellDictionaryAdd, spellDictionaryList, spellDictionaryRemove } from '../backend';
 import { loadSpellPrefs, saveSpellPrefs, type SpellPrefs } from '../settings/prefs';
 
 const props = defineProps<{
@@ -11,6 +11,7 @@ const props = defineProps<{
 
 const prefs = ref<SpellPrefs>(loadSpellPrefs());
 const query = ref('');
+const addWord = ref('');
 const words = ref<string[]>([]);
 const status = ref('');
 const loading = ref(false);
@@ -47,6 +48,19 @@ watch(
   { immediate: true },
 );
 
+async function submitAddWord() {
+  const word = addWord.value.trim();
+  if (!word || !props.manuscriptId) return;
+  status.value = '';
+  try {
+    await spellDictionaryAdd(props.manuscriptId, word);
+    addWord.value = '';
+    await reload();
+  } catch {
+    status.value = 'Could not add that word.';
+  }
+}
+
 async function removeWord(word: string) {
   if (!props.manuscriptId) return;
   await spellDictionaryRemove(props.manuscriptId, word);
@@ -58,40 +72,62 @@ async function removeWord(word: string) {
   <div data-test="settings-spelling">
     <h1 class="st-h1">Spelling &amp; grammar</h1>
     <p class="st-muted st-sub">
-      Offline checking while you write. Nothing is sent off this device.
+      Check spelling and grammar as you write. Everything stays on this device—nothing is sent
+      elsewhere.
     </p>
     <section class="st-card" aria-labelledby="st-spell-toggles">
       <h2 id="st-spell-toggles" class="st-h2">Checking</h2>
-      <label class="st-row st-row--toggle" for="spell-spelling">
-        <span class="st-row__k">Spelling</span>
+      <div class="st-row st-row--toggle">
+        <span id="spell-spelling-label" class="st-row__k">Spelling</span>
         <input
           id="spell-spelling"
           v-model="prefs.spelling"
           type="checkbox"
+          role="switch"
+          class="st-switch"
+          :aria-checked="prefs.spelling ? 'true' : 'false'"
+          aria-labelledby="spell-spelling-label"
           data-test="spell-toggle-spelling"
           @change="persistPrefs"
         />
-      </label>
-      <label class="st-row st-row--toggle" for="spell-grammar">
-        <span class="st-row__k">Grammar</span>
+      </div>
+      <div class="st-row st-row--toggle">
+        <span id="spell-grammar-label" class="st-row__k">Grammar</span>
         <input
           id="spell-grammar"
           v-model="prefs.grammar"
           type="checkbox"
+          role="switch"
+          class="st-switch"
+          :aria-checked="prefs.grammar ? 'true' : 'false'"
+          aria-labelledby="spell-grammar-label"
           data-test="spell-toggle-grammar"
           @change="persistPrefs"
         />
-      </label>
+      </div>
       <p class="st-muted st-desc">
         Both are on by default. Turn either off to hide its underlines.
       </p>
     </section>
     <section v-if="manuscriptId && backendAvailable" class="st-card" aria-labelledby="st-dict">
-      <h2 id="st-dict" class="st-h2">Dictionary</h2>
+      <h2 id="st-dict" class="st-h2">Dictionary for this manuscript</h2>
       <p class="st-muted st-desc">
         Words you add here apply only to this book. Character names and invented terms won't be
         flagged.
       </p>
+      <form class="st-row st-row--add" @submit.prevent="submitAddWord">
+        <label class="st-row__k" for="dict-add">Add word</label>
+        <input
+          id="dict-add"
+          v-model="addWord"
+          class="st-inp"
+          type="text"
+          autocomplete="off"
+          placeholder="Type a word"
+          data-test="dict-add"
+        />
+        <button type="submit" class="st-btn st-btn--s" data-test="dict-add-submit">Add</button>
+      </form>
       <label class="st-row" for="dict-search">
         <span class="st-row__k">Search</span>
         <input
@@ -129,6 +165,9 @@ async function removeWord(word: string) {
 
 <style scoped>
 .st-row--toggle {
+  align-items: center;
+}
+.st-row--add {
   align-items: center;
 }
 .dict-list {

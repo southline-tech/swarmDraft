@@ -245,3 +245,7 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-30 · #67 · Designer re-review (#157) · Esc on wp8 author filter left focus in the closed popover · `closeFilterMenu(true)` refocuses `[data-test=filter-toggle]` (overflow-menu pattern)
 - 2026-10-30 · #67 · Designer re-review (#157) · PR wp1/wp6/wp8 shots stale or load-error · re-capture from `?evidence=rad67&frame=…&theme=…` App shell after harness fix
 - 2026-10-30 · #55 · Designer review (#158) · pill × exit dropped focus to body; Ctrl+Shift+F hides chrome with no SR cue; evidence was editor-only · focus page on exit; polite `focus-mode-live`; `.shell--focus-mode` drops status-bar padding; re-capture wp5 from App `?evidence=rad55`
+- 2026-10-30 · #159 · review (#171) · Spellcheck debounce invoked real `invoke` under `isTauri: true` mocks · try/catch in `lintBlockText`/`spellLintParagraph`/`runLint`; stub `spellLintParagraph` in continuous App tests
+- 2026-10-30 · #159 · review (#171) · placeholder pr-evidence PNGs · capture sc1–sc6 from `docs/pr-evidence/159/evidence.html` + `capture.sh`
+- 2026-10-30 · #159 · review (#171) · SpellMenu order/focus vs sc2/sc3 · suggestions → sep → Add to dictionary (spelling only) → Ignore; first suggestion + Enter hint; `sh-menu`/`sh-mi`; Dictionary switches + add-word field
+- 2026-10-30 · #159 · review (#171) · plugin update dirtied selection not change range · mark dirty blocks from `tr.mapping` in plugin `apply` when `tr.docChanged`
