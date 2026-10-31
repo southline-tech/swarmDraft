@@ -7,6 +7,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { errorLine, rawErrorText } from './errors/map-error';
 import { pairingApi, type PairingApi, type PairingSummary } from './pairing-client';
+import { pairingAccessChips } from './pairing-copy';
 import { trapTab } from './settings/focus-trap';
 import './settings/settings.css';
 
@@ -115,16 +116,8 @@ function onKeydown(e: KeyboardEvent) {
   } else if (dialog.value) trapTab(e, dialog.value);
 }
 
-function scopeLine(scopes: string[]): string {
-  const hasSuggest = scopes.includes('suggest');
-  const hasComment = scopes.includes('comment');
-  if (hasSuggest && hasComment) {
-    return 'It is asking to suggest edits and comment in your books.';
-  }
-  if (hasSuggest) return 'It is asking to suggest edits in your books.';
-  if (hasComment) return 'It is asking to comment in your books.';
-  if (scopes.includes('read')) return 'It is asking to read your books.';
-  return 'It is asking to connect to your books.';
+function accessChips(scopes: string[]) {
+  return pairingAccessChips(scopes);
 }
 
 watch(
@@ -158,14 +151,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="active()" class="scrim" data-test="pairing-scrim">
+  <div v-if="active()" class="st-dlg-scrim" data-test="pairing-scrim">
     <div
       ref="dialog"
-      class="card dlg"
+      class="st-dlg"
       role="alertdialog"
       aria-modal="true"
       aria-labelledby="pair-title"
-      aria-describedby="pair-body"
+      aria-describedby="pair-body pair-hint"
       data-test="pairing-dialog"
       @keydown="onKeydown"
     >
@@ -176,12 +169,23 @@ onBeforeUnmount(() => {
           :style="{ background: active()!.color }"
         />
         <h2 id="pair-title" class="st-h2 pair__title">
-          Allow <bdi dir="auto">{{ active()!.name }}</bdi>?
+          Allow <bdi dir="auto">{{ active()!.name }}</bdi> to connect?
         </h2>
       </div>
       <p id="pair-body" class="st-desc pair__body">
-        {{ scopeLine(active()!.requestedScopes) }}
-        You can turn off its key anytime in Settings › Agents.
+        A bot on this computer is asking to pair over MCP. It will get a key with the access below.
+        You can revoke it later in Settings › Agents.
+      </p>
+      <div class="pair__access">
+        <span class="pair__access-label">Requested access</span>
+        <ul class="pair__chips">
+          <li v-for="chip in accessChips(active()!.requestedScopes)" :key="chip">
+            {{ chip }}
+          </li>
+        </ul>
+      </div>
+      <p id="pair-hint" class="st-muted pair__hint">
+        Esc denies and dismisses. Focus returns to the app.
       </p>
       <p v-if="inlineError" class="pair__error" role="alert" data-test="pairing-error">
         {{ inlineError }}
@@ -231,6 +235,35 @@ onBeforeUnmount(() => {
 .pair__body {
   margin: 0;
 }
+.pair__access {
+  margin-top: var(--ct-space-4);
+}
+.pair__access-label {
+  display: block;
+  margin-bottom: var(--ct-space-2);
+  font-size: var(--ct-text-sm);
+  font-weight: var(--ct-weight-semibold);
+}
+.pair__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ct-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pair__chips li {
+  padding: var(--ct-space-1) var(--ct-space-3);
+  border: 1px solid var(--ct-border-strong);
+  border-radius: var(--ct-radius-full);
+  background: var(--ct-bg);
+  font-size: var(--ct-text-sm);
+  font-weight: var(--ct-weight-semibold);
+}
+.pair__hint {
+  margin: var(--ct-space-4) 0 0;
+  font-size: var(--ct-text-sm);
+}
 .pair__error {
   margin: var(--ct-space-3) 0 0;
   color: var(--ct-danger);
@@ -241,26 +274,5 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   gap: var(--ct-space-3);
   margin-top: var(--ct-space-6);
-}
-</style>
-
-<style>
-.scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: grid;
-  place-items: center;
-  padding: var(--ct-space-6);
-  background: var(--ct-scrim);
-}
-.card.dlg {
-  width: min(480px, 100%);
-  padding: var(--ct-space-8);
-  border: 1px solid var(--ct-border);
-  border-radius: var(--ct-radius-lg);
-  background: var(--ct-surface-raised);
-  box-shadow: var(--ct-elevation-3);
-  line-height: 1.5;
 }
 </style>

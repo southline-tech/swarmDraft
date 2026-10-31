@@ -446,7 +446,7 @@ onBeforeUnmount(() => {
   color: var(--ct-text-muted);
 }
 .ag__mcp--connected {
-  color: var(--ct-text);
+  color: var(--ct-success);
 }
 .ag__mcp-dot {
   width: var(--ct-space-2);

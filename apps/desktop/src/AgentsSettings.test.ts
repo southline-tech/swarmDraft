@@ -354,6 +354,7 @@ describe('AgentsSettings', () => {
       const row = w.get('[data-test="mcp-status"]');
       expect(row.text()).toBe('MCP connected');
       expect(row.classes()).toContain('ag__mcp--connected');
+      expect(row.classes()).not.toContain('ag__mcp--muted');
     });
 
     it('shows last active minutes when older than two minutes', async () => {

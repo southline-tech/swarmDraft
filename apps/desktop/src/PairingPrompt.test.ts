@@ -83,7 +83,18 @@ describe('PairingPrompt', () => {
     await w.get('[data-test="pairing-deny"]').trigger('click');
     await flushPromises();
     expect(w.text()).toContain('Second');
-    expect(w.text()).not.toContain('Allow First');
+    expect(w.text()).not.toContain('Allow First to connect');
+  });
+
+  it('uses ap1 title, body, access chips, and Esc hint', async () => {
+    const { w } = mountPrompt([sample('p1', 'Helper')]);
+    await flushPromises();
+    expect(w.text()).toContain('Allow Helper to connect?');
+    expect(w.text()).toContain('A bot on this computer is asking to pair over MCP');
+    expect(w.text()).toContain('Requested access');
+    expect(w.text()).toContain('Suggest changes');
+    expect(w.text()).toContain('Comment');
+    expect(w.text()).toContain('Esc denies and dismisses. Focus returns to the app.');
   });
 
   it('closes quietly when the pairing expired', async () => {
