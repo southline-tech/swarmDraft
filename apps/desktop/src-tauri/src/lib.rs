@@ -83,6 +83,14 @@ fn agent_create(
 }
 
 #[tauri::command]
+fn set_user_display_name(
+    store: tauri::State<'_, storage::Store>,
+    name: String,
+) -> Result<String, String> {
+    store.set_user_display_name(&name).map_err(err)
+}
+
+#[tauri::command]
 fn agent_revoke(store: tauri::State<'_, storage::Store>, agent_id: String) -> Result<(), String> {
     store.revoke_agent(&agent_id).map_err(err)
 }
@@ -653,6 +661,7 @@ pub fn run() {
             agents_list,
             agents_primary_id,
             agent_create,
+            set_user_display_name,
             agent_revoke,
             agent_tokens_list,
             agent_token_create,

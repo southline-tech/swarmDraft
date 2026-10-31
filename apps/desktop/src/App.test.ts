@@ -997,6 +997,7 @@ vi.mock('./backend', async (orig) => ({
     list: vi.fn(async () => []),
     primaryId: vi.fn(async () => null),
     tokens: vi.fn(async () => []),
+    setUserDisplayName: vi.fn(async (name: string) => name),
   },
   getAppInfo: vi.fn(async () => ({
     version: '0.1.0',

@@ -10,6 +10,8 @@ import {
   bootTheme,
   loadProfile,
   loadTracking,
+  normalizeProfile,
+  profileNameSaveError,
   saveProfile,
   seedProfileForTracking,
 } from './prefs';
@@ -45,6 +47,22 @@ describe('loadProfile (#102)', () => {
   it('a non-string name and an unknown color fall back to the defaults', () => {
     const s = store({ [PROFILE_KEY]: JSON.stringify({ name: { x: 1 }, color: 999 }) });
     expect(loadProfile(s)).toEqual(DEFAULT_PROFILE);
+  });
+});
+
+describe('profile name sync (#45)', () => {
+  it('normalizeProfile trims and caps like saveProfile', () => {
+    expect(normalizeProfile({ name: '  Ada  ', color: 99 })).toEqual({
+      name: 'Ada',
+      color: DEFAULT_PROFILE.color,
+    });
+  });
+
+  it('profileNameSaveError passes through backend rule messages', () => {
+    expect(
+      profileNameSaveError('"Grok Bot" is already used by an agent; choose another name'),
+    ).toContain('already used by an agent');
+    expect(profileNameSaveError(new Error('db exploded'))).toContain("Couldn't save");
   });
 });
 
