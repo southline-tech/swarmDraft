@@ -249,3 +249,5 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-30 · #159 · review (#171) · placeholder pr-evidence PNGs · capture sc1–sc6 from `docs/pr-evidence/159/evidence.html` + `capture.sh`
 - 2026-10-30 · #159 · review (#171) · SpellMenu order/focus vs sc2/sc3 · suggestions → sep → Add to dictionary (spelling only) → Ignore; first suggestion + Enter hint; `sh-menu`/`sh-mi`; Dictionary switches + add-word field
 - 2026-10-30 · #159 · review (#171) · plugin update dirtied selection not change range · mark dirty blocks from `tr.mapping` in plugin `apply` when `tr.docChanged`
+- 2026-10-31 · #187 · Designer review (#190) · one-time key card used "You won't see it again" · ap3 copy: "Copy this key now. This key won't be shown again."; assert in `AgentsSettings.test.ts`
+- 2026-10-31 · #187 · review (#190) · createToken failure after create left no agent row refresh · refresh list and surface mapped error; keep **New key** for retry (`shows an error and keeps New key when mint fails after create`)
