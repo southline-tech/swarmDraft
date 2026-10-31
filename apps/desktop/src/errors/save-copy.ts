@@ -19,6 +19,20 @@ import type { ManuscriptSession } from '../manuscript-session';
 import { mapError, type MappedError } from './map-error';
 import { BUSY_CODE } from './busy';
 
+/** Strip Win32 verbatim prefixes before showing a path in the UI (#183). */
+export function displayUserPath(path: string): string {
+  const s = path.replace(/\//g, '\\');
+  const uncPrefix = '\\\\?\\UNC\\';
+  if (
+    s.length >= uncPrefix.length &&
+    s.slice(0, uncPrefix.length).toLowerCase() === uncPrefix.toLowerCase()
+  ) {
+    return `\\\\${s.slice(uncPrefix.length)}`;
+  }
+  if (s.startsWith('\\\\?\\') || s.startsWith('\\\\.\\')) return s.slice(4);
+  return s;
+}
+
 export interface BuildCopyDeps {
   loadComments: (manuscriptId: string) => Promise<ManuscriptCopyComment[]>;
 }
@@ -140,7 +154,7 @@ export async function saveCopy(
     const { bytes } = await buildCopy(session, deps.build);
     const path = await deps.save(session.title, bytes);
     if (!path) return { status: 'cancelled' };
-    return { status: 'saved', path };
+    return { status: 'saved', path: displayUserPath(path) };
   } catch (err) {
     if (err === BUSY_CODE) return { status: 'busy' };
     console.error('Save a copy failed', err);

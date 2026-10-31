@@ -37,6 +37,7 @@ import {
   type StoredManuscript,
   type UpdatesSince,
 } from './backend';
+import { errorLine, mapError } from './errors/map-error';
 
 export interface ManuscriptSession {
   id: string;
@@ -322,6 +323,12 @@ function watchSections(manuscript: Y.Doc, docs: Map<string, Y.Doc>, p: SectionPe
       }
       if (failed) {
         failures++;
+        const mapped = mapError(lastError, 'save');
+        console.error('Autosave failed', {
+          code: mapped.code,
+          message: errorLine(lastError, 'save'),
+          sectionIds: unsaved(),
+        });
         schedule(Math.min((p.retryMs ?? 1000) * 2 ** (failures - 1), RETRY_MAX_MS));
       } else if (!dirtyFull.size) {
         if (failures) p.onSaved?.();
