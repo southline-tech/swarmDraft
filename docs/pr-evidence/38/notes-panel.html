@@ -80,11 +80,39 @@
         background: var(--ct-accent);
         color: var(--ct-paper);
       }
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        font-size: var(--ct-text-sm);
+        color: var(--ct-text-muted);
+        margin-top: 0.5rem;
+      }
+      .field input,
+      .field select,
+      .field .editor {
+        font: inherit;
+        color: var(--ct-text);
+        background: var(--ct-paper);
+        border: 1px solid var(--ct-border);
+        border-radius: var(--ct-radius-sm);
+        padding: 0.35rem 0.5rem;
+      }
+      .field .editor {
+        min-height: 5rem;
+        font-size: var(--ct-text-sm);
+      }
+      .detail {
+        margin-top: 0.75rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
     </style>
     <script>
       const params = new URLSearchParams(location.search);
       if (params.get('theme') === 'dark') document.documentElement.dataset.theme = 'dark';
-      const filled = params.get('frame') === 'filled';
+      const frame = params.get('frame') || 'empty';
     </script>
   </head>
   <body>
@@ -99,9 +127,17 @@
     </div>
     <script>
       const body = document.getElementById('body');
-      if (!filled) {
+      if (frame === 'empty') {
         body.innerHTML =
           '<div class="empty"><strong>No story notes yet</strong><p>Capture planning notes beside your draft.</p></div>';
+      } else if (frame === 'detail') {
+        body.innerHTML = `
+          <div class="row row--sel"><strong>Timeline check</strong><div class="author author--bot">Sample Bot <span class="tag">Bot</span></div></div>
+          <div class="detail">
+            <label class="field"><span>Title</span><input type="text" value="Timeline check" readonly /></label>
+            <label class="field"><span>Linked chapter</span><select><option>Sample Chapter One</option></select></label>
+            <label class="field"><span>Body</span><div class="editor" role="textbox" aria-label="Body">Mara should not look back until she reaches the pier.</div></label>
+          </div>`;
       } else {
         body.innerHTML = `
           <div class="row"><strong>Opening hook</strong><div class="author">Sample Person</div></div>

@@ -165,12 +165,15 @@ const sectionOptions = computed(() =>
         >
           Go to linked chapter
         </button>
-        <NoteBodyEditor
-          :key="selected.id"
-          :notes-doc="notesDoc"
-          :note-id="selected.id"
-          :readonly="readonly"
-        />
+        <label class="story-notes__field">
+          <span>Body</span>
+          <NoteBodyEditor
+            :key="selected.id"
+            :notes-doc="notesDoc"
+            :note-id="selected.id"
+            :readonly="readonly"
+          />
+        </label>
       </section>
     </div>
   </aside>
