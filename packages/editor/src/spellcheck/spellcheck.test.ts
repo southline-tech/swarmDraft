@@ -101,6 +101,40 @@ describe('spellcheck decorations', () => {
     });
   });
 
+  it('clears decorations immediately when a block is invalidated during a stale lint (#181)', async () => {
+    let finishLint: ((v: SpellLintResult[]) => void) | undefined;
+    const lint = vi.fn(
+      () =>
+        new Promise<SpellLintResult[]>((resolve) => {
+          finishLint = resolve;
+        }),
+    );
+    const e = editorWithSpell(
+      {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'teh' }] }],
+      },
+      lint,
+    );
+    await vi.waitFor(() => expect(lint.mock.calls.length).toBeGreaterThan(0));
+    e.view.dispatch(
+      e.state.tr.setMeta(spellcheckKey, { invalidate: 0 }).setMeta('addToHistory', false),
+    );
+    expect(spellIssueAtPos(e.state, 1)).toBeUndefined();
+    finishLint?.([
+      {
+        start: 0,
+        end: 3,
+        kind: 'spelling',
+        message: 'teh',
+        suggestions: ['the'],
+      },
+    ]);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(spellIssueAtPos(e.state, 1)).toBeUndefined();
+    e.destroy();
+  });
+
   it('debounces lint after rapid edits', async () => {
     const lint = vi.fn(async (): Promise<SpellLintResult[]> => []);
     const e = editorWithSpell(

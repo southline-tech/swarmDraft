@@ -70,6 +70,64 @@ function sliceWithMark(slice: Slice, mark: PMMark): Slice {
   return new Slice(addMarkToFragment(slice.content, mark), slice.openStart, slice.openEnd);
 }
 
+function isBlockSplitStep(step: ReplaceStep): boolean {
+  return step.from === step.to && step.slice.openStart > 0 && step.slice.openEnd > 0;
+}
+
+function blockPos(doc: PMNode, blockIndex: number): number | null {
+  if (blockIndex < 0 || blockIndex >= doc.childCount) return null;
+  let pos = 0;
+  for (let i = 0; i < blockIndex; i++) pos += doc.child(i).nodeSize;
+  return pos;
+}
+
+/** Find `text` only inside the block at `blockIndex` (the paragraph created by Enter / split). */
+function findTextRangeInBlock(
+  doc: PMNode,
+  blockIndex: number,
+  text: string,
+): { from: number; to: number } | null {
+  if (!text || blockIndex < 0 || blockIndex >= doc.childCount) return null;
+  const block = doc.child(blockIndex);
+  const base = blockPos(doc, blockIndex)! + 1;
+  let found: { from: number; to: number } | null = null;
+  block.descendants((node, pos) => {
+    if (found || !node.isText || !node.text) return;
+    const start = node.text.indexOf(text);
+    if (start >= 0) found = { from: base + pos + start, to: base + pos + start + text.length };
+  });
+  return found;
+}
+
+/** Mark text moved to a new paragraph by Enter / split while track changes is on. */
+function markBlockSplitInsert(
+  tr: Transaction,
+  beforeDoc: PMNode,
+  from: number,
+  mark: PMMark,
+): Transaction {
+  const $pos = beforeDoc.resolve(from);
+  const tail = $pos.parent.textBetween($pos.parentOffset, $pos.parent.content.size);
+  const blockIndex = $pos.index(0) + 1;
+  const splitMark = mark.type.create({ ...mark.attrs, blockSplit: true });
+  if (tail) {
+    const range = findTextRangeInBlock(tr.doc, blockIndex, tail);
+    if (range) return tr.addMark(range.from, range.to, splitMark);
+  }
+  const pos = blockPos(tr.doc, blockIndex);
+  if (pos == null) return tr;
+  const node = tr.doc.nodeAt(pos);
+  if (!node) return tr;
+  return tr.setNodeMarkup(pos, undefined, {
+    ...node.attrs,
+    blockSplitInsert: {
+      id: String(mark.attrs.id),
+      author: String(mark.attrs.author),
+      ts: String(mark.attrs.ts),
+    },
+  });
+}
+
 function insertSpanLen(beforeDoc: PMNode, step: ReplaceStep, hasDeletion: boolean): number {
   const applied = step.apply(beforeDoc);
   if (applied.failed || !applied.doc) return 0;
@@ -137,7 +195,11 @@ export function humanTrackAppendTransaction(
     if (hasDeletion && !hasInsertion) {
       tr = tr.replace(mapFrom, mapFrom, sliceWithMark(deletedSlice, delMark));
     } else if (!hasDeletion && hasInsertion) {
-      tr = markInsertedSlice(tr, beforeDoc, step, mapFrom, insMark, 0, false);
+      if (isBlockSplitStep(step)) {
+        tr = markBlockSplitInsert(tr, beforeDoc, from, insMark);
+      } else {
+        tr = markInsertedSlice(tr, beforeDoc, step, mapFrom, insMark, 0, false);
+      }
     } else {
       tr = tr.replace(mapFrom, mapFrom, sliceWithMark(deletedSlice, delMark));
       tr = markInsertedSlice(tr, beforeDoc, step, mapFrom, insMark, deletedSlice.size, true);

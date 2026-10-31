@@ -14,6 +14,7 @@ import {
   manuscriptEditorOptions,
   collaborativeEditorOptions,
 } from './index';
+import { applyReviewDecision } from './trusted';
 
 const WRITER = 'Rowan Vale';
 const plainDoc: JSONContent = {
@@ -146,6 +147,114 @@ describe('human track changes (#126)', () => {
     expect(listSuggestions(eOff.getJSON() as never)).toHaveLength(0);
     eOn.destroy();
     eOff.destroy();
+  });
+
+  it('records paragraph split (Enter) as a tracked insert (#182)', () => {
+    const e = editor();
+    editors.push(e);
+    e.commands.setTextSelection(6);
+    e.commands.splitBlock();
+    const items = listSuggestions(e.getJSON() as never).filter(
+      (i) => i.kind === 'suggestion_insert' && i.author === WRITER,
+    );
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.some((i) => i.text.includes('line.'))).toBe(true);
+    e.destroy();
+  });
+
+  it('records Enter at end of paragraph as a tracked change (#182)', () => {
+    const e = editor();
+    editors.push(e);
+    e.commands.setTextSelection(e.state.doc.content.size - 1);
+    e.commands.splitBlock();
+    const items = listSuggestions(e.getJSON() as never).filter((i) => i.author === WRITER);
+    expect(items.length).toBeGreaterThan(0);
+    expect(e.state.doc.textContent).not.toContain('\u200b');
+    e.destroy();
+  });
+
+  it('rejecting Enter mid-paragraph restores a single paragraph (#182)', () => {
+    const e = editor();
+    editors.push(e);
+    e.commands.setTextSelection(6);
+    e.commands.splitBlock();
+    expect(e.state.doc.childCount).toBe(2);
+    let hasBlockSplit = false;
+    e.state.doc.descendants((node) => {
+      if (!node.isText) return;
+      for (const m of node.marks) {
+        if (m.type.name === 'suggestion_insert' && m.attrs.blockSplit === true)
+          hasBlockSplit = true;
+      }
+    });
+    expect(hasBlockSplit).toBe(true);
+    const items = listSuggestions(e.getJSON() as never).filter(
+      (i) => i.kind === 'suggestion_insert' && i.author === WRITER,
+    );
+    expect(items.length).toBeGreaterThan(0);
+    applyReviewDecision(e.view, {
+      targets: items.map((i) => ({ kind: i.kind, id: i.id })),
+      decision: 'reject',
+    });
+    expect(e.state.doc.childCount).toBe(1);
+    expect(e.state.doc.textContent).toBe('Alpha line.');
+    e.destroy();
+  });
+
+  it('accepting Enter at end leaves no U+200B (#182)', () => {
+    const e = editor();
+    editors.push(e);
+    e.commands.setTextSelection(e.state.doc.content.size - 1);
+    e.commands.splitBlock();
+    const items = listSuggestions(e.getJSON() as never).filter((i) => i.author === WRITER);
+    applyReviewDecision(e.view, {
+      targets: items.map((i) => ({ kind: i.kind, id: i.id })),
+      decision: 'accept',
+    });
+    expect(e.state.doc.textContent).not.toContain('\u200b');
+    expect(e.state.doc.childCount).toBe(2);
+    e.destroy();
+  });
+
+  it('marks duplicated short tail text on the new block after split (#182)', () => {
+    const dupDoc: JSONContent = {
+      type: 'doc',
+      content: [
+        { type: 'paragraph', attrs: { style: 'body' }, content: [{ type: 'text', text: 'aa' }] },
+        { type: 'paragraph', attrs: { style: 'body' }, content: [{ type: 'text', text: 'aa' }] },
+      ],
+    };
+    const e = editor(dupDoc);
+    editors.push(e);
+    let secondParaPos = 0;
+    e.state.doc.forEach((_node, _offset, index) => {
+      if (index === 1) {
+        let pos = 0;
+        for (let i = 0; i < index; i++) pos += e.state.doc.child(i).nodeSize;
+        secondParaPos = pos + 1 + 1;
+      }
+    });
+    e.commands.setTextSelection(secondParaPos);
+    e.commands.splitBlock();
+    expect(e.state.doc.childCount).toBe(3);
+    const insId = listSuggestions(e.getJSON() as never).find(
+      (i) => i.kind === 'suggestion_insert' && i.author === WRITER,
+    )!.id;
+    let markedBlock = -1;
+    e.state.doc.forEach((block, _offset, index) => {
+      block.descendants((node) => {
+        if (!node.isText) return;
+        if (
+          node.marks.some(
+            (m) => m.type.name === 'suggestion_insert' && String(m.attrs.id) === insId,
+          )
+        ) {
+          markedBlock = index;
+        }
+      });
+    });
+    expect(markedBlock).toBe(2);
+    e.destroy();
   });
 
   it('records a delete as suggestion_delete without removing text', () => {

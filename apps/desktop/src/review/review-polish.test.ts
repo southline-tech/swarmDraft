@@ -222,4 +222,35 @@ describe('review sidebar polish (#47)', () => {
     expect(card.querySelector('.q')?.nextElementSibling?.classList.contains('reason')).toBe(true);
     w.unmount();
   });
+
+  it('shows one margin note per bot replace suggestion (#189)', async () => {
+    const by = { author: 'agent:a1', ts: '2026-10-25T00:00:00Z' };
+    const content: JSONContent = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'The light ' },
+            {
+              type: 'text',
+              text: 'flickered',
+              marks: [{ type: 'suggestion_delete', attrs: { id: 's1', ...by } }],
+            },
+            {
+              type: 'text',
+              text: 'guttered',
+              marks: [{ type: 'suggestion_insert', attrs: { id: 's1', ...by } }],
+            },
+            { type: 'text', text: ' out.' },
+          ],
+        },
+      ],
+    };
+    setAgents([agent('a1', 'Draft Helper')]);
+    const w = mount(ManuscriptEditor, { props: { content }, attachTo: document.body });
+    await flushPromises();
+    expect(w.findAll('[data-test="margin-note"]')).toHaveLength(1);
+    w.unmount();
+  });
 });

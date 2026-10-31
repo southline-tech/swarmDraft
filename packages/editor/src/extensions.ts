@@ -48,6 +48,13 @@ export const Paragraph = Node.create({
         },
         renderHTML: (attrs) => ({ 'data-style': attrs.style, class: `p-${attrs.style}` }),
       },
+      /** Tracked Enter at end of paragraph (#182): empty split pending review. */
+      blockSplitInsert: {
+        default: undefined,
+        rendered: false,
+        parseHTML: () => undefined,
+        renderHTML: () => ({}),
+      },
     };
   },
   parseHTML: () => [{ tag: 'p' }],
@@ -316,7 +323,17 @@ export const SuggestionInsert = Mark.create({
   name: 'suggestion_insert',
   excludes: '',
   inclusive: false,
-  addAttributes: reviewAttrs(['id', 'author', 'ts']),
+  addAttributes() {
+    return {
+      ...reviewAttrs(['id', 'author', 'ts'])(),
+      blockSplit: {
+        default: undefined,
+        rendered: false,
+        parseHTML: () => undefined,
+        renderHTML: () => ({}),
+      },
+    };
+  },
   parseHTML: () => [{ tag: 'ins[data-suggestion]' }],
   renderHTML: ({ HTMLAttributes }) => [
     'ins',

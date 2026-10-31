@@ -44,6 +44,25 @@ interface JsonPara {
 
 const keyOf = (kind: string, id: unknown) => `${kind}\u0000${String(id)}`;
 
+interface BlockSplitInsertAttrs {
+  id: string;
+  author: string;
+  ts: string;
+}
+
+function joinBlockAtIndex(tr: Transaction, blockIndex: number): Transaction {
+  if (blockIndex <= 0 || blockIndex >= tr.doc.childCount) return tr;
+  let pos = 0;
+  for (let i = 0; i < blockIndex; i++) pos += tr.doc.child(i).nodeSize;
+  pos = tr.mapping.map(pos);
+  const cur = tr.doc.child(blockIndex);
+  if (!cur.content.size) return tr.delete(pos, pos + cur.nodeSize);
+  const insertAt = pos - 1;
+  const content = cur.content;
+  tr = tr.delete(pos, pos + cur.nodeSize);
+  return tr.insert(tr.mapping.map(insertAt), content);
+}
+
 /** Whether text carrying this insert/delete suggestion is removed by the decision. */
 const removesInsertDelete = (kind: string, decision: ReviewDecision) =>
   (kind === 'suggestion_insert') !== (decision === 'accept');
@@ -143,6 +162,8 @@ export function buildReviewTransaction(
   const unmark: { from: number; to: number; mark: PMMark }[] = [];
   const cut: { from: number; to: number }[] = [];
   const notes: { pos: number; node: PMNode }[] = [];
+  const splitJoinBlocks = new Set<number>();
+  const splitParaAccept: number[] = [];
   const paragraphStyleReject = new Map<number, ParagraphStyle>();
   const formatReject: {
     from: number;
@@ -157,17 +178,25 @@ export function buildReviewTransaction(
       if (noteHasTarget(content, keys)) notes.push({ pos, node });
       return false;
     }
-    if (node.type.name === 'paragraph' && op.decision === 'reject') {
-      node.forEach((child) => {
-        if (!child.isText) return;
-        for (const mark of child.marks) {
-          if (mark.type.name !== 'format_change') continue;
-          if (!keys.has(keyOf('format_change', mark.attrs.id))) continue;
-          const attrs = readFormatAttrs(mark.attrs);
-          if (attrs?.target === PARAGRAPH_STYLE_TARGET)
-            paragraphStyleReject.set(pos, attrs.before as ParagraphStyle);
-        }
-      });
+    if (node.type.name === 'paragraph') {
+      const bsi = node.attrs.blockSplitInsert as BlockSplitInsertAttrs | null | undefined;
+      if (bsi?.id && keys.has(keyOf('suggestion_insert', bsi.id))) {
+        const blockIndex = state.doc.resolve(pos).index(0);
+        if (op.decision === 'accept') splitParaAccept.push(pos);
+        else if (blockIndex > 0) splitJoinBlocks.add(blockIndex);
+      }
+      if (op.decision === 'reject') {
+        node.forEach((child) => {
+          if (!child.isText) return;
+          for (const mark of child.marks) {
+            if (mark.type.name !== 'format_change') continue;
+            if (!keys.has(keyOf('format_change', mark.attrs.id))) continue;
+            const attrs = readFormatAttrs(mark.attrs);
+            if (attrs?.target === PARAGRAPH_STYLE_TARGET)
+              paragraphStyleReject.set(pos, attrs.before as ParagraphStyle);
+          }
+        });
+      }
     }
     if (!node.isText) return true;
     let drop = false;
@@ -184,8 +213,28 @@ export function buildReviewTransaction(
         }
         continue;
       }
-      if (removesInsertDelete(mark.type.name, op.decision)) drop = true;
-      else unmark.push({ from: pos, to: pos + node.nodeSize, mark });
+      if (removesInsertDelete(mark.type.name, op.decision)) {
+        if (
+          op.decision === 'reject' &&
+          mark.type.name === 'suggestion_insert' &&
+          mark.attrs.blockSplit
+        ) {
+          unmark.push({ from: pos, to: pos + node.nodeSize, mark });
+          const blockIndex = state.doc.resolve(pos).index(0);
+          if (blockIndex > 0) splitJoinBlocks.add(blockIndex);
+          continue;
+        }
+        drop = true;
+      } else {
+        unmark.push({ from: pos, to: pos + node.nodeSize, mark });
+        if (
+          op.decision === 'accept' &&
+          mark.type.name === 'suggestion_insert' &&
+          node.text === '\u200b'
+        ) {
+          drop = true;
+        }
+      }
     }
     if (drop) cut.push({ from: pos, to: pos + node.nodeSize });
     return false;
@@ -196,7 +245,9 @@ export function buildReviewTransaction(
     !cut.length &&
     !notes.length &&
     !paragraphStyleReject.size &&
-    !formatReject.length
+    !formatReject.length &&
+    !splitParaAccept.length &&
+    !splitJoinBlocks.size
   )
     return null;
   let tr = state.tr;
@@ -217,6 +268,17 @@ export function buildReviewTransaction(
   }
   for (const c of [...cut].sort((a, b) => b.from - a.from)) {
     tr.delete(tr.mapping.map(c.from), tr.mapping.map(c.to));
+  }
+  for (const pos of [...splitParaAccept].sort((a, b) => b - a)) {
+    const mapped = tr.mapping.map(pos);
+    const node = tr.doc.nodeAt(mapped);
+    if (!node) continue;
+    const attrs = { ...node.attrs };
+    delete attrs.blockSplitInsert;
+    tr = tr.setNodeMarkup(mapped, undefined, attrs);
+  }
+  for (const blockIndex of [...splitJoinBlocks].sort((a, b) => b - a)) {
+    tr = joinBlockAtIndex(tr, blockIndex);
   }
   return trust(tr);
 }
