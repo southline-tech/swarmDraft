@@ -18,6 +18,7 @@ function fakeApi() {
         createdAt: 't',
         revokedAt: null,
         primary: false,
+        lastSeenAt: null as string | null,
       };
       agents.push(a);
       return a;
@@ -324,6 +325,65 @@ describe('AgentsSettings', () => {
       expect(el.selectionStart).toBe(0);
       expect(el.selectionEnd).toBe('cat_abcdefSECRET'.length);
       w.unmount();
+    });
+  });
+
+  describe('MCP connection status (#188)', () => {
+    const fixedNow = Date.parse('2026-06-01T12:00:00.000Z');
+
+    async function mountWithAgent(lastSeenAt: string | null) {
+      const api = fakeApi();
+      api.list = vi.fn(async () => [
+        {
+          id: 'a0',
+          name: 'Helper',
+          color: '#3366ff',
+          createdAt: 't',
+          revokedAt: null,
+          primary: false,
+          lastSeenAt,
+        },
+      ]);
+      const w = mount(AgentsSettings, { props: { api, now: () => fixedNow } });
+      await flushPromises();
+      return w;
+    }
+
+    it('shows MCP connected within two minutes', async () => {
+      const w = await mountWithAgent('2026-06-01T11:59:00.000Z');
+      const row = w.get('[data-test="mcp-status"]');
+      expect(row.text()).toBe('MCP connected');
+      expect(row.classes()).toContain('ag__mcp--connected');
+    });
+
+    it('shows last active minutes when older than two minutes', async () => {
+      const w = await mountWithAgent('2026-06-01T11:30:00.000Z');
+      const row = w.get('[data-test="mcp-status"]');
+      expect(row.text()).toBe('Last active 30 min ago');
+      expect(row.classes()).toContain('ag__mcp--muted');
+    });
+
+    it('shows not connected when last_seen_at is null', async () => {
+      const w = await mountWithAgent(null);
+      const row = w.get('[data-test="mcp-status"]');
+      expect(row.text()).toBe('Not connected');
+      expect(row.classes()).toContain('ag__mcp--muted');
+    });
+
+    it('clears the 30s refresh timer on unmount', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const api = fakeApi();
+      const w = mount(AgentsSettings, { props: { api } });
+      await flushPromises();
+      expect(api.list).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await flushPromises();
+      expect(api.list).toHaveBeenCalledTimes(2);
+      w.unmount();
+      await vi.advanceTimersByTimeAsync(30_000);
+      await flushPromises();
+      expect(api.list).toHaveBeenCalledTimes(2);
+      vi.useRealTimers();
     });
   });
 });

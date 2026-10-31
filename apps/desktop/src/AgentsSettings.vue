@@ -4,8 +4,11 @@
  * User-facing copy says "key"; code identifiers keep "token".
  */
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { isTauri } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { setAgents } from './agent-names';
 import { errorLine, rawErrorText } from './errors/map-error';
+import { mcpAgentStatus } from './mcp-agent-status';
 import {
   AGENT_SCOPES,
   agentsApi,
@@ -16,11 +19,18 @@ import {
 } from './backend';
 
 const props = withDefaults(
-  defineProps<{ api?: AgentsApi; writeClipboard?: (text: string) => Promise<void> }>(),
+  defineProps<{
+    api?: AgentsApi;
+    writeClipboard?: (text: string) => Promise<void>;
+    /** Test hook instead of Tauri `agents-changed`. */
+    subscribeAgentsChanged?: (cb: () => void) => () => void;
+    now?: () => number;
+  }>(),
   {
     api: () => agentsApi,
-    // The Clipboard API works in the app webview under our CSP (no network involved).
     writeClipboard: (text: string) => navigator.clipboard.writeText(text),
+    subscribeAgentsChanged: undefined,
+    now: () => Date.now(),
   },
 );
 
@@ -146,13 +156,43 @@ const SCOPE_HINT: Record<AgentScope, string> = {
   comment: 'leave comments',
   suggest: 'propose edits',
 };
+
+/** Tick every 30s so relative MCP times stay fresh (#188 ap2). */
+const statusTick = ref(0);
+let statusTimer: ReturnType<typeof setInterval> | undefined;
+let stopAgentsChanged = () => {};
+
+function agentMcpStatus(agent: Agent) {
+  void statusTick.value;
+  return mcpAgentStatus(agent.lastSeenAt, props.now());
+}
+
 onMounted(() => {
   window.addEventListener('pagehide', clearToken);
-  return guard(refresh);
+  void guard(refresh);
+  statusTimer = setInterval(() => {
+    statusTick.value++;
+    void refresh();
+  }, 30_000);
+  if (props.subscribeAgentsChanged) {
+    stopAgentsChanged = props.subscribeAgentsChanged(() => {
+      void refresh();
+    });
+  } else if (isTauri()) {
+    let unlisten: UnlistenFn = () => {};
+    void listen('agents-changed', () => {
+      void refresh();
+    }).then((u) => {
+      unlisten = u;
+    });
+    stopAgentsChanged = () => unlisten();
+  }
 });
 onBeforeUnmount(() => {
   window.removeEventListener('pagehide', clearToken);
   clearToken();
+  clearInterval(statusTimer);
+  stopAgentsChanged();
 });
 </script>
 
@@ -248,6 +288,15 @@ onBeforeUnmount(() => {
             <b class="ag__name"
               ><bdi dir="auto">{{ a.name }}</bdi></b
             >
+            <p
+              v-if="!a.revokedAt"
+              class="ag__mcp"
+              :class="`ag__mcp--${agentMcpStatus(a).tone}`"
+              data-test="mcp-status"
+            >
+              <span class="ag__mcp-dot" aria-hidden="true" />
+              <span>{{ agentMcpStatus(a).text }}</span>
+            </p>
             <em v-if="a.revokedAt" class="st-muted">Removed</em>
             <template v-else>
               <button type="button" class="st-btn st-btn--s" data-test="mint" @click="mint(a.id)">
@@ -383,7 +432,30 @@ onBeforeUnmount(() => {
 .ag__head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--ct-space-3);
+}
+.ag__mcp {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ct-space-2);
+  flex: 1 1 100%;
+  margin: 0;
+  padding-left: calc(var(--ct-space-8) + var(--ct-space-3));
+  font-size: var(--ct-text-sm);
+  color: var(--ct-text-muted);
+}
+.ag__mcp--connected {
+  color: var(--ct-text);
+}
+.ag__mcp-dot {
+  width: var(--ct-space-2);
+  height: var(--ct-space-2);
+  border-radius: var(--ct-radius-full);
+  background: var(--ct-text-muted);
+}
+.ag__mcp--connected .ag__mcp-dot {
+  background: var(--ct-success);
 }
 .ag__av {
   display: grid;
