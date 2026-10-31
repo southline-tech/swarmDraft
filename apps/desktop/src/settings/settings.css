@@ -187,3 +187,22 @@
   text-transform: uppercase;
   vertical-align: middle;
 }
+/** Settings modal overlay + card (Backups confirm, MCP pairing ap1). */
+.st-dlg-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: var(--ct-space-6);
+  background: color-mix(in srgb, var(--ct-text) 40%, transparent);
+}
+.st-dlg {
+  width: min(640px, 100%);
+  padding: var(--ct-space-8);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-lg);
+  background: var(--ct-surface-raised);
+  box-shadow: var(--ct-elevation-2);
+  line-height: 1.5;
+}

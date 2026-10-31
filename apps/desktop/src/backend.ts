@@ -25,6 +25,8 @@ export interface Agent {
   revokedAt: string | null;
   /** Built-in P1 bot; at most one agent is primary (#76). */
   primary: boolean;
+  /** Last authenticated MCP activity (#188); ISO timestamp or null when unknown. */
+  lastSeenAt?: string | null;
 }
 
 export const AGENT_SCOPES = ['read', 'comment', 'suggest'] as const;

@@ -55,6 +55,7 @@ import { readEvidenceQuery } from './evidence/evidence-routes';
 import AppToast from './shells/AppToast.vue';
 import OpeningProgress from './shells/OpeningProgress.vue';
 import ErrorCard from './shells/ErrorCard.vue';
+import PairingPrompt from './PairingPrompt.vue';
 import {
   OPENING_REVEAL_MS,
   errorCardIcon,
@@ -892,6 +893,7 @@ defineExpose({ open, closeSession });
   <Rad55FocusModeEvidence v-else-if="evidence === 'rad55'" class="shell shell--focus-mode" />
   <ShellsPreview v-else-if="preview" class="shell" :initial="preview" @close="preview = null" />
   <main v-else class="shell" :class="{ 'shell--focus-mode': focusMode }">
+    <PairingPrompt v-if="info && isTauri()" />
     <header v-show="!focusMode" class="topbar">
       <details ref="appMenu" class="topbar__menu" data-test="app-menu" @toggle="onAppMenuToggle">
         <summary
