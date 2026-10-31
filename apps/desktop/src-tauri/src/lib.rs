@@ -15,6 +15,7 @@ pub mod dictionary;
 pub mod manuscripts;
 pub mod mcp;
 pub mod migrate;
+pub mod notes;
 pub mod opening_progress;
 pub mod save_copy;
 pub mod storage;
@@ -444,6 +445,26 @@ async fn manuscript_set_numbering_style(
     .await
 }
 
+#[tauri::command]
+async fn notes_load(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+) -> Result<notes::NotesState, String> {
+    blocking(&store, move |s| s.load_notes_state(&manuscript_id)).await
+}
+
+#[tauri::command]
+async fn notes_apply_update(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+    update: Vec<u8>,
+) -> Result<(), String> {
+    blocking(&store, move |s| {
+        s.apply_notes_update(&manuscript_id, &update)
+    })
+    .await
+}
+
 /// Where the MCP server is listening, or why it is not.
 #[derive(Clone, serde::Serialize)]
 pub struct McpStatus {
@@ -680,6 +701,8 @@ pub fn run() {
             manuscript_save_outline,
             manuscript_updates_since,
             manuscript_set_numbering_style,
+            notes_load,
+            notes_apply_update,
             section_review_meta,
             manuscript_review_decisions,
             section_save_review_decisions,

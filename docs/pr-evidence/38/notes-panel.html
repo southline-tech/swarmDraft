@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Story notes evidence #38</title>
+    <link rel="stylesheet" href="../../../apps/desktop/src/styles/tokens.css" />
+    <link rel="stylesheet" href="../../../apps/desktop/src/styles/app.css" />
+    <link rel="stylesheet" href="../../../apps/desktop/src/shells/shells.css" />
+    <style>
+      body {
+        margin: 0;
+        background: var(--ct-bg);
+        font-family: var(--ct-font-ui);
+      }
+      .wrap {
+        padding: 1rem;
+        max-width: 22rem;
+      }
+      .story-notes {
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        padding: 0.75rem;
+        background: var(--ct-surface);
+        border: 1px solid var(--ct-border);
+        border-radius: var(--ct-radius-md);
+        min-height: 28rem;
+      }
+      .head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      h2 {
+        margin: 0;
+        font-size: var(--ct-text-md);
+      }
+      .btn {
+        border: 1px solid var(--ct-border);
+        background: var(--ct-paper);
+        border-radius: var(--ct-radius-sm);
+        padding: 0.25rem 0.5rem;
+        color: var(--ct-text);
+      }
+      .empty {
+        text-align: center;
+        padding: 2rem 1rem;
+        color: var(--ct-text-muted);
+        border: 1px dashed var(--ct-border);
+        border-radius: var(--ct-radius-md);
+        background: var(--ct-paper);
+      }
+      .row {
+        border: 1px solid var(--ct-border);
+        border-radius: var(--ct-radius-sm);
+        padding: 0.5rem;
+        background: var(--ct-paper);
+        margin-bottom: 0.35rem;
+      }
+      .row--sel {
+        border-color: var(--ct-accent);
+        background: var(--ct-selected-bg);
+      }
+      .author {
+        font-size: var(--ct-text-xs);
+        color: var(--ct-text-muted);
+        border-left: 3px solid var(--ct-collab-2);
+        padding-left: 0.35rem;
+        margin-top: 0.25rem;
+      }
+      .author--bot {
+        border-left-color: var(--ct-collab-1);
+      }
+      .tag {
+        font-size: 0.65rem;
+        margin-left: 0.35rem;
+        padding: 0 0.25rem;
+        border-radius: var(--ct-radius-sm);
+        background: var(--ct-accent);
+        color: var(--ct-paper);
+      }
+    </style>
+    <script>
+      const params = new URLSearchParams(location.search);
+      if (params.get('theme') === 'dark') document.documentElement.dataset.theme = 'dark';
+      const filled = params.get('frame') === 'filled';
+    </script>
+  </head>
+  <body>
+    <div class="wrap">
+      <aside class="story-notes" aria-label="Story notes">
+        <div class="head">
+          <h2>Story notes</h2>
+          <button type="button" class="btn">New note</button>
+        </div>
+        <div id="body"></div>
+      </aside>
+    </div>
+    <script>
+      const body = document.getElementById('body');
+      if (!filled) {
+        body.innerHTML =
+          '<div class="empty"><strong>No story notes yet</strong><p>Capture planning notes beside your draft.</p></div>';
+      } else {
+        body.innerHTML = `
+          <div class="row"><strong>Opening hook</strong><div class="author">Sample Person</div></div>
+          <div class="row row--sel"><strong>Timeline check</strong><div class="author author--bot">Sample Bot <span class="tag">Bot</span></div></div>
+          <div class="row"><strong>Continuity</strong><div class="author author--bot">Sample Bot <span class="tag">Bot</span></div></div>`;
+      }
+    </script>
+  </body>
+</html>
