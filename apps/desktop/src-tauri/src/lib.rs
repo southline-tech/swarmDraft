@@ -11,6 +11,7 @@ pub mod agents;
 pub mod anchor;
 pub mod backup;
 pub mod content;
+pub mod dictionary;
 pub mod manuscripts;
 pub mod mcp;
 pub mod migrate;
@@ -20,6 +21,11 @@ pub mod storage;
 
 use serde::Serialize;
 use tauri::Manager;
+
+use dictionary::{
+    spell_dictionary_add, spell_dictionary_ignore, spell_dictionary_list, spell_dictionary_remove,
+    spell_lint_paragraph,
+};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -669,6 +675,11 @@ pub fn run() {
             manuscript_review_decisions,
             section_save_review_decisions,
             manuscript_open_comments,
+            spell_lint_paragraph,
+            spell_dictionary_list,
+            spell_dictionary_add,
+            spell_dictionary_remove,
+            spell_dictionary_ignore,
             mcp_status,
             save_manuscript_copy
         ])

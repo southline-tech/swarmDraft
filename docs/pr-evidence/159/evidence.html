@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script>
+      const q = new URLSearchParams(location.search);
+      if (q.get('theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+      document.documentElement.dataset.scene = q.get('scene') ?? 'sc1';
+    </script>
+    <meta charset="utf-8" />
+    <title>Spellcheck evidence (#159)</title>
+    <link rel="stylesheet" href="../../../apps/desktop/src/styles/tokens.css" />
+    <link rel="stylesheet" href="../../../apps/desktop/src/settings/settings.css" />
+    <link rel="stylesheet" href="../../../apps/desktop/src/shells/shells.css" />
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        background: var(--ct-bg);
+        color: var(--ct-text);
+        font-family: var(--ct-font-ui);
+        box-sizing: border-box;
+        width: 800px;
+        min-height: 450px;
+      }
+      .scene {
+        display: none;
+      }
+      html[data-scene='sc1'] .scene-sc1,
+      html[data-scene='sc2'] .scene-sc2,
+      html[data-scene='sc3'] .scene-sc3,
+      html[data-scene='sc4'] .scene-sc4,
+      html[data-scene='sc5'] .scene-sc5,
+      html[data-scene='sc6'] .scene-sc6 {
+        display: block;
+      }
+      .page {
+        max-width: 520px;
+        margin: 0 auto;
+        padding: 48px 56px;
+        background: var(--ct-paper);
+        border: 1px solid var(--ct-border);
+        border-radius: var(--ct-radius-md);
+        font-family: var(--ct-font-manuscript);
+        font-size: 18px;
+        line-height: 1.65;
+      }
+      .spell-lint {
+        text-decoration-line: underline;
+        text-decoration-style: wavy;
+        text-decoration-thickness: 2px;
+        text-underline-offset: 3px;
+      }
+      .spell-lint--spelling {
+        text-decoration-color: var(--ct-spell);
+      }
+      .spell-lint--grammar {
+        text-decoration-color: var(--ct-grammar);
+      }
+      .menu-stage {
+        position: relative;
+        height: 320px;
+        margin-top: 24px;
+      }
+      .spell-menu {
+        min-width: 260px;
+        max-width: 320px;
+        padding: var(--ct-space-2) 0;
+        position: absolute;
+        left: 120px;
+        top: 40px;
+      }
+      .spell-menu__head {
+        margin: 0;
+        padding: var(--ct-space-2) var(--ct-space-4) var(--ct-space-3);
+        border-bottom: 1px solid var(--ct-border);
+        font-size: var(--ct-text-sm);
+        line-height: 1.4;
+      }
+      .spell-menu__kind {
+        display: block;
+        font-weight: var(--ct-weight-semibold);
+        color: var(--ct-text-muted);
+        font-size: var(--ct-text-xs);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .spell-menu__msg {
+        display: block;
+        margin-top: var(--ct-space-1);
+      }
+      .sh-mi.sh-focus {
+        background: var(--ct-selected-bg);
+        color: var(--ct-accent);
+      }
+      .settings-wrap {
+        max-width: 640px;
+      }
+      .dict-list {
+        margin: var(--ct-space-4) 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      .dict-list__row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--ct-space-3);
+        min-height: var(--ct-space-12);
+        padding: var(--ct-space-2) 0;
+        border-bottom: 1px solid var(--ct-border);
+      }
+      .st-row--toggle,
+      .st-row--add {
+        align-items: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="scene scene-sc1">
+      <article class="page">
+        <p>
+          The harbor was quiet except for the
+          <span class="spell-lint spell-lint--spelling">foghorn's</span> low note. Mara
+          <span class="spell-lint spell-lint--grammar">don't</span> look back as she crossed the
+          pier toward the <span class="spell-lint spell-lint--spelling">lampost</span>.
+        </p>
+      </article>
+    </div>
+
+    <div class="scene scene-sc2">
+      <div class="menu-stage">
+        <div class="sh-menu spell-menu" role="menu" aria-label="Spelling">
+          <p class="spell-menu__head">
+            <span class="spell-menu__kind">Spelling</span>
+            <span class="spell-menu__msg">Did you mean “lamppost”?</span>
+          </p>
+          <button type="button" class="sh-mi sh-focus" role="menuitem">
+            lamppost<span class="sh-k">Enter</span>
+          </button>
+          <button type="button" class="sh-mi" role="menuitem">lamp post</button>
+          <div class="sh-sep" role="separator"></div>
+          <button type="button" class="sh-mi" role="menuitem">Add to dictionary</button>
+          <button type="button" class="sh-mi" role="menuitem">Ignore</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="scene scene-sc3">
+      <div class="menu-stage">
+        <div class="sh-menu spell-menu" role="menu" aria-label="Grammar">
+          <p class="spell-menu__head">
+            <span class="spell-menu__kind">Grammar</span>
+            <span class="spell-menu__msg">Use “doesn't” with a singular subject.</span>
+          </p>
+          <button type="button" class="sh-mi sh-focus" role="menuitem">
+            doesn't<span class="sh-k">Enter</span>
+          </button>
+          <button type="button" class="sh-mi" role="menuitem">does not</button>
+          <div class="sh-sep" role="separator"></div>
+          <button type="button" class="sh-mi" role="menuitem">Ignore</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="scene scene-sc4 settings-wrap">
+      <h1 class="st-h1">Spelling &amp; grammar</h1>
+      <p class="st-muted st-sub">
+        Check this manuscript as you write. Checking runs on your computer; nothing leaves the
+        machine.
+      </p>
+      <section class="st-card">
+        <h2 class="st-h2">Checking</h2>
+        <div class="st-row st-row--toggle">
+          <span class="st-row__k">Spelling</span>
+          <input type="checkbox" role="switch" class="st-switch" checked />
+        </div>
+        <p class="st-muted st-desc">Red wavy underline on words that aren't in the dictionary</p>
+        <div class="st-row st-row--toggle">
+          <span class="st-row__k">Grammar</span>
+          <input type="checkbox" role="switch" class="st-switch" checked />
+        </div>
+        <p class="st-muted st-desc">Green wavy underline on grammar issues</p>
+      </section>
+      <section class="st-card">
+        <h2 class="st-h2">Dictionary for this manuscript</h2>
+        <p class="st-muted st-desc">
+          Words you add stop being flagged as spelling mistakes. The dictionary applies only to this
+          manuscript.
+        </p>
+        <div class="st-row st-row--add">
+          <span class="st-row__k">Add word</span>
+          <input class="st-inp" type="text" placeholder="Type a word" />
+          <button type="button" class="st-btn st-btn--s">Add</button>
+        </div>
+        <ul class="dict-list">
+          <li class="dict-list__row">
+            <bdi>Harborwick</bdi><button class="st-btn st-btn--s">Remove</button>
+          </li>
+          <li class="dict-list__row">
+            <bdi>foghorn</bdi><button class="st-btn st-btn--s">Remove</button>
+          </li>
+        </ul>
+      </section>
+    </div>
+
+    <div class="scene scene-sc5 settings-wrap">
+      <h1 class="st-h1">Spelling &amp; grammar</h1>
+      <section class="st-card">
+        <h2 class="st-h2">Dictionary for this manuscript</h2>
+        <p class="st-muted st-desc">
+          No words in this manuscript's dictionary yet. Add character names, places, and invented
+          terms so they aren't flagged.
+        </p>
+        <div class="st-row st-row--add">
+          <span class="st-row__k">Add word</span>
+          <input class="st-inp" type="text" placeholder="Type a word" />
+          <button type="button" class="st-btn st-btn--s">Add</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="scene scene-sc6 settings-wrap">
+      <h1 class="st-h1">Spelling &amp; grammar</h1>
+      <section class="st-card">
+        <h2 class="st-h2">Dictionary for this manuscript</h2>
+        <div class="st-row">
+          <span class="st-row__k">Search</span>
+          <input class="st-inp" type="search" value="har" />
+        </div>
+        <ul class="dict-list">
+          <li class="dict-list__row">
+            <bdi>Harborwick</bdi><button class="st-btn st-btn--s">Remove</button>
+          </li>
+        </ul>
+      </section>
+    </div>
+  </body>
+</html>

@@ -41,6 +41,7 @@ const props = defineProps<{
   computerName?: string;
   /** Persisted review decisions keyed by section id (#51). */
   decisionRecordsBySection?: Readonly<Record<string, DecisionRecord[]>>;
+  manuscriptId?: string;
 }>();
 
 const commentRows = shallowRef<readonly CommentRow[]>([]);
@@ -216,6 +217,7 @@ onBeforeUnmount(() => observer?.disconnect());
             :notes-hidden="notesHidden"
             :computer-name="computerName"
             :decision-records="decisionRecordsBySection?.[sec.id] ?? []"
+            :manuscript-id="manuscriptId"
             @reload="emit('reload')"
             @toggle-navigator="emit('toggle-navigator')"
             @decisions="(records) => emit('decisions', sec.id, records)"

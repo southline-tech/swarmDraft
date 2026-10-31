@@ -80,6 +80,10 @@ import {
   FindHighlight,
   FormatTrackChanges,
   HumanTrackChanges,
+  Spellcheck,
+  applySpellSuggestion,
+  refreshSpellcheck,
+  spellIssueAtPos,
   collectReviewItems,
   listSuggestions,
   refreshAuthorLabels,
@@ -91,7 +95,12 @@ import {
   type SuggestionItem,
   type SuggestionTarget,
   type CommentRow,
+  type SpellIssue,
 } from '@coauthor/editor';
+import { spellDictionaryAdd, spellDictionaryIgnore } from './backend';
+import { lintBlockText } from './spellcheck/lint';
+import SpellMenu from './spellcheck/SpellMenu.vue';
+import { loadSpellPrefs, spellcheckEnabled } from './settings/prefs';
 import { applyReviewDecision } from './review/apply';
 import { collabColor, setWriterProfileForColors } from './author-colors';
 import { commentRowLabel, primaryCommentByThread } from './review/review-sidebar';
@@ -146,6 +155,8 @@ const props = defineProps<{
   notesHidden?: boolean;
   /** One continuous manuscript (#107): body-only slice; chrome lives on the active section. */
   sliceMode?: boolean;
+  /** Open book id for spell dictionary / ignore (#159). */
+  manuscriptId?: string;
   /** Parent-hosted review column (outside the scroll area). */
   reviewTarget?: string;
   /** Parent-hosted status bar (outside the scroll area). */
@@ -182,6 +193,8 @@ const emit = defineEmits<{
 const findOpen = shallowRef(false);
 const findFocusReplace = shallowRef(false);
 const menuAt = shallowRef<{ x: number; y: number } | null>(null);
+const spellMenu = shallowRef<{ x: number; y: number; issue: SpellIssue } | null>(null);
+const spellPrefs = ref(loadSpellPrefs());
 const shortcutsOpen = shallowRef(false);
 const focusMode = shallowRef(Boolean(import.meta.env.DEV && props.initialFocusMode));
 const prefStore = () => props.storage ?? globalThis.localStorage;
@@ -250,7 +263,10 @@ function onWindowKey(e: KeyboardEvent) {
   if (isField(e.target)) return;
   const mod = e.ctrlKey || e.metaKey;
   // An open context menu or Find owns Escape: close it and stay in focus mode (#94).
-  if (e.key === 'Escape' && menuAt.value) {
+  if (e.key === 'Escape' && spellMenu.value) {
+    e.preventDefault();
+    spellMenu.value = null;
+  } else if (e.key === 'Escape' && menuAt.value) {
     e.preventDefault();
     menuAt.value = null;
   } else if (e.key === 'Escape' && findOpen.value) {
@@ -292,6 +308,8 @@ function onShellKey(e: KeyboardEvent) {
   } else if (mod && e.shiftKey && e.key.toLowerCase() === 'f') {
     e.preventDefault();
     focusMode.value = !focusMode.value;
+  } else if (e.key === 'Escape' && spellMenu.value) {
+    spellMenu.value = null;
   } else if (e.key === 'Escape' && menuAt.value) {
     menuAt.value = null;
   } else if (e.key === 'Escape' && findOpen.value) {
@@ -313,10 +331,54 @@ function closeFind() {
   void nextTick(() => editor.value?.view.focus());
 }
 function openMenu(e: MouseEvent) {
+  const ed = editor.value;
+  if (ed && !ed.isDestroyed) {
+    const hit = ed.view.posAtCoords({ left: e.clientX, top: e.clientY });
+    if (hit) {
+      const issue = spellIssueAtPos(ed.state, hit.pos);
+      if (issue) {
+        spellMenu.value = {
+          x: Math.min(e.clientX, window.innerWidth - 280),
+          y: Math.min(e.clientY, window.innerHeight - 300),
+          issue,
+        };
+        menuAt.value = null;
+        return;
+      }
+    }
+  }
+  spellMenu.value = null;
   menuAt.value = {
     x: Math.min(e.clientX, window.innerWidth - 280),
     y: Math.min(e.clientY, window.innerHeight - 300),
   };
+}
+
+async function onSpellSuggest(text: string) {
+  const ed = editor.value;
+  const menu = spellMenu.value;
+  spellMenu.value = null;
+  if (!ed || !menu || ed.isDestroyed) return;
+  applySpellSuggestion(ed, menu.issue, text);
+  void nextTick(() => ed.view.focus());
+}
+
+async function onSpellIgnore() {
+  const ed = editor.value;
+  const menu = spellMenu.value;
+  spellMenu.value = null;
+  if (!ed || !menu || !props.manuscriptId) return;
+  await spellDictionaryIgnore(props.manuscriptId, menu.issue.word);
+  refreshSpellcheck(ed);
+}
+
+async function onSpellDictionary() {
+  const ed = editor.value;
+  const menu = spellMenu.value;
+  spellMenu.value = null;
+  if (!ed || !menu || !props.manuscriptId) return;
+  await spellDictionaryAdd(props.manuscriptId, menu.issue.word);
+  refreshSpellcheck(ed);
 }
 const menuDisabled = computed(() => contextMenuDisabled(editor.value));
 const menuActiveStyle = computed((): ContextMenuAction | undefined => {
@@ -507,6 +569,12 @@ function onKeydown(ev: KeyboardEvent) {
   else decideCurrent(action === 'accept' ? 'accept' : 'reject');
 }
 onMounted(() => window.addEventListener('keydown', onKeydown, true));
+function onSpellPrefs() {
+  spellPrefs.value = loadSpellPrefs();
+  const e = editor.value;
+  if (e && !e.isDestroyed) refreshSpellcheck(e);
+}
+onMounted(() => window.addEventListener('swarmdraft-spell-prefs', onSpellPrefs));
 
 /* #92: report the desk's width and whether the review panel shows, so the parent can close the
    outline while the page would drop below its minimum width. */
@@ -694,6 +762,12 @@ const options: Partial<EditorOptions> = {
       authorVisible: (author) => authorVisibleInFilter(filter.value, author),
     }),
     FindHighlight,
+    Spellcheck.configure({
+      enabled: () => spellcheckEnabled(spellPrefs.value),
+      checkSpelling: () => spellPrefs.value.spelling,
+      checkGrammar: () => spellPrefs.value.grammar,
+      lint: (text) => lintBlockText(props.manuscriptId, text),
+    }),
   ],
   onContentError: ({ error }) => {
     const raw = String((error as Error & { cause?: unknown }).cause ?? error.message);
@@ -757,6 +831,7 @@ watch(agentDirectory, () => {
 });
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown, true);
+  window.removeEventListener('swarmdraft-spell-prefs', onSpellPrefs);
   if (focusMode.value) emit('focus-mode', false);
   clearTimeout(countTimer);
   stopBook();
@@ -901,7 +976,12 @@ const LABELS: Record<ReviewItem['type'], string> = {
           <p v-if="chapterLabel" class="chapter-label" data-test="chapter-label" aria-hidden="true">
             {{ chapterLabel }}
           </p>
-          <EditorContent :editor="editor" class="page" @contextmenu.prevent="openMenu" />
+          <EditorContent
+            :editor="editor"
+            class="page"
+            spellcheck="false"
+            @contextmenu.prevent="openMenu"
+          />
         </div>
         <!-- Margin notes (wp1): suggestion callouts beside the page, read-only. -->
         <div
@@ -988,6 +1068,16 @@ const LABELS: Record<ReviewItem['type'], string> = {
         </div>
       </Teleport>
     </div>
+    <SpellMenu
+      v-if="spellMenu"
+      :x="spellMenu.x"
+      :y="spellMenu.y"
+      :issue="spellMenu.issue"
+      @suggest="onSpellSuggest"
+      @ignore="onSpellIgnore"
+      @dictionary="onSpellDictionary"
+      @close="spellMenu = null"
+    />
     <ContextMenu
       v-if="menuAt"
       :x="menuAt.x"
@@ -998,11 +1088,17 @@ const LABELS: Record<ReviewItem['type'], string> = {
       @close="menuAt = null"
     />
     <div
-      v-if="menuAt"
+      v-if="spellMenu || menuAt"
       class="fixed inset-0 z-30"
       data-test="context-dismiss"
-      @click="menuAt = null"
-      @contextmenu.prevent="menuAt = null"
+      @click="
+        spellMenu = null;
+        menuAt = null;
+      "
+      @contextmenu.prevent="
+        spellMenu = null;
+        menuAt = null;
+      "
     />
     <ShortcutsSheet v-if="shortcutsOpen" @close="shortcutsOpen = false" />
     <template v-if="focusMode">
@@ -1246,6 +1342,18 @@ const LABELS: Record<ReviewItem['type'], string> = {
 .tiptap .find-match--active {
   outline: 2px solid var(--ct-accent);
   outline-offset: -2px;
+}
+.tiptap .spell-lint {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+.tiptap .spell-lint--spelling {
+  text-decoration-color: var(--ct-spell);
+}
+.tiptap .spell-lint--grammar {
+  text-decoration-color: var(--ct-grammar);
 }
 .manuscript-editor .desk:has(> .sh-margin) {
   --ct-page-notes-room: calc(var(--ct-margin-notes-w) + var(--ct-space-4));

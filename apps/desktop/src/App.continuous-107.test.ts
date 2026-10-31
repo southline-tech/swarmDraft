@@ -28,6 +28,7 @@ vi.mock('./backend', async (importOriginal) => {
     getMigrationNotices: async () => [],
     openLatestManuscript: async () => null,
     listenOpeningProgress: async () => () => {},
+    spellLintParagraph: async () => [],
   };
 });
 vi.mock('./close-flush', () => ({

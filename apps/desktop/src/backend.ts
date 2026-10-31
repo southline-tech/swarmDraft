@@ -336,6 +336,47 @@ export async function saveSectionReviewDecisions(
   await invoke('section_save_review_decisions', { manuscriptId, sectionId, records });
 }
 
+export type SpellLintIssue = import('@coauthor/editor').SpellLintResult;
+
+export async function spellLintParagraph(
+  manuscriptId: string | undefined,
+  text: string,
+  checkSpelling: boolean,
+  checkGrammar: boolean,
+): Promise<SpellLintIssue[]> {
+  if (!isTauri() || (!checkSpelling && !checkGrammar) || !text.trim()) return [];
+  try {
+    return await invoke<SpellLintIssue[]>('spell_lint_paragraph', {
+      manuscriptId: manuscriptId ?? null,
+      text,
+      checkSpelling,
+      checkGrammar,
+    });
+  } catch {
+    return [];
+  }
+}
+
+export async function spellDictionaryList(manuscriptId: string, query?: string): Promise<string[]> {
+  if (!isTauri()) return [];
+  return invoke<string[]>('spell_dictionary_list', { manuscriptId, query: query ?? null });
+}
+
+export async function spellDictionaryAdd(manuscriptId: string, word: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('spell_dictionary_add', { manuscriptId, word });
+}
+
+export async function spellDictionaryRemove(manuscriptId: string, word: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('spell_dictionary_remove', { manuscriptId, word });
+}
+
+export async function spellDictionaryIgnore(manuscriptId: string, word: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('spell_dictionary_ignore', { manuscriptId, word });
+}
+
 const webSectionReviewMeta = new Map<string, SectionReviewMeta>();
 
 function emptySectionReviewMeta(): SectionReviewMeta {
