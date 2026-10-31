@@ -98,10 +98,15 @@ async function refresh() {
 const create = () =>
   guard(async () => {
     const agent = await props.api.create(name.value, color.value);
-    const t = await props.api.createToken(agent.id, scopes.value);
-    copied.value = false;
-    copyFailed.value = false;
-    shownToken.value = { agentId: agent.id, token: t.token };
+    try {
+      const t = await props.api.createToken(agent.id, scopes.value);
+      copied.value = false;
+      copyFailed.value = false;
+      shownToken.value = { agentId: agent.id, token: t.token };
+    } catch (e) {
+      console.error('Agent settings action failed', e);
+      error.value = agentError(e);
+    }
     await refresh();
   });
 const mint = (agentId: string) =>
@@ -157,7 +162,7 @@ onBeforeUnmount(() => {
         New key for <bdi dir="auto">{{ agentName(shownToken.agentId) }}</bdi>
       </h2>
       <p class="st-desc">
-        <b>Copy this key now. You won't see it again.</b> Paste it into the agent's setup.
+        <b>Copy this key now. This key won't be shown again.</b> Paste it into the agent's setup.
       </p>
       <div class="ag__keyrow">
         <input

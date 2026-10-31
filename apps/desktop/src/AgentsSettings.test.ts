@@ -56,7 +56,7 @@ describe('AgentsSettings', () => {
     await w.find('[data-test="create-agent"]').trigger('submit');
     await flushPromises();
     expect(w.get('[data-test="token-once"]').text()).toContain('New key for Sample Agent');
-    expect(w.text()).toContain("Copy this key now. You won't see it again.");
+    expect(w.text()).toContain("Copy this key now. This key won't be shown again.");
     expect(w.text()).toContain('New keys can');
     await w.find('[data-test="token-done"]').trigger('click');
     await flushPromises();
@@ -71,6 +71,22 @@ describe('AgentsSettings', () => {
       .toLowerCase();
     expect(visible).not.toContain('token');
     expect(visible).not.toContain('revoke');
+  });
+
+  it('shows an error and keeps New key when mint fails after create (#187)', async () => {
+    const api = fakeApi();
+    api.createToken = vi.fn(async () => {
+      throw 'could not mint key';
+    });
+    const w = mount(AgentsSettings, { props: { api } });
+    await flushPromises();
+    await w.find('[data-test="create-agent"]').trigger('submit');
+    await flushPromises();
+    expect(api.create).toHaveBeenCalled();
+    expect(w.findAll('[data-test="agent"]')).toHaveLength(1);
+    expect(w.find('[data-test="token-once"]').exists()).toBe(false);
+    expect(w.find('[data-test="error"]').text().length).toBeGreaterThan(0);
+    expect(w.find('[data-test="mint"]').text()).toBe('New key');
   });
 
   it('shows the backend error when a name is reserved or taken (RAD-263)', async () => {
