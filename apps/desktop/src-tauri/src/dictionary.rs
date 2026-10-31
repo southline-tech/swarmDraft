@@ -299,23 +299,13 @@ mod tests {
 
     #[test]
     fn common_typo_uses_spelling_kind() {
-        let issues = lint_plain_text("Fix teh word.", &[], &[], true, true);
-        let teh = issues.iter().find(|i| {
-            i.message.to_lowercase().contains("teh") || {
-                let slice = &i.message;
-                slice.contains("teh")
-            }
-        });
-        if teh.is_none() {
-            let any = lint_plain_text("teh", &[], &[], true, false);
-            assert!(
-                any.iter().all(|i| i.kind == "spelling"),
-                "expected Typo lints as spelling, got {:?}",
-                any
-            );
-        } else {
-            assert_eq!(teh.unwrap().kind, "spelling");
-        }
+        let issues = lint_plain_text("teh", &[], &[], true, false);
+        assert!(!issues.is_empty(), "expected a lint for teh");
+        assert!(
+            issues.iter().all(|i| i.kind == "spelling"),
+            "expected Typo lints as spelling, got {:?}",
+            issues
+        );
     }
 
     #[test]
