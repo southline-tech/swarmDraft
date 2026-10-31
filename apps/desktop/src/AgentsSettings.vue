@@ -29,7 +29,7 @@ const tokens = ref<Record<string, TokenInfo[]>>({});
 const name = ref('Grok Bot');
 const color = ref('#3366ff');
 const scopes = ref<AgentScope[]>([...AGENT_SCOPES]);
-const shownToken = ref<{ agentId: string; token: string } | null>(null);
+const shownToken = ref<{ agentId: string; token: string; agentName: string } | null>(null);
 const error = ref('');
 const copied = ref(false);
 const copyFailed = ref(false);
@@ -49,10 +49,15 @@ async function copyToken() {
   } catch {
     copyFailed.value = true;
     // Focus (and so select) the token, so the "selected above" hint is true.
-    await nextTick();
-    tokenInput.value?.focus();
-    tokenInput.value?.select();
+    await focusKeyCard();
   }
+}
+
+/** Move keyboard focus into the one-time key card (Designer #187 ap3 polish). */
+async function focusKeyCard() {
+  await nextTick();
+  tokenInput.value?.focus();
+  tokenInput.value?.select();
 }
 
 function selectAll(e: Event) {
@@ -102,20 +107,28 @@ const create = () =>
       const t = await props.api.createToken(agent.id, scopes.value);
       copied.value = false;
       copyFailed.value = false;
-      shownToken.value = { agentId: agent.id, token: t.token };
+      shownToken.value = {
+        agentId: agent.id,
+        token: t.token,
+        agentName: agent.name,
+      };
+      await refresh();
+      await focusKeyCard();
     } catch (e) {
       console.error('Agent settings action failed', e);
       error.value = agentError(e);
+      await refresh();
     }
-    await refresh();
   });
 const mint = (agentId: string) =>
   guard(async () => {
     const t = await props.api.createToken(agentId, scopes.value);
     copied.value = false;
     copyFailed.value = false;
-    shownToken.value = { agentId, token: t.token };
+    const agentName = agents.value.find((a) => a.id === agentId)?.name ?? '';
+    shownToken.value = { agentId, token: t.token, agentName };
     await refresh();
+    await focusKeyCard();
   });
 const revokeToken = (id: string) =>
   guard(async () => {
@@ -133,8 +146,6 @@ const SCOPE_HINT: Record<AgentScope, string> = {
   comment: 'leave comments',
   suggest: 'propose edits',
 };
-const agentName = (id: string) => agents.value.find((a) => a.id === id)?.name ?? '';
-
 onMounted(() => {
   window.addEventListener('pagehide', clearToken);
   return guard(refresh);
@@ -159,7 +170,7 @@ onBeforeUnmount(() => {
       data-test="token-once"
     >
       <h2 id="ag-once" class="st-h2">
-        New key for <bdi dir="auto">{{ agentName(shownToken.agentId) }}</bdi>
+        New key for <bdi dir="auto">{{ shownToken.agentName }}</bdi>
       </h2>
       <p class="st-desc">
         <b>Copy this key now. This key won't be shown again.</b> Paste it into the agent's setup.

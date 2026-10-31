@@ -251,3 +251,4 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-30 · #159 · review (#171) · plugin update dirtied selection not change range · mark dirty blocks from `tr.mapping` in plugin `apply` when `tr.docChanged`
 - 2026-10-31 · #187 · Designer review (#190) · one-time key card used "You won't see it again" · ap3 copy: "Copy this key now. This key won't be shown again."; assert in `AgentsSettings.test.ts`
 - 2026-10-31 · #187 · review (#190) · createToken failure after create left no agent row refresh · refresh list and surface mapped error; keep **New key** for retry (`shows an error and keeps New key when mint fails after create`)
+- 2026-10-31 · #187 · Designer (#190) · key card heading empty until refresh; no focus on mint · store `agentName` on `shownToken`; `focusKeyCard()` after create/mint (`#187: mints and reveals a key`)

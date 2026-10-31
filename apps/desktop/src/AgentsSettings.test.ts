@@ -141,12 +141,20 @@ describe('AgentsSettings', () => {
   it('#187: mints and reveals a key when an agent is created', async () => {
     const api = fakeApi();
     const writeClipboard = vi.fn(async () => {});
-    const w = mount(AgentsSettings, { props: { api, writeClipboard } });
+    const w = mount(AgentsSettings, {
+      props: { api, writeClipboard },
+      attachTo: document.body,
+    });
     await flushPromises();
     await w.find('[data-test="create-agent"]').trigger('submit');
     await flushPromises();
     expect(api.createToken).toHaveBeenCalledTimes(1);
     expect(w.find('[data-test="token-once"]').exists()).toBe(true);
+    expect(w.get('[data-test="token-once"]').text()).toContain('New key for Grok Bot');
+    const keyInput = w.find('[data-test="token-value"]').element as HTMLInputElement;
+    expect(document.activeElement).toBe(keyInput);
+    expect(keyInput.selectionStart).toBe(0);
+    expect(keyInput.selectionEnd).toBe('cat_abcdefSECRET'.length);
     expect(w.find('[data-test="copy-token"]').exists()).toBe(true);
     await w.find('[data-test="copy-token"]').trigger('click');
     await flushPromises();
