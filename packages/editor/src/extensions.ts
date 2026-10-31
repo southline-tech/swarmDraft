@@ -30,6 +30,9 @@ const Text = Node.create({ name: 'text', group: 'inline' });
 /** Marker line that becomes a scene break when typed on its own. */
 export const SCENE_BREAK_MARKER = '***';
 
+/** Canonical centered glyph in the editor; storage and export keep `marker`. */
+export const SCENE_BREAK_DISPLAY = '* * *';
+
 export const Paragraph = Node.create({
   name: 'paragraph',
   group: 'block',
@@ -111,11 +114,26 @@ export const SceneBreak = Node.create({
     };
   },
   parseHTML: () => [{ tag: 'div[data-scene-break]' }],
-  renderHTML: ({ node, HTMLAttributes }) => [
+  renderHTML: ({ HTMLAttributes }) => [
     'div',
     mergeAttributes(HTMLAttributes, { 'data-scene-break': '', class: 'scene-break' }),
-    node.attrs.marker || ' ',
+    SCENE_BREAK_DISPLAY,
   ],
+  addNodeView() {
+    return ({ HTMLAttributes }) => {
+      const dom = document.createElement('div');
+      const attrs = mergeAttributes(HTMLAttributes, {
+        'data-scene-break': '',
+        class: 'scene-break',
+      });
+      for (const [key, value] of Object.entries(attrs)) {
+        if (value == null || value === false) continue;
+        dom.setAttribute(key, value === true ? '' : String(value));
+      }
+      dom.textContent = SCENE_BREAK_DISPLAY;
+      return { dom };
+    };
+  },
   addCommands() {
     return {
       insertSceneBreak:

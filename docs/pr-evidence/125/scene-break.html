@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script>
+      if (new URLSearchParams(location.search).get('theme') === 'dark') {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    </script>
+    <meta charset="utf-8" />
+    <title>Scene break evidence (#125)</title>
+    <link rel="stylesheet" href="../../../apps/desktop/src/styles/tokens.css" />
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 32px 24px;
+        background: var(--ct-bg);
+      }
+      .page-sheet {
+        width: var(--ct-page-min-w);
+        background: var(--ct-paper);
+        box-shadow: var(--ct-elevation-2);
+        padding: 72px;
+        box-sizing: border-box;
+      }
+      .tiptap {
+        max-width: var(--ct-measure-page);
+        margin-left: auto;
+        margin-right: auto;
+        font-family: var(--ct-font-manuscript);
+        font-size: var(--ct-text-page);
+        line-height: var(--ct-leading-body);
+        color: var(--ct-text);
+      }
+      .tiptap h1 {
+        font-family: var(--ct-font-manuscript);
+        font-weight: 400;
+        text-align: center;
+        margin: 0 0 0.5em;
+      }
+      .tiptap p {
+        margin: 0;
+        text-indent: 1.5em;
+      }
+      .tiptap p.p-first {
+        text-indent: 0;
+      }
+      .tiptap .scene-break {
+        text-align: center;
+        margin: var(--ct-space-4) 0;
+        color: var(--ct-text);
+        user-select: none;
+      }
+      .tiptap ins.suggestion-insert [data-suggester] {
+        color: var(--ct-text);
+        background: var(--ct-suggest-insert-bg);
+        text-decoration: underline 2px var(--ct-suggest-insert-underline);
+        text-underline-offset: 3px;
+      }
+      .tiptap del.suggestion-delete [data-suggester] {
+        color: var(--ct-suggest-delete-text);
+        background: var(--ct-suggest-delete-bg);
+        text-decoration: line-through 2px var(--ct-suggest-delete-strike);
+      }
+    </style>
+  </head>
+  <body>
+    <article class="page-sheet">
+      <div class="tiptap ProseMirror">
+        <h1>Chapter One</h1>
+        <p class="p-first">
+          The lantern
+          <del class="suggestion-delete"
+            ><span data-suggester style="--ct-suggester: var(--ct-collab-1)">flickered</span></del
+          ><ins class="suggestion-insert"
+            ><span data-suggester style="--ct-suggester: var(--ct-collab-1)">guttered</span></ins
+          >
+          twice before the rain began.
+        </p>
+        <div class="scene-break" data-scene-break="" data-marker="***">* * *</div>
+        <p class="p-first">Morning came late.</p>
+      </div>
+    </article>
+  </body>
+</html>
