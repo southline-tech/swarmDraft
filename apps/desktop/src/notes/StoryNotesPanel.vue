@@ -2,7 +2,7 @@
 /**
  * Story notes beside the draft (#38): ordered notes with title, rich body, optional chapter link.
  */
-import { computed, ref, shallowRef, watch } from 'vue';
+import { computed, nextTick, onUpdated, ref, shallowRef, watch } from 'vue';
 import type { Section } from '@coauthor/schema';
 import type * as Y from 'yjs';
 import EmptyState from '../shells/EmptyState.vue';
@@ -29,6 +29,7 @@ const emit = defineEmits<{ 'select-section': [sectionId: string] }>();
 
 const notes = shallowRef<NoteMeta[]>([]);
 const selectedId = ref<string>();
+const root = ref<HTMLElement>();
 
 const refresh = () => {
   notes.value = listNotes(props.notesDoc);
@@ -87,10 +88,32 @@ function onSectionChange(e: Event) {
 const sectionOptions = computed(() =>
   props.outline.filter((s) => s.kind === 'chapter' || s.kind === 'front_matter'),
 );
+
+/** TipTap root lives in NoteBodyEditor; name the contenteditable for a11y (#38). */
+function applyBodyAriaLabel() {
+  const el = root.value?.querySelector<HTMLElement>('[data-test=note-body]');
+  if (el) el.setAttribute('aria-label', 'Body');
+}
+
+watch(
+  () => selected.value?.id,
+  (id, _prev, onCleanup) => {
+    let observer: MutationObserver | undefined;
+    void nextTick(() => {
+      if (!id || !root.value) return;
+      applyBodyAriaLabel();
+      observer = new MutationObserver(applyBodyAriaLabel);
+      observer.observe(root.value, { childList: true, subtree: true, attributes: true });
+    });
+    onCleanup(() => observer?.disconnect());
+  },
+  { immediate: true },
+);
+onUpdated(applyBodyAriaLabel);
 </script>
 
 <template>
-  <aside class="story-notes" aria-label="Story notes" data-test="story-notes">
+  <aside ref="root" class="story-notes" aria-label="Story notes" data-test="story-notes">
     <header class="story-notes__head">
       <h2>Story notes</h2>
       <button
@@ -165,12 +188,15 @@ const sectionOptions = computed(() =>
         >
           Go to linked chapter
         </button>
-        <NoteBodyEditor
-          :key="selected.id"
-          :notes-doc="notesDoc"
-          :note-id="selected.id"
-          :readonly="readonly"
-        />
+        <label class="story-notes__field">
+          <span>Body</span>
+          <NoteBodyEditor
+            :key="selected.id"
+            :notes-doc="notesDoc"
+            :note-id="selected.id"
+            :readonly="readonly"
+          />
+        </label>
       </section>
     </div>
   </aside>
