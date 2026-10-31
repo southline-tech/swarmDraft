@@ -48,6 +48,16 @@ fn accepted_insert(id: &str) -> ReviewDecisionRecord {
     }
 }
 
+fn rejected_insert(id: &str) -> ReviewDecisionRecord {
+    ReviewDecisionRecord {
+        kind: "suggestion_insert".into(),
+        id: id.into(),
+        status: "rejected".into(),
+        decided_at: "2026-10-26T03:00:00.000Z".into(),
+        decided_by: "author".into(),
+    }
+}
+
 #[test]
 fn review_decisions_save_reload_and_replace() {
     let tmp = tempfile::tempdir().unwrap();
@@ -118,6 +128,26 @@ fn saving_decisions_closes_matching_suggestions_and_undo_reopens() {
 }
 
 #[test]
+fn saving_decisions_reject_closes_matching_suggestions() {
+    let tmp = tempfile::tempdir().unwrap();
+    let store = Store::open(tmp.path()).unwrap();
+    let (m, secs) = store
+        .import_manuscript("Synthetic Harbor", &[sec("c1", "Chapter One")])
+        .unwrap();
+    let sid = secs[0].id.clone();
+    store
+        .insert_suggestion(&m.id, &bot_suggestion(&sid, "s1"))
+        .unwrap();
+    assert_eq!(store.open_suggestions(&sid).unwrap().len(), 1);
+    store
+        .save_section_review_decisions(&m.id, &sid, &[rejected_insert("s1")])
+        .unwrap();
+    assert!(store.open_suggestions(&sid).unwrap().is_empty());
+    let row = store.get_suggestion("s1").unwrap().unwrap();
+    assert_eq!(row.status, "rejected");
+}
+
+#[test]
 fn accepted_suggestions_drop_from_open_meta_rationales() {
     let tmp = tempfile::tempdir().unwrap();
     let store = Store::open(tmp.path()).unwrap();
@@ -128,6 +158,9 @@ fn accepted_suggestions_drop_from_open_meta_rationales() {
     store
         .insert_suggestion(&m.id, &bot_suggestion(&sid, "s1"))
         .unwrap();
+    let open_before = store.open_suggestions(&sid).unwrap();
+    assert_eq!(open_before.len(), 1);
+    assert_eq!(open_before[0].rationale.as_deref(), Some("Stronger verb."));
     store
         .save_section_review_decisions(&m.id, &sid, &[accepted_insert("s1")])
         .unwrap();
