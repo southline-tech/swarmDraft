@@ -80,6 +80,16 @@ describe('SpellMenu (#159)', () => {
     shell.remove();
   });
 
+  it('emits suggest when a suggestion is clicked', async () => {
+    const w = mount(SpellMenu, {
+      attachTo: document.body,
+      props: { x: 0, y: 0, issue: issue({ kind: 'spelling' }) },
+    });
+    await w.get('[data-test=spell-suggest-primary]').trigger('click');
+    expect(w.emitted('suggest')).toEqual([['one']]);
+    w.unmount();
+  });
+
   it('returns focus to the editor when unmounted (backdrop dismiss)', async () => {
     const editor = document.createElement('div');
     editor.className = 'ProseMirror';

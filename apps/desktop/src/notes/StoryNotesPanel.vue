@@ -1,11 +1,12 @@
 <script setup lang="ts">
 /**
- * Story notes beside the draft (#38): ordered notes with title, rich body, optional chapter link.
+ * Story notes under the draft (#38): ordered notes with title, rich body, optional chapter link.
  */
 import { computed, ref, shallowRef, watch } from 'vue';
 import type { Section } from '@coauthor/schema';
 import type * as Y from 'yjs';
 import EmptyState from '../shells/EmptyState.vue';
+import AppIcon from '../icons/AppIcon.vue';
 import { agentName } from '../agent-names';
 import { collabColor } from '../author-colors';
 import NoteBodyEditor from './NoteBodyEditor.vue';
@@ -25,7 +26,7 @@ const props = defineProps<{
   humanAuthor: { id: string; name: string };
 }>();
 
-const emit = defineEmits<{ 'select-section': [sectionId: string] }>();
+const emit = defineEmits<{ 'select-section': [sectionId: string]; close: [] }>();
 
 const notes = shallowRef<NoteMeta[]>([]);
 const selectedId = ref<string>();
@@ -93,15 +94,26 @@ const sectionOptions = computed(() =>
   <aside class="story-notes" aria-label="Story notes" data-test="story-notes">
     <header class="story-notes__head">
       <h2>Story notes</h2>
-      <button
-        type="button"
-        class="sh-btn"
-        data-test="new-note"
-        :disabled="readonly"
-        @click="onNewNote"
-      >
-        New note
-      </button>
+      <div class="story-notes__actions">
+        <button
+          type="button"
+          class="sh-btn"
+          data-test="new-note"
+          :disabled="readonly"
+          @click="onNewNote"
+        >
+          New note
+        </button>
+        <button
+          type="button"
+          class="sh-tbtn sh-icon"
+          data-test="story-notes-close"
+          aria-label="Close story notes"
+          @click="emit('close')"
+        >
+          <AppIcon name="x" />
+        </button>
+      </div>
     </header>
     <EmptyState
       v-if="!notes.length"
@@ -203,6 +215,12 @@ const sectionOptions = computed(() =>
   margin: 0;
   font-size: var(--ct-text-md);
   font-weight: var(--ct-weight-semibold);
+}
+.story-notes__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-space-2);
+  flex-shrink: 0;
 }
 .story-notes__body {
   display: flex;

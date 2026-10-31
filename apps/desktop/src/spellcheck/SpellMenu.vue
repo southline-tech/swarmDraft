@@ -127,7 +127,6 @@ onBeforeUnmount(restoreEditorFocus);
   min-width: 260px;
   max-width: 320px;
   padding: var(--ct-space-2) 0;
-  z-index: 6;
 }
 .spell-menu__head {
   margin: 0;

@@ -1068,6 +1068,19 @@ const LABELS: Record<ReviewItem['type'], string> = {
         </div>
       </Teleport>
     </div>
+    <div
+      v-if="spellMenu || menuAt"
+      class="fixed inset-0 z-30"
+      data-test="context-dismiss"
+      @click="
+        spellMenu = null;
+        menuAt = null;
+      "
+      @contextmenu.prevent="
+        spellMenu = null;
+        menuAt = null;
+      "
+    />
     <SpellMenu
       v-if="spellMenu"
       :x="spellMenu.x"
@@ -1086,19 +1099,6 @@ const LABELS: Record<ReviewItem['type'], string> = {
       :active-style="menuActiveStyle"
       @select="onContextMenuSelect"
       @close="menuAt = null"
-    />
-    <div
-      v-if="spellMenu || menuAt"
-      class="fixed inset-0 z-30"
-      data-test="context-dismiss"
-      @click="
-        spellMenu = null;
-        menuAt = null;
-      "
-      @contextmenu.prevent="
-        spellMenu = null;
-        menuAt = null;
-      "
     />
     <ShortcutsSheet v-if="shortcutsOpen" @close="shortcutsOpen = false" />
     <template v-if="focusMode">
