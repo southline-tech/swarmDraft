@@ -820,26 +820,31 @@ describe('App open-file input', () => {
 
 describe('App status bar on an imported manuscript', () => {
   const editorOf = (w: ReturnType<typeof mount>) => leadTiptapEditor(w);
-  const num = (w: ReturnType<typeof mount>, t: string) =>
-    Number(w.find(`[data-test="status-${t}"]`).text().replace(/[^\d]/g, ''));
+  const num = (w: ReturnType<typeof mount>) =>
+    Number(
+      w
+        .find('[data-test="status-word-count"]')
+        .text()
+        .match(/^[\d,]+/)![0]!
+        .replace(/,/g, ''),
+    );
   const words = (session: ReturnType<typeof sessionFromDocx>, ids: string[]) =>
     ids.reduce((n, id) => n + docWordCount(session.sections.get(id)!), 0);
 
-  it('shows a chapter by title and counts words in its doc', async () => {
+  it('counts words in the open chapter doc', async () => {
     const { w, session } = await withManuscript();
     const ch = session.outline.value.find((s) => s.kind === 'chapter')!;
     await w.find(`[data-test="section-${ch.id}"]`).trigger('click');
     await settle();
-    expect(w.find('[data-test="status-chapter"]').text()).toBe(ch.title);
-    const total = docWordCount(session.sections.get(ch.docId)!);
-    expect(num(w, 'chapter-words')).toBe(total);
+    const all = session.outline.value.map((s) => s.docId);
+    expect(num(w)).toBe(words(session, all));
     w.unmount();
   });
 
   it('shows a book total equal to the sum of all sections', async () => {
     const { w, session } = await withManuscript();
     const all = session.outline.value.map((s) => s.docId);
-    expect(num(w, 'book-words')).toBe(words(session, all));
+    expect(num(w)).toBe(words(session, all));
     w.unmount();
   });
 
@@ -849,20 +854,18 @@ describe('App status bar on an imported manuscript', () => {
     const [first, second] = chapters;
     await w.find(`[data-test="section-${first!.id}"]`).trigger('click');
     await settle();
-    const book = num(w, 'book-words');
-    const chapter = num(w, 'chapter-words');
+    const book = num(w);
     editorOf(w).commands.insertContentAt(1, 'Countme alsome ');
     await settle();
     await new Promise((r) => setTimeout(r, 400));
     await settle();
-    expect(num(w, 'book-words')).toBe(book + 2);
-    expect(num(w, 'chapter-words')).toBe(chapter + 2);
+    expect(num(w)).toBe(book + 2);
     await w.find(`[data-test="section-${second!.id}"]`).trigger('click');
     await settle();
     await w.find(`[data-test="section-${first!.id}"]`).trigger('click');
     await settle();
     expect(editorSurface(w).text()).toContain('Countme alsome');
-    expect(num(w, 'book-words')).toBe(book + 2);
+    expect(num(w)).toBe(book + 2);
     w.unmount();
   });
 
@@ -872,7 +875,7 @@ describe('App status bar on an imported manuscript', () => {
     const open = outline.find((s) => s.kind === 'chapter')!;
     await w.find(`[data-test="section-${open.id}"]`).trigger('click');
     await settle();
-    const book = num(w, 'book-words');
+    const book = num(w);
     // A leaf section with text that is not the open one.
     const gone = outline.find(
       (s) =>
@@ -884,13 +887,13 @@ describe('App status bar on an imported manuscript', () => {
     const goneDoc = session.sections.get(gone.docId)!;
     await session.save(outline.filter((s) => s.id !== gone.id));
     await settle();
-    expect(num(w, 'book-words')).toBe(book - goneWords);
+    expect(num(w)).toBe(book - goneWords);
     expect(editorSurface(w).exists()).toBe(true);
     // The deleted doc is no longer watched: editing it changes nothing.
     goneDoc.getXmlFragment('prosemirror').insert(0, [new Y.XmlElement('paragraph')]);
     await new Promise((r) => setTimeout(r, 400));
     await settle();
-    expect(num(w, 'book-words')).toBe(book - goneWords);
+    expect(num(w)).toBe(book - goneWords);
     await session.save([
       ...session.outline.value,
       {
@@ -912,11 +915,11 @@ describe('App status bar on an imported manuscript', () => {
     text.insert(0, 'Brand new words');
     await new Promise((r) => setTimeout(r, 400));
     await settle();
-    expect(num(w, 'book-words')).toBe(book - goneWords + 3);
+    expect(num(w)).toBe(book - goneWords + 3);
     w.unmount();
   });
 
-  it('shows "Not saved, retrying" when a save fails, alongside the existing alert', async () => {
+  it('shows save error with Retry when a save fails, alongside the existing alert', async () => {
     // Uses the backend-saved import path (chooseFile), whose saves go through saveSectionUpdate.
     const backend = await import('./backend');
     const w = mount(App, { attachTo: document.body });
@@ -927,8 +930,11 @@ describe('App status bar on an imported manuscript', () => {
     editorOf(w).commands.insertContentAt(1, 'Unsaved ');
     await settle();
     await vi.waitFor(() =>
-      expect(w.find('[data-test="status-save"]').text()).toBe('Not saved, retrying'),
+      expect(w.find('[data-test="status-save"]').text()).toContain(
+        "Your latest changes aren't saved yet",
+      ),
     );
+    expect(w.find('[data-test="status-save-retry"]').exists()).toBe(true);
     expect(w.find('[data-test="save-error"]').text()).toContain(
       "Your latest changes aren't saved yet",
     );
@@ -937,11 +943,13 @@ describe('App status bar on an imported manuscript', () => {
     editorOf(w).commands.insertContentAt(1, 'Recovered ');
     await settle();
     await vi.waitFor(() => expect(w.find('[data-test="save-error"]').exists()).toBe(false));
-    await vi.waitFor(() => expect(w.find('[data-test="status-save"]').text()).toBe('Saved'));
+    await vi.waitFor(() =>
+      expect(w.find('[data-test="status-save"]').text()).toContain('Saved just now'),
+    );
     const next = sessionFromDocx(bytes(), 'm-other');
     (w.vm as unknown as { open: (s: typeof next) => void }).open(next);
     await settle();
-    expect(w.find('[data-test="status-save"]').text()).toBe('');
+    expect(w.find('[data-test="status-save"]').exists()).toBe(false);
     w.unmount();
   });
 });

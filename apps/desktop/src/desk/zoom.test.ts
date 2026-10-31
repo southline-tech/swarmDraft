@@ -92,13 +92,13 @@ describe('page on desk', () => {
     w.unmount();
   });
 
-  it('scales the page (no reflow) from the status bar and remembers the level', async () => {
+  it('scales the page (no reflow) from the toolbar zoom control and remembers the level', async () => {
     localStorage.setItem(ZOOM_STORAGE_KEY, '125');
     const w = mount(ManuscriptEditor, { props: { content: SAMPLE_DOC }, attachTo: document.body });
     await flushPromises();
     const page = () => w.find('[data-test="page"]');
     expect(page().attributes('style')).toContain('zoom: 1.25');
-    expect(w.find('[data-test="status-bar"] [data-test="zoom-reset"]').text()).toBe('125%');
+    expect(w.find('[data-test="zoom-reset"]').text()).toBe('125%');
     await w.find('[data-test="zoom-in"]').trigger('click');
     expect(page().attributes('style')).toContain('zoom: 1.5');
     // #92: the width is the fluid CSS rule (page-width.test.ts), not a fixed utility class.

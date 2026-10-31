@@ -103,82 +103,107 @@ describe('Y.Doc counts', () => {
 });
 
 describe('StatusBar', () => {
-  it('shows chapter, counts and zoom, spanning the window on the surface token', () => {
+  it('spans the window on the surface token at 26px (#204)', () => {
     const w = mount(StatusBar, {
-      props: { zoom: 100, chapterTitle: 'The Low Tide', chapterWords: 2154, bookWords: 16076 },
+      props: { wordCount: 2154, trackChanges: false, storyNotesPanelId: 'story-notes-panel' },
     });
     const bar = w.find('[data-test="status-bar"]');
     expect(bar.classes()).toEqual(
-      expect.arrayContaining(['fixed', 'inset-x-0', 'box-border', 'bg-surface']),
+      expect.arrayContaining(['fixed', 'inset-x-0', 'box-border', 'bg-surface', 'h-[26px]']),
     );
-    expect(w.find('[data-test="status-chapter"]').text()).toBe('The Low Tide');
-    expect(w.find('[data-test="status-chapter-words"]').text()).toBe('2,154 words in chapter');
-    expect(w.find('[data-test="status-book-words"]').text()).toBe('16,076 words in book');
-    expect(w.find('[data-test="zoom"]').exists()).toBe(true);
-    expect(w.find('[data-test="status-selection-words"]').exists()).toBe(false);
+    expect(bar.attributes('role')).toBe('contentinfo');
+    expect(w.find('[data-test="status-word-count"]').text()).toBe('2,154 words');
+    expect(w.find('[data-test="status-track-changes"]').text()).toBe('Track changes: Off');
+    expect(w.find('[data-test="status-notes-toggle"]').text()).toBe('Story notes');
   });
 
-  it('leaves out items without data instead of faking them', () => {
-    const w = mount(StatusBar, { props: { zoom: 100 } });
-    for (const t of ['chapter', 'chapter-words', 'book-words', 'selection-words']) {
-      expect(w.find(`[data-test="status-${t}"]`).exists()).toBe(false);
-    }
-    expect(w.find('[data-test="status-save"]').text()).toBe('');
-    expect(w.find('[data-test="zoom"]').exists()).toBe(true);
+  it('shows selection and track on, with save and notes pressed state', () => {
+    const w = mount(StatusBar, {
+      props: {
+        wordCount: 100,
+        selectionWords: 3,
+        trackChanges: true,
+        storyNotesOpen: true,
+        storyNotesPanelId: 'story-notes-panel',
+        save: { phase: 'saved', savedAt: Date.now() },
+      },
+    });
+    expect(w.find('[data-test="status-word-count"]').text()).toBe('100 words · 3 selected');
+    expect(w.find('[data-test="status-track-changes"]').text()).toBe('Track changes: On');
+    expect(w.find('[data-test="status-save"]').attributes('data-state')).toBe('saved');
+    expect(w.find('[data-test="status-notes-toggle"]').attributes('aria-pressed')).toBe('true');
   });
 
-  it('announces save status politely, with the warning state explained', () => {
-    const w = mount(StatusBar, { props: { zoom: 100, saveState: 'offline' } });
+  it('announces save status politely; word count is not live', () => {
+    const w = mount(StatusBar, {
+      props: {
+        wordCount: 1,
+        save: { phase: 'saving' },
+        storyNotesPanelId: 'story-notes-panel',
+      },
+    });
     const live = w.find('[data-test="status-save"]');
     expect(live.attributes('aria-live')).toBe('polite');
-    const s = live.find('[data-state="offline"]');
-    expect(s.classes()).toContain('text-warning');
-    expect(s.attributes('title')).toMatch(/kept/);
+    expect(w.find('[data-test="status-word-count"]').attributes('aria-live')).toBeUndefined();
+    expect(live.text()).toContain('Saving…');
   });
 
-  it('shows the selection word count', () => {
-    const w = mount(StatusBar, { props: { zoom: 100, selectionWords: 3 } });
-    expect(w.find('[data-test="status-selection-words"]').text()).toBe('3 words selected');
-  });
-
-  it('uses the singular for one word', () => {
+  it('shows error with Retry in danger styling', async () => {
     const w = mount(StatusBar, {
-      props: { zoom: 100, chapterWords: 1, selectionWords: 1, bookWords: 1 },
+      props: {
+        wordCount: 1,
+        save: { phase: 'error', message: 'Not saved' },
+        storyNotesPanelId: 'story-notes-panel',
+      },
     });
-    expect(w.find('[data-test="status-chapter-words"]').text()).toBe('1 word in chapter');
-    expect(w.find('[data-test="status-selection-words"]').text()).toBe('1 word selected');
-    expect(w.find('[data-test="status-book-words"]').text()).toBe('1 word in book');
+    expect(w.find('[data-test="status-save-retry"]').classes()).toContain('text-danger');
+    await w.find('[data-test="status-save-retry"]').trigger('click');
+    expect(w.emitted('save-retry')).toHaveLength(1);
   });
 
-  it('keeps spacing on the --ct scale (space-5 between items, space-4 padding)', () => {
-    const bar = mount(StatusBar, { props: { zoom: 100 } }).find('[data-test="status-bar"]');
-    expect(bar.classes()).toEqual(expect.arrayContaining(['gap-5', 'px-4']));
+  it('leaves out word count when unknown', () => {
+    const w = mount(StatusBar, { props: { storyNotesPanelId: 'story-notes-panel' } });
+    expect(w.find('[data-test="status-word-count"]').exists()).toBe(false);
+    expect(w.find('[data-test="status-save"]').exists()).toBe(false);
   });
 
-  it('updates zoom through the existing ZoomControl', async () => {
+  it('uses the singular for one word selected', () => {
     const w = mount(StatusBar, {
-      props: { zoom: 100, 'onUpdate:zoom': (z: number) => w.setProps({ zoom: z }) },
+      props: { wordCount: 1, selectionWords: 1, storyNotesPanelId: 'story-notes-panel' },
     });
-    await w.find('[data-test="zoom-in"]').trigger('click');
-    expect(w.props('zoom')).toBe(110);
+    expect(w.find('[data-test="status-word-count"]').text()).toBe('1 word · 1 selected');
+  });
+
+  it('keeps spacing on the --ct scale (space-4 gap, space-4 padding)', () => {
+    const bar = mount(StatusBar, { props: { storyNotesPanelId: 'x' } }).find(
+      '[data-test="status-bar"]',
+    );
+    expect(bar.classes()).toEqual(expect.arrayContaining(['gap-4', 'px-4']));
+  });
+
+  it('toggles story notes and track changes', async () => {
+    const w = mount(StatusBar, {
+      props: { trackChanges: false, storyNotesPanelId: 'story-notes-panel' },
+    });
+    await w.find('[data-test="status-notes-toggle"]').trigger('click');
+    await w.find('[data-test="status-track-changes"]').trigger('click');
+    expect(w.emitted('toggle-story-notes')).toHaveLength(1);
+    expect(w.emitted('toggle-track-changes')).toHaveLength(1);
   });
 });
 
 describe('ManuscriptEditor status bar', () => {
-  it('counts the chapter and the selection, and passes through the chapter title', async () => {
+  it('counts words for the open doc and passes selection', async () => {
     const w = mount(ManuscriptEditor, {
       props: { content: SAMPLE_DOC, chapterTitle: 'Chapter One' },
       attachTo: document.body,
     });
     await flushPromises();
-    expect(w.find('[data-test="status-chapter"]').text()).toBe('Chapter One');
     const n = Number(
-      w.find('[data-test="status-chapter-words"]').text().split(' ')[0]!.replace(/,/g, ''),
+      w.find('[data-test="status-word-count"]').text().split(' ')[0]!.replace(/,/g, ''),
     );
     expect(n).toBeGreaterThan(0);
-    // No book docs and no save state given: those items are left out.
-    expect(w.find('[data-test="status-book-words"]').exists()).toBe(false);
-    expect(w.find('[data-test="status-save"]').text()).toBe('');
+    expect(w.find('[data-test="status-save"]').exists()).toBe(false);
     w.unmount();
   });
 
@@ -192,11 +217,10 @@ describe('ManuscriptEditor status bar', () => {
       attachTo: document.body,
     });
     await flushPromises();
-    expect(w.find('[data-test="status-book-words"]').text()).toBe('5 words in book');
-    expect(w.find('[data-test="status-chapter-words"]').text()).toBe('3 words in chapter');
+    expect(w.find('[data-test="status-word-count"]').text()).toBe('5 words');
     await w.setProps({ chapterDocs: [...docs.values()] });
     await flushPromises();
-    expect(w.find('[data-test="status-chapter-words"]').text()).toBe('5 words in chapter');
+    expect(w.find('[data-test="status-word-count"]').text()).toBe('5 words');
     w.unmount();
   });
 });

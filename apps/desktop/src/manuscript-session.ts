@@ -220,6 +220,8 @@ export interface SectionPersister {
   retryMs?: number;
   /** Called when a save fails; the edits are kept and retried (nothing is ever dropped). */
   onError?: (err: unknown) => void;
+  /** Called when a local edit is queued for persist (debounced save pending). */
+  onDirty?: () => void;
   /** Called when a save succeeds and nothing is left unsaved (e.g. to clear an error). */
   onSaved?: () => void;
 }
@@ -330,8 +332,8 @@ function watchSections(manuscript: Y.Doc, docs: Map<string, Y.Doc>, p: SectionPe
           sectionIds: unsaved(),
         });
         schedule(Math.min((p.retryMs ?? 1000) * 2 ** (failures - 1), RETRY_MAX_MS));
-      } else if (!dirtyFull.size) {
-        if (failures) p.onSaved?.();
+      } else if (!dirtyFull.size && !pending.size) {
+        p.onSaved?.();
         failures = 0;
         lastError = undefined;
       }
@@ -345,6 +347,7 @@ function watchSections(manuscript: Y.Doc, docs: Map<string, Y.Doc>, p: SectionPe
     const on = (update: Uint8Array, origin: unknown) => {
       if (origin === LOAD_ORIGIN || origin === REMOTE_ORIGIN) return;
       pending.set(docId, [...(pending.get(docId) ?? []), update]);
+      p.onDirty?.();
       schedule(p.debounceMs ?? SAVE_DEBOUNCE_MS);
     };
     doc.on('update', on);

@@ -75,6 +75,7 @@ import type { NumberingStyle } from '@coauthor/schema';
 import type { DecisionRecord } from '@coauthor/editor';
 import { mergeLoadedDecisionRecords } from './review/decision-records-load';
 import { docWordCount, outlineDocs, sectionTreeDocs } from './status/wordcount';
+import type { ManuscriptSaveView } from './status/save-status';
 import {
   importAndOpen,
   openStored,
@@ -210,21 +211,44 @@ async function runOpeningRetry() {
  * succeeds. Edits are never dropped. Raw error text only goes to the console. */
 const saveFailure = ref({ ...SAVE_OK });
 const saveError = computed(() => saveFailure.value.failing);
-/** RAD-265: show "Saved" in the status bar after at least one successful persist. */
+/** RAD-265 / #204: footer save line after at least one successful persist. */
 const saveStatusShown = ref(false);
+const saveDirty = ref(false);
+const lastSavedAt = ref<number | null>(null);
+/** Manuscript id for the in-flight save callbacks (ignore stale flushes after switch). */
+const saveHookManuscriptId = ref<string | undefined>();
 const persistHooks = {
   onError: (err: unknown) => {
     console.error('Save failed; retrying', err);
     saveFailure.value = saveFailed(saveFailure.value, err);
   },
+  onDirty: () => {
+    saveDirty.value = true;
+    saveHookManuscriptId.value = session.value?.id;
+  },
   onSaved: () => {
+    if (session.value?.id !== saveHookManuscriptId.value) return;
     saveFailure.value = saveSucceeded();
+    saveDirty.value = false;
+    lastSavedAt.value = Date.now();
     saveStatusShown.value = true;
   },
 };
-const saveStatus = computed(() =>
-  saveError.value ? 'offline' : saveStatusShown.value ? 'saved' : undefined,
-);
+const manuscriptSave = computed((): ManuscriptSaveView | undefined => {
+  if (!session.value || choosingBook.value) return undefined;
+  if (saveError.value) {
+    const title = saveFailure.value.error?.title ?? mapError(null, 'save').title;
+    return { phase: 'error', message: title };
+  }
+  if (saveDirty.value) return { phase: 'saving' };
+  if (saveStatusShown.value && lastSavedAt.value != null) {
+    return { phase: 'saved', savedAt: lastSavedAt.value };
+  }
+  return { phase: 'idle' };
+});
+function onManuscriptSaveRetry() {
+  void session.value?.flush();
+}
 const saveCopyOfOpen = () =>
   session.value ? saveCopy(session.value) : Promise.resolve({ status: 'cancelled' as const });
 /**
@@ -624,6 +648,8 @@ function closeSession() {
   notesSession.value = null;
   storyNotesOpen.value = false;
   saveStatusShown.value = false;
+  saveDirty.value = false;
+  lastSavedAt.value = null;
   decisionRecordsBySection.value = {};
   selectedId.value = undefined;
   choosingBook.value = false;
@@ -645,6 +671,8 @@ function open(next: ManuscriptSession) {
   dismissToast();
   saveFailure.value = saveSucceeded();
   saveStatusShown.value = false;
+  saveDirty.value = false;
+  lastSavedAt.value = null;
   // A manuscript is open again, so an earlier "please restart" or open failure no longer holds.
   fatalError.value = '';
   openError.value = '';
@@ -1236,7 +1264,9 @@ defineExpose({ open, closeSession });
               ? sectionTreeDocs(session.outline.value, selectedId, session.sections)
               : undefined
           "
-          :save-state="saveStatus"
+          :manuscript-save="manuscriptSave"
+          :story-notes-open="storyNotesOpen"
+          story-notes-panel-id="story-notes-panel"
           :author-labels="markAuthorLabel"
           toolbar-target="#toolbar-row"
           external-load-error
@@ -1253,9 +1283,12 @@ defineExpose({ open, closeSession });
           @layout="onEditorLayout"
           @focus-mode="focusMode = $event"
           @ask-bot="onAskBotFromEditor"
+          @toggle-story-notes="toggleStoryNotes"
+          @save-retry="onManuscriptSaveRetry"
         />
         <StoryNotesPanel
           v-if="storyNotesOpen && notesSession && !focusMode"
+          id="story-notes-panel"
           class="editor-stack__notes"
           :notes-doc="notesSession.doc"
           :outline="session.outline.value"
@@ -1289,14 +1322,13 @@ body {
   margin: 0;
 }
 .shell {
-  /* One window-height column: the content ends above the fixed status bar (h-7 = 1.75rem) and
-     the chapter list and editor scroll inside it, so the bar never covers either. */
+  /* One window-height column: the content ends above the fixed status footer (26px). */
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   height: 100vh;
   overflow: auto;
-  padding-bottom: 1.75rem;
+  padding-bottom: 26px;
 }
 /* #55 wp5: status bar is hidden in focus mode; drop the reserved strip. */
 .shell.shell--focus-mode {

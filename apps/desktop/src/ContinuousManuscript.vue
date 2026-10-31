@@ -10,7 +10,7 @@ import type { CommentRow } from '@coauthor/editor';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import { sectionReviewMeta } from './backend';
 import { sectionsInReadingOrder } from './manuscript-reading-order';
-import type { SaveState } from './status/StatusBar.vue';
+import type { ManuscriptSaveView } from './status/save-status';
 import type { EditorLayout } from './desk/outline-auto-collapse';
 import type { AgentName } from './agent-names';
 import type { DecisionRecord } from '@coauthor/editor';
@@ -31,7 +31,9 @@ const props = defineProps<{
   sectionLabels?: ReadonlyMap<string, string>;
   bookDocs?: readonly Y.Doc[];
   chapterDocs?: Y.Doc[];
-  saveState?: SaveState;
+  manuscriptSave?: ManuscriptSaveView;
+  storyNotesOpen?: boolean;
+  storyNotesPanelId?: string;
   authorLabels?: (author: string) => AgentName;
   toolbarTarget?: string;
   externalLoadError?: boolean;
@@ -81,6 +83,8 @@ const emit = defineEmits<{
   'load-error': [message: string];
   layout: [layout: EditorLayout];
   'ask-bot': [];
+  'toggle-story-notes': [];
+  'save-retry': [];
 }>();
 
 const ordered = computed(() => sectionsInReadingOrder(props.outline));
@@ -207,7 +211,9 @@ onBeforeUnmount(() => observer?.disconnect());
             :chapter-label="sectionLabels?.get(sec.id)"
             :book-docs="sec.id === selectedId ? bookDocs : undefined"
             :chapter-docs="sec.id === selectedId ? chapterDocs : undefined"
-            :save-state="sec.id === selectedId ? saveState : undefined"
+            :manuscript-save="sec.id === selectedId ? manuscriptSave : undefined"
+            :story-notes-open="storyNotesOpen"
+            :story-notes-panel-id="storyNotesPanelId"
             :author-labels="authorLabels"
             :comment-rows="sec.id === selectedId ? commentRows : []"
             :author-saved-names="sec.id === selectedId ? authorSavedNames : undefined"
@@ -225,6 +231,8 @@ onBeforeUnmount(() => observer?.disconnect());
             @load-error="(msg) => sec.id === selectedId && emit('load-error', msg)"
             @layout="(layout) => sec.id === selectedId && onLeadLayout(layout)"
             @ask-bot="emit('ask-bot')"
+            @toggle-story-notes="emit('toggle-story-notes')"
+            @save-retry="emit('save-retry')"
           />
         </div>
       </div>
