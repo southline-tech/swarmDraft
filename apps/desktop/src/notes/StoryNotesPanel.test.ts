@@ -148,6 +148,7 @@ describe('StoryNotesPanel', () => {
     });
     await flushPromises();
     expect(w.get('[data-test=note-save]').text()).toContain('Saved just now');
+    expect(w.find('.story-notes__save-check').exists()).toBe(true);
     w.unmount();
   });
 });
