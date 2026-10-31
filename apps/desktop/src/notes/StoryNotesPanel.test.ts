@@ -1,6 +1,5 @@
 import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
-import * as Y from 'yjs';
 import StoryNotesPanel from './StoryNotesPanel.vue';
 import { addNote, createNotesDoc } from './doc';
 

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 /** Designer evidence for #38 story notes (`?evidence=38-notes&frame=empty|filled`). */
 import { computed, markRaw } from 'vue';
-import * as Y from 'yjs';
 import StoryNotesPanel from '../notes/StoryNotesPanel.vue';
 import { addNote, createNotesDoc } from '../notes/doc';
 import { readRad38Frame } from './rad38-evidence';
