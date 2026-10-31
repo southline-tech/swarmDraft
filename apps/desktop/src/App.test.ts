@@ -406,6 +406,38 @@ describe('App', () => {
     w.unmount();
   });
 
+  it('drops workspace right padding so footer notes split aligns with Story notes (#219)', async () => {
+    const { w } = await withManuscript();
+    const ws = w.get('[data-test="workspace"]').element as HTMLElement;
+    expect(ws.className).toContain('pr-0');
+    expect(ws.className).not.toMatch(/\bp-4\b/);
+    const notesCol = w.get('[data-test="story-notes-col"]').element;
+    const rightSeg = w.get('[data-test="status-seg-right"]').element;
+    const sharedLeft = 640;
+    const rect = (left: number, width = 280) =>
+      ({
+        left,
+        right: left + width,
+        top: 0,
+        bottom: 26,
+        width,
+        height: 26,
+        x: left,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    vi.spyOn(notesCol, 'getBoundingClientRect').mockReturnValue(rect(sharedLeft));
+    vi.spyOn(rightSeg, 'getBoundingClientRect').mockReturnValue(rect(sharedLeft));
+    expect(rightSeg.getBoundingClientRect().left).toBe(notesCol.getBoundingClientRect().left);
+    await w.find('[data-test="tb-navigator"]').trigger('click');
+    await settle();
+    expect(w.find('[data-test="status-seg-left"]').exists()).toBe(false);
+    expect((w.get('[data-test="status-seg-center"]').element as HTMLElement).style.gridColumn).toBe(
+      '2',
+    );
+    w.unmount();
+  });
+
   it.skip.each(['part', 'chapter', 'front_matter', 'back_matter'] as const)(
     'a new %s from the navigator opens editable and takes typing (#42; add UI deferred #108)',
     async (kind) => {

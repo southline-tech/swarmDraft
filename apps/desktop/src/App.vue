@@ -1268,7 +1268,7 @@ defineExpose({ open, closeSession });
       />
       <div
         v-if="session && !choosingBook"
-        class="workspace grid min-h-0 flex-1 gap-0 overflow-hidden p-4"
+        class="workspace grid min-h-0 flex-1 gap-0 overflow-hidden pt-4 pb-4 pl-4 pr-0"
         :class="workspaceGridClass"
         data-test="workspace"
       >

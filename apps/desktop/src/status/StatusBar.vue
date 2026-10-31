@@ -93,6 +93,10 @@ const chapterLabel = computed(() => {
 const footerStyle = computed(() =>
   props.columnTracks ? { gridTemplateColumns: props.columnTracks } : undefined,
 );
+
+/** Keep center|right under writing|notes when the left segment is hidden but tracks stay three-wide. */
+const segGridColumn = (track: 1 | 2 | 3) =>
+  props.columnTracks ? { gridColumn: String(track) } : undefined;
 </script>
 
 <template>
@@ -107,12 +111,18 @@ const footerStyle = computed(() =>
       v-if="showChapterSegment && chapterCount !== undefined"
       class="status-seg status-seg-left"
       data-test="status-seg-left"
+      :style="segGridColumn(1)"
     >
       <span class="status-bar__muted tabular-nums" data-test="status-chapter-count">{{
         chapterLabel
       }}</span>
     </div>
-    <div ref="centerSeg" class="status-seg status-seg-center" data-test="status-seg-center">
+    <div
+      ref="centerSeg"
+      class="status-seg status-seg-center"
+      data-test="status-seg-center"
+      :style="segGridColumn(2)"
+    >
       <span
         v-if="wordCount !== undefined"
         class="status-bar__cluster tabular-nums"
@@ -169,7 +179,7 @@ const footerStyle = computed(() =>
         @update:model-value="emit('update:zoom', $event)"
       />
     </div>
-    <div class="status-seg status-seg-right" data-test="status-seg-right">
+    <div class="status-seg status-seg-right" data-test="status-seg-right" :style="segGridColumn(3)">
       <span
         v-if="showTrackChangesReadout"
         class="status-bar__muted"

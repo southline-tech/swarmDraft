@@ -126,6 +126,24 @@ describe('StatusBar', () => {
     expect(w.find('[data-test="status-notes-toggle"]').text()).toBe('Story notes');
   });
 
+  it('keeps center and right on tracks 2 and 3 when the chapter segment is hidden (#219)', () => {
+    const w = mount(StatusBar, {
+      props: {
+        chapterCount: 4,
+        showChapterSegment: false,
+        columnTracks: 'var(--ct-rail-w) minmax(0, 1fr) var(--ct-story-notes-w)',
+        wordCount: 10,
+        wordsBeforeCaretInBook: 0,
+        storyNotesPanelId: 'story-notes-panel',
+      },
+    });
+    expect(w.find('[data-test="status-seg-left"]').exists()).toBe(false);
+    const center = w.get('[data-test="status-seg-center"]').element as HTMLElement;
+    const right = w.get('[data-test="status-seg-right"]').element as HTMLElement;
+    expect(center.style.gridColumn).toBe('2');
+    expect(right.style.gridColumn).toBe('3');
+  });
+
   it('hides track changes in the right segment when Story notes is closed (fb4)', () => {
     const w = mount(StatusBar, {
       props: {

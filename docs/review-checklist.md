@@ -267,3 +267,5 @@ Implementor: add one line here for every review, design or QA finding, in the sa
 - 2026-10-31 · #219 · review 5725177562 · compact zoom menu missing popup hint · `aria-haspopup="menu"` on compact `<summary>` in `StatusBarZoom`
 - 2026-10-31 · #219 · review 5725177562 · workspace gap-4 misaligned center footer divider · `gap-0` workspace; `OUTLINE_ROOM` without gap (#207)
 - 2026-10-31 · #219 · review 5725177562 · page stuck at 1 before caret click · scroll-center estimate in `ContinuousManuscript` until `caret-placed` (#216)
+- 2026-10-31 · #219 · review 5725395533 · collapsed nav omitted left footer cell but kept three tracks · explicit `grid-column` 2|3 on center|right when `columnTracks` set (#207)
+- 2026-10-31 · #219 · review 5725395533 · workspace `p-4` right inset misaligned writing|notes footer divider · `pr-0` workspace; Story notes toggle stays 12px via `status-seg-right`
