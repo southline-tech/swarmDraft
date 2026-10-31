@@ -18,7 +18,6 @@ export interface PairingApi {
 
 export const pairingApi: PairingApi = {
   listPending: () => invoke<PairingSummary[]>('list_pending_pairings'),
-  approve: (pairingId, scopes) =>
-    invoke('approve_pairing', { pairingId, scopes: scopes ?? null }),
+  approve: (pairingId, scopes) => invoke('approve_pairing', { pairingId, scopes: scopes ?? null }),
   deny: (pairingId) => invoke('deny_pairing', { pairingId }),
 };

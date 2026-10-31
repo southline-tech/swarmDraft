@@ -163,11 +163,7 @@ onBeforeUnmount(() => {
       @keydown="onKeydown"
     >
       <div class="pair__head">
-        <span
-          class="pair__swatch"
-          aria-hidden="true"
-          :style="{ background: active()!.color }"
-        />
+        <span class="pair__swatch" aria-hidden="true" :style="{ background: active()!.color }" />
         <h2 id="pair-title" class="st-h2 pair__title">
           Allow <bdi dir="auto">{{ active()!.name }}</bdi> to connect?
         </h2>
