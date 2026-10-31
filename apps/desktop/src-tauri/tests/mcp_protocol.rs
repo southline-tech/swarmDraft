@@ -653,7 +653,7 @@ async fn write_tools_listed_and_decisions_absent() {
     ] {
         assert!(names.contains(&t), "missing {t}");
     }
-    assert_eq!(names.len(), 10, "{names:?}");
+    assert_eq!(names.len(), 12, "{names:?}");
     let r = call(&s, "accept_suggestion", json!({"id": "x"})).await;
     let r2 = rpc(
         &s,
@@ -1291,7 +1291,9 @@ async fn suggest_only_no_tool_can_accept_or_reject() {
             "list_chapters",
             "list_documents",
             "list_suggestions",
+            "poll_pairing",
             "read_chapter",
+            "request_pairing",
             "search_text",
             "suggest_edit",
             "suggest_style",

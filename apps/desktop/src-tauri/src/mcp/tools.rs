@@ -934,10 +934,18 @@ impl CoauthorMcp {
             check_len("color", c, MAX_ID)
                 .map_err(|e| ErrorData::invalid_params(e.message, None))?;
         }
-        let result = self
-            .store
-            .request_pairing(&a.name, a.color.as_deref(), a.scopes.as_deref())
-            .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+        let result =
+            match self
+                .store
+                .request_pairing(&a.name, a.color.as_deref(), a.scopes.as_deref())
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    return Ok(CallToolResult::error(vec![ContentBlock::text(
+                        e.to_string(),
+                    )]));
+                }
+            };
         if let Some(hook) = &self.pairing_hook {
             hook(result.pairing_id.clone());
         }

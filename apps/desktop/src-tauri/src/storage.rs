@@ -384,7 +384,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         {
             let mut conn = Connection::open(tmp.path().join("coauthor.db")).unwrap();
-            migrate_with(&mut conn, &MIGRATIONS[..MIGRATIONS.len() - 4]).unwrap();
+            migrate_with(&mut conn, &MIGRATIONS[..5]).unwrap();
             conn.execute(
                 "INSERT INTO agents (id, name, color, created_at) VALUES (?1, ?2, ?3, ?4)",
                 rusqlite::params!["a1", "Line Editor", "#3366ff", "2026-01-01T00:00:00Z"],

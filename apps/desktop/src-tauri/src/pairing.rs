@@ -108,10 +108,8 @@ fn count_pending(c: &rusqlite::Connection) -> Result<i64, StorageError> {
 
 fn pairing_rate_ok(c: &rusqlite::Connection) -> Result<bool, StorageError> {
     let n: i64 = c.query_row(
-        &format!(
-            "SELECT count(*) FROM agent_pairings
-             WHERE created_at > strftime('%Y-%m-%dT%H:%M:%fZ','now',?1)"
-        ),
+        "SELECT count(*) FROM agent_pairings
+             WHERE created_at > strftime('%Y-%m-%dT%H:%M:%fZ','now',?1)",
         [format!("-{PAIRING_RATE_WINDOW_SECS} seconds")],
         |r| r.get(0),
     )?;
@@ -202,9 +200,7 @@ impl Store {
                 "pending" => {
                     let expired: bool = c
                         .query_row(
-                            &format!(
-                                "SELECT 1 WHERE ?1 < strftime('%Y-%m-%dT%H:%M:%fZ','now')"
-                            ),
+                            "SELECT 1 WHERE ?1 < strftime('%Y-%m-%dT%H:%M:%fZ','now')",
                             [&expires_at],
                             |_| Ok(()),
                         )
