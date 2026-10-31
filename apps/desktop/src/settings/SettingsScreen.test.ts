@@ -195,9 +195,7 @@ describe('Your name & color (#99)', () => {
     const input = w.get('[data-test="settings-name"]');
     expect(input.attributes('aria-invalid')).toBe('true');
     expect(input.attributes('aria-describedby')).toBe('nc-name-error');
-    expect(w.get('[data-test="settings-name-error"]').text()).toContain(
-      'already used by an agent',
-    );
+    expect(w.get('[data-test="settings-name-error"]').text()).toContain('already used by an agent');
     expect(loadProfile().name).toBe('Author');
   });
 
