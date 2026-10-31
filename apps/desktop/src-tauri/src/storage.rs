@@ -143,6 +143,20 @@ const MIGRATIONS: &[&str] = &[
         word TEXT NOT NULL,
         PRIMARY KEY (manuscript_id, word)
      );",
+    // #39: async Pandoc export jobs (EPUB 3 / .docx); PDF deferred to Typst slice.
+    "CREATE TABLE export_jobs (
+        id TEXT PRIMARY KEY,
+        manuscript_id TEXT NOT NULL REFERENCES manuscripts(id) ON DELETE CASCADE,
+        format TEXT NOT NULL CHECK (format IN ('epub','docx','pdf')),
+        trim TEXT,
+        status TEXT NOT NULL CHECK (status IN ('queued','running','succeeded','failed')),
+        file_path TEXT,
+        error_message TEXT,
+        log TEXT,
+        created_at TEXT NOT NULL,
+        finished_at TEXT
+     );
+     CREATE INDEX export_jobs_manuscript ON export_jobs(manuscript_id, created_at);",
 ];
 
 /// How long a statement waits on a locked database before failing.
@@ -353,7 +367,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         {
             let mut conn = Connection::open(tmp.path().join("coauthor.db")).unwrap();
-            migrate_with(&mut conn, &MIGRATIONS[..MIGRATIONS.len() - 3]).unwrap();
+            migrate_with(&mut conn, &MIGRATIONS[..MIGRATIONS.len() - 4]).unwrap();
             conn.execute(
                 "INSERT INTO agents (id, name, color, created_at) VALUES (?1, ?2, ?3, ?4)",
                 rusqlite::params!["a1", "Line Editor", "#3366ff", "2026-01-01T00:00:00Z"],

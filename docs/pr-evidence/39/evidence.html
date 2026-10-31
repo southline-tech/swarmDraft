@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>#39 Export evidence</title>
+    <link rel="stylesheet" href="../../../apps/desktop/src/styles/tokens.css" />
+    <link rel="stylesheet" href="../../../apps/desktop/src/settings/settings.css" />
+    <style>
+      body {
+        margin: 0;
+        padding: var(--ct-space-8);
+        background: var(--ct-bg);
+        color: var(--ct-text);
+        font-family: var(--ct-font-ui);
+      }
+      .ex__actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--ct-space-3);
+      }
+      .ex__list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .ex__row {
+        display: grid;
+        grid-template-columns: 4rem 1fr;
+        gap: var(--ct-space-3);
+        padding: var(--ct-space-2) 0;
+        border-bottom: 1px solid var(--ct-border);
+        font-size: var(--ct-text-sm);
+      }
+    </style>
+    <script>
+      const p = new URLSearchParams(location.search);
+      if (p.get('theme') === 'dark') document.documentElement.dataset.theme = 'dark';
+    </script>
+  </head>
+  <body>
+    <h1 class="st-h1">Export</h1>
+    <p class="st-muted st-sub">
+      Build a reader-ready EPUB 3 or .docx from the accepted manuscript text.
+    </p>
+    <section class="st-card">
+      <h2 class="st-h2">Sample Manuscript</h2>
+      <div class="ex__actions">
+        <button type="button" class="st-btn st-btn--primary">Export EPUB</button>
+        <button type="button" class="st-btn">Export .docx</button>
+      </div>
+    </section>
+    <section class="st-card">
+      <h2 class="st-h2">Recent exports</h2>
+      <ul class="ex__list">
+        <li class="ex__row">
+          <span class="st-muted">EPUB</span>
+          <span
+            >Saved to /home/user/.local/share/swarmDraft/exports/job-1/Sample-Manuscript.epub</span
+          >
+        </li>
+        <li class="ex__row">
+          <span class="st-muted">DOCX</span>
+          <span
+            >Pandoc is not installed. Install Pandoc from https://pandoc.org/ and try again.</span
+          >
+        </li>
+      </ul>
+    </section>
+  </body>
+</html>

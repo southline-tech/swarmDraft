@@ -159,6 +159,7 @@ const RULES: [ErrorCode, RegExp][] = [
     /corrupt|truncated|checksum mismatch|unsupported zip|has no body|has no root element|DOCTYPE|malformed|database disk image is malformed|file is not a database/i,
   ],
   ['not-found', /^not found:|os error (2|3)\b|ENOENT|cannot find the (file|path)|no such file/i],
+  ['export-failed', /pandoc is not installed|pdf export is not in this build|export failed/i],
 ];
 
 export function mapError(err: unknown, context: ErrorContext = 'other'): MappedError {

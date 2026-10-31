@@ -134,6 +134,8 @@ async fn initialize_and_list_tools() {
         "list_chapters",
         "read_chapter",
         "search_text",
+        "trigger_export",
+        "get_export",
     ] {
         assert!(names.contains(&t), "missing {t}: {names:?}");
     }
@@ -651,7 +653,7 @@ async fn write_tools_listed_and_decisions_absent() {
     ] {
         assert!(names.contains(&t), "missing {t}");
     }
-    assert_eq!(names.len(), 8, "{names:?}");
+    assert_eq!(names.len(), 10, "{names:?}");
     let r = call(&s, "accept_suggestion", json!({"id": "x"})).await;
     let r2 = rpc(
         &s,
@@ -1282,13 +1284,15 @@ async fn suggest_only_no_tool_can_accept_or_reject() {
         names,
         [
             "add_comment",
+            "get_export",
             "list_chapters",
             "list_documents",
             "list_suggestions",
             "read_chapter",
             "search_text",
             "suggest_edit",
-            "suggest_style"
+            "suggest_style",
+            "trigger_export"
         ]
     );
     for name in [
@@ -1417,4 +1421,74 @@ async fn list_suggestions_filters_by_author_and_status() {
     .await;
     assert_eq!(closed["isError"], true);
     assert!(text(&closed).contains("only open"));
+}
+
+#[tokio::test]
+async fn trigger_export_pdf_is_not_in_build() {
+    let s = start(&["read"], 1000).await;
+    let r = call(
+        &s,
+        "trigger_export",
+        json!({"manuscript_id": s.manuscript_id, "format": "pdf"}),
+    )
+    .await;
+    assert_eq!(r["isError"], true);
+    assert!(text(&r).contains("PDF export"));
+}
+
+#[tokio::test]
+async fn trigger_export_epub_returns_job_and_get_export_polls() {
+    let s = start(&["read"], 1000).await;
+    let r = call(
+        &s,
+        "trigger_export",
+        json!({"manuscript_id": s.manuscript_id, "format": "epub"}),
+    )
+    .await;
+    if coauthor_lib::export::locate_pandoc().is_err() {
+        assert_ne!(r["isError"], true, "{r}");
+        let id = r["structuredContent"]["exportId"].as_str().unwrap();
+        for _ in 0..80 {
+            let g = call(&s, "get_export", json!({"export_id": id})).await;
+            let st = g["structuredContent"]["status"].as_str().unwrap();
+            if st == "failed" {
+                assert!(g["structuredContent"]["errorMessage"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Pandoc"));
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        panic!("export job did not fail without pandoc");
+    }
+    assert_ne!(r["isError"], true, "{r}");
+    let id = r["structuredContent"]["exportId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let mut status = String::from("queued");
+    for _ in 0..120 {
+        let g = call(&s, "get_export", json!({"export_id": id})).await;
+        assert_ne!(g["isError"], true, "{g}");
+        status = g["structuredContent"]["status"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        if status == "succeeded" || status == "failed" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        status, "succeeded",
+        "export should succeed when pandoc is installed"
+    );
+    let g = call(&s, "get_export", json!({"export_id": id})).await;
+    let path = g["structuredContent"]["filePath"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(path.contains("exports"));
+    assert!(std::path::Path::new(&path).is_file());
 }

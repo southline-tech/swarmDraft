@@ -12,6 +12,7 @@ pub mod anchor;
 pub mod backup;
 pub mod content;
 pub mod dictionary;
+pub mod export;
 pub mod manuscripts;
 pub mod mcp;
 pub mod migrate;
@@ -214,6 +215,35 @@ async fn save_manuscript_copy(
     })
     .await
     .map_err(|e| format!("io: {e}"))?
+}
+
+#[tauri::command]
+fn export_trigger(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+    format: String,
+    trim: Option<String>,
+) -> Result<export::ExportJob, String> {
+    export::trigger_export(&store, &manuscript_id, &format, trim.as_deref()).map_err(err)
+}
+
+#[tauri::command]
+fn export_get(
+    store: tauri::State<'_, storage::Store>,
+    job_id: String,
+) -> Result<export::ExportJob, String> {
+    store.get_export_job(&job_id).map_err(err)
+}
+
+#[tauri::command]
+fn export_list(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+    limit: Option<usize>,
+) -> Result<Vec<export::ExportJob>, String> {
+    store
+        .list_export_jobs(&manuscript_id, limit.unwrap_or(20))
+        .map_err(err)
 }
 
 /// Recovery notices that could not be saved to disk; shown from memory until dismissed.
@@ -681,7 +711,10 @@ pub fn run() {
             spell_dictionary_remove,
             spell_dictionary_ignore,
             mcp_status,
-            save_manuscript_copy
+            save_manuscript_copy,
+            export_trigger,
+            export_get,
+            export_list
         ])
         .run(tauri::generate_context!())
         .expect("error while running swarmDraft");

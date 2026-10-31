@@ -171,6 +171,28 @@ pub struct ListSuggestionsArgs {
     pub author: Option<String>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportFormat {
+    Pdf,
+    Epub,
+    Docx,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct TriggerExportArgs {
+    pub manuscript_id: String,
+    pub format: ExportFormat,
+    /// Trim size for print PDF (ignored for EPUB/.docx in this slice).
+    pub trim: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GetExportArgs {
+    /// Export job id returned by `trigger_export`.
+    pub export_id: String,
+}
+
 pub const PARAGRAPH_STYLES: &[&str] = &[
     "body",
     "first",
@@ -434,6 +456,82 @@ impl CoauthorMcp {
                 Ok(Output::Json(json!({ "suggestions": out })))
             },
         )
+    }
+
+    #[tool(
+        description = "Start a local export job (EPUB 3 or .docx via Pandoc). Returns the job id and status; poll with get_export. PDF is not available in this build."
+    )]
+    async fn trigger_export(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(a): Parameters<TriggerExportArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let format = match a.format {
+            ExportFormat::Epub => "epub",
+            ExportFormat::Docx => "docx",
+            ExportFormat::Pdf => "pdf",
+        };
+        let args = json!({
+            "manuscriptId": a.manuscript_id,
+            "format": format,
+            "trim": a.trim,
+        });
+        self.run(
+            &parts,
+            "read",
+            "trigger_export",
+            Some(&a.manuscript_id),
+            args,
+            |_| {
+                check_ids(&[("manuscript_id", Some(&a.manuscript_id))])?;
+                if let Some(t) = &a.trim {
+                    check_len("trim", t, MAX_ID)?;
+                }
+                let job = crate::export::trigger_export(
+                    &self.store,
+                    &a.manuscript_id,
+                    format,
+                    a.trim.as_deref(),
+                )
+                .map_err(ToolErr::from)?;
+                Ok(Output::Json(json!({
+                    "exportId": job.id,
+                    "status": job.status,
+                    "format": job.format,
+                    "filePath": job.file_path,
+                    "errorMessage": job.error_message,
+                })))
+            },
+        )
+    }
+
+    #[tool(
+        description = "Poll an export job started with trigger_export. When status is succeeded, filePath is the local path to the EPUB or .docx under app data exports/."
+    )]
+    async fn get_export(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(a): Parameters<GetExportArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let args = json!({ "exportId": a.export_id });
+        self.run(&parts, "read", "get_export", None, args, |_| {
+            check_len("export_id", &a.export_id, MAX_ID)?;
+            let job = self
+                .store
+                .get_export_job(&a.export_id)
+                .map_err(ToolErr::from)?;
+            Ok(Output::Json(json!({
+                "exportId": job.id,
+                "manuscriptId": job.manuscript_id,
+                "status": job.status,
+                "format": job.format,
+                "filePath": job.file_path,
+                "errorMessage": job.error_message,
+                "log": job.log,
+                "createdAt": job.created_at,
+                "finishedAt": job.finished_at,
+            })))
+        })
     }
 
     #[tool(
@@ -1007,9 +1105,10 @@ impl ServerHandler for CoauthorMcp {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "swarmDraft manuscript tools. Read with list_documents, list_chapters, read_chapter, \
-             list_suggestions and search_text; comment with add_comment and propose changes with \
-             suggest_edit and suggest_style. Anchor comments and suggestions with a block id plus \
-             an exact quote. Accepting or rejecting suggestions is reserved for the human author.",
+             list_suggestions, search_text, trigger_export and get_export; comment with add_comment \
+             and propose changes with suggest_edit and suggest_style. Anchor comments and \
+             suggestions with a block id plus an exact quote. Accepting or rejecting suggestions \
+             is reserved for the human author.",
         )
     }
 }

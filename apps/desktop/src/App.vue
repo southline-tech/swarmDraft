@@ -998,6 +998,7 @@ defineExpose({ open, closeSession });
       :confirming-restore="confirmingRestore"
       :tokens-notice="tokensNotice"
       :book-open="!!session && !choosingBook"
+      :book-title="session?.title"
       :numbering-style="session?.numberingStyle.value"
       :manuscript-id="session?.id"
       @close="settingsOpen = false"
