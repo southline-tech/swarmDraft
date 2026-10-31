@@ -143,6 +143,22 @@ function walkText(inline: InlineNode[] | undefined, visit: (t: TextNode) => void
 export function listSuggestions(doc: DocNode): SuggestionItem[] {
   const byKey = new Map<string, SuggestionItem>();
   for (const block of doc.content) {
+    if (block.type === 'paragraph') {
+      const bsi = (block.attrs as { blockSplitInsert?: { id: string; author: string; ts: string } })
+        .blockSplitInsert;
+      if (bsi?.id) {
+        const key = targetKey({ kind: 'suggestion_insert', id: bsi.id });
+        if (!byKey.has(key)) {
+          byKey.set(key, {
+            id: bsi.id,
+            kind: 'suggestion_insert',
+            author: bsi.author,
+            ts: bsi.ts,
+            text: '',
+          });
+        }
+      }
+    }
     walkText(inlineOf(block), (node) => {
       for (const m of node.marks ?? []) {
         if (!isSuggestion(m)) continue;

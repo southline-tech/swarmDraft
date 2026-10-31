@@ -74,22 +74,29 @@ function isBlockSplitStep(step: ReplaceStep): boolean {
   return step.from === step.to && step.slice.openStart > 0 && step.slice.openEnd > 0;
 }
 
-function findTextRange(doc: PMNode, text: string): { from: number; to: number } | null {
-  if (!text) return null;
-  let found: { from: number; to: number } | null = null;
-  doc.descendants((node, pos) => {
-    if (found || !node.isText || !node.text) return;
-    const start = node.text.indexOf(text);
-    if (start >= 0) found = { from: pos + start, to: pos + start + text.length };
-  });
-  return found;
-}
-
-function posInsideBlock(doc: PMNode, blockIndex: number): number | null {
+function blockPos(doc: PMNode, blockIndex: number): number | null {
   if (blockIndex < 0 || blockIndex >= doc.childCount) return null;
   let pos = 0;
   for (let i = 0; i < blockIndex; i++) pos += doc.child(i).nodeSize;
-  return pos + 1;
+  return pos;
+}
+
+/** Find `text` only inside the block at `blockIndex` (the paragraph created by Enter / split). */
+function findTextRangeInBlock(
+  doc: PMNode,
+  blockIndex: number,
+  text: string,
+): { from: number; to: number } | null {
+  if (!text || blockIndex < 0 || blockIndex >= doc.childCount) return null;
+  const block = doc.child(blockIndex);
+  const base = blockPos(doc, blockIndex)! + 1;
+  let found: { from: number; to: number } | null = null;
+  block.descendants((node, pos) => {
+    if (found || !node.isText || !node.text) return;
+    const start = node.text.indexOf(text);
+    if (start >= 0) found = { from: base + pos + start, to: base + pos + start + text.length };
+  });
+  return found;
 }
 
 /** Mark text moved to a new paragraph by Enter / split while track changes is on. */
@@ -102,14 +109,23 @@ function markBlockSplitInsert(
   const $pos = beforeDoc.resolve(from);
   const tail = $pos.parent.textBetween($pos.parentOffset, $pos.parent.content.size);
   const blockIndex = $pos.index(0) + 1;
+  const splitMark = mark.type.create({ ...mark.attrs, blockSplit: true });
   if (tail) {
-    const range = findTextRange(tr.doc, tail);
-    if (range) return tr.addMark(range.from, range.to, mark);
+    const range = findTextRangeInBlock(tr.doc, blockIndex, tail);
+    if (range) return tr.addMark(range.from, range.to, splitMark);
   }
-  const inner = posInsideBlock(tr.doc, blockIndex);
-  if (inner == null) return tr;
-  const zwsp = tr.doc.type.schema.text('\u200b', [mark]);
-  return tr.insert(inner, zwsp);
+  const pos = blockPos(tr.doc, blockIndex);
+  if (pos == null) return tr;
+  const node = tr.doc.nodeAt(pos);
+  if (!node) return tr;
+  return tr.setNodeMarkup(pos, undefined, {
+    ...node.attrs,
+    blockSplitInsert: {
+      id: String(mark.attrs.id),
+      author: String(mark.attrs.author),
+      ts: String(mark.attrs.ts),
+    },
+  });
 }
 
 function insertSpanLen(beforeDoc: PMNode, step: ReplaceStep, hasDeletion: boolean): number {
