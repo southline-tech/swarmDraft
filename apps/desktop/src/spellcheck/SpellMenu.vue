@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** Context menu for a spelling or grammar flag (#159 sc2/sc3). */
 import type { SpellIssue } from '@coauthor/editor';
-import { nextTick, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 
 const props = defineProps<{
   x: number;
@@ -16,6 +16,17 @@ const emit = defineEmits<{
 }>();
 
 const root = ref<HTMLElement>();
+const opener = document.activeElement as HTMLElement | null;
+
+const visibleSuggestions = computed(() => props.issue.suggestions.slice(0, 3));
+const kindLabel = computed(() => (props.issue.kind === 'spelling' ? 'Spelling' : 'Grammar'));
+
+function restoreEditorFocus() {
+  void nextTick(() => {
+    const page = document.querySelector<HTMLElement>('.manuscript-editor .ProseMirror');
+    (page ?? opener)?.focus?.();
+  });
+}
 
 function menuItems() {
   return [...(root.value?.querySelectorAll<HTMLElement>('[role=menuitem]') ?? [])];
@@ -40,12 +51,22 @@ function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     e.stopPropagation();
     emit('close');
+    restoreEditorFocus();
   }
 }
 
-onMounted(() => void nextTick(() => menuItems()[0]?.focus()));
+function onIgnore() {
+  emit('ignore');
+  restoreEditorFocus();
+}
 
-const kindLabel = props.issue.kind === 'spelling' ? 'Spelling' : 'Grammar';
+function onDictionary() {
+  emit('dictionary');
+  restoreEditorFocus();
+}
+
+onMounted(() => void nextTick(() => menuItems()[0]?.focus()));
+onBeforeUnmount(restoreEditorFocus);
 </script>
 
 <template>
@@ -53,7 +74,7 @@ const kindLabel = props.issue.kind === 'spelling' ? 'Spelling' : 'Grammar';
     ref="root"
     class="sh-menu spell-menu"
     role="menu"
-    aria-label="Spelling and grammar"
+    :aria-label="kindLabel"
     data-test="spell-menu"
     :style="{ left: `${x}px`, top: `${y}px` }"
     @keydown="onKey"
@@ -63,7 +84,7 @@ const kindLabel = props.issue.kind === 'spelling' ? 'Spelling' : 'Grammar';
       <span class="spell-menu__msg">{{ issue.message }}</span>
     </p>
     <button
-      v-for="(s, i) in issue.suggestions"
+      v-for="(s, i) in visibleSuggestions"
       :key="s"
       type="button"
       role="menuitem"
@@ -84,7 +105,7 @@ const kindLabel = props.issue.kind === 'spelling' ? 'Spelling' : 'Grammar';
       tabindex="-1"
       class="sh-mi"
       data-test="spell-dictionary"
-      @click="emit('dictionary')"
+      @click="onDictionary"
     >
       Add to dictionary
     </button>
@@ -94,7 +115,7 @@ const kindLabel = props.issue.kind === 'spelling' ? 'Spelling' : 'Grammar';
       tabindex="-1"
       class="sh-mi"
       data-test="spell-ignore"
-      @click="emit('ignore')"
+      @click="onIgnore"
     >
       Ignore
     </button>

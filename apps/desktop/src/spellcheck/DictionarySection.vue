@@ -72,8 +72,8 @@ async function removeWord(word: string) {
   <div data-test="settings-spelling">
     <h1 class="st-h1">Spelling &amp; grammar</h1>
     <p class="st-muted st-sub">
-      Check spelling and grammar as you write. Everything stays on this device—nothing is sent
-      elsewhere.
+      See spelling and grammar issues as you write. Checking runs on this device only—your
+      manuscript text is never sent elsewhere.
     </p>
     <section class="st-card" aria-labelledby="st-spell-toggles">
       <h2 id="st-spell-toggles" class="st-h2">Checking</h2>
@@ -91,6 +91,7 @@ async function removeWord(word: string) {
           @change="persistPrefs"
         />
       </div>
+      <p class="st-muted st-desc">Red wavy underline on possible misspellings.</p>
       <div class="st-row st-row--toggle">
         <span id="spell-grammar-label" class="st-row__k">Grammar</span>
         <input
@@ -105,13 +106,14 @@ async function removeWord(word: string) {
           @change="persistPrefs"
         />
       </div>
-      <p class="st-muted st-desc">
-        Both are on by default. Turn either off to hide its underlines.
-      </p>
+      <p class="st-muted st-desc">Green wavy underline on possible grammar issues.</p>
     </section>
     <section v-if="manuscriptId && backendAvailable" class="st-card" aria-labelledby="st-dict">
       <h2 id="st-dict" class="st-h2">Dictionary for this manuscript</h2>
-      <p class="st-muted st-desc">
+      <p v-if="!loading && !words.length" class="st-muted st-desc" data-test="dict-empty">
+        No custom words yet.
+      </p>
+      <p v-else-if="words.length" class="st-muted st-desc">
         Words you add here apply only to this book. Character names and invented terms won't be
         flagged.
       </p>
@@ -140,13 +142,13 @@ async function removeWord(word: string) {
         />
       </label>
       <p v-if="loading" class="st-muted" role="status">Loading…</p>
-      <p v-else-if="!words.length" class="st-muted" data-test="dict-empty">No custom words yet.</p>
-      <ul v-else class="dict-list" data-test="dict-list">
+      <ul v-else-if="words.length" class="dict-list" data-test="dict-list">
         <li v-for="w in filtered" :key="w" class="dict-list__row">
           <bdi dir="auto">{{ w }}</bdi>
           <button
             type="button"
             class="st-btn st-btn--s"
+            :aria-label="`Remove ${w}`"
             :data-test="`dict-remove-${w}`"
             @click="removeWord(w)"
           >

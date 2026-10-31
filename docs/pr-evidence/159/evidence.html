@@ -129,7 +129,7 @@
 
     <div class="scene scene-sc2">
       <div class="menu-stage">
-        <div class="sh-menu spell-menu" role="menu">
+        <div class="sh-menu spell-menu" role="menu" aria-label="Spelling">
           <p class="spell-menu__head">
             <span class="spell-menu__kind">Spelling</span>
             <span class="spell-menu__msg">Did you mean “lamppost”?</span>
@@ -147,7 +147,7 @@
 
     <div class="scene scene-sc3">
       <div class="menu-stage">
-        <div class="sh-menu spell-menu" role="menu">
+        <div class="sh-menu spell-menu" role="menu" aria-label="Grammar">
           <p class="spell-menu__head">
             <span class="spell-menu__kind">Grammar</span>
             <span class="spell-menu__msg">Use “doesn't” with a singular subject.</span>
@@ -165,8 +165,8 @@
     <div class="scene scene-sc4 settings-wrap">
       <h1 class="st-h1">Spelling &amp; grammar</h1>
       <p class="st-muted st-sub">
-        Check spelling and grammar as you write. Everything stays on this device—nothing is sent
-        elsewhere.
+        See spelling and grammar issues as you write. Checking runs on this device only—your
+        manuscript text is never sent elsewhere.
       </p>
       <section class="st-card">
         <h2 class="st-h2">Checking</h2>
@@ -174,10 +174,12 @@
           <span class="st-row__k">Spelling</span>
           <input type="checkbox" role="switch" class="st-switch" checked />
         </div>
+        <p class="st-muted st-desc">Red wavy underline on possible misspellings.</p>
         <div class="st-row st-row--toggle">
           <span class="st-row__k">Grammar</span>
           <input type="checkbox" role="switch" class="st-switch" checked />
         </div>
+        <p class="st-muted st-desc">Green wavy underline on possible grammar issues.</p>
       </section>
       <section class="st-card">
         <h2 class="st-h2">Dictionary for this manuscript</h2>
