@@ -18,11 +18,13 @@ pub mod mcp;
 pub mod migrate;
 pub mod notes;
 pub mod opening_progress;
+pub mod pairing;
 pub mod save_copy;
 pub mod storage;
 
 use serde::Serialize;
 use tauri::Manager;
+use tauri::Emitter;
 
 use dictionary::{
     spell_dictionary_add, spell_dictionary_ignore, spell_dictionary_list, spell_dictionary_remove,
@@ -122,6 +124,32 @@ fn agent_token_revoke(
     token_id: String,
 ) -> Result<(), String> {
     store.revoke_token(&token_id).map_err(err)
+}
+
+#[tauri::command]
+fn list_pending_pairings(
+    store: tauri::State<'_, storage::Store>,
+) -> Result<Vec<pairing::PairingSummary>, String> {
+    store.list_pending_pairings().map_err(err)
+}
+
+#[tauri::command]
+fn approve_pairing(
+    store: tauri::State<'_, storage::Store>,
+    app: tauri::AppHandle,
+    pairing_id: String,
+    scopes: Option<Vec<String>>,
+) -> Result<agents::Agent, String> {
+    let (agent, _token) = store
+        .approve_pairing(&pairing_id, scopes.as_deref())
+        .map_err(err)?;
+    let _ = app.emit("agents-changed", ());
+    Ok(agent)
+}
+
+#[tauri::command]
+fn deny_pairing(store: tauri::State<'_, storage::Store>, pairing_id: String) -> Result<(), String> {
+    store.deny_pairing(&pairing_id).map_err(err)
 }
 
 /// Write a full backup. The destination is chosen here, never taken from the webview (#73):
@@ -717,6 +745,9 @@ pub fn run() {
             agent_tokens_list,
             agent_token_create,
             agent_token_revoke,
+            list_pending_pairings,
+            approve_pairing,
+            deny_pairing,
             create_backup,
             recovery_notices,
             dismiss_recovery_notices,

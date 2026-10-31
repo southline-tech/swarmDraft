@@ -157,6 +157,23 @@ const MIGRATIONS: &[&str] = &[
         finished_at TEXT
      );
      CREATE INDEX export_jobs_manuscript ON export_jobs(manuscript_id, created_at);",
+    // #188: MCP pairing requests and agent activity for connection status.
+    "ALTER TABLE agents ADD COLUMN last_seen_at TEXT;
+     CREATE TABLE agent_pairings (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        color TEXT NOT NULL,
+        requested_scopes TEXT NOT NULL,
+        secret_hash TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending','approved','denied','expired')),
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        resolved_at TEXT,
+        agent_id TEXT REFERENCES agents(id),
+        approved_scopes TEXT,
+        delivery_token TEXT
+     );
+     CREATE INDEX agent_pairings_status ON agent_pairings(status, expires_at);",
 ];
 
 /// How long a statement waits on a locked database before failing.

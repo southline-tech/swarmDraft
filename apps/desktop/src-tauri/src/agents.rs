@@ -33,6 +33,8 @@ pub struct Agent {
     pub revoked_at: Option<String>,
     /// Built-in P1 bot; at most one row is primary. Drives a fixed collab-1 color by agent id.
     pub primary: bool,
+    /// Last authenticated MCP activity (#188); throttled writes.
+    pub last_seen_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,7 +95,7 @@ pub fn hash_token(token: &str) -> String {
         .collect()
 }
 
-fn normalize_scopes(scopes: Option<&[String]>) -> Result<Vec<String>, StorageError> {
+pub(crate) fn normalize_scopes(scopes: Option<&[String]>) -> Result<Vec<String>, StorageError> {
     let Some(scopes) = scopes else {
         return Ok(SCOPES.iter().map(|s| s.to_string()).collect());
     };
@@ -126,10 +128,11 @@ fn row_agent(r: &rusqlite::Row) -> rusqlite::Result<Agent> {
         created_at: r.get(3)?,
         revoked_at: r.get(4)?,
         primary: r.get::<_, i64>(5)? != 0,
+        last_seen_at: r.get(6)?,
     })
 }
 
-const AGENT_COLS: &str = "id, name, color, created_at, revoked_at, is_primary";
+const AGENT_COLS: &str = "id, name, color, created_at, revoked_at, is_primary, last_seen_at";
 
 fn row_token(r: &rusqlite::Row) -> rusqlite::Result<TokenInfo> {
     let scopes: String = r.get(3)?;
@@ -450,6 +453,14 @@ impl Store {
                               OR last_used_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-60 seconds'))"
                     ),
                     [&p.token_id],
+                );
+                let _ = c.execute(
+                    &format!(
+                        "UPDATE agents SET last_seen_at = {NOW} WHERE id = ?1
+                         AND (last_seen_at IS NULL
+                              OR last_seen_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-30 seconds'))"
+                    ),
+                    [&p.agent_id],
                 );
             }
             if p.is_none() {
