@@ -1,5 +1,5 @@
-import { mount } from '@vue/test-utils';
-import { describe, expect, it } from 'vitest';
+import { flushPromises, mount } from '@vue/test-utils';
+import { describe, expect, it, vi } from 'vitest';
 import StoryNotesPanel from './StoryNotesPanel.vue';
 import { addNote, createNotesDoc } from './doc';
 
@@ -34,5 +34,24 @@ describe('StoryNotesPanel', () => {
     await w.find('[data-test="new-note"]').trigger('click');
     expect(w.find('[data-test="empty"]').exists()).toBe(false);
     expect(w.find('[data-test="note-detail"]').exists()).toBe(true);
+  });
+
+  it('names the note body editor for assistive tech', async () => {
+    const notesDoc = createNotesDoc();
+    addNote(notesDoc, { kind: 'human', id: 'h', name: 'Sample Person' }, 'Note');
+    const w = mount(StoryNotesPanel, {
+      attachTo: document.body,
+      props: {
+        notesDoc,
+        outline: [],
+        humanAuthor: { id: 'h', name: 'Sample Person' },
+      },
+    });
+    await flushPromises();
+    await vi.waitFor(() => {
+      expect(w.find('[data-test=note-body]').attributes('aria-label')).toBe('Body');
+    });
+    expect(w.get('[data-test=note-detail]').text()).toContain('Body');
+    w.unmount();
   });
 });
