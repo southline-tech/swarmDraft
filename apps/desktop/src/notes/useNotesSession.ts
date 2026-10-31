@@ -2,7 +2,9 @@ import { markRaw, onBeforeUnmount, type ShallowRef } from 'vue';
 import * as Y from 'yjs';
 import { loadNotesState, pollUpdates } from '../backend';
 import { createNotesDoc } from './doc';
-import { watchNotesDoc } from './persist';
+import { notesSaveStatus, retryNotesSave, watchNotesDoc, type NotesSaveStatus } from './persist';
+
+export { notesSaveStatus, retryNotesSave, type NotesSaveStatus };
 import {
   followUpdates,
   LIVE_POLL_MS,

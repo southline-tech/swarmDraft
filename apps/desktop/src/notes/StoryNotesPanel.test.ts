@@ -1,7 +1,66 @@
 import { flushPromises, mount } from '@vue/test-utils';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import StoryNotesPanel from './StoryNotesPanel.vue';
-import { addNote, createNotesDoc } from './doc';
+import { addNote, createNotesDoc, updateNoteTitle } from './doc';
+import { watchNotesDoc } from './persist';
+
+vi.mock('../backend', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('../backend')>();
+  return { ...orig, notesApplyUpdate: vi.fn() };
+
+  it('shows Saving then Saved in the note detail header', async () => {
+    vi.useFakeTimers();
+    vi.mocked(notesApplyUpdate).mockResolvedValue(undefined);
+    const notesDoc = createNotesDoc();
+    const meta = addNote(notesDoc, { kind: 'human', id: 'h', name: 'Sample Person' }, 'Note');
+    watchNotesDoc('ms-1', notesDoc, { debounceMs: 100 });
+    updateNoteTitle(notesDoc, meta.id, 'Edited');
+    const w = mount(StoryNotesPanel, {
+      props: {
+        notesDoc,
+        outline: [],
+        humanAuthor: { id: 'h', name: 'Sample Person' },
+      },
+    });
+    await flushPromises();
+    expect(w.get('[data-test=notes-save-status]').attributes('data-state')).toBe('saving');
+    await vi.advanceTimersByTimeAsync(100);
+    await flushPromises();
+    expect(w.get('[data-test=notes-save-status]').attributes('data-state')).toBe('saved');
+    w.unmount();
+  });
+
+});
+
+import { notesApplyUpdate } from '../backend';
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.clearAllMocks();
+
+  it('shows Saving then Saved in the note detail header', async () => {
+    vi.useFakeTimers();
+    vi.mocked(notesApplyUpdate).mockResolvedValue(undefined);
+    const notesDoc = createNotesDoc();
+    const meta = addNote(notesDoc, { kind: 'human', id: 'h', name: 'Sample Person' }, 'Note');
+    watchNotesDoc('ms-1', notesDoc, { debounceMs: 100 });
+    updateNoteTitle(notesDoc, meta.id, 'Edited');
+    const w = mount(StoryNotesPanel, {
+      props: {
+        notesDoc,
+        outline: [],
+        humanAuthor: { id: 'h', name: 'Sample Person' },
+      },
+    });
+    await flushPromises();
+    expect(w.get('[data-test=notes-save-status]').attributes('data-state')).toBe('saving');
+    await vi.advanceTimersByTimeAsync(100);
+    await flushPromises();
+    expect(w.get('[data-test=notes-save-status]').attributes('data-state')).toBe('saved');
+    w.unmount();
+  });
+
+});
 
 describe('StoryNotesPanel', () => {
   it('shows empty state then lists human and agent notes with badges', async () => {
@@ -67,4 +126,27 @@ describe('StoryNotesPanel', () => {
     expect(w.get('[data-test=note-detail]').text()).toContain('Body');
     w.unmount();
   });
+
+  it('shows Saving then Saved in the note detail header', async () => {
+    vi.useFakeTimers();
+    vi.mocked(notesApplyUpdate).mockResolvedValue(undefined);
+    const notesDoc = createNotesDoc();
+    const meta = addNote(notesDoc, { kind: 'human', id: 'h', name: 'Sample Person' }, 'Note');
+    watchNotesDoc('ms-1', notesDoc, { debounceMs: 100 });
+    updateNoteTitle(notesDoc, meta.id, 'Edited');
+    const w = mount(StoryNotesPanel, {
+      props: {
+        notesDoc,
+        outline: [],
+        humanAuthor: { id: 'h', name: 'Sample Person' },
+      },
+    });
+    await flushPromises();
+    expect(w.get('[data-test=notes-save-status]').attributes('data-state')).toBe('saving');
+    await vi.advanceTimersByTimeAsync(100);
+    await flushPromises();
+    expect(w.get('[data-test=notes-save-status]').attributes('data-state')).toBe('saved');
+    w.unmount();
+  });
+
 });

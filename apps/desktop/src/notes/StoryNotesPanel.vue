@@ -2,7 +2,7 @@
 /**
  * Story notes under the draft (#38): ordered notes with title, rich body, optional chapter link.
  */
-import { computed, ref, shallowRef, watch } from 'vue';
+import { computed, onUnmounted, ref, shallowRef, watch, watchEffect } from 'vue';
 import type { Section } from '@coauthor/schema';
 import type * as Y from 'yjs';
 import EmptyState from '../shells/EmptyState.vue';
@@ -18,6 +18,27 @@ import {
   updateNoteTitle,
   type NoteMeta,
 } from './doc';
+import {
+  notesSaveStatus,
+  retryNotesSave,
+  type NotesSavePhase,
+} from './persist';
+
+const SAVED_CHECK_MS = 2500;
+
+function saveStatusLabel(phase: NotesSavePhase, savedAt: number | null, nowMs: number) {
+  if (phase === 'idle') return null;
+  if (phase === 'saving') return { kind: 'saving' as const, text: 'Saving…' };
+  if (phase === 'error') return { kind: 'error' as const, text: "Couldn't save. Retrying…" };
+  if (phase === 'saved' && savedAt != null) {
+    const age = nowMs - savedAt;
+    if (age < SAVED_CHECK_MS) return { kind: 'saved' as const, text: 'Saved', check: true };
+    if (age < 60_000) return { kind: 'relative' as const, text: 'Saved just now' };
+    const mins = Math.floor(age / 60_000);
+    return { kind: 'relative' as const, text: `Saved ${mins} min ago` };
+  }
+  return null;
+}
 
 const props = defineProps<{
   notesDoc: Y.Doc;
@@ -88,6 +109,38 @@ function onSectionChange(e: Event) {
 const sectionOptions = computed(() =>
   props.outline.filter((s) => s.kind === 'chapter' || s.kind === 'front_matter'),
 );
+
+const saveStatus = ref<{ phase: NotesSavePhase; savedAt: number | null }>({
+  phase: 'idle',
+  savedAt: null,
+});
+watchEffect(() => {
+  const v = notesSaveStatus(props.notesDoc).value;
+  saveStatus.value = { phase: v.phase, savedAt: v.savedAt };
+});
+const nowMs = ref(Date.now());
+let saveTick: ReturnType<typeof setInterval> | undefined;
+watch(
+  () => saveStatus.value.phase,
+  (phase) => {
+    if (saveTick) clearInterval(saveTick);
+    saveTick = undefined;
+    if (phase === 'saved' || phase === 'saving') {
+      nowMs.value = Date.now();
+      saveTick = setInterval(() => {
+        nowMs.value = Date.now();
+      }, 10_000);
+    }
+  },
+  { immediate: true },
+);
+onUnmounted(() => {
+  if (saveTick) clearInterval(saveTick);
+});
+
+const saveLabel = computed(() =>
+  saveStatusLabel(saveStatus.value.phase, saveStatus.value.savedAt, nowMs.value),
+);
 </script>
 
 <template>
@@ -145,6 +198,38 @@ const sectionOptions = computed(() =>
         </li>
       </ul>
       <section v-if="selected" class="story-notes__detail" data-test="note-detail">
+        <header v-if="saveLabel" class="story-notes__detail-head">
+          <div
+            class="story-notes__save"
+            role="status"
+            aria-live="polite"
+            data-test="notes-save-status"
+            :data-state="saveStatus.phase"
+          >
+            <template v-if="saveLabel.kind === 'saving' || saveLabel.kind === 'relative'">
+              <span class="story-notes__save-text story-notes__save-text--muted">{{
+                saveLabel.text
+              }}</span>
+            </template>
+            <template v-else-if="saveLabel.kind === 'saved'">
+              <svg class="story-notes__save-check" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M3.5 8.5l3 3 6-7" />
+              </svg>
+              <span class="story-notes__save-text story-notes__save-text--ok">{{ saveLabel.text }}</span>
+            </template>
+            <template v-else-if="saveLabel.kind === 'error'">
+              <span class="story-notes__save-text story-notes__save-text--err">{{ saveLabel.text }}</span>
+              <button
+                type="button"
+                class="story-notes__retry"
+                data-test="notes-save-retry"
+                @click="retryNotesSave(notesDoc)"
+              >
+                Retry
+              </button>
+            </template>
+          </div>
+        </header>
         <label class="story-notes__field">
           <span>Title</span>
           <input
@@ -268,6 +353,56 @@ const sectionOptions = computed(() =>
   flex-direction: column;
   gap: var(--ct-space-2);
   min-height: 0;
+}
+
+.story-notes__detail-head {
+  display: flex;
+  justify-content: flex-end;
+  min-height: var(--ct-space-5);
+}
+.story-notes__save {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-space-1);
+  font-size: var(--ct-text-xs);
+}
+.story-notes__save-text--muted {
+  color: var(--ct-text-muted);
+}
+.story-notes__save-text--ok {
+  color: var(--ct-success);
+  font-weight: var(--ct-weight-medium);
+}
+.story-notes__save-text--err {
+  color: var(--ct-danger);
+}
+.story-notes__save-check {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: var(--ct-success);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+.story-notes__retry {
+  font: inherit;
+  font-size: var(--ct-text-xs);
+  font-weight: var(--ct-weight-medium);
+  padding: var(--ct-space-1) var(--ct-space-2);
+  border: 1px solid var(--ct-danger);
+  border-radius: var(--ct-radius-sm);
+  background: var(--ct-danger-bg);
+  color: var(--ct-danger);
+  cursor: pointer;
+}
+.story-notes__retry:hover {
+  filter: brightness(0.97);
+}
+.story-notes__retry:focus-visible {
+  outline: 2px solid var(--ct-focus-ring-color);
+  outline-offset: 2px;
 }
 .story-notes__field {
   display: flex;
