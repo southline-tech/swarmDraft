@@ -25,7 +25,8 @@ import { Selection } from '@tiptap/pm/state';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import type * as Y from 'yjs';
 import EditorToolbar from './toolbar/EditorToolbar.vue';
-import StatusBar, { type SaveState } from './status/StatusBar.vue';
+import StatusBar from './status/StatusBar.vue';
+import type { ManuscriptSaveView } from './status/save-status';
 import { countWords, watchBookWords } from './status/wordcount';
 import { agentDirectory, authorLabel, markAuthorLabel, type AgentName } from './agent-names';
 import { loadZoom, saveZoom } from './desk/zoom';
@@ -62,7 +63,6 @@ import NamePrompt from './shells/NamePrompt.vue';
 import NameColorSection from './settings/NameColorSection.vue';
 import { SWATCHES, swatchVar } from './shells/colors';
 import {
-  DEFAULT_PROFILE,
   loadProfile,
   loadTrackPromptSeen,
   loadTracking,
@@ -131,8 +131,11 @@ const props = defineProps<{
   bookDocs?: readonly Y.Doc[];
   /** The chapter's docs (its own and its scenes'); without it only this doc is counted. */
   chapterDocs?: Y.Doc[];
-  /** Save status, only when the parent actually knows it. */
-  saveState?: SaveState;
+  /** Manuscript save status for the footer (#204); omitted when unknown. */
+  manuscriptSave?: ManuscriptSaveView;
+  /** Story notes panel toggle (#204). */
+  storyNotesOpen?: boolean;
+  storyNotesPanelId?: string;
   /** Display name for a raw author id in the review panel (decisions still key on the id). */
   authorLabels?: (author: string) => AgentName;
   /** Saved author display names keyed by mark author (`agent:<id>`) or bare agent id (#47). */
@@ -187,6 +190,8 @@ const emit = defineEmits<{
   layout: [layout: EditorLayout];
   /** Writer chose “Ask bot to suggest…” from the editor context menu (#54). */
   'ask-bot': [];
+  'toggle-story-notes': [];
+  'save-retry': [];
 }>();
 
 /* UI shells for the audit review (Part of #36). Local view state only: none of these change the
@@ -212,7 +217,6 @@ watch(writerProfile, (p) => setWriterProfileForColors(p.name, p.color), {
   deep: true,
   immediate: true,
 });
-const trackUsingDefaultName = computed(() => writerProfile.value.name === DEFAULT_PROFILE.name);
 const trackSeedFromComputer = computed(() => Boolean(props.computerName?.trim()));
 const trackToggleBtn = useTemplateRef<HTMLButtonElement>('trackToggleBtn');
 function dismissNamePrompt() {
@@ -1122,33 +1126,16 @@ const LABELS: Record<ReviewItem['type'], string> = {
     >
       <StatusBar
         v-if="!focusMode && !sliceMode"
+        :word-count="bookWords ?? chapterWords"
+        :selection-words="selectionWords || undefined"
+        :track-changes="tracking"
+        :save="manuscriptSave"
+        :story-notes-open="storyNotesOpen"
         v-model:zoom="zoom"
-        :chapter-title="chapterTitle"
-        :chapter-words="chapterWords"
-        :selection-words="selectionWords"
-        :book-words="bookWords"
-        :save-state="saveState"
-      >
-        <div class="sh-status-track-wrap">
-          <span
-            v-if="!tracking"
-            class="sh-status-track sh-status-track--muted"
-            data-test="status-tracking-off"
-            >Track changes is off</span
-          >
-          <template v-else>
-            <span class="sh-status-track sh-status-track--on" data-test="status-tracking"
-              >Recording changes</span
-            >
-            <span class="sh-status-track-as" data-test="status-tracking-as">
-              Your changes show as <bdi dir="auto">{{ writerProfile.name }}</bdi
-              ><span v-if="trackUsingDefaultName" class="sh-status-track-hint">
-                (default name)</span
-              >
-            </span>
-          </template>
-        </div>
-      </StatusBar>
+        :story-notes-panel-id="storyNotesPanelId"
+        @toggle-story-notes="emit('toggle-story-notes')"
+        @save-retry="emit('save-retry')"
+      />
     </Teleport>
   </div>
 </template>

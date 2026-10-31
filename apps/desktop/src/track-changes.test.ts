@@ -55,12 +55,11 @@ describe('Track changes toggle (#57)', () => {
     const t = w.get('[data-test="track-changes"]');
     expect(t.attributes('aria-pressed')).toBe('false');
     expect(t.text()).toBe('Track changes');
-    expect(w.find('[data-test="status-tracking-off"]').text()).toContain('Track changes is off');
+    expect(w.find('[data-test="status-track-changes"]').text()).toBe('Track changes: Off');
     await t.trigger('click');
     expect(t.attributes('aria-pressed')).toBe('true');
     expect(t.text()).toContain('Track changes · On');
-    expect(w.find('[data-test="status-tracking"]').exists()).toBe(true);
-    expect(w.find('[data-test="status-tracking-as"]').text()).toContain('Your changes show as');
+    expect(w.find('[data-test="status-track-changes"]').text()).toBe('Track changes: On');
     expect(loadTracking(s)).toBe(true);
     w.unmount();
     const again = await mountedEditor({ storage: s });
