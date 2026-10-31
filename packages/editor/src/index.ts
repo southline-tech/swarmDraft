@@ -96,6 +96,7 @@ export {
   refreshSpellcheck,
   spellIssueAtPos,
   invalidateSpellBlock,
+  invalidateSpellIssue,
   spellcheckKey,
 } from './spellcheck/spellcheck';
 export { applySpellSuggestion } from './spellcheck/apply';

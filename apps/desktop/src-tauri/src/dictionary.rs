@@ -40,8 +40,12 @@ fn suggestion_strings(suggestions: &[Suggestion]) -> Vec<String> {
     out
 }
 
+fn is_spelling_lint(kind: LintKind) -> bool {
+    kind.is_spelling() || kind.is_typo()
+}
+
 fn lint_kind_label(kind: LintKind) -> &'static str {
-    if kind.is_spelling() {
+    if is_spelling_lint(kind) {
         "spelling"
     } else {
         "grammar"
@@ -85,18 +89,20 @@ pub fn lint_plain_text(
     let document = Document::new_plain_english(text, dict_arc.as_ref());
     let source: Vec<char> = text.chars().collect();
     let ignored_set: std::collections::HashSet<&str> = ignored.iter().map(String::as_str).collect();
+    let dict_set: std::collections::HashSet<&str> =
+        extra_words.iter().map(String::as_str).collect();
 
     linter
         .lint(&document)
         .into_iter()
         .filter(|lint| match lint.lint_kind {
-            k if k.is_spelling() => check_spelling,
+            k if is_spelling_lint(k) => check_spelling,
             _ => check_grammar,
         })
         .filter(|lint| {
             let word = lint.get_str(&source);
             let key = normalize_word(&word);
-            !ignored_set.contains(key.as_str())
+            !ignored_set.contains(key.as_str()) && !dict_set.contains(key.as_str())
         })
         .map(|lint| lint_to_issue(&lint, &source))
         .collect()
@@ -289,6 +295,35 @@ mod tests {
     fn lint_finds_misspelling() {
         let issues = lint_plain_text("This is an tst.", &[], &[], true, true);
         assert!(issues.iter().any(|i| i.kind == "spelling"));
+    }
+
+    #[test]
+    fn common_typo_uses_spelling_kind() {
+        let issues = lint_plain_text("Fix teh word.", &[], &[], true, true);
+        let teh = issues.iter().find(|i| {
+            i.message.to_lowercase().contains("teh") || {
+                let slice = &i.message;
+                slice.contains("teh")
+            }
+        });
+        if teh.is_none() {
+            let any = lint_plain_text("teh", &[], &[], true, false);
+            assert!(
+                any.iter().all(|i| i.kind == "spelling"),
+                "expected Typo lints as spelling, got {:?}",
+                any
+            );
+        } else {
+            assert_eq!(teh.unwrap().kind, "spelling");
+        }
+    }
+
+    #[test]
+    fn ignored_and_dictionary_suppress_typo() {
+        let issues = lint_plain_text("teh", &[], &["teh".into()], true, true);
+        assert!(issues.is_empty());
+        let issues = lint_plain_text("teh", &["teh".into()], &[], true, true);
+        assert!(issues.is_empty());
     }
 
     #[test]

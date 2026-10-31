@@ -2829,9 +2829,21 @@ describe('App outline vs margin notes (#98)', () => {
   it('Hide notes removes the margin notes and reports marginNotes:false; they return after the panel closes', async () => {
     const { w } = await withManuscript();
     const ed = () => leadEditor(w);
-    const st = (ed().vm as unknown as { $: { setupState: { review: unknown[] } } }).$.setupState;
-    st.review = [
-      { id: 'q1', type: 'insertion', author: 'Bot', text: 'x', from: 1, to: 3, quote: 'ab' },
+    const st = ed().vm as unknown as {
+      $: {
+        setupState: {
+          suggestions: { id: string; kind: string; author: string; ts: string; text: string }[];
+        };
+      };
+    };
+    st.$.setupState.suggestions = [
+      {
+        id: 'q1',
+        kind: 'suggestion_insert',
+        author: 'agent:sample',
+        ts: '2026-10-25T00:00:00Z',
+        text: 'x',
+      },
     ];
     await settle();
     expect(w.find('[data-test="margin-notes"]').exists()).toBe(true);

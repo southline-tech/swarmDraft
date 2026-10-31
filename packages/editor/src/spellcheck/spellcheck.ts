@@ -111,7 +111,17 @@ export function spellIssueAtPos(state: EditorState, pos: number): SpellIssue | u
 export function invalidateSpellBlock(editor: Editor, blockPos: number): void {
   const view = editor.view;
   if (view.isDestroyed) return;
-  view.dispatch(view.state.tr.setMeta(spellcheckKey, { invalidate: blockPos }));
+  view.dispatch(
+    view.state.tr
+      .setMeta(spellcheckKey, { invalidate: blockPos })
+      .setMeta('addToHistory', false),
+  );
+}
+
+/** Clear decorations for one issue immediately (dictionary / ignore). */
+export function invalidateSpellIssue(editor: Editor, issue: SpellIssue): void {
+  const block = blockAtPos(editor.state.doc, issue.from);
+  if (block) invalidateSpellBlock(editor, block.pos);
 }
 
 export const Spellcheck = Extension.create<SpellcheckOptions>({
@@ -197,10 +207,12 @@ export const Spellcheck = Extension.create<SpellcheckOptions>({
               { set?: SpellPluginState; invalidate?: number; rescan?: number[] } | undefined;
             if (meta?.set) return meta.set;
             if (meta?.invalidate !== undefined) {
+              lintGeneration++;
               const issues = mergeIssuesForBlock(tr.doc, prev.issues, meta.invalidate, []);
               return { issues, decorations: issuesToDecorations(tr.doc, issues) };
             }
             if (meta?.rescan) {
+              lintGeneration++;
               for (const p of meta.rescan) dirtyBlocks.add(p);
               schedule();
             }

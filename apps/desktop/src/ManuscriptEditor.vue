@@ -83,6 +83,7 @@ import {
   Spellcheck,
   applySpellSuggestion,
   refreshSpellcheck,
+  invalidateSpellIssue,
   spellIssueAtPos,
   collectReviewItems,
   listSuggestions,
@@ -368,6 +369,7 @@ async function onSpellIgnore() {
   const menu = spellMenu.value;
   spellMenu.value = null;
   if (!ed || !menu || !props.manuscriptId) return;
+  invalidateSpellIssue(ed, menu.issue);
   await spellDictionaryIgnore(props.manuscriptId, menu.issue.word);
   refreshSpellcheck(ed);
 }
@@ -377,6 +379,7 @@ async function onSpellDictionary() {
   const menu = spellMenu.value;
   spellMenu.value = null;
   if (!ed || !menu || !props.manuscriptId) return;
+  invalidateSpellIssue(ed, menu.issue);
   await spellDictionaryAdd(props.manuscriptId, menu.issue.word);
   refreshSpellcheck(ed);
 }
@@ -582,8 +585,7 @@ const deskEl = shallowRef<HTMLElement | null>(null);
 const deskWidth = shallowRef(0);
 const deskLeft = shallowRef(0);
 const marginNotesShown = computed(
-  () =>
-    !focusMode.value && !props.notesHidden && review.value.some((r) => r.type !== 'comment_anchor'),
+  () => !focusMode.value && !props.notesHidden && changes.value.length > 0,
 );
 /** #96: page under 440px in the forced state, so it gets the narrower inner padding. */
 const pageNarrow = computed(() =>
@@ -991,13 +993,13 @@ const LABELS: Record<ReviewItem['type'], string> = {
           aria-label="Suggestion notes"
         >
           <div
-            v-for="r in review.filter((x) => x.type !== 'comment_anchor')"
-            :key="`m-${r.type}-${r.id}`"
+            v-for="c in changes"
+            :key="`m-${c.key}`"
             class="sh-callout"
             data-test="margin-note"
           >
             <b
-              ><bdi dir="auto">{{ r.author ? labelAuthor(r.author).name : 'Suggestion' }}</bdi></b
+              ><bdi dir="auto">{{ c.author ? labelAuthor(c.author).name : 'Suggestion' }}</bdi></b
             >
             Suggested, not applied. Review to accept.
           </div>
