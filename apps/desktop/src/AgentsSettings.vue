@@ -357,7 +357,7 @@ onBeforeUnmount(() => {
           <span class="ag__removed-chevron" aria-hidden="true">{{ removedOpen ? '▾' : '▸' }}</span>
           Removed agents ({{ removedAgents.length }})
         </button>
-        <div v-show="removedOpen" :id="removedPanelId" class="ag__removed-panel">
+        <div v-if="removedOpen" :id="removedPanelId" class="ag__removed-panel">
           <p class="st-muted st-desc ag__removed-help">{{ REMOVED_HELP }}</p>
           <ul class="ag__list ag__list--removed">
             <li

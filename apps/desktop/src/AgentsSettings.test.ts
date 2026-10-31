@@ -382,8 +382,7 @@ describe('AgentsSettings', () => {
       expect(w.findAll('[data-test="agent"]')).toHaveLength(1);
       expect(w.get('[data-test="agent"]').text()).toContain('Active');
       expect(w.find('[data-test="removed-toggle"]').attributes('aria-expanded')).toBe('false');
-      expect(w.find('[data-test="removed-agent"]').exists()).toBe(true);
-      expect(w.find('[data-test="removed-agent"]').isVisible()).toBe(false);
+      expect(w.find('[data-test="removed-agent"]').exists()).toBe(false);
       await w.find('[data-test="removed-toggle"]').trigger('click');
       expect(w.find('[data-test="removed-toggle"]').attributes('aria-expanded')).toBe('true');
       const row = w.get('[data-test="removed-agent"]');
