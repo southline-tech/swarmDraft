@@ -97,7 +97,11 @@ async function refresh() {
 
 const create = () =>
   guard(async () => {
-    await props.api.create(name.value, color.value);
+    const agent = await props.api.create(name.value, color.value);
+    const t = await props.api.createToken(agent.id, scopes.value);
+    copied.value = false;
+    copyFailed.value = false;
+    shownToken.value = { agentId: agent.id, token: t.token };
     await refresh();
   });
 const mint = (agentId: string) =>

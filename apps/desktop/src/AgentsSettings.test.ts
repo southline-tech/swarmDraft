@@ -55,11 +55,11 @@ describe('AgentsSettings', () => {
     await w.find('input[aria-label="Agent name"]').setValue('Sample Agent');
     await w.find('[data-test="create-agent"]').trigger('submit');
     await flushPromises();
-    await w.find('[data-test="mint"]').trigger('click');
-    await flushPromises();
     expect(w.get('[data-test="token-once"]').text()).toContain('New key for Sample Agent');
     expect(w.text()).toContain("Copy this key now. You won't see it again.");
     expect(w.text()).toContain('New keys can');
+    await w.find('[data-test="token-done"]').trigger('click');
+    await flushPromises();
     await w.find('[data-test="revoke-token"]').trigger('click');
     await flushPromises();
     await w.find('[data-test="revoke-agent"]').trigger('click');
@@ -99,14 +99,12 @@ describe('AgentsSettings', () => {
     await w.find('[data-test="create-agent"]').trigger('submit');
     await flushPromises();
     expect(api.create).toHaveBeenCalledWith('Grok Bot', '#3366ff');
+    expect(api.createToken).toHaveBeenCalledWith('a0', ['read', 'comment', 'suggest']);
     expect(w.findAll('[data-test="agent"]')).toHaveLength(1);
     // The editor and review UI pick up the new agent's name from this list (RAD-263).
     expect(authorLabel('agent:a0')).toBe('Grok Bot (bot)');
     agentDirectory.value = null;
 
-    await w.find('[data-test="mint"]').trigger('click');
-    await flushPromises();
-    expect(api.createToken).toHaveBeenCalledWith('a0', ['read', 'comment', 'suggest']);
     expect((w.find('[data-test="token-value"]').element as HTMLInputElement).value).toBe(
       'cat_abcdefSECRET',
     );
@@ -116,9 +114,37 @@ describe('AgentsSettings', () => {
     expect(w.find('[data-test="token-once"]').exists()).toBe(false);
     expect(w.html()).not.toContain('SECRET');
 
+    await w.find('[data-test="mint"]').trigger('click');
+    await flushPromises();
+    expect(api.createToken).toHaveBeenCalledTimes(2);
     await w.find('[data-test="revoke-token"]').trigger('click');
     await flushPromises();
     expect(w.find('[data-test="token"]').text()).toContain('Turned off');
+  });
+
+  it('#187: mints and reveals a key when an agent is created', async () => {
+    const api = fakeApi();
+    const writeClipboard = vi.fn(async () => {});
+    const w = mount(AgentsSettings, { props: { api, writeClipboard } });
+    await flushPromises();
+    await w.find('[data-test="create-agent"]').trigger('submit');
+    await flushPromises();
+    expect(api.createToken).toHaveBeenCalledTimes(1);
+    expect(w.find('[data-test="token-once"]').exists()).toBe(true);
+    expect(w.find('[data-test="copy-token"]').exists()).toBe(true);
+    await w.find('[data-test="copy-token"]').trigger('click');
+    await flushPromises();
+    expect(writeClipboard).toHaveBeenCalledWith('cat_abcdefSECRET');
+    await w.find('[data-test="token-done"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test="token-once"]').exists()).toBe(false);
+
+    const w2 = mount(AgentsSettings, { props: { api } });
+    await flushPromises();
+    expect(w2.find('[data-test="token-once"]').exists()).toBe(false);
+    expect(w2.html()).not.toContain('SECRET');
+    w.unmount();
+    w2.unmount();
   });
 
   it('copies the token and confirms', async () => {
@@ -126,8 +152,6 @@ describe('AgentsSettings', () => {
     const writeClipboard = vi.fn(async () => {});
     const w = mount(AgentsSettings, { props: { api, writeClipboard } });
     await w.find('[data-test="create-agent"]').trigger('submit');
-    await flushPromises();
-    await w.find('[data-test="mint"]').trigger('click');
     await flushPromises();
     expect(w.find('[data-test="copied"]').exists()).toBe(false);
     await w.find('[data-test="copy-token"]').trigger('click');
@@ -158,8 +182,6 @@ describe('AgentsSettings', () => {
       attachTo: document.body,
     });
     await w.find('[data-test="create-agent"]').trigger('submit');
-    await flushPromises();
-    await w.find('[data-test="mint"]').trigger('click');
     await flushPromises();
     await w.find('[data-test="copy-token"]').trigger('click');
     await flushPromises();
@@ -193,8 +215,6 @@ describe('AgentsSettings', () => {
     const api = fakeApi();
     const w = mount(AgentsSettings, { props: { api } });
     await w.find('[data-test="create-agent"]').trigger('submit');
-    await flushPromises();
-    await w.find('[data-test="mint"]').trigger('click');
     await flushPromises();
     window.dispatchEvent(new Event('pagehide'));
     await flushPromises();
@@ -244,11 +264,9 @@ describe('AgentsSettings', () => {
     function setClipboard(value: unknown) {
       Object.defineProperty(navigator, 'clipboard', { value, configurable: true });
     }
-    async function mintAndCopy() {
+    async function createAndCopy() {
       const w = mount(AgentsSettings, { props: { api: fakeApi() }, attachTo: document.body });
       await w.find('[data-test="create-agent"]').trigger('submit');
-      await flushPromises();
-      await w.find('[data-test="mint"]').trigger('click');
       await flushPromises();
       await w.find('[data-test="copy-token"]').trigger('click');
       await flushPromises();
@@ -258,7 +276,7 @@ describe('AgentsSettings', () => {
     it('writes the token via navigator.clipboard and confirms', async () => {
       const writeText = vi.fn(async () => undefined);
       setClipboard({ writeText });
-      const w = await mintAndCopy();
+      const w = await createAndCopy();
       expect(writeText).toHaveBeenCalledWith('cat_abcdefSECRET');
       expect(w.find('[data-test="copied"]').text()).toBe('Copied');
       expect(w.find('[data-test="copy-failed"]').exists()).toBe(false);
@@ -273,7 +291,7 @@ describe('AgentsSettings', () => {
       ['navigator.clipboard is undefined', () => undefined],
     ])('falls back when %s', async (_, make) => {
       setClipboard(make());
-      const w = await mintAndCopy();
+      const w = await createAndCopy();
       expect(w.find('[data-test="copied"]').exists()).toBe(false);
       expect(w.find('[data-test="copy-failed"]').text()).toContain('press Ctrl+C to copy it');
       const el = w.find('[data-test="token-value"]').element as HTMLInputElement;
