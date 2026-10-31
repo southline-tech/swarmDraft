@@ -66,7 +66,12 @@ const FRONT_MATTER_CATALOG = [
   'Epigraph',
   'Contents',
 ] as const;
-const BACK_MATTER_CATALOG = ['Acknowledgements', 'About the author', 'Also by'] as const;
+const BACK_MATTER_CATALOG = [
+  'Acknowledgements',
+  'About the author',
+  'Also by',
+  'Epilogue',
+] as const;
 const DEFAULT_FRONT_PLACEHOLDERS = new Set<string>(['Title page', 'Copyright', 'Contents']);
 
 function normalizeMatterTitle(title: string) {

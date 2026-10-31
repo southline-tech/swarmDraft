@@ -60,6 +60,7 @@ import {
   OPENING_REVEAL_MS,
   errorCardIcon,
   openingStateFromEvent,
+  openingTitleAfterImport,
   titleFromDocxName,
   type OpeningRetry,
   type OpeningUiState,
@@ -763,7 +764,17 @@ async function importBytes(fileName: string, bytes: Uint8Array) {
   try {
     const current = session.value;
     try {
-      const next = await importAndOpen(bytes, persistHooks, current);
+      const next = await importAndOpen(bytes, persistHooks, current, {
+        fileName,
+        onParsedTitle: (title) => {
+          if (opening.value) {
+            opening.value = {
+              ...opening.value,
+              title: openingTitleAfterImport(title, fileName),
+            };
+          }
+        },
+      });
       finishOpening();
       open(next);
       showOpenToast(next);

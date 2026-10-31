@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { errorCardIcon, openingStateFromEvent, titleFromDocxName } from './opening-flow';
+import {
+  errorCardIcon,
+  openingStateFromEvent,
+  openingTitleAfterImport,
+  titleFromDocxName,
+} from './opening-flow';
 
 describe('opening-flow (#80)', () => {
   it('maps backend progress into ob6 props', () => {
@@ -24,6 +29,11 @@ describe('opening-flow (#80)', () => {
 
   it('derives a book title from the file name', () => {
     expect(titleFromDocxName('My Book.docx')).toBe('My Book');
+  });
+
+  it('prefers the imported manuscript title over the file name (#215)', () => {
+    expect(openingTitleAfterImport('Lanterns', 'Kim Draft.docx')).toBe('Lanterns');
+    expect(openingTitleAfterImport('Untitled', 'Kim Draft.docx')).toBe('Kim Draft');
   });
 
   it('picks icons for mapped error codes', () => {

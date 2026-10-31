@@ -52,6 +52,8 @@ export interface ImportedManuscript {
 
 export interface ImportOptions {
   manuscriptId?: string;
+  /** Filename stem (no extension) when the document has no in-body title signal. */
+  fileNameStem?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,7 +65,7 @@ const NUM = `(?:\\d+|[ivxlcdm]+|(?:(?:${NUMBER_WORDS})[\\s-]*)+)`;
 const CHAPTER_RE = new RegExp(`^(?:chapter|ch\\.)\\s+${NUM}\\s*(?:[:.\\-–—]\\s*\\S.*)?$`, 'i');
 const PART_RE = new RegExp(`^(?:part|book)\\s+${NUM}\\s*(?:[:.\\-–—]\\s*\\S.*)?$`, 'i');
 const BACK_MATTER_RE =
-  /^(acknowledge?ments?|about the author|afterword|author'?s note|author’s note|glossary|also by .+|reading group guide|discussion questions|notes|bibliography|appendix\b.*)$/i;
+  /^(acknowledge?ments?|about the author|afterword|author'?s note|author’s note|glossary|also by .+|reading group guide|discussion questions|notes|bibliography|appendix\b.*|epilog(?:ue)?(?:\s*[:.\-–—]\s*\S.*)?)$/i;
 const FRONT_TITLE_RE = /^(prologue|foreword|preface|introduction)$/i;
 /** A paragraph consisting only of break glyphs (and spaces) is a scene break. */
 const SCENE_BREAK_RE = /^[*#~•·❦❧⁂✦✧◆◇○●§※=_\-–—]+$/u;
@@ -753,6 +755,69 @@ function paragraphStyle(p: Para, firstInScene: boolean, report: ReportBuilder): 
 // ---------------------------------------------------------------------------
 // Assembly
 
+function corePropertyTitle(pkg: Pkg): string | undefined {
+  const core = pkg.read('docProps/core.xml');
+  if (!core) return undefined;
+  const walk = (el: XmlElement): string | undefined => {
+    for (const c of kids(el)) {
+      if (typeof c === 'string') continue;
+      if (c.name === 'dc:title') {
+        const t = textOf(c).trim();
+        if (t) return t;
+      }
+      const hit = walk(c);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+  return walk(core);
+}
+
+/** First short, display-style line before the main body (centered / large / bold title line). */
+function prominentFrontTitle(paras: Para[], endIndex: number): string | undefined {
+  for (let i = 0; i < endIndex; i++) {
+    const p = paras[i]!;
+    const text = p.text.replace(/\s+/g, ' ').trim();
+    if (!text || isEmpty(p)) continue;
+    if (/^(contents|table of contents)$/i.test(text)) continue;
+    if (/©|\bcopyright\b|all rights reserved/i.test(text)) continue;
+    const display = p.centered || p.maxSize >= 28 || (p.allBold && text.length <= 80);
+    if (
+      display &&
+      text.length <= 120 &&
+      !CHAPTER_RE.test(text) &&
+      !BACK_MATTER_RE.test(text) &&
+      !PART_RE.test(text)
+    )
+      return text;
+    if (!display && text.length > 80) break;
+  }
+  return undefined;
+}
+
+function resolveImportedTitle(
+  paras: Para[],
+  sections: ImportedSection[],
+  bodyStart: number,
+  pkg: Pkg,
+  fileNameStem?: string,
+): string {
+  const styleTitle = paras.find((p) => p.styleId.toLowerCase() === 'title')?.text.trim();
+  if (styleTitle) return styleTitle;
+  const titlePage = sections.find((s) => s.title === 'Title Page');
+  const tp = (titlePage?.content.content ?? []).map((b) =>
+    'content' in b ? plainText(b.content).trim() : '',
+  );
+  if (tp[0]) return tp[0]!;
+  const core = corePropertyTitle(pkg);
+  if (core) return core;
+  const prominent = prominentFrontTitle(paras, bodyStart);
+  if (prominent) return prominent;
+  const stem = fileNameStem?.trim();
+  if (stem) return stem;
+  return 'Untitled';
+}
+
 function frontMatterTitle(paras: Para[], index: number): string {
   const texts = paras.map((p) => p.text.trim());
   const joined = texts.join(' ');
@@ -1138,9 +1203,8 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
   const tp = (titlePage?.content.content ?? []).map((b) =>
     'content' in b ? plainText(b.content).trim() : '',
   );
-  const styleTitle = paras.find((p) => p.styleId.toLowerCase() === 'title')?.text.trim();
   const result: ImportedManuscript = {
-    title: styleTitle || tp[0] || 'Untitled',
+    title: resolveImportedTitle(paras, doc.sections, bodyStart, pkg, options.fileNameStem),
     sections: doc.sections,
     comments,
     report: fullReport,
