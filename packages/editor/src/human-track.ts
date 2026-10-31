@@ -70,48 +70,6 @@ function sliceWithMark(slice: Slice, mark: PMMark): Slice {
   return new Slice(addMarkToFragment(slice.content, mark), slice.openStart, slice.openEnd);
 }
 
-function isBlockSplitStep(step: ReplaceStep): boolean {
-  return step.from === step.to && step.slice.openStart > 0 && step.slice.openEnd > 0;
-}
-
-function findTextRange(doc: PMNode, text: string): { from: number; to: number } | null {
-  if (!text) return null;
-  let found: { from: number; to: number } | null = null;
-  doc.descendants((node, pos) => {
-    if (found || !node.isText || !node.text) return;
-    const start = node.text.indexOf(text);
-    if (start >= 0) found = { from: pos + start, to: pos + start + text.length };
-  });
-  return found;
-}
-
-function posInsideBlock(doc: PMNode, blockIndex: number): number | null {
-  if (blockIndex < 0 || blockIndex >= doc.childCount) return null;
-  let pos = 0;
-  for (let i = 0; i < blockIndex; i++) pos += doc.child(i).nodeSize;
-  return pos + 1;
-}
-
-/** Mark text moved to a new paragraph by Enter / split while track changes is on. */
-function markBlockSplitInsert(
-  tr: Transaction,
-  beforeDoc: PMNode,
-  from: number,
-  mark: PMMark,
-): Transaction {
-  const $pos = beforeDoc.resolve(from);
-  const tail = $pos.parent.textBetween($pos.parentOffset, $pos.parent.content.size);
-  const blockIndex = $pos.index(0) + 1;
-  if (tail) {
-    const range = findTextRange(tr.doc, tail);
-    if (range) return tr.addMark(range.from, range.to, mark);
-  }
-  const inner = posInsideBlock(tr.doc, blockIndex);
-  if (inner == null) return tr;
-  const zwsp = tr.doc.type.schema.text('\u200b', [mark]);
-  return tr.insert(inner, zwsp);
-}
-
 function insertSpanLen(beforeDoc: PMNode, step: ReplaceStep, hasDeletion: boolean): number {
   const applied = step.apply(beforeDoc);
   if (applied.failed || !applied.doc) return 0;
@@ -179,11 +137,7 @@ export function humanTrackAppendTransaction(
     if (hasDeletion && !hasInsertion) {
       tr = tr.replace(mapFrom, mapFrom, sliceWithMark(deletedSlice, delMark));
     } else if (!hasDeletion && hasInsertion) {
-      if (isBlockSplitStep(step)) {
-        tr = markBlockSplitInsert(tr, beforeDoc, from, insMark);
-      } else {
-        tr = markInsertedSlice(tr, beforeDoc, step, mapFrom, insMark, 0, false);
-      }
+      tr = markInsertedSlice(tr, beforeDoc, step, mapFrom, insMark, 0, false);
     } else {
       tr = tr.replace(mapFrom, mapFrom, sliceWithMark(deletedSlice, delMark));
       tr = markInsertedSlice(tr, beforeDoc, step, mapFrom, insMark, deletedSlice.size, true);
