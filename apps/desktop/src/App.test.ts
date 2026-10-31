@@ -930,9 +930,7 @@ describe('App status bar on an imported manuscript', () => {
     editorOf(w).commands.insertContentAt(1, 'Unsaved ');
     await settle();
     await vi.waitFor(() =>
-      expect(w.find('[data-test="status-save"]').text()).toContain(
-        "Your latest changes aren't saved yet",
-      ),
+      expect(w.find('[data-test="status-save"]').text()).toContain("Couldn't save. Retrying…"),
     );
     expect(w.find('[data-test="status-save-retry"]').exists()).toBe(true);
     expect(w.find('[data-test="save-error"]').text()).toContain(

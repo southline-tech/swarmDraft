@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatSavedAt, saveStatusLabel } from './save-status';
+import { formatSavedAt, saveStatusLabel, FOOTER_SAVE_ERROR_LABEL } from './save-status';
 
 describe('formatSavedAt', () => {
   const t0 = 1_700_000_000_000;
@@ -19,7 +19,7 @@ describe('saveStatusLabel', () => {
   it('maps phases to copy', () => {
     expect(saveStatusLabel({ phase: 'idle' })).toBe('');
     expect(saveStatusLabel({ phase: 'saving' })).toBe('Saving…');
-    expect(saveStatusLabel({ phase: 'error', message: 'Not saved' })).toBe('Not saved');
+    expect(saveStatusLabel({ phase: 'error', message: 'ignored' })).toBe(FOOTER_SAVE_ERROR_LABEL);
     expect(saveStatusLabel({ phase: 'saved', savedAt: 0 }, 30_000)).toBe('Saved just now');
   });
 });

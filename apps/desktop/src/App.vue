@@ -237,8 +237,7 @@ const persistHooks = {
 const manuscriptSave = computed((): ManuscriptSaveView | undefined => {
   if (!session.value || choosingBook.value) return undefined;
   if (saveError.value) {
-    const title = saveFailure.value.error?.title ?? mapError(null, 'save').title;
-    return { phase: 'error', message: title };
+    return { phase: 'error', message: '' };
   }
   if (saveDirty.value) return { phase: 'saving' };
   if (saveStatusShown.value && lastSavedAt.value != null) {

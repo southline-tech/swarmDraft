@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import ManuscriptEditor from '../ManuscriptEditor.vue';
-import ZoomControl from './ZoomControl.vue';
+import StatusBarZoom from '../status/StatusBarZoom.vue';
 import { SAMPLE_DOC } from '../fixtures/sample';
 import { PAGE, ZOOM_STORAGE_KEY, clampZoom, loadZoom, saveZoom, stepZoom } from './zoom';
 
@@ -41,32 +41,34 @@ describe('zoom model', () => {
   });
 });
 
-describe('ZoomControl', () => {
+describe('StatusBarZoom', () => {
   it('steps, resets, aria-disables (still focusable, no-op) only at the ends, and binds no shortcuts', async () => {
-    const w = mount(ZoomControl, {
+    const w = mount(StatusBarZoom, {
       props: {
         modelValue: 50,
         'onUpdate:modelValue': (v: number) => w.setProps({ modelValue: v }),
       },
     });
-    const out = w.find('[data-test="zoom-out"]');
+    const out = w.find('[data-test="status-zoom-out"]');
     expect(out.attributes('disabled')).toBeUndefined();
     expect(out.attributes('aria-disabled')).toBe('true');
     await out.trigger('click');
     expect(w.props('modelValue')).toBe(50);
-    expect(w.find('[data-test="zoom-in"]').attributes('aria-disabled')).toBeUndefined();
-    await w.find('[data-test="zoom-in"]').trigger('click');
+    expect(w.find('[data-test="status-zoom-in"]').attributes('aria-disabled')).toBeUndefined();
+    await w.find('[data-test="status-zoom-in"]').trigger('click');
     expect(w.props('modelValue')).toBe(67);
-    await w.find('[data-test="zoom-slider"]').setValue('200');
-    expect(w.props('modelValue')).toBe(200);
-    const zin = w.find('[data-test="zoom-in"]');
+    await w.setProps({ modelValue: 200 });
+    const zin = w.find('[data-test="status-zoom-in"]');
     expect(zin.attributes('disabled')).toBeUndefined();
     expect(zin.attributes('aria-disabled')).toBe('true');
     await zin.trigger('click');
     expect(w.props('modelValue')).toBe(200);
-    expect(w.find('[data-test="zoom-out"]').attributes('aria-disabled')).toBeUndefined();
-    expect(w.find('[data-test="zoom-reset"]').text()).toBe('200%');
-    await w.find('[data-test="zoom-reset"]').trigger('click');
+    expect(w.find('[data-test="status-zoom-out"]').attributes('aria-disabled')).toBeUndefined();
+    expect(w.find('[data-test="status-zoom-reset"]').text()).toBe('200%');
+    expect(w.find('[data-test="status-zoom-reset"]').attributes('aria-label')).toBe(
+      'Reset zoom, 100%',
+    );
+    await w.find('[data-test="status-zoom-reset"]').trigger('click');
     expect(w.props('modelValue')).toBe(100);
     expect(w.findAll('[aria-keyshortcuts]')).toHaveLength(0);
     for (const el of w.findAll('[title]')) expect(el.attributes('title')).not.toMatch(/Ctrl/);
@@ -92,14 +94,14 @@ describe('page on desk', () => {
     w.unmount();
   });
 
-  it('scales the page (no reflow) from the toolbar zoom control and remembers the level', async () => {
+  it('scales the page (no reflow) from the footer zoom control and remembers the level', async () => {
     localStorage.setItem(ZOOM_STORAGE_KEY, '125');
     const w = mount(ManuscriptEditor, { props: { content: SAMPLE_DOC }, attachTo: document.body });
     await flushPromises();
     const page = () => w.find('[data-test="page"]');
     expect(page().attributes('style')).toContain('zoom: 1.25');
-    expect(w.find('[data-test="zoom-reset"]').text()).toBe('125%');
-    await w.find('[data-test="zoom-in"]').trigger('click');
+    expect(w.find('[data-test="status-zoom-reset"]').text()).toBe('125%');
+    await w.find('[data-test="status-zoom-in"]').trigger('click');
     expect(page().attributes('style')).toContain('zoom: 1.5');
     // #92: the width is the fluid CSS rule (page-width.test.ts), not a fixed utility class.
     expect(page().classes()).not.toContain('w-144');
@@ -115,7 +117,7 @@ describe('page on desk', () => {
     await new Promise((r) => requestAnimationFrame(() => r(undefined)));
     await w.vm.$nextTick();
     expect(w.find('[data-test="load-error"]').exists()).toBe(true);
-    await w.find('[data-test="zoom-out"]').trigger('click');
+    await w.find('[data-test="status-zoom-out"]').trigger('click');
     expect(w.find('[data-test="page"]').attributes('style')).toContain('zoom: 0.9');
     w.unmount();
   });

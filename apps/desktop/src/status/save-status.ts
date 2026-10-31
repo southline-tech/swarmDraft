@@ -9,6 +9,9 @@ export type ManuscriptSaveView =
   | { phase: 'saved'; savedAt: number }
   | { phase: 'error'; message: string };
 
+/** Footer copy while save retries (story-notes ap5 / #185); not mapError title. */
+export const FOOTER_SAVE_ERROR_LABEL = "Couldn't save. Retrying…";
+
 /** Relative "Saved …" line; pass `now` in tests. */
 export function formatSavedAt(savedAt: number, now = Date.now()): string {
   const sec = Math.floor((now - savedAt) / 1000);
@@ -24,7 +27,7 @@ export function saveStatusLabel(view: ManuscriptSaveView, now = Date.now()): str
     case 'saved':
       return formatSavedAt(view.savedAt, now);
     case 'error':
-      return view.message;
+      return FOOTER_SAVE_ERROR_LABEL;
     default:
       return '';
   }

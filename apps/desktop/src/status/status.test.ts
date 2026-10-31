@@ -114,6 +114,7 @@ describe('StatusBar', () => {
     expect(bar.attributes('role')).toBe('contentinfo');
     expect(w.find('[data-test="status-word-count"]').text()).toBe('2,154 words');
     expect(w.find('[data-test="status-track-changes"]').text()).toBe('Track changes: Off');
+    expect(w.find('[data-test="status-track-changes"]').element.tagName).toBe('SPAN');
     expect(w.find('[data-test="status-notes-toggle"]').text()).toBe('Story notes');
   });
 
@@ -132,6 +133,14 @@ describe('StatusBar', () => {
     expect(w.find('[data-test="status-track-changes"]').text()).toBe('Track changes: On');
     expect(w.find('[data-test="status-save"]').attributes('data-state')).toBe('saved');
     expect(w.find('[data-test="status-notes-toggle"]').attributes('aria-pressed')).toBe('true');
+    expect(w.find('[data-test="status-notes-toggle"]').classes()).toEqual(
+      expect.arrayContaining(['aria-pressed:bg-selected', 'aria-pressed:text-accent']),
+    );
+    const wc = w.find('[data-test="status-word-count"]');
+    expect(wc.text()).toBe('100 words · 3 selected');
+    expect(wc.find('.text-muted').text()).toBe('100 words');
+    expect(wc.find('.text-text').classes()).toContain('text-text');
+    expect(wc.find('.text-text').text()).toContain('3 selected');
   });
 
   it('announces save status politely; word count is not live', () => {
@@ -148,15 +157,16 @@ describe('StatusBar', () => {
     expect(live.text()).toContain('Saving…');
   });
 
-  it('shows error with Retry in danger styling', async () => {
+  it('shows ap5 error copy with bordered Retry', async () => {
     const w = mount(StatusBar, {
       props: {
         wordCount: 1,
-        save: { phase: 'error', message: 'Not saved' },
+        save: { phase: 'error', message: 'mapError title' },
         storyNotesPanelId: 'story-notes-panel',
       },
     });
-    expect(w.find('[data-test="status-save-retry"]').classes()).toContain('text-danger');
+    expect(w.find('[data-test="status-save"]').text()).toContain("Couldn't save. Retrying…");
+    expect(w.find('[data-test="status-save-retry"]').classes()).toContain('status-bar__retry');
     await w.find('[data-test="status-save-retry"]').trigger('click');
     expect(w.emitted('save-retry')).toHaveLength(1);
   });
@@ -181,14 +191,32 @@ describe('StatusBar', () => {
     expect(bar.classes()).toEqual(expect.arrayContaining(['gap-4', 'px-4']));
   });
 
-  it('toggles story notes and track changes', async () => {
+  it('toggles story notes from the footer', async () => {
     const w = mount(StatusBar, {
       props: { trackChanges: false, storyNotesPanelId: 'story-notes-panel' },
     });
+    expect(w.find('[data-test="status-track-changes"]').attributes('role')).toBeUndefined();
     await w.find('[data-test="status-notes-toggle"]').trigger('click');
-    await w.find('[data-test="status-track-changes"]').trigger('click');
     expect(w.emitted('toggle-story-notes')).toHaveLength(1);
-    expect(w.emitted('toggle-track-changes')).toHaveLength(1);
+    expect(w.emitted('toggle-track-changes')).toBeUndefined();
+  });
+
+  it('shows zoom after Story notes with a separator (#204)', async () => {
+    const w = mount(StatusBar, {
+      props: {
+        storyNotesPanelId: 'story-notes-panel',
+        zoom: 100,
+        'onUpdate:zoom': (v: number) => w.setProps({ zoom: v }),
+      },
+    });
+    expect(w.find('.status-bar__sep').exists()).toBe(true);
+    expect(w.find('[data-test="status-zoom"]').attributes('aria-label')).toBe('Zoom');
+    expect(w.find('[data-test="status-zoom-reset"]').text()).toBe('100%');
+    await w.find('[data-test="status-zoom-in"]').trigger('click');
+    expect(w.emitted('update:zoom')).toEqual([[110]]);
+    await w.setProps({ zoom: 110 });
+    await w.find('[data-test="status-zoom-reset"]').trigger('click');
+    expect(w.emitted('update:zoom')).toContainEqual([100]);
   });
 });
 

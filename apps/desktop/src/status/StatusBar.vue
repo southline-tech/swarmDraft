@@ -1,11 +1,12 @@
 <script setup lang="ts">
 /**
- * Window status footer (#204): word count, track-changes state, manuscript save status, Story notes
- * toggle. 26px tall; zoom lives on the toolbar row (mockup fb1–fb4 omit footer zoom).
+ * Window status footer (#204): word count, track-changes readout, save status, Story notes toggle,
+ * zoom (− / % / +). 26px tall.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { formatWords as words, formatCount } from './wordcount';
 import { saveStatusLabel, type ManuscriptSaveView } from './save-status';
+import StatusBarZoom from './StatusBarZoom.vue';
 
 const props = defineProps<{
   /** Whole-book or current-chapter count when book total is unavailable. */
@@ -16,12 +17,14 @@ const props = defineProps<{
   storyNotesOpen?: boolean;
   /** Target panel for `aria-controls` on the Story notes toggle. */
   storyNotesPanelId?: string;
+  /** Page zoom percent; when set, footer shows zoom after Story notes. */
+  zoom?: number;
 }>();
 
 const emit = defineEmits<{
-  'toggle-track-changes': [];
   'toggle-story-notes': [];
   'save-retry': [];
+  'update:zoom': [value: number];
 }>();
 
 const now = ref(Date.now());
@@ -35,14 +38,10 @@ onBeforeUnmount(() => clearInterval(tick));
 
 const saveLabel = computed(() => (props.save ? saveStatusLabel(props.save, now.value) : ''));
 
-const wordLine = computed(() => {
-  if (props.wordCount === undefined) return '';
-  let line = words(props.wordCount);
-  if (props.selectionWords) {
-    const n = props.selectionWords;
-    line += ` · ${n === 1 ? '1 selected' : `${formatCount(n)} selected`}`;
-  }
-  return line;
+const selectionSuffix = computed(() => {
+  if (!props.selectionWords) return '';
+  const n = props.selectionWords;
+  return ` · ${n === 1 ? '1 selected' : `${formatCount(n)} selected`}`;
 });
 
 const trackLabel = computed(() =>
@@ -57,23 +56,17 @@ const trackLabel = computed(() =>
     aria-label="Status bar"
     data-test="status-bar"
   >
-    <span
-      v-if="wordCount !== undefined"
-      class="tabular-nums text-muted"
-      data-test="status-word-count"
-    >
-      {{ wordLine }}
+    <span v-if="wordCount !== undefined" class="tabular-nums" data-test="status-word-count">
+      <span class="text-muted">{{ words(wordCount) }}</span
+      ><span v-if="selectionWords" class="text-text">{{ selectionSuffix }}</span>
     </span>
-    <button
+    <span
       v-if="trackChanges !== undefined"
-      type="button"
-      class="border-0 bg-transparent p-0 font-ui text-xs text-muted cursor-pointer hover:text-text"
+      class="font-ui text-xs text-muted"
       data-test="status-track-changes"
-      :aria-pressed="trackChanges ? 'true' : 'false'"
-      @click="emit('toggle-track-changes')"
     >
       {{ trackLabel }}
-    </button>
+    </span>
     <span class="flex-1" aria-hidden="true" />
     <span
       v-if="save && save.phase !== 'idle'"
@@ -87,7 +80,7 @@ const trackLabel = computed(() =>
         <span class="text-danger">{{ saveLabel }}</span>
         <button
           type="button"
-          class="border-0 bg-transparent p-0 font-ui text-xs font-medium text-danger underline cursor-pointer"
+          class="status-bar__retry"
           data-test="status-save-retry"
           @click="emit('save-retry')"
         >
@@ -109,7 +102,7 @@ const trackLabel = computed(() =>
     <button
       v-if="storyNotesPanelId"
       type="button"
-      class="border-0 bg-transparent p-0 font-ui text-xs font-medium text-text cursor-pointer hover:text-accent"
+      class="border-0 bg-transparent p-0 font-ui text-xs font-medium text-text cursor-pointer hover:text-accent aria-pressed:bg-selected aria-pressed:text-accent"
       data-test="status-notes-toggle"
       :aria-pressed="storyNotesOpen ? 'true' : 'false'"
       :aria-controls="storyNotesPanelId"
@@ -117,5 +110,33 @@ const trackLabel = computed(() =>
     >
       Story notes
     </button>
+    <template v-if="zoom !== undefined">
+      <span v-if="storyNotesPanelId" class="status-bar__sep" aria-hidden="true" />
+      <StatusBarZoom :model-value="zoom" @update:model-value="emit('update:zoom', $event)" />
+    </template>
   </footer>
 </template>
+
+<style scoped>
+.status-bar__sep {
+  flex: none;
+  align-self: center;
+  width: 1px;
+  height: 12px;
+  background: var(--ct-border);
+}
+.status-bar__retry {
+  padding: 0 var(--ct-space-2);
+  border: 1px solid var(--ct-danger);
+  border-radius: var(--ct-radius-sm);
+  background: var(--ct-danger-bg);
+  color: var(--ct-danger);
+  font: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+.status-bar__retry:focus-visible {
+  outline: none;
+  box-shadow: var(--ct-focus-ring);
+}
+</style>

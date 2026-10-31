@@ -27,7 +27,6 @@ import type * as Y from 'yjs';
 import EditorToolbar from './toolbar/EditorToolbar.vue';
 import StatusBar from './status/StatusBar.vue';
 import type { ManuscriptSaveView } from './status/save-status';
-import ZoomControl from './desk/ZoomControl.vue';
 import { countWords, watchBookWords } from './status/wordcount';
 import { agentDirectory, authorLabel, markAuthorLabel, type AgentName } from './agent-names';
 import { loadZoom, saveZoom } from './desk/zoom';
@@ -913,7 +912,6 @@ const LABELS: Record<ReviewItem['type'], string> = {
               </svg>
               Track changes<template v-if="tracking"> · On</template>
             </button>
-            <ZoomControl v-model="zoom" class="ml-2 shrink-0" />
           </template>
           <template #menu>
             <button
@@ -1133,8 +1131,8 @@ const LABELS: Record<ReviewItem['type'], string> = {
         :track-changes="tracking"
         :save="manuscriptSave"
         :story-notes-open="storyNotesOpen"
+        v-model:zoom="zoom"
         :story-notes-panel-id="storyNotesPanelId"
-        @toggle-track-changes="toggleTrackChanges"
         @toggle-story-notes="emit('toggle-story-notes')"
         @save-retry="emit('save-retry')"
       />

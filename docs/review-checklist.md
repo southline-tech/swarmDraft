@@ -254,3 +254,9 @@ Implementor: add one line here for every review, design or QA finding, in the sa
 - 2026-10-31 · #188 · Design (#194) · ap1 title/copy/chips/hint; ap2 MCP connected text color; no global z-index 50 scrim · `Allow … to connect?`; `st-dlg-scrim`/`st-dlg` in `settings.css`; `--ct-success` on connected label
 - 2026-10-31 · #185 · Design (#203) · Saved state used `--ct-success`; save hooks named `notes-save-*` · ap5 `data-test=note-save` / `note-save-retry`; Saving/Saved text + checkmark `--ct-text-muted` only
 - 2026-10-31 · #203 · Windows smoke · notes header stuck on Saving after successful flush · non-reactive save status on Y.Doc: subscribe in `persist.ts` and bump a Vue ref; normalize doc with `toRaw` for listener WeakMap keys; panel tests assert DOM `data-state`, not only doc phase
+- 2026-10-31 · #204 · Designer review (#206) · footer save error showed mapError title · `FOOTER_SAVE_ERROR_LABEL` (`Couldn't save. Retrying…`) in `save-status.ts`; banner keeps mapError
+- 2026-10-31 · #204 · Designer review (#206) · Retry was an underlined link · `status-bar__retry` uses `--ct-danger` border/text and `--ct-danger-bg` (ap5)
+- 2026-10-31 · #204 · Designer review (#206) · footer track changes was a second toggle · read-only `<span>`; toolbar owns `aria-pressed` and toggle
+- 2026-10-31 · #204 · Designer review (#206) · whole word-count line was muted · base count `--ct-text-muted`; ` · N selected` suffix `--ct-text`
+- 2026-10-31 · #204 · Designer review (#206) · Story notes footer toggle lacked pressed accent · `aria-pressed:bg-selected` + `aria-pressed:text-accent`; test when open
+- 2026-10-31 · #204 · Designer review (#206) · zoom on toolbar not Word-style footer · `StatusBarZoom` after Story notes (`status-zoom-*`); − / % / + only; toolbar control removed
