@@ -273,7 +273,8 @@ export function buildReviewTransaction(
     const mapped = tr.mapping.map(pos);
     const node = tr.doc.nodeAt(mapped);
     if (!node) continue;
-    const { blockSplitInsert: _drop, ...attrs } = node.attrs;
+    const attrs = { ...node.attrs };
+    delete attrs.blockSplitInsert;
     tr = tr.setNodeMarkup(mapped, undefined, attrs);
   }
   for (const blockIndex of [...splitJoinBlocks].sort((a, b) => b - a)) {
