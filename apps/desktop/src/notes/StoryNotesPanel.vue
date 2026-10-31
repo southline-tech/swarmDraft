@@ -19,9 +19,9 @@ import {
   type NoteMeta,
 } from './doc';
 import {
-  notesSaveStatusTick,
   readNotesSaveStatus,
   retryNotesSave,
+  subscribeNotesSaveStatus,
   type NotesSavePhase,
 } from './persist';
 
@@ -111,14 +111,26 @@ const sectionOptions = computed(() =>
   props.outline.filter((s) => s.kind === 'chapter' || s.kind === 'front_matter'),
 );
 
+const saveStatusRev = ref(0);
+watch(
+  () => props.notesDoc,
+  (doc, _prev, onCleanup) => {
+    const off = subscribeNotesSaveStatus(doc, () => {
+      saveStatusRev.value += 1;
+    });
+    onCleanup(off);
+  },
+  { immediate: true },
+);
+
 const savePhase = computed(() => {
-  void notesSaveStatusTick();
+  void saveStatusRev.value;
   return readNotesSaveStatus(props.notesDoc).phase;
 });
 const nowMs = ref(Date.now());
 let saveTick: ReturnType<typeof setInterval> | undefined;
 watch(
-  () => [notesSaveStatusTick(), readNotesSaveStatus(props.notesDoc).phase] as const,
+  () => [saveStatusRev.value, readNotesSaveStatus(props.notesDoc).phase] as const,
   ([, phase]) => {
     if (saveTick) clearInterval(saveTick);
     saveTick = undefined;
@@ -136,7 +148,7 @@ onUnmounted(() => {
 });
 
 const saveLabel = computed(() => {
-  void notesSaveStatusTick();
+  void saveStatusRev.value;
   const v = readNotesSaveStatus(props.notesDoc);
   return saveStatusLabel(v.phase, v.savedAt, nowMs.value);
 });

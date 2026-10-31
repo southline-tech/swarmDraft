@@ -3,6 +3,7 @@
  * Save status for the notes detail header (#185).
  */
 import * as Y from 'yjs';
+import { toRaw } from 'vue';
 import { notesApplyUpdate } from '../backend';
 import {
   LOAD_ORIGIN,
@@ -48,26 +49,49 @@ const IDLE: NotesSaveStatus = { phase: 'idle', savedAt: null };
 const g = globalThis as typeof globalThis & { __coauthorNotesSaveTick?: number };
 if (g.__coauthorNotesSaveTick == null) g.__coauthorNotesSaveTick = 0;
 
-function bumpSaveStatus() {
-  g.__coauthorNotesSaveTick! += 1;
+const saveListeners = new WeakMap<Y.Doc, Set<() => void>>();
+
+function notesDocKey(doc: Y.Doc): Y.Doc {
+  return toRaw(doc) as Y.Doc;
 }
 
-/** Bumped whenever any watched notes doc save status changes (for Vue computed deps). */
+function bumpSaveStatus(doc: Y.Doc) {
+  const key = notesDocKey(doc);
+  g.__coauthorNotesSaveTick! += 1;
+  saveListeners.get(key)?.forEach((fn) => fn());
+}
+
+/** Bumped whenever any watched notes doc save status changes (legacy dep; prefer subscribe). */
 export function notesSaveStatusTick(): number {
   return g.__coauthorNotesSaveTick!;
 }
 
+/** Notified when `readNotesSaveStatus(doc)` changes (successful save, error, etc.). */
+export function subscribeNotesSaveStatus(doc: Y.Doc, fn: () => void): () => void {
+  const key = notesDocKey(doc);
+  let set = saveListeners.get(key);
+  if (!set) {
+    set = new Set();
+    saveListeners.set(key, set);
+  }
+  set.add(fn);
+  return () => {
+    set!.delete(fn);
+  };
+}
+
 export function readNotesSaveStatus(doc: Y.Doc): NotesSaveStatus {
-  return (doc as DocWithSave)[SAVE] ?? IDLE;
+  return (notesDocKey(doc) as DocWithSave)[SAVE] ?? IDLE;
 }
 
 function writeStatus(doc: Y.Doc, next: NotesSaveStatus) {
-  (doc as DocWithSave)[SAVE] = next;
-  bumpSaveStatus();
+  const key = notesDocKey(doc);
+  (key as DocWithSave)[SAVE] = next;
+  bumpSaveStatus(key);
 }
 
 export function retryNotesSave(doc: Y.Doc) {
-  void (doc as DocWithSave)[FLUSH]?.().catch(() => {});
+  void (notesDocKey(doc) as DocWithSave)[FLUSH]?.().catch(() => {});
 }
 
 export function watchNotesDoc(

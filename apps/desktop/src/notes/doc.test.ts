@@ -7,7 +7,7 @@ vi.mock('../backend', () => ({
 
 import { notesApplyUpdate } from '../backend';
 import { addNote, createNotesDoc, listNotes, updateNoteSectionLink, updateNoteTitle } from './doc';
-import { watchNotesDoc } from './persist';
+import { readNotesSaveStatus, subscribeNotesSaveStatus, watchNotesDoc } from './persist';
 
 describe('story notes doc', () => {
   it('creates ordered notes with human attribution', () => {
@@ -61,5 +61,21 @@ describe('watchNotesDoc', () => {
     expect(spy).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(50);
     expect(spy).toHaveBeenCalledWith('m-1', expect.any(Uint8Array));
+  });
+
+  it('notifies subscribers when a save completes', async () => {
+    const doc = createNotesDoc();
+    addNote(doc, { kind: 'human', id: 'h', name: 'Author' });
+    const persister = watchNotesDoc('m-1', doc, { debounceMs: 50 });
+    const id = listNotes(doc)[0]!.id;
+    let rev = 0;
+    subscribeNotesSaveStatus(doc, () => {
+      rev += 1;
+    });
+    updateNoteTitle(doc, id, 'Saved');
+    await vi.advanceTimersByTimeAsync(50);
+    await persister.flush();
+    expect(readNotesSaveStatus(doc).phase).toBe('saved');
+    expect(rev).toBeGreaterThan(0);
   });
 });

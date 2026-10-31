@@ -96,11 +96,16 @@ describe('StoryNotesPanel', () => {
         outline: [],
         humanAuthor: { id: 'h', name: 'Sample Person' },
       },
+      global: {
+        stubs: { NoteBodyEditor: { template: '<div data-test="note-body" aria-label="Body" />' } },
+      },
     });
     await flushPromises();
     expect(w.get('[data-test=note-save]').attributes('data-state')).toBe('saving');
     await persister.flush();
-    expect(readNotesSaveStatus(notesDoc).phase).toBe('saved');
+    await flushPromises();
+    expect(w.get('[data-test=note-save]').attributes('data-state')).toBe('saved');
+    expect(w.get('[data-test=note-save]').text()).toContain('Saved');
     w.unmount();
   });
 

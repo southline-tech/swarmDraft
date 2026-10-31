@@ -255,3 +255,4 @@ Format: `YYYY-MM-DD · #PR · finding · rule`
 - 2026-10-31 · #188 · UI lane · pairing prompt must not mount in vitest when `getAppInfo` is mocked · `<PairingPrompt v-if="info && isTauri()" />`; inject `PairingApi` in unit tests
 - 2026-10-31 · #188 · Design (#194) · ap1 title/copy/chips/hint; ap2 MCP connected text color; no global z-index 50 scrim · `Allow … to connect?`; `st-dlg-scrim`/`st-dlg` in `settings.css`; `--ct-success` on connected label
 - 2026-10-31 · #185 · Design (#203) · Saved state used `--ct-success`; save hooks named `notes-save-*` · ap5 `data-test=note-save` / `note-save-retry`; Saving/Saved text + checkmark `--ct-text-muted` only
+- 2026-10-31 · #203 · Windows smoke · notes header stuck on Saving after successful flush · non-reactive save status on Y.Doc: subscribe in `persist.ts` and bump a Vue ref; normalize doc with `toRaw` for listener WeakMap keys; panel tests assert DOM `data-state`, not only doc phase
