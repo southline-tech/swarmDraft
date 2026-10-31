@@ -433,3 +433,6 @@ export async function manuscriptOpenComments(
   if (!isTauri()) return [];
   return invoke<ManuscriptCopyComment[]>('manuscript_open_comments', { manuscriptId });
 }
+
+export type { ExportJob, ExportFormat } from './export/api';
+export { exportApi, triggerExport, getExportJob, listExportJobs } from './export/api';

@@ -1,0 +1,44 @@
+/* Fiction starter theme for EPUB 3 exports (#39). */
+body {
+  font-family: Georgia, 'Times New Roman', serif;
+  line-height: 1.5;
+  margin: 0 5%;
+}
+h1,
+h2,
+h3 {
+  font-family: 'Palatino Linotype', Palatino, Georgia, serif;
+  text-align: center;
+  page-break-before: always;
+}
+h1.part-title {
+  margin-top: 3em;
+}
+p {
+  text-indent: 1.5em;
+  margin: 0;
+}
+p.first,
+h1 + p,
+h2 + p,
+hr.scene-break + p {
+  text-indent: 0;
+}
+blockquote,
+.epigraph,
+.verse {
+  margin: 1em 10%;
+}
+.epigraph,
+.centered {
+  text-align: center;
+}
+hr.scene-break {
+  border: none;
+  text-align: center;
+  margin: 1.5em 0;
+}
+hr.scene-break::after {
+  content: '* * *';
+  letter-spacing: 0.35em;
+}

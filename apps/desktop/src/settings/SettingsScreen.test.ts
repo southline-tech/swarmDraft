@@ -32,7 +32,7 @@ beforeEach(() => {
 });
 
 describe('Settings screen (#99)', () => {
-  it('has the six sections in order, one shown at a time', async () => {
+  it('has the seven sections in order, one shown at a time', async () => {
     const w = screen();
     const nav = w.findAll('[data-test="settings-nav"] button').map((b) => b.text());
     expect(nav).toEqual([
@@ -40,6 +40,7 @@ describe('Settings screen (#99)', () => {
       'Your name & color',
       'Appearance',
       'Spelling & grammar',
+      'Export',
       'Backups',
       'Agents',
     ]);
