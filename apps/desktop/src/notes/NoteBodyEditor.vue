@@ -21,6 +21,7 @@ const editor = useEditor({
     attributes: {
       class: 'story-note-body tiptap',
       'data-test': 'note-body',
+      'aria-label': 'Body',
     },
   },
 });
