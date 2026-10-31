@@ -183,7 +183,8 @@ describe('human track changes (#126)', () => {
     e.state.doc.descendants((node) => {
       if (!node.isText) return;
       for (const m of node.marks) {
-        if (m.type.name === 'suggestion_insert' && m.attrs.blockSplit === true) hasBlockSplit = true;
+        if (m.type.name === 'suggestion_insert' && m.attrs.blockSplit === true)
+          hasBlockSplit = true;
       }
     });
     expect(hasBlockSplit).toBe(true);
