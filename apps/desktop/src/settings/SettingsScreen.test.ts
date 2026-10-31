@@ -170,6 +170,7 @@ describe('Your name & color (#99)', () => {
     await w.get('[data-test="settings-name"]').setValue('  Sample Writer  ');
     await w.get('[data-test="swatch-5"]').trigger('click');
     await w.get('[data-test="settings-save"]').trigger('click');
+    await flushPromises();
     expect(loadProfile()).toEqual({ name: 'Sample Writer', color: 5 });
     w.unmount();
     const again = mount(NameColorSection);
@@ -191,7 +192,10 @@ describe('Your name & color (#99)', () => {
     await w.get('[data-test="settings-name"]').setValue('Grok Bot');
     await w.get('[data-test="settings-save"]').trigger('click');
     await flushPromises();
-    expect(w.get('[data-test="settings-name-status"]').text()).toContain(
+    const input = w.get('[data-test="settings-name"]');
+    expect(input.attributes('aria-invalid')).toBe('true');
+    expect(input.attributes('aria-describedby')).toBe('nc-name-error');
+    expect(w.get('[data-test="settings-name-error"]').text()).toContain(
       'already used by an agent',
     );
     expect(loadProfile().name).toBe('Author');
@@ -208,7 +212,7 @@ describe('Your name & color (#99)', () => {
     await w.get('[data-test="settings-name"]').setValue('You');
     await w.get('[data-test="settings-save"]').trigger('click');
     await flushPromises();
-    expect(w.get('[data-test="settings-name-status"]').text()).toContain('reserved');
+    expect(w.get('[data-test="settings-name-error"]').text()).toContain('reserved');
     expect(loadProfile().name).toBe('Author');
   });
 
@@ -223,7 +227,7 @@ describe('Your name & color (#99)', () => {
     await w.get('[data-test="settings-name"]').setValue('Grok Bot');
     await w.get('[data-test="settings-save"]').trigger('click');
     await flushPromises();
-    expect(w.get('[data-test="settings-name-status"]').text()).toContain('reserved');
+    expect(w.get('[data-test="settings-name-error"]').text()).toContain('reserved');
     expect(loadProfile().name).toBe('Author');
   });
 

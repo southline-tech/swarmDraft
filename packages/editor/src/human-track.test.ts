@@ -148,6 +148,29 @@ describe('human track changes (#126)', () => {
     eOff.destroy();
   });
 
+  it('records paragraph split (Enter) as a tracked insert (#182)', () => {
+    const e = editor();
+    editors.push(e);
+    e.commands.setTextSelection(6);
+    e.commands.splitBlock();
+    const items = listSuggestions(e.getJSON() as never).filter(
+      (i) => i.kind === 'suggestion_insert' && i.author === WRITER,
+    );
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.some((i) => i.text.includes('line.'))).toBe(true);
+    e.destroy();
+  });
+
+  it('records Enter at end of paragraph as a tracked change (#182)', () => {
+    const e = editor();
+    editors.push(e);
+    e.commands.setTextSelection(e.state.doc.content.size - 1);
+    e.commands.splitBlock();
+    const items = listSuggestions(e.getJSON() as never).filter((i) => i.author === WRITER);
+    expect(items.length).toBeGreaterThan(0);
+    e.destroy();
+  });
+
   it('records a delete as suggestion_delete without removing text', () => {
     const e = editor();
     editors.push(e);
