@@ -392,13 +392,49 @@ describe('App', () => {
     expect(sidebar().isVisible()).toBe(false);
     expect(rail().isVisible()).toBe(true);
     const ws = w.find('[data-test="workspace"]');
-    expect(ws.classes()).toContain('grid-cols-[var(--ct-rail-w)_1fr]');
-    expect(ws.classes()).not.toContain('grid-cols-[18rem_1fr]');
+    expect(ws.classes()).toContain(
+      'grid-cols-[var(--ct-rail-w)_minmax(0,1fr)_var(--ct-story-notes-w)]',
+    );
+    expect(ws.classes()).not.toContain('grid-cols-[18rem_minmax(0,1fr)_var(--ct-story-notes-w)]');
     expect(nav.attributes('aria-controls')).toBe('chapter-navigator-rail');
     await nav.trigger('click');
     expect(nav.attributes('aria-pressed')).toBe('true');
     expect(sidebar().isVisible()).toBe(true);
-    expect(w.find('[data-test="workspace"]').classes()).toContain('grid-cols-[18rem_1fr]');
+    expect(w.find('[data-test="workspace"]').classes()).toContain(
+      'grid-cols-[18rem_minmax(0,1fr)_var(--ct-story-notes-w)]',
+    );
+    w.unmount();
+  });
+
+  it('drops workspace right padding so footer notes split aligns with Story notes (#219)', async () => {
+    const { w } = await withManuscript();
+    const ws = w.get('[data-test="workspace"]').element as HTMLElement;
+    expect(ws.className).toContain('pr-0');
+    expect(ws.className).not.toMatch(/\bp-4\b/);
+    const notesCol = w.get('[data-test="story-notes-col"]').element;
+    const rightSeg = w.get('[data-test="status-seg-right"]').element;
+    const sharedLeft = 640;
+    const rect = (left: number, width = 280) =>
+      ({
+        left,
+        right: left + width,
+        top: 0,
+        bottom: 26,
+        width,
+        height: 26,
+        x: left,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    vi.spyOn(notesCol, 'getBoundingClientRect').mockReturnValue(rect(sharedLeft));
+    vi.spyOn(rightSeg, 'getBoundingClientRect').mockReturnValue(rect(sharedLeft));
+    expect(rightSeg.getBoundingClientRect().left).toBe(notesCol.getBoundingClientRect().left);
+    await w.find('[data-test="tb-navigator"]').trigger('click');
+    await settle();
+    expect(w.find('[data-test="status-seg-left"]').exists()).toBe(false);
+    expect((w.get('[data-test="status-seg-center"]').element as HTMLElement).style.gridColumn).toBe(
+      '2',
+    );
     w.unmount();
   });
 
@@ -2000,7 +2036,7 @@ describe('full-width toolbar (#84)', () => {
   // The toolbar row sits between the title bar and the panel row, as a sibling of both, so it
   // spans the window and the outline / review panels start below it.
   const order = (w: ReturnType<typeof mount>) => {
-    const main = w.get('main.shell').element;
+    const main = w.get('.shell__main').element;
     const kids = [...main.children];
     return {
       topbar: kids.indexOf(w.get('.topbar').element),
@@ -2167,16 +2203,28 @@ describe('focus mode screen reader (#55)', () => {
     w.unmount();
   });
 
-  it('drops the status-bar padding strip on the app shell while focus mode is on', async () => {
+  it('hides the in-flow status bar while focus mode is on', async () => {
     const { w } = await withManuscript();
     const shell = () => w.get('main.shell');
     expect(shell().classes()).not.toContain('shell--focus-mode');
+    expect(w.find('[data-test="status-bar"]').exists()).toBe(true);
     await w.get('[data-test="focus-mode"]').trigger('click');
     await settle();
     expect(shell().classes()).toContain('shell--focus-mode');
+    expect(w.find('[data-test="status-bar"]').exists()).toBe(false);
     await w.get('[data-test="focus-exit"]').trigger('click');
     await settle();
     expect(shell().classes()).not.toContain('shell--focus-mode');
+    expect(w.find('[data-test="status-bar"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('does not scroll the app shell for a loaded book (#209)', async () => {
+    const { w } = await withManuscript();
+    const shell = w.get('main.shell').element;
+    expect(shell.scrollHeight).toBeLessThanOrEqual(shell.clientHeight + 1);
+    const stage = w.find('[data-test="continuous-manuscript"]');
+    expect(stage.exists()).toBe(true);
     w.unmount();
   });
 });
