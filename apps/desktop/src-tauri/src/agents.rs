@@ -641,7 +641,11 @@ mod tests {
         let r = s.create_agent("Line Editor", "#3366ff").unwrap();
         s.revoke_agent(&r.id).unwrap();
         assert!(s.create_agent("line editor", "#3366ff").is_err());
-        assert_eq!(s.list_agents().unwrap().len(), 5);
+        assert_eq!(
+            s.list_agents().unwrap().len(),
+            4,
+            "revoked agents without open review are omitted from list_agents"
+        );
         // Names are stored NFC.
         let d = s.create_agent("Nai\u{308}ve", "#3366ff").unwrap();
         assert_eq!(d.name, "Na\u{ef}ve");
