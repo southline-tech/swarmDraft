@@ -54,6 +54,32 @@ export const DEFAULT_PROFILE: Readonly<Profile> = { name: 'Author', color: 3 };
 
 const validColor = (c: unknown): c is number => SWATCHES.some((s) => s.id === c);
 
+/** Trim and validate a profile before save or backend sync (#45). */
+export function normalizeProfile(p: Profile): Profile {
+  return {
+    name: p.name.trim().slice(0, 64) || DEFAULT_PROFILE.name,
+    color: validColor(p.color) ? p.color : DEFAULT_PROFILE.color,
+  };
+}
+
+/** Backend rule messages for profile name sync (#45); anything else gets generic copy. */
+const PROFILE_NAME_RULE =
+  /^(name must be 1-64 characters|"[^"\n]{1,64}" is reserved; choose another name|"[^"\n]{1,64}" is already used by an agent; choose another name)$/;
+
+export function profileNameSaveError(err: unknown): string {
+  const raw =
+    typeof err === 'string'
+      ? err
+      : err instanceof Error
+        ? err.message
+        : err && typeof err === 'object' && 'message' in err
+          ? String((err as { message: unknown }).message)
+          : '';
+  return PROFILE_NAME_RULE.test(raw.trim())
+    ? raw.trim()
+    : "Couldn't save your name and color on this computer. Try again.";
+}
+
 export function loadProfile(storage: Store = globalThis.localStorage): Profile {
   try {
     const raw = storage?.getItem(PROFILE_KEY);
@@ -71,10 +97,7 @@ export function loadProfile(storage: Store = globalThis.localStorage): Profile {
 
 /** Saves a trimmed name (blank falls back to the default) and a known swatch; returns what was kept. */
 export function saveProfile(p: Profile, storage: Store = globalThis.localStorage): Profile {
-  const kept: Profile = {
-    name: p.name.trim().slice(0, 64) || DEFAULT_PROFILE.name,
-    color: validColor(p.color) ? p.color : DEFAULT_PROFILE.color,
-  };
+  const kept = normalizeProfile(p);
   try {
     storage?.setItem(PROFILE_KEY, JSON.stringify(kept));
   } catch {

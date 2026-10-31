@@ -1,10 +1,22 @@
 <script setup lang="ts">
 /** Settings → Your name & color (#99). Save keeps the name and color on this computer. */
+import { isTauri } from '@tauri-apps/api/core';
 import { ref } from 'vue';
+import { agentsApi } from '../backend';
 import { SWATCHES, swatchVar } from '../shells/colors';
-import { DEFAULT_PROFILE, loadProfile, saveProfile } from './prefs';
+import {
+  DEFAULT_PROFILE,
+  loadProfile,
+  normalizeProfile,
+  profileNameSaveError,
+  saveProfile,
+} from './prefs';
 
-const props = defineProps<{ storage?: Pick<Storage, 'getItem' | 'setItem'> }>();
+const props = defineProps<{
+  storage?: Pick<Storage, 'getItem' | 'setItem'>;
+  /** Sync display name to SQLite before localStorage (#45); defaults to desktop IPC. */
+  syncDisplayName?: (name: string) => Promise<string>;
+}>();
 const emit = defineEmits<{ close: [] }>();
 
 const store = () => props.storage ?? globalThis.localStorage;
@@ -13,14 +25,22 @@ const name = ref(saved.name);
 const color = ref(saved.color);
 const status = ref('');
 
-function save() {
+async function save() {
+  status.value = '';
+  const kept = normalizeProfile({ name: name.value, color: color.value });
   try {
-    const kept = saveProfile({ name: name.value, color: color.value }, store());
+    if (props.syncDisplayName) {
+      kept.name = await props.syncDisplayName(kept.name);
+    } else if (isTauri()) {
+      kept.name = await agentsApi.setUserDisplayName(kept.name);
+    }
+    saveProfile(kept, store());
     name.value = kept.name;
     color.value = kept.color;
     status.value = 'Saved.';
-  } catch {
-    status.value = "Couldn't save your name and color on this computer. Try again.";
+  } catch (e) {
+    console.error('Profile save failed', e);
+    status.value = profileNameSaveError(e);
   }
 }
 function reset() {

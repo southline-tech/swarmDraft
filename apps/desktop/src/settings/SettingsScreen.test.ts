@@ -179,6 +179,23 @@ describe('Your name & color (#99)', () => {
     expect(again.get('[data-test="settings-name-status"]').attributes('role')).toBe('status');
   });
 
+  it('shows a clear error when the name matches an agent (#45)', async () => {
+    const w = mount(NameColorSection, {
+      props: {
+        syncDisplayName: async () => {
+          throw '"Grok Bot" is already used by an agent; choose another name';
+        },
+      },
+    });
+    await w.get('[data-test="settings-name"]').setValue('Grok Bot');
+    await w.get('[data-test="settings-save"]').trigger('click');
+    await flushPromises();
+    expect(w.get('[data-test="settings-name-status"]').text()).toContain(
+      'already used by an agent',
+    );
+    expect(loadProfile().name).toBe('Author');
+  });
+
   it('unsaved edits are not kept; a broken stored value falls back to the default', async () => {
     const w = mount(NameColorSection);
     await w.get('[data-test="settings-name"]').setValue('Unsaved');

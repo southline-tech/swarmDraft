@@ -51,6 +51,8 @@ export const agentsApi = {
   /** Active primary agent id, if any; revoked primaries are omitted. */
   primaryId: () => invoke<string | null>('agents_primary_id'),
   create: (name: string, color: string) => invoke<Agent>('agent_create', { name, color }),
+  /** Persist writer display name for agent-name reservation (#45). */
+  setUserDisplayName: (name: string) => invoke<string>('set_user_display_name', { name }),
   revoke: (agentId: string) => invoke<void>('agent_revoke', { agentId }),
   tokens: (agentId: string) => invoke<TokenInfo[]>('agent_tokens_list', { agentId }),
   createToken: (agentId: string, scopes?: AgentScope[]) =>

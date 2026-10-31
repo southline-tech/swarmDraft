@@ -144,9 +144,12 @@ fn row_token(r: &rusqlite::Row) -> rusqlite::Result<TokenInfo> {
     })
 }
 
+/// `app_meta` key for the writer display name from Settings → Your name & color (#45).
+pub const USER_DISPLAY_NAME_META_KEY: &str = "user_display_name";
+
 /// Names an agent may not take, so it can't pass for the local user or a UI fallback label
-/// (RAD-263). The app has no user display-name setting yet, so the user is reserved as "You";
-/// [`reserved_name`] also takes the user's own name once one exists.
+/// (RAD-263). The UI fallback "You" is always reserved; [`reserved_name`] also takes the saved
+/// user display name once one exists in [`USER_DISPLAY_NAME_META_KEY`].
 pub const RESERVED_AGENT_NAMES: &[&str] = &["You", "Unnamed agent", "Removed agent"];
 
 /// Whether `name` is reserved: one of [`RESERVED_AGENT_NAMES`] or the local user's display name
@@ -205,17 +208,23 @@ impl Store {
             return Err(StorageError::Invalid("name must be 1-64 characters".into()));
         }
         let key = name_key(name);
-        // No user display-name setting exists yet, so only "You" stands for the user.
-        if reserved_name(name, None) {
-            return Err(StorageError::Invalid(format!(
-                "\"{name}\" is reserved; choose another agent name"
-            )));
-        }
         if !valid_color(color) {
             return Err(StorageError::Invalid("color must look like #rrggbb".into()));
         }
         let id = new_id();
         self.with_conn(|c| {
+            let user_display_name: Option<String> = c
+                .query_row(
+                    "SELECT value FROM app_meta WHERE key = ?1",
+                    [USER_DISPLAY_NAME_META_KEY],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if reserved_name(name, user_display_name.as_deref()) {
+                return Err(StorageError::Invalid(format!(
+                    "\"{name}\" is reserved; choose another agent name"
+                )));
+            }
             let taken = {
                 let mut st = c.prepare("SELECT name FROM agents")?;
                 let names = st
@@ -249,6 +258,41 @@ impl Store {
                 [&id],
                 row_agent,
             )?)
+        })
+    }
+
+    /// Persist the writer display name from Settings (#45). Rejects names that collide with an
+    /// active agent or a reserved label; normalization matches agent naming ([`name_key`]).
+    pub fn set_user_display_name(&self, name: &str) -> Result<String, StorageError> {
+        let name = clean_name(name);
+        let name = name.as_str();
+        if name.is_empty() || name.chars().count() > 64 {
+            return Err(StorageError::Invalid("name must be 1-64 characters".into()));
+        }
+        if reserved_name(name, None) {
+            return Err(StorageError::Invalid(format!(
+                "\"{name}\" is reserved; choose another name"
+            )));
+        }
+        let key = name_key(name);
+        self.with_conn(|c| {
+            let taken = {
+                let mut st = c.prepare("SELECT name FROM agents WHERE revoked_at IS NULL")?;
+                let names = st
+                    .query_map([], |r| r.get::<_, String>(0))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                names.iter().any(|n| name_key(n) == key)
+            };
+            if taken {
+                return Err(StorageError::Invalid(format!(
+                    "\"{name}\" is already used by an agent; choose another name"
+                )));
+            }
+            c.execute(
+                "INSERT OR REPLACE INTO app_meta (key, value) VALUES (?1, ?2)",
+                params![USER_DISPLAY_NAME_META_KEY, name],
+            )?;
+            Ok(name.to_string())
         })
     }
 
@@ -492,6 +536,48 @@ mod tests {
         assert!(!reserved_name("J\u{f6}rn", None));
         assert!(!reserved_name("Helper", Some("  ")));
         assert!(reserved_name("You", None));
+    }
+
+    #[test]
+    fn create_agent_rejects_the_saved_user_display_name() {
+        let (_t, s) = store();
+        s.set_user_display_name("J\u{f6}rn").unwrap();
+        let e = s.create_agent("  jo\u{308}rn ", "#3366ff").unwrap_err();
+        assert!(
+            matches!(e, StorageError::Invalid(ref m) if m.contains("reserved")),
+            "{e:?}"
+        );
+        s.create_agent("Helper", "#3366ff").unwrap();
+    }
+
+    #[test]
+    fn set_user_display_name_rejects_active_agent_names() {
+        let (_t, s) = store();
+        s.create_agent("Line Editor", "#3366ff").unwrap();
+        let e = s.set_user_display_name("  line EDITOR ").unwrap_err();
+        assert!(
+            matches!(e, StorageError::Invalid(ref m) if m.contains("already used by an agent")),
+            "{e:?}"
+        );
+        assert!(s.set_user_display_name("Writer").is_ok());
+        let stored: String = s
+            .with_conn(|c| {
+                Ok(c.query_row(
+                    "SELECT value FROM app_meta WHERE key = ?1",
+                    [USER_DISPLAY_NAME_META_KEY],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(stored, "Writer");
+    }
+
+    #[test]
+    fn set_user_display_name_allows_revoked_agent_names() {
+        let (_t, s) = store();
+        let a = s.create_agent("Line Editor", "#3366ff").unwrap();
+        s.revoke_agent(&a.id).unwrap();
+        assert!(s.set_user_display_name("Line Editor").is_ok());
     }
 
     #[test]

@@ -42,6 +42,7 @@ function fakeApi() {
     revokeToken: vi.fn(async (id: string) => {
       tokens.find((t) => t.id === id)!.revokedAt = 't';
     }),
+    setUserDisplayName: vi.fn(async (n: string) => n),
   };
   return api;
 }
