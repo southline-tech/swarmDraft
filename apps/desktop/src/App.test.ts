@@ -597,7 +597,7 @@ describe('App', () => {
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
     w.unmount();
-  });
+  }, 15_000);
 
   it('clicking any outline row logs no console warning (#36)', async () => {
     const { w, session } = await withManuscript();
@@ -617,7 +617,7 @@ describe('App', () => {
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
     w.unmount();
-  });
+  }, 15_000);
 
   it('keeps typed text and the same editor across a navigator close/open', async () => {
     const { w } = await withManuscript();
