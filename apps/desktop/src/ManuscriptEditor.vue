@@ -34,7 +34,6 @@ import { agentDirectory, authorLabel, markAuthorLabel, type AgentName } from './
 import { clampZoom, loadZoom, saveZoom } from './desk/zoom';
 import ReviewPanel from './review/ReviewPanel.vue';
 import OverlapPopover, { type OverlapEntry } from './review/OverlapPopover.vue';
-import EmptyState from './shells/EmptyState.vue';
 import {
   DecisionLog,
   keyOf,
@@ -110,6 +109,8 @@ import {
   type SuggestionTarget,
   type CommentRow,
   type SpellIssue,
+  buildThreads,
+  type CommentThread,
 } from '@swarmdraft/editor';
 import { spellDictionaryAdd, spellDictionaryIgnore } from './backend';
 import { lintBlockText } from './spellcheck/lint';
@@ -122,9 +123,20 @@ import {
   persistDismissOutdated,
 } from './review/apply';
 import { collabColor, setWriterProfileForColors } from './author-colors';
-import { commentRowLabel, primaryCommentByThread } from './review/review-sidebar';
-import { parseBookChangeKey, scopeBookChangeKey } from './review/review-book';
-import type { BookChapterGroup } from './review/review-book';
+import {
+  buildReviewList,
+  commentReviewKey,
+  isCommentReviewKey,
+  loadShowResolved,
+  saveShowResolved,
+  threadIdFromCommentReviewKey,
+  type ReviewListItem,
+} from './review/review-inline';
+import {
+  parseBookChangeKey,
+  scopeBookChangeKey,
+  type BookChapterGroup,
+} from './review/review-book';
 import { scrollBehavior, scrollElementCenterInRoot } from './review/review-scroll';
 import {
   stackMarginNoteTops,
@@ -243,6 +255,8 @@ const emit = defineEmits<{
   'open-suggestions': [items: SuggestionItem[]];
   'update:reviewFollow': [on: boolean];
   'update:authorFilter': [filter: AuthorFilter];
+  'comment-reply': [threadId: string, body: string];
+  'comment-resolve': [threadId: string, resolved: boolean];
 }>();
 
 const appFooterEditor = inject(APP_FOOTER_EDITOR_KEY, null);
@@ -476,9 +490,10 @@ const zoom = shallowRef(loadZoom());
 watch(zoom, (z) => saveZoom(z));
 
 const review = shallowRef<ReviewItem[]>([]);
-const comments = computed(() => review.value.filter((r) => r.type === 'comment_anchor'));
 const selectedCommentId = ref<string | null>(null);
 const hoveredCommentId = ref<string | null>(null);
+const showResolved = ref(loadShowResolved(prefStore()));
+watch(showResolved, (v) => saveShowResolved(v, prefStore()));
 
 function refreshCommentAnchorDecorations() {
   const e = editor.value;
@@ -493,19 +508,12 @@ function refreshCommentAnchorDecorations() {
 watch([selectedCommentId, hoveredCommentId], () => {
   void nextTick(refreshCommentAnchorDecorations);
 });
-const commentByThread = computed(() => primaryCommentByThread(props.commentRows ?? []));
 const labelAuthor = (author: string) => {
   const resolved = markAuthorLabel(author, props.authorSavedNames);
   if (!props.authorLabels) return resolved;
   const custom = props.authorLabels(author);
   if (resolved.note && !custom.note) return resolved;
   return custom;
-};
-const commentAuthor = (item: ReviewItem): AgentName | null => {
-  const row = commentByThread.value.get(item.id);
-  if (row) return commentRowLabel(row);
-  if (item.author) return labelAuthor(item.author);
-  return null;
 };
 
 /** Review step-through (RAD-258). Suggestions in document order, keyed on raw author id. */
@@ -525,6 +533,14 @@ const filter = computed({
 const viewScopeLive = shallowRef('');
 const currentKey = shallowRef<string | null>(null);
 let currentIndex = -1;
+watch(currentKey, (key) => {
+  if (!key) {
+    hoveredCommentId.value = null;
+    return;
+  }
+  hoveredCommentId.value =
+    threadIdFromCommentReviewKey(parseBookChangeKey(key)?.changeKey ?? key) ?? null;
+});
 const collapsed = shallowRef(loadCollapsed());
 watch(collapsed, (v) => saveCollapsed(v));
 const changes = computed(() =>
@@ -535,14 +551,73 @@ const changes = computed(() =>
 /** Margin callouts align to marks in this section's doc only (#212); the rail may stay book-wide. */
 const marginChanges = computed(() => visibleItems(groupChanges(suggestions.value), filter.value));
 
+const commentThreads = computed((): CommentThread[] => {
+  const e = editor.value;
+  if (!e || e.isDestroyed) return [];
+  return buildThreads(e.state.doc.toJSON() as DocNode, [...(props.commentRows ?? [])]);
+});
+
+function reviewListKey(item: ReviewListItem): string {
+  const base =
+    item.kind === 'comment'
+      ? commentReviewKey(item.thread.id)
+      : (parseBookChangeKey(item.key)?.changeKey ?? item.key);
+  return props.sectionId ? scopeBookChangeKey(props.sectionId, base) : base;
+}
+
+function fromOfChange(change: ReviewChange): number {
+  const e = editor.value;
+  if (!e) return 0;
+  const parsed = parseBookChangeKey(change.key);
+  const localKey = parsed?.changeKey ?? change.key;
+  const item =
+    changes.value.find((c) => c.key === change.key) ??
+    changes.value.find((c) => (parseBookChangeKey(c.key)?.changeKey ?? c.key) === localKey);
+  if (!item) return Number.MAX_SAFE_INTEGER;
+  const parts = item.targets
+    .map((t) => rangeOf(e, t))
+    .filter((r): r is { from: number; to: number } => !!r);
+  return parts.length ? Math.min(...parts.map((p) => p.from)) : Number.MAX_SAFE_INTEGER;
+}
+
+function fromOfThread(thread: CommentThread): number {
+  if (thread.order < 0) return -1;
+  const e = editor.value;
+  if (!e) return thread.order;
+  let from = -1;
+  e.state.doc.descendants((n, pos) => {
+    if (!n.isText) return true;
+    if (n.marks.some((m) => m.type.name === 'comment_anchor' && String(m.attrs.id) === thread.id)) {
+      if (from < 0) from = pos;
+    }
+    return true;
+  });
+  return from >= 0 ? from : -1;
+}
+
+const reviewListItems = computed(() =>
+  buildReviewList({
+    changes: changes.value,
+    threads: commentThreads.value,
+    filter: filter.value,
+    showResolved: showResolved.value,
+    fromOfChange,
+    fromOfThread,
+  }).map((item) => ({ ...item, key: reviewListKey(item) })),
+);
+
+const filteredSuggestions = computed(() => visibleItems(changes.value, filter.value));
+
 function marginSelectedKey(): string | null {
   const key = currentKey.value;
   if (!key) return null;
   const parsed = parseBookChangeKey(key);
+  const changeKey = parsed?.changeKey ?? key;
+  if (isCommentReviewKey(changeKey)) return null;
   if (parsed && props.sectionId && parsed.sectionId !== props.sectionId) return null;
   return parsed?.changeKey ?? key;
 }
-const visible = computed(() => visibleItems(changes.value, filter.value));
+const visible = computed(() => reviewListItems.value);
 const log = new DecisionLog();
 watch(
   () => props.decisionRecords,
@@ -574,7 +649,7 @@ function announceViewScope() {
   viewScopeLive.value = viewScopeAnnouncement(
     filter.value,
     display,
-    visibleItems(changes.value, filter.value).length,
+    filteredSuggestions.value.length,
   );
 }
 function refreshAuthorFilterDecorations() {
@@ -658,6 +733,15 @@ function focusReviewRow(key: string) {
 
 function select(key: string) {
   const parsed = parseBookChangeKey(key);
+  const changeKey = parsed?.changeKey ?? key;
+  const threadId = threadIdFromCommentReviewKey(changeKey);
+  if (threadId) {
+    currentKey.value = key;
+    currentIndex = visible.value.findIndex((v) => v.key === key);
+    selectedCommentId.value = threadId;
+    focusCommentByThreadId(threadId);
+    return;
+  }
   if (parsed && continuousNav) {
     currentKey.value = key;
     currentIndex = visible.value.findIndex((v) => v.key === key);
@@ -673,10 +757,10 @@ function select(key: string) {
   }
   const e = editor.value;
   const item = visible.value.find((v) => v.key === key);
-  if (!e || !item) return;
+  if (!e || !item || item.kind !== 'suggestion') return;
   currentKey.value = key;
   currentIndex = visible.value.indexOf(item);
-  const parts = item.targets.map((t) => rangeOf(e, t)).filter((r) => !!r);
+  const parts = item.change.targets.map((t) => rangeOf(e, t)).filter((r) => !!r);
   if (!parts.length) return;
   const r = {
     from: Math.min(...parts.map((p) => p.from)),
@@ -690,18 +774,48 @@ function selectLocalChange(
   displayKey?: string,
   opts?: { focusEditor?: boolean },
 ) {
+  if (isCommentReviewKey(changeKey)) {
+    const listKey =
+      displayKey ?? (props.sectionId ? scopeBookChangeKey(props.sectionId, changeKey) : changeKey);
+    currentKey.value = listKey;
+    currentIndex = visible.value.findIndex((v) => v.key === listKey);
+    selectedCommentId.value = threadIdFromCommentReviewKey(changeKey);
+    focusCommentByThreadId(selectedCommentId.value!, opts?.focusEditor === false);
+    return;
+  }
   const e = editor.value;
   if (!e) return;
   const listKey =
     displayKey ?? (props.sectionId ? scopeBookChangeKey(props.sectionId, changeKey) : changeKey);
   const item =
-    visible.value.find((v) => v.key === listKey) ??
-    visible.value.find((v) => parseBookChangeKey(v.key)?.changeKey === changeKey) ??
+    visible.value.find((v) => v.key === listKey && v.kind === 'suggestion') ??
+    visible.value.find(
+      (v) =>
+        v.kind === 'suggestion' && (parseBookChangeKey(v.key)?.changeKey ?? v.key) === changeKey,
+    ) ??
     changes.value.find((c) => c.key === changeKey);
-  if (!item) return;
+  if (!item || !('change' in item)) {
+    const fromChanges = changes.value.find((c) => c.key === changeKey);
+    if (!fromChanges) return;
+    currentKey.value = listKey;
+    currentIndex = visible.value.findIndex((v) => v.key === listKey);
+    const parts = fromChanges.targets.map((t) => rangeOf(e, t)).filter((r) => !!r);
+    if (!parts.length) return;
+    const r = {
+      from: Math.min(...parts.map((p) => p.from)),
+      to: Math.max(...parts.map((p) => p.to)),
+    };
+    if (opts?.focusEditor === false) {
+      const tr = e.state.tr.setSelection(TextSelection.create(e.state.doc, r.from, r.to));
+      e.view.dispatch(tr);
+      return;
+    }
+    e.chain().setTextSelection(r).run();
+    return;
+  }
   currentKey.value = listKey;
   currentIndex = visible.value.findIndex((v) => v.key === listKey);
-  const parts = item.targets.map((t) => rangeOf(e, t)).filter((r) => !!r);
+  const parts = item.change.targets.map((t) => rangeOf(e, t)).filter((r) => !!r);
   if (!parts.length) return;
   const r = {
     from: Math.min(...parts.map((p) => p.from)),
@@ -715,29 +829,36 @@ function selectLocalChange(
   e.chain().setTextSelection(r).run();
 }
 
-function focusComment(item: ReviewItem, rowEl?: HTMLElement | null) {
+function focusCommentByThreadId(threadId: string, skipEditorFocus = false) {
   const e = editor.value;
   if (!e) return;
-  selectedCommentId.value = item.id;
+  selectedCommentId.value = threadId;
   continuousNav?.beginSuppressSync();
   let from = -1;
   let to = -1;
   e.state.doc.descendants((n, pos) => {
     if (!n.isText) return true;
-    if (n.marks.some((m) => m.type.name === 'comment_anchor' && String(m.attrs.id) === item.id)) {
+    if (n.marks.some((m) => m.type.name === 'comment_anchor' && String(m.attrs.id) === threadId)) {
       if (from < 0) from = pos;
       to = pos + n.nodeSize;
     }
     return true;
   });
   if (from < 0) return;
-  scrollSelectionIntoManuscriptColumn(e, { from, to }, { focusEditor: false });
-  const row = rowEl ?? document.querySelector(`[data-comment-id="${CSS.escape(item.id)}"]`);
+  scrollSelectionIntoManuscriptColumn(
+    e,
+    { from, to },
+    skipEditorFocus ? { focusEditor: false } : undefined,
+  );
+  const rowKey = props.sectionId
+    ? scopeBookChangeKey(props.sectionId, commentReviewKey(threadId))
+    : commentReviewKey(threadId);
   void nextTick(() => {
     refreshCommentAnchorDecorations();
-    (row as HTMLElement | null)?.focus();
+    focusReviewRow(rowKey);
   });
 }
+
 function move(dir: 1 | -1) {
   const list = visible.value;
   const i = step(
@@ -790,7 +911,13 @@ const targetOf = (key: string | null) => {
   const local = parsed?.changeKey ?? key;
   return changes.value.find((c) => c.key === key || c.key === local)?.targets ?? [];
 };
-const decideCurrent = (d: Decision) => decide(targetOf(currentKey.value), d);
+const decideCurrent = (d: Decision) => {
+  const key = currentKey.value;
+  if (!key) return;
+  const ck = parseBookChangeKey(key)?.changeKey ?? key;
+  if (isCommentReviewKey(ck)) return;
+  decide(targetOf(key), d);
+};
 const decideOne = (key: string, d: Decision) => {
   const parsed = parseBookChangeKey(key);
   if (parsed && continuousNav && parsed.sectionId !== props.sectionId) {
@@ -1362,13 +1489,6 @@ onBeforeUnmount(() => {
   clearTimeout(focusTimer);
   editor.value?.destroy();
 });
-
-const LABELS: Record<ReviewItem['type'], string> = {
-  comment_anchor: 'Comment',
-  suggestion_insert: 'Insert',
-  suggestion_delete: 'Delete',
-  format_change: 'Format',
-};
 </script>
 
 <template>
@@ -1539,6 +1659,9 @@ const LABELS: Record<ReviewItem['type'], string> = {
         >
           <ReviewPanel
             :items="suggestions"
+            :list-items="reviewListItems"
+            :suggestion-count="filteredSuggestions.length"
+            :show-resolved="showResolved"
             :book-changes="reviewTarget ? bookChanges : undefined"
             :chapter-groups="reviewTarget ? bookChapterGroups : undefined"
             :active-scroll-key="reviewTarget ? reviewActiveScrollKey : undefined"
@@ -1558,64 +1681,13 @@ const LABELS: Record<ReviewItem['type'], string> = {
             @select-view="onSelectView"
             @dismiss-one="dismissOne"
             @update:follow="emit('update:reviewFollow', $event)"
+            @update:show-resolved="showResolved = $event"
+            @comment-reply="(id, body) => emit('comment-reply', id, body)"
+            @comment-resolve="(id, r) => emit('comment-resolve', id, r)"
           />
           <div class="visually-hidden" aria-live="polite" data-test="view-scope-live">
             {{ viewScopeLive }}
           </div>
-          <EmptyState
-            v-if="!collapsed && !comments.length && !loadError"
-            class="comments-empty"
-            data-test="comments-empty"
-            icon="comment"
-            title="No comments yet"
-            text="Select some text and choose Comment to leave yourself a note."
-          />
-          <section
-            v-else-if="!collapsed && comments.length"
-            class="comments"
-            aria-label="Comments"
-            data-test="comments-list"
-          >
-            <h3>Comments</h3>
-            <ul role="listbox">
-              <li
-                v-for="r in comments"
-                :key="r.id"
-                role="option"
-                tabindex="-1"
-                data-test="comment-row"
-                :data-comment-id="r.id"
-                :class="{ selected: r.id === selectedCommentId }"
-                :aria-selected="r.id === selectedCommentId ? 'true' : 'false'"
-                @click="focusComment(r, $event.currentTarget as HTMLElement)"
-                @keydown.enter.prevent="focusComment(r, $event.currentTarget as HTMLElement)"
-                @keydown.space.prevent="focusComment(r, $event.currentTarget as HTMLElement)"
-                @mouseenter="hoveredCommentId = r.id"
-                @mouseleave="hoveredCommentId = null"
-              >
-                <div class="review-comment-head">
-                  <strong>{{ LABELS[r.type] }}</strong>
-                  <span
-                    v-if="commentAuthor(r)"
-                    class="agent-label review-comment-author"
-                    data-test="review-author"
-                  >
-                    <template v-for="n in [commentAuthor(r)!]" :key="n.name">
-                      ·
-                      <bdi class="agent-name" dir="auto" data-test="agent-name" :title="n.name">{{
-                        n.name
-                      }}</bdi>
-                      <span v-if="n.agent" class="agent-tag" data-test="agent-tag">Bot</span>
-                      <template v-if="n.note">
-                        {{ ' ' }}<span class="agent-note" data-test="agent-note">{{ n.note }}</span>
-                      </template>
-                    </template>
-                  </span>
-                </div>
-                <q class="review-comment-quote">{{ r.text }}</q>
-              </li>
-            </ul>
-          </section>
         </div>
       </Teleport>
     </div>

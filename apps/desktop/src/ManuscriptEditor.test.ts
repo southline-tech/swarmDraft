@@ -85,13 +85,29 @@ describe('ManuscriptEditor', () => {
     const w = mount(ManuscriptEditor, { props: { content: plain }, attachTo: document.body });
     await flushPromises();
     const cards = w.findAll('[data-test="review"] .es');
-    expect(cards.map((c) => c.find('h3').text())).toEqual(['Nothing to review', 'No comments yet']);
+    expect(cards.map((c) => c.find('h3').text())).toEqual(['Nothing to review']);
     expect(w.find('.comments').exists()).toBe(false);
     w.unmount();
   });
 
-  it('renders the document with tracked changes in the review panel and comments below it', async () => {
-    const w = mount(ManuscriptEditor, { props: { content: SAMPLE_DOC }, attachTo: document.body });
+  it('renders tracked changes and comments in one mixed review list (#239)', async () => {
+    const w = mount(ManuscriptEditor, {
+      props: {
+        content: SAMPLE_DOC,
+        commentRows: [
+          {
+            id: 'r1',
+            threadId: 'sample-c1',
+            body: 'Wet.',
+            authorKind: 'human',
+            authorId: 'u',
+            authorName: 'Mara',
+            createdAt: '2026-10-26T00:00:00Z',
+          },
+        ],
+      },
+      attachTo: document.body,
+    });
     await flushPromises();
     const page = w.find('.tiptap');
     expect(page.find('ins.suggestion-insert').text()).toBe('guttered');
@@ -103,18 +119,13 @@ describe('ManuscriptEditor', () => {
     const sceneBreak = page.find('.scene-break');
     expect(sceneBreak.exists()).toBe(true);
     expect(sceneBreak.text()).toBe('* * *');
-    // The replacement is one card with an inline diff.
     const cards = w.findAll('[data-test="item"]');
     expect(cards).toHaveLength(1);
     expect(cards[0]!.find('[data-test=del]').text()).toBe('flickered');
     expect(cards[0]!.find('[data-test=ins]').text()).toBe('guttered');
-    expect(w.find('[data-test="counter"]').text()).toBe('1 of 1');
-    const items = w.findAll('[data-test="comment-row"]').map((i) => i.text());
-    expect(items).toHaveLength(1);
-    expect(items[0]).toContain('Comment');
-    // Comments stay read-only; only suggestions get Accept/Reject.
-    expect(w.find('.comments button').exists()).toBe(false);
-    expect(w.find('[data-test="comments-empty"]').exists()).toBe(false);
+    expect(w.findAll('[data-kind="comment"]')).toHaveLength(1);
+    expect(w.find('[data-test="counter"]').text()).toMatch(/of 2$/);
+    expect(w.find('.comments').exists()).toBe(false);
     w.unmount();
   });
 
@@ -134,9 +145,25 @@ describe('ManuscriptEditor', () => {
         },
       ],
     };
-    const w = mount(ManuscriptEditor, { props: { content }, attachTo: document.body });
+    const w = mount(ManuscriptEditor, {
+      props: {
+        content,
+        commentRows: [
+          {
+            id: 'r1',
+            threadId: 'c1',
+            body: 'Wet.',
+            authorKind: 'human',
+            authorId: 'u',
+            authorName: 'Mara',
+            createdAt: '2026-10-26T00:00:00Z',
+          },
+        ],
+      },
+      attachTo: document.body,
+    });
     await flushPromises();
-    await w.get('[data-test="comment-row"]').trigger('click');
+    await w.get('[data-test="review-item"][data-kind="comment"]').trigger('click');
     await flushPromises();
     await new Promise((r) => requestAnimationFrame(() => r(undefined)));
     await flushPromises();
