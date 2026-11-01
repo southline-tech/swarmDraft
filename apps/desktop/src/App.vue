@@ -31,7 +31,8 @@ import {
 } from './backend';
 import SettingsScreen from './settings/SettingsScreen.vue';
 import AgentsWindow from './agents/AgentsWindow.vue';
-import { markAuthorLabel, refreshAgents, reloadOnFocus } from './agent-names';
+import { agentDirectory, markAuthorLabel, refreshAgents, reloadOnFocus } from './agent-names';
+import type { Agent } from './backend';
 import ContinuousManuscript from './ContinuousManuscript.vue';
 import SectionNav from './SectionNav.vue';
 import OutlineRail from './desk/OutlineRail.vue';
@@ -401,6 +402,20 @@ async function getStarted() {
 const choosingBook = ref(false);
 const settingsOpen = ref(false);
 const agentsOpen = ref(false);
+const newlyPairedAgentIds = ref<string[]>([]);
+const agentsBatchBanner = computed(() => newlyPairedAgentIds.value.length >= 5);
+const agentsForWindow = computed(() => {
+  const dir = agentDirectory.value;
+  if (!dir) return [] as Agent[];
+  return [...dir.values()];
+});
+function onPairingApproved(agent: Agent) {
+  newlyPairedAgentIds.value = [...newlyPairedAgentIds.value, agent.id];
+  void refreshAgents();
+}
+function dismissAgentsBatch() {
+  newlyPairedAgentIds.value = [];
+}
 const draftPickerLabel = computed(() => session.value?.title?.trim() || 'Untitled draft');
 function openToolbarSettings() {
   settingsFocusReturn.value =
@@ -410,6 +425,8 @@ function openToolbarSettings() {
 function openToolbarAgents() {
   agentsFocusReturn.value =
     document.querySelector<HTMLElement>('[data-test="toolbar-agents"]') ?? null;
+  void refreshAgents();
+  void refreshDraftRows();
   agentsOpen.value = true;
 }
 function closeAgentsWindow() {
@@ -1079,7 +1096,11 @@ defineExpose({ open, closeSession });
   <ShellsPreview v-else-if="preview" class="shell" :initial="preview" @close="preview = null" />
   <main v-else class="shell" :class="{ 'shell--focus-mode': focusMode }">
     <div class="shell__main">
-      <PairingPrompt v-if="info && isTauri()" />
+      <PairingPrompt
+        v-if="info && isTauri()"
+        :context-manuscript-id="session?.id ?? null"
+        @approved="onPairingApproved"
+      />
       <div v-show="!focusMode" class="shell__chrome" data-test="shell-chrome">
         <header class="topbar">
           <details
@@ -1270,8 +1291,14 @@ defineExpose({ open, closeSession });
       />
       <AgentsWindow
         v-if="agentsOpen"
+        :batch-banner="agentsBatchBanner"
+        :initial-selected-agent-ids="newlyPairedAgentIds"
+        :agents="agentsForWindow"
+        :manuscripts="draftRows"
+        :current-manuscript-id="session?.id ?? null"
         @close="closeAgentsWindow"
         @open-settings="openAgentsSettingsFromWindow"
+        @dismiss-batch="dismissAgentsBatch"
       />
       <p v-if="askBotRequested" class="visually-hidden" data-test="ask-bot-requested" role="status">
         Ask bot requested

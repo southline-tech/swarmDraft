@@ -61,6 +61,12 @@ async fn outline_edits_persist_across_restart_and_show_over_mcp() {
     let (token, mid, kept_doc) = {
         let store = Store::open(tmp.path()).unwrap();
         let agent = store.create_agent("Test Agent", "#3366ff").unwrap();
+        store
+            .set_agent_manuscript_access_mode(
+                &agent.id,
+                swarmdraft_lib::agent_access::ACCESS_MODE_ALL,
+            )
+            .unwrap();
         let token = store
             .create_token(&agent.id, Some(&["read".to_string()]))
             .unwrap()

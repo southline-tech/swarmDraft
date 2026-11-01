@@ -219,6 +219,17 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE suggestions_outdated_mig RENAME TO suggestions;
      CREATE INDEX suggestions_section ON suggestions(section_id, status);
      PRAGMA foreign_keys=ON;",
+    // #244: per-agent draft access (selected list or all drafts including future).
+    "ALTER TABLE agents ADD COLUMN manuscript_access_mode TEXT NOT NULL DEFAULT 'selected'
+     CHECK (manuscript_access_mode IN ('selected', 'all'));
+     UPDATE agents SET manuscript_access_mode = 'all';
+     CREATE TABLE agent_manuscript_access (
+        agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+        manuscript_id TEXT NOT NULL REFERENCES manuscripts(id) ON DELETE CASCADE,
+        granted_at TEXT NOT NULL,
+        PRIMARY KEY (agent_id, manuscript_id)
+     );
+     CREATE INDEX agent_manuscript_access_manuscript ON agent_manuscript_access(manuscript_id);",
 ];
 
 /// How long a statement waits on a locked database before failing.

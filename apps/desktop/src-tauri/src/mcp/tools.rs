@@ -294,13 +294,29 @@ impl SwarmdraftMcp {
         f: impl FnOnce(&AgentPrincipal) -> Result<Output, ToolErr>,
     ) -> Result<CallToolResult, ErrorData> {
         let p = principal(parts)?;
-        let result = if p.has_scope(scope) {
-            f(&p)
-        } else {
+        let result = if !p.has_scope(scope) {
             Err(ToolErr {
                 outcome: "denied",
                 message: format!("token lacks the '{scope}' scope"),
             })
+        } else if let Some(mid) = manuscript_id {
+            if let Err(e) = check_len("manuscript_id", mid, MAX_ID) {
+                Err(e)
+            } else {
+                match self.store.agent_can_access_manuscript(&p.agent_id, mid) {
+                    Ok(true) => f(&p),
+                    Ok(false) => Err(ToolErr {
+                        outcome: "denied",
+                        message: "agent does not have access to this draft".into(),
+                    }),
+                    Err(e) => Err(ToolErr {
+                        outcome: "error",
+                        message: e.to_string(),
+                    }),
+                }
+            }
+        } else {
+            f(&p)
         };
         let outcome = match &result {
             Ok(_) => "ok",
@@ -347,9 +363,15 @@ impl SwarmdraftMcp {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.run(&parts, "read", "list_documents", None, json!({}), |_| {
+        self.run(&parts, "read", "list_documents", None, json!({}), |p| {
             let mut out = Vec::new();
             for m in self.store.list_manuscripts()? {
+                if !self
+                    .store
+                    .agent_can_access_manuscript(&p.agent_id, &m.id)?
+                {
+                    continue;
+                }
                 let n = self.store.list_sections(&m.id)?.len();
                 out.push(json!({ "id": m.id, "title": m.title, "createdAt": m.created_at, "sectionCount": n }));
             }
@@ -577,12 +599,21 @@ impl SwarmdraftMcp {
         Parameters(a): Parameters<GetExportArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let args = json!({ "exportId": a.export_id });
-        self.run(&parts, "read", "get_export", None, args, |_| {
+        self.run(&parts, "read", "get_export", None, args, |p| {
             check_len("export_id", &a.export_id, MAX_ID)?;
             let job = self
                 .store
                 .get_export_job(&a.export_id)
                 .map_err(ToolErr::from)?;
+            if !self
+                .store
+                .agent_can_access_manuscript(&p.agent_id, &job.manuscript_id)?
+            {
+                return Err(ToolErr {
+                    outcome: "denied",
+                    message: "agent does not have access to this draft".into(),
+                });
+            }
             Ok(Output::Json(json!({
                 "exportId": job.id,
                 "manuscriptId": job.manuscript_id,
@@ -1677,6 +1708,7 @@ mod tests {
             .id
             .clone();
         let agent = store.create_agent("Synthetic agent", "#123456").unwrap();
+        store.grant_agent_manuscript(&agent.id, &m.id).unwrap();
         let scopes: Vec<String> = ["read", "comment", "suggest"]
             .iter()
             .map(|s| s.to_string())
@@ -1780,6 +1812,7 @@ mod tests {
             .id
             .clone();
         let agent = store.create_agent("Synthetic agent", "#123456").unwrap();
+        store.grant_agent_manuscript(&agent.id, &m.id).unwrap();
         let scopes = vec!["read".to_string(), "suggest".to_string()];
         let tok = store.create_token(&agent.id, Some(&scopes)).unwrap();
         let principal = store.authenticate(&tok.token).unwrap().unwrap();

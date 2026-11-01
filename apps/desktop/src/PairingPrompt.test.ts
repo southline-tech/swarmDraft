@@ -19,7 +19,15 @@ function mountPrompt(
 ) {
   const api: PairingApi = {
     listPending: vi.fn(async () => pending.map((p) => ({ ...p }))),
-    approve: vi.fn(async () => {}),
+    approve: vi.fn(async () => ({
+      id: 'new-agent',
+      name: 'Helper',
+      color: '#3366ff',
+      createdAt: 't',
+      revokedAt: null,
+      primary: false,
+      lastSeenAt: null,
+    })),
     deny: vi.fn(async () => {}),
     ...overrides,
   };
@@ -64,7 +72,7 @@ describe('PairingPrompt', () => {
     await flushPromises();
     await w.get('[data-test="pairing-allow"]').trigger('click');
     await flushPromises();
-    expect(api.approve).toHaveBeenCalledWith('p1', ['comment', 'suggest']);
+    expect(api.approve).toHaveBeenCalledWith('p1', ['comment', 'suggest'], null);
   });
 
   it('shows the second request after the first resolves', async () => {
@@ -74,7 +82,15 @@ describe('PairingPrompt', () => {
       .mockResolvedValueOnce([sample('p2', 'Second')]);
     const api: PairingApi = {
       listPending: list,
-      approve: vi.fn(async () => {}),
+      approve: vi.fn(async () => ({
+        id: 'new-agent',
+        name: 'Helper',
+        color: '#3366ff',
+        createdAt: 't',
+        revokedAt: null,
+        primary: false,
+        lastSeenAt: null,
+      })),
       deny: vi.fn(async () => {}),
     };
     const w = mount(PairingPrompt, { props: { api }, attachTo: document.body });

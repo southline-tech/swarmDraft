@@ -44,6 +44,13 @@ function fakeApi() {
       tokens.find((t) => t.id === id)!.revokedAt = 't';
     }),
     setUserDisplayName: vi.fn(async (n: string) => n),
+    draftAccessList: vi.fn(async () => []),
+    setDraftAccessMode: vi.fn(async () => {}),
+    grantDraft: vi.fn(async () => {}),
+    revokeDraft: vi.fn(async () => {}),
+    bulkGrantCurrentDraft: vi.fn(async () => {}),
+    bulkGrantAllDrafts: vi.fn(async () => {}),
+    bulkRevokeAllDrafts: vi.fn(async () => {}),
   };
   return api;
 }

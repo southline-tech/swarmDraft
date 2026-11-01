@@ -32,6 +32,7 @@ pub async fn start_with(scopes: &[&str], tune: impl FnOnce(&mut mcp::McpConfig))
     let fixture: Value =
         serde_json::from_str(&std::fs::read_to_string(SECTION_FIXTURE).unwrap()).unwrap();
     let m = store.create_manuscript("Sample Manuscript").unwrap();
+    store.grant_agent_manuscript(&agent.id, &m.id).unwrap();
     let s = store
         .import_section_json(&m.id, "chapter", "Chapter One", &fixture["doc"])
         .unwrap();
@@ -1684,6 +1685,9 @@ async fn rpc_as(s: &Server, token: &str, method: &str, params: Value) -> Value {
 
 async fn second_agent_token(s: &Server, name: &str) -> String {
     let agent = s.store.create_agent(name, "#aabbcc").unwrap();
+    s.store
+        .grant_agent_manuscript(&agent.id, &s.manuscript_id)
+        .unwrap();
     let scopes = vec![
         "read".to_string(),
         "suggest".to_string(),
@@ -1849,7 +1853,7 @@ async fn initialize_and_poll_pairing_carry_work_guide() {
     let sc = &req_body["result"]["structuredContent"];
     let pid = sc["pairingId"].as_str().unwrap();
     let secret = sc["pairingSecret"].as_str().unwrap();
-    s.store.approve_pairing(pid, None).unwrap();
+    s.store.approve_pairing(pid, None, None).unwrap();
     let poll_resp = post(
         &s.url,
         None,
@@ -1865,4 +1869,36 @@ async fn initialize_and_poll_pairing_carry_work_guide() {
         .unwrap_or_default();
     assert!(guide.contains("suggest_edit"), "{guide}");
     assert!(poll_body["result"]["structuredContent"]["token"].is_string());
+}
+
+#[tokio::test]
+async fn agent_without_draft_access_cannot_read_or_list_other_manuscripts() {
+    let s = start(&["read", "comment", "suggest"], 1000).await;
+    let other = s.store.create_manuscript("Secret draft").unwrap();
+    s.store
+        .import_section_json(
+            &other.id,
+            "chapter",
+            "Hidden",
+            &json!({"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Private."}]}]}),
+        )
+        .unwrap();
+    let list = call(&s, "list_documents", json!({})).await;
+    let ids: Vec<&str> = list["structuredContent"]["documents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|d| d["id"].as_str())
+        .collect();
+    assert!(ids.contains(&s.manuscript_id.as_str()));
+    assert!(!ids.contains(&other.id.as_str()));
+
+    let denied = call(
+        &s,
+        "read_chapter",
+        json!({"manuscript_id": other.id, "section_id": "nope", "format": "json"}),
+    )
+    .await;
+    assert_eq!(denied["isError"], true);
+    assert!(text(&denied).contains("does not have access"));
 }

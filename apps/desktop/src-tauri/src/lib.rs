@@ -7,6 +7,7 @@
 //! - `migrate`: first-run copy of the pre-rename data folders (#43).
 //! - `mcp`: in-app MCP server bound to 127.0.0.1 with per-agent bearer tokens (RAD-205/209/210).
 
+pub mod agent_access;
 pub mod agents;
 pub mod anchor;
 pub mod backup;
@@ -140,12 +141,84 @@ fn approve_pairing(
     app: tauri::AppHandle,
     pairing_id: String,
     scopes: Option<Vec<String>>,
+    context_manuscript_id: Option<String>,
 ) -> Result<agents::Agent, String> {
     let (agent, _token) = store
-        .approve_pairing(&pairing_id, scopes.as_deref())
+        .approve_pairing(
+            &pairing_id,
+            scopes.as_deref(),
+            context_manuscript_id.as_deref(),
+        )
         .map_err(err)?;
     let _ = app.emit("agents-changed", ());
     Ok(agent)
+}
+
+#[tauri::command]
+fn agents_draft_access_list(
+    store: tauri::State<'_, storage::Store>,
+) -> Result<Vec<agent_access::AgentDraftAccess>, String> {
+    store.list_agents_draft_access().map_err(err)
+}
+
+#[tauri::command]
+fn agent_set_draft_access_mode(
+    store: tauri::State<'_, storage::Store>,
+    agent_id: String,
+    mode: String,
+) -> Result<(), String> {
+    store
+        .set_agent_manuscript_access_mode(&agent_id, &mode)
+        .map_err(err)
+}
+
+#[tauri::command]
+fn agent_grant_draft(
+    store: tauri::State<'_, storage::Store>,
+    agent_id: String,
+    manuscript_id: String,
+) -> Result<(), String> {
+    store
+        .grant_agent_manuscript(&agent_id, &manuscript_id)
+        .map_err(err)
+}
+
+#[tauri::command]
+fn agent_revoke_draft(
+    store: tauri::State<'_, storage::Store>,
+    agent_id: String,
+    manuscript_id: String,
+) -> Result<(), String> {
+    store
+        .revoke_agent_manuscript(&agent_id, &manuscript_id)
+        .map_err(err)
+}
+
+#[tauri::command]
+fn agents_bulk_grant_current_draft(
+    store: tauri::State<'_, storage::Store>,
+    agent_ids: Vec<String>,
+    manuscript_id: String,
+) -> Result<(), String> {
+    store
+        .bulk_grant_manuscript(&agent_ids, &manuscript_id)
+        .map_err(err)
+}
+
+#[tauri::command]
+fn agents_bulk_grant_all_drafts(
+    store: tauri::State<'_, storage::Store>,
+    agent_ids: Vec<String>,
+) -> Result<(), String> {
+    store.bulk_grant_all_manuscripts(&agent_ids).map_err(err)
+}
+
+#[tauri::command]
+fn agents_bulk_revoke_all_drafts(
+    store: tauri::State<'_, storage::Store>,
+    agent_ids: Vec<String>,
+) -> Result<(), String> {
+    store.bulk_revoke_all_draft_access(&agent_ids).map_err(err)
 }
 
 #[tauri::command]
@@ -887,6 +960,13 @@ pub fn run() {
             list_pending_pairings,
             approve_pairing,
             deny_pairing,
+            agents_draft_access_list,
+            agent_set_draft_access_mode,
+            agent_grant_draft,
+            agent_revoke_draft,
+            agents_bulk_grant_current_draft,
+            agents_bulk_grant_all_drafts,
+            agents_bulk_revoke_all_drafts,
             create_backup,
             recovery_notices,
             dismiss_recovery_notices,

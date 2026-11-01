@@ -28,6 +28,9 @@ async fn start() -> Server {
     let tmp = tempfile::tempdir().unwrap();
     let store = Store::open(tmp.path()).unwrap();
     let agent = store.create_agent("Grok Bot", "#3366ff").unwrap();
+    store
+        .set_agent_manuscript_access_mode(&agent.id, swarmdraft_lib::agent_access::ACCESS_MODE_ALL)
+        .unwrap();
     let scopes = vec!["read".to_string(), "comment".into(), "suggest".into()];
     let token = store.create_token(&agent.id, Some(&scopes)).unwrap().token;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

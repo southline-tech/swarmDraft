@@ -79,6 +79,12 @@ async fn import_is_listed_over_mcp_and_survives_restart() {
     let (token, id) = {
         let store = Store::open(tmp.path()).unwrap();
         let agent = store.create_agent("Test Agent", "#3366ff").unwrap();
+        store
+            .set_agent_manuscript_access_mode(
+                &agent.id,
+                swarmdraft_lib::agent_access::ACCESS_MODE_ALL,
+            )
+            .unwrap();
         let token = store
             .create_token(&agent.id, Some(&["read".to_string()]))
             .unwrap()
@@ -223,6 +229,12 @@ async fn editor_edits_are_saved_reopened_and_read_over_mcp() {
     let (token, id, sec) = {
         let store = Store::open(tmp.path()).unwrap();
         let agent = store.create_agent("Test Agent", "#3366ff").unwrap();
+        store
+            .set_agent_manuscript_access_mode(
+                &agent.id,
+                swarmdraft_lib::agent_access::ACCESS_MODE_ALL,
+            )
+            .unwrap();
         let token = store
             .create_token(&agent.id, Some(&["read".to_string()]))
             .unwrap()
