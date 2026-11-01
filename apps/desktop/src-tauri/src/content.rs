@@ -14,9 +14,7 @@ use serde_json::{json, Map, Value};
 use yrs::types::text::YChange;
 use yrs::types::xml::{Xml, XmlFragment, XmlOut};
 use yrs::types::Attrs;
-use yrs::{
-    Any, BranchID, Doc, GetString, Out, ReadTxn, Text, Transact, TransactionMut, XmlFragmentRef,
-};
+use yrs::{Any, BranchID, Doc, GetString, Out, ReadTxn, Text, Transact, TransactionMut, WriteTxn};
 
 /// Name of the Y.XmlFragment that holds a section (same as y-prosemirror / `FRAGMENT_NAME`).
 pub const FRAGMENT: &str = "prosemirror";
@@ -372,8 +370,13 @@ fn fill(
 /// Append the blocks of a ProseMirror `doc` JSON to a section document (same encoding as
 /// `docToYDoc` in ydoc.ts). Errors only if a run's mark keys can't be made unique.
 pub fn encode(doc: &Doc, pm_doc: &Value) -> Result<(), String> {
-    let frag: XmlFragmentRef = doc.get_or_insert_xml_fragment(FRAGMENT);
+    encode_fragment(doc, FRAGMENT, pm_doc)
+}
+
+/// Same as [`encode`], but targets a named XmlFragment (e.g. story-note bodies at `body:{id}`).
+pub fn encode_fragment(doc: &Doc, fragment: &str, pm_doc: &Value) -> Result<(), String> {
     let mut txn = doc.transact_mut();
+    let frag = txn.get_or_insert_xml_fragment(fragment);
     if let Some(c) = pm_doc["content"].as_array() {
         fill(&mut txn, &frag, c)?;
     }
