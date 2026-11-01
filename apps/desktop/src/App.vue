@@ -398,10 +398,21 @@ const settingsOpen = ref(false);
 const agentsOpen = ref(false);
 const draftPickerLabel = computed(() => session.value?.title?.trim() || 'Untitled draft');
 function openToolbarSettings() {
+  settingsFocusReturn.value =
+    document.querySelector<HTMLElement>('[data-test="toolbar-settings"]') ?? null;
   settingsOpen.value = true;
 }
 function openToolbarAgents() {
+  agentsFocusReturn.value =
+    document.querySelector<HTMLElement>('[data-test="toolbar-agents"]') ?? null;
   agentsOpen.value = true;
+}
+function closeAgentsWindow() {
+  agentsOpen.value = false;
+  void nextTick(() => {
+    agentsFocusReturn.value?.focus();
+    agentsFocusReturn.value = null;
+  });
 }
 function openAgentsSettingsFromWindow() {
   agentsOpen.value = false;
@@ -422,6 +433,8 @@ function openPreview(id: 'all') {
   preview.value = id;
 }
 const settingsButton = ref<HTMLButtonElement | null>(null);
+const settingsFocusReturn = shallowRef<HTMLElement | null>(null);
+const agentsFocusReturn = shallowRef<HTMLElement | null>(null);
 const recentOpen = ref(false);
 const recentBooks = ref<StoredManuscriptRow[]>([]);
 async function refreshRecentBooks() {
@@ -495,8 +508,10 @@ async function quitApp() {
 }
 watch(settingsOpen, async (isOpen) => {
   await nextTick();
-  // SettingsScreen moves focus into itself on mount; back to the button that opened it on close.
-  if (!isOpen) settingsButton.value?.focus();
+  if (!isOpen) {
+    (settingsFocusReturn.value ?? settingsButton.value)?.focus();
+    settingsFocusReturn.value = null;
+  }
 });
 const fileInput = ref<HTMLInputElement | null>(null);
 const chooseFile = () => fileInput.value?.click();
@@ -1199,7 +1214,7 @@ defineExpose({ open, closeSession });
       />
       <AgentsWindow
         v-if="agentsOpen"
-        @close="agentsOpen = false"
+        @close="closeAgentsWindow"
         @open-settings="openAgentsSettingsFromWindow"
       />
       <p v-if="askBotRequested" class="visually-hidden" data-test="ask-bot-requested" role="status">

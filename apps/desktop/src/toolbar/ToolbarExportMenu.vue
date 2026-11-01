@@ -114,7 +114,9 @@ const btn =
         Markdown
       </button>
     </div>
-    <p v-if="status" class="sr-only" role="status">{{ status }}</p>
+    <p v-if="status" role="status" class="tb-export-status" data-test="toolbar-export-status">
+      {{ status }}
+    </p>
   </div>
 </template>
 
@@ -139,5 +141,22 @@ const btn =
   background: var(--ct-selected-bg);
   color: var(--ct-accent);
   outline: none;
+}
+.tb-export-status {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 10;
+  max-width: 16rem;
+  margin: var(--ct-space-1) 0 0;
+  padding: var(--ct-space-1) var(--ct-space-2);
+  border-radius: var(--ct-radius-sm);
+  background: var(--ct-surface);
+  border: 1px solid var(--ct-border);
+  color: var(--ct-text-muted);
+  font-family: var(--ct-font-ui);
+  font-size: var(--ct-text-xs);
+  white-space: normal;
+  box-shadow: var(--ct-elevation-3);
 }
 </style>
