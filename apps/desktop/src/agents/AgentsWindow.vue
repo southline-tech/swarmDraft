@@ -9,7 +9,9 @@ import {
   type AgentDraftAccess,
   type AgentDraftAccessMode,
   type StoredManuscriptRow,
+} from '../backend';
 import { errorLine } from '../errors/map-error';
+import { trapTab } from '../settings/focus-trap';
 
 const props = defineProps<{
   batchBanner?: boolean;
