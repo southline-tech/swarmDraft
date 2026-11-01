@@ -1,9 +1,16 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { Editor } from '@tiptap/core';
 import { manuscriptEditorOptions } from '@swarmdraft/editor';
 import EditorToolbar from './EditorToolbar.vue';
 import { THEME_KEY } from '../settings/prefs';
+
+vi.mock('../export/run-book-export', () => ({
+  runBookExport: vi.fn(),
+}));
+vi.mock('../export/api', () => ({
+  exportApi: { revealInFolder: vi.fn() },
+}));
 
 const editors: Editor[] = [];
 afterEach(() => editors.splice(0).forEach((e) => e.destroy()));
@@ -49,6 +56,16 @@ describe('Wave 6a toolbar (#245)', () => {
     for (const id of ['export-docx', 'export-pdf', 'export-md']) {
       expect(w.find(`[data-test="${id}"]`).exists()).toBe(true);
     }
+    w.unmount();
+  });
+
+  it('PDF shows coming-later copy without running export (#250)', async () => {
+    const { runBookExport } = await import('../export/run-book-export');
+    const w = mountBar();
+    await w.get('[data-test="toolbar-export"]').trigger('click');
+    await w.get('[data-test="export-pdf"]').trigger('click');
+    expect(w.get('[data-test="toolbar-export-status"]').text()).toContain('coming');
+    expect(runBookExport).not.toHaveBeenCalled();
     w.unmount();
   });
 });

@@ -3,7 +3,7 @@
 import { ref, shallowRef } from 'vue';
 import { isTauri } from '@tauri-apps/api/core';
 import { exportApi } from '../export/api';
-import { errorLine } from '../errors/map-error';
+import { runBookExport } from '../export/run-book-export';
 import { loadPandocPath } from '../settings/prefs';
 import AppIcon from '../icons/AppIcon.vue';
 import { useToolbarMenu } from './menu';
@@ -19,37 +19,54 @@ const { open, wrapEl, close, toggle, onMenuKey } = useToolbarMenu(menuEl, trigge
 
 const busy = ref(false);
 const status = ref('');
+const savedPath = ref<string | null>(null);
 
-async function run(format: 'docx' | 'pdf' | 'md') {
+function setStatus(message: string) {
+  status.value = message;
+}
+
+async function runDocx() {
   if (!props.manuscriptId || busy.value) return;
-  if (format === 'md') {
-    status.value = 'Markdown export is coming in a later update.';
-    close(false);
-    return;
-  }
   if (!isTauri()) {
-    status.value = 'Export is only available in the desktop app.';
+    setStatus('Export is only available in the desktop app.');
     close(false);
     return;
   }
   busy.value = true;
-  status.value = '';
+  savedPath.value = null;
   close(false);
   try {
-    const job = await exportApi.trigger(props.manuscriptId, format, {
-      pandocPath: loadPandocPath(),
-    });
-    if (!job) {
-      status.value = 'Export is only available in the desktop app.';
-      return;
-    }
-    status.value = 'Export started…';
-    const done = await exportApi.wait(job.id, { deadlineMs: 600_000 });
-    status.value = done ? exportApi.statusLabel(done) : 'Still working… check again in a moment.';
-  } catch (e) {
-    status.value = errorLine(e, 'export');
+    const result = await runBookExport(
+      props.manuscriptId,
+      'docx',
+      loadPandocPath(),
+      setStatus,
+    );
+    setStatus(result.status);
+    savedPath.value = result.savedPath;
   } finally {
     busy.value = false;
+  }
+}
+
+function runComingLater(kind: 'pdf' | 'md') {
+  if (!props.manuscriptId || busy.value) return;
+  savedPath.value = null;
+  setStatus(
+    kind === 'pdf'
+      ? 'PDF export is coming in a later update.'
+      : 'Markdown export is coming in a later update.',
+  );
+  close(false);
+}
+
+async function openSavedFolder() {
+  const path = savedPath.value;
+  if (!path) return;
+  try {
+    await exportApi.revealInFolder(path);
+  } catch {
+    setStatus('Could not open that folder.');
   }
 }
 
@@ -89,7 +106,7 @@ const btn =
         tabindex="-1"
         class="tb-menu-item"
         data-test="export-docx"
-        @click="run('docx')"
+        @click="runDocx()"
       >
         Word (.docx)
       </button>
@@ -99,7 +116,7 @@ const btn =
         tabindex="-1"
         class="tb-menu-item"
         data-test="export-pdf"
-        @click="run('pdf')"
+        @click="runComingLater('pdf')"
       >
         PDF
       </button>
@@ -109,14 +126,25 @@ const btn =
         tabindex="-1"
         class="tb-menu-item"
         data-test="export-md"
-        @click="run('md')"
+        @click="runComingLater('md')"
       >
         Markdown
       </button>
     </div>
-    <p v-if="status" role="status" class="tb-export-status" data-test="toolbar-export-status">
-      {{ status }}
-    </p>
+    <div v-if="status || savedPath" class="tb-export-feedback">
+      <p v-if="status" role="status" class="tb-export-status" data-test="toolbar-export-status">
+        {{ status }}
+      </p>
+      <button
+        v-if="savedPath"
+        type="button"
+        class="tb-export-open"
+        data-test="toolbar-export-open-folder"
+        @click="openSavedFolder()"
+      >
+        Open folder
+      </button>
+    </div>
   </div>
 </template>
 
@@ -142,13 +170,20 @@ const btn =
   color: var(--ct-accent);
   outline: none;
 }
-.tb-export-status {
+.tb-export-feedback {
   position: absolute;
   top: 100%;
   right: 0;
   z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--ct-space-1);
   max-width: 16rem;
-  margin: var(--ct-space-1) 0 0;
+  margin-top: var(--ct-space-1);
+}
+.tb-export-status {
+  margin: 0;
   padding: var(--ct-space-1) var(--ct-space-2);
   border-radius: var(--ct-radius-sm);
   background: var(--ct-surface);
@@ -158,5 +193,21 @@ const btn =
   font-size: var(--ct-text-xs);
   white-space: normal;
   box-shadow: var(--ct-elevation-3);
+}
+.tb-export-open {
+  padding: var(--ct-space-1) var(--ct-space-2);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-sm);
+  background: var(--ct-surface);
+  color: var(--ct-accent);
+  font-family: var(--ct-font-ui);
+  font-size: var(--ct-text-xs);
+  cursor: pointer;
+}
+.tb-export-open:hover,
+.tb-export-open:focus-visible {
+  background: var(--ct-selected-bg);
+  outline: none;
+  box-shadow: var(--ct-focus-ring);
 }
 </style>
