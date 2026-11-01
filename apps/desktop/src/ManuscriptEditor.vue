@@ -79,6 +79,8 @@ import {
   collaborativeEditorOptions,
   AuthorLabels,
   AuthorSuggestionColors,
+  CommentAnchorUi,
+  refreshCommentAnchorUi,
   FindHighlight,
   FormatTrackChanges,
   HumanTrackChanges,
@@ -110,7 +112,11 @@ import { commentRowLabel, primaryCommentByThread } from './review/review-sidebar
 import { parseBookChangeKey, scopeBookChangeKey } from './review/review-book';
 import type { BookChapterGroup } from './review/review-book';
 import { scrollBehavior, scrollElementCenterInRoot } from './review/review-scroll';
-import { stackMarginNoteTops, type MarginNoteLayout } from './review/margin-note-layout';
+import {
+  stackMarginNoteTops,
+  clampSelectedMarginTop,
+  type MarginNoteLayout,
+} from './review/margin-note-layout';
 import { CONTINUOUS_REVIEW_NAV, CONTINUOUS_SCROLL_ROOT } from './continuous-review-nav';
 import type { ReviewChange } from './review/review-state';
 import { SECTION_LOAD_ERROR_COPY } from './errors/map-error';
@@ -449,30 +455,18 @@ const comments = computed(() => review.value.filter((r) => r.type === 'comment_a
 const selectedCommentId = ref<string | null>(null);
 const hoveredCommentId = ref<string | null>(null);
 
-function editorDom(): HTMLElement | null {
+function refreshCommentAnchorDecorations() {
   const e = editor.value;
-  if (!e || e.isDestroyed) return null;
+  if (!e || e.isDestroyed) return;
   try {
-    return e.view.dom;
+    refreshCommentAnchorUi(e.view);
   } catch {
-    return null;
+    /* view not mounted yet */
   }
 }
 
-function syncCommentAnchorClasses() {
-  if (!hostMounted.value) return;
-  const root = editorDom();
-  if (!root) return;
-  root.querySelectorAll('.comment-anchor').forEach((node) => {
-    if (!(node instanceof HTMLElement)) return;
-    const id = node.getAttribute('data-id') ?? node.getAttribute('data-comment-id') ?? '';
-    node.classList.toggle('comment-anchor--selected', id === selectedCommentId.value);
-    node.classList.toggle('comment-anchor--hover', id === hoveredCommentId.value);
-  });
-}
-
 watch([selectedCommentId, hoveredCommentId], () => {
-  void nextTick(syncCommentAnchorClasses);
+  void nextTick(refreshCommentAnchorDecorations);
 });
 const commentByThread = computed(() => primaryCommentByThread(props.commentRows ?? []));
 const labelAuthor = (author: string) => {
@@ -501,6 +495,16 @@ const changes = computed(() =>
     ? [...props.bookChanges]
     : groupChanges(suggestions.value),
 );
+/** Margin callouts align to marks in this section's doc only (#212); the rail may stay book-wide. */
+const marginChanges = computed(() => groupChanges(suggestions.value));
+
+function marginSelectedKey(): string | null {
+  const key = currentKey.value;
+  if (!key) return null;
+  const parsed = parseBookChangeKey(key);
+  if (parsed && props.sectionId && parsed.sectionId !== props.sectionId) return null;
+  return parsed?.changeKey ?? key;
+}
 const visible = computed(() => visibleItems(changes.value, filter.value));
 const log = new DecisionLog();
 watch(
@@ -669,7 +673,7 @@ function focusComment(item: ReviewItem, rowEl?: HTMLElement | null) {
   scrollSelectionIntoManuscriptColumn(e, { from, to }, { focusEditor: false });
   const row = rowEl ?? document.querySelector(`[data-comment-id="${CSS.escape(item.id)}"]`);
   void nextTick(() => {
-    syncCommentAnchorClasses();
+    refreshCommentAnchorDecorations();
     (row as HTMLElement | null)?.focus();
   });
 }
@@ -765,7 +769,7 @@ const deskWidth = shallowRef(0);
 const deskLeft = shallowRef(0);
 const hostMounted = ref(false);
 const marginNotesShown = computed(
-  () => !focusMode.value && !props.notesHidden && changes.value.length > 0,
+  () => !focusMode.value && !props.notesHidden && marginChanges.value.length > 0,
 );
 const marginEl = shallowRef<HTMLElement | null>(null);
 const marginNoteHeights = ref<Record<string, number>>({});
@@ -806,20 +810,32 @@ function measureMarginNotes() {
       return;
     }
     const marginTop = margin.getBoundingClientRect().top;
-    const measures = changes.value.map((c) => {
-      const from = anchorFromForChange(e, c);
-      const height = marginNoteHeights.value[c.key] ?? 48;
-      if (from == null) return { key: c.key, idealTop: 0, height };
-      const coords = coordsAtPos(from);
-      return { key: c.key, idealTop: coords.top - marginTop, height };
-    });
-    marginLayouts.value = stackMarginNoteTops(measures, currentKey.value);
+    const measures = marginChanges.value
+      .map((c) => {
+        const from = anchorFromForChange(e, c);
+        const height = marginNoteHeights.value[c.key] ?? 48;
+        if (from == null) return null;
+        const coords = coordsAtPos(from);
+        return { key: c.key, idealTop: coords.top - marginTop, height };
+      })
+      .filter((m): m is NonNullable<typeof m> => m != null);
+    if (!measures.length) {
+      marginLayouts.value = [];
+      return;
+    }
+    const stacked = stackMarginNoteTops(measures, marginSelectedKey());
+    marginLayouts.value = clampSelectedMarginTop(
+      stacked,
+      marginSelectedKey(),
+      marginNoteHeights.value,
+      margin.clientHeight,
+    );
   });
 }
 
 function marginNoteStyle(key: string): Record<string, string> {
   const layout = marginLayoutByKey.value.get(key);
-  const change = changes.value.find((c) => c.key === key);
+  const change = marginChanges.value.find((c) => c.key === key);
   const style: Record<string, string> = {};
   if (layout) style.top = `${layout.top}px`;
   if (change) style['--ct-suggester'] = collabColor(change.author);
@@ -837,7 +853,7 @@ function bindMarginNoteEl(key: string, el: Element | null) {
   });
 }
 
-watch([changes, currentKey, zoom, marginNotesShown], () => scheduleMeasureMarginNotes(), {
+watch([marginChanges, currentKey, zoom, marginNotesShown], () => scheduleMeasureMarginNotes(), {
   deep: true,
 });
 watch(deskWidth, () => scheduleMeasureMarginNotes());
@@ -1064,6 +1080,12 @@ const options: Partial<EditorOptions> = {
       colorFor: collabColor,
       authorVisible: (author) => authorVisibleInFilter(filter.value, author),
     }),
+    CommentAnchorUi.configure({
+      uiState: () => ({
+        selectedId: selectedCommentId.value,
+        hoverId: hoveredCommentId.value,
+      }),
+    }),
     FindHighlight,
     Spellcheck.configure({
       enabled: () => spellcheckEnabled(spellPrefs.value),
@@ -1093,7 +1115,7 @@ const options: Partial<EditorOptions> = {
   onCreate: ({ editor }) => {
     refreshReview(editor);
     void nextTick(() => {
-      syncCommentAnchorClasses();
+      refreshCommentAnchorDecorations();
       measureMarginNotes();
     });
     countChapter(editor);
@@ -1110,7 +1132,6 @@ const options: Partial<EditorOptions> = {
   onUpdate: ({ editor }) => {
     refreshReview(editor);
     scheduleCount(editor);
-    void nextTick(syncCommentAnchorClasses);
     scheduleMeasureMarginNotes();
     if (loadError.value) return;
     emit('change', editor.getJSON());
@@ -1353,12 +1374,12 @@ const LABELS: Record<ReviewItem['type'], string> = {
           aria-label="Suggestion notes"
         >
           <div
-            v-for="c in changes"
+            v-for="c in marginChanges"
             :key="`m-${c.key}`"
             :ref="(el) => bindMarginNoteEl(c.key, el as Element | null)"
             class="sh-callout"
             :class="{
-              'sh-callout--selected': c.key === currentKey,
+              'sh-callout--selected': c.key === marginSelectedKey(),
               'sh-callout--nudged': marginLayoutByKey.get(c.key)?.nudged,
             }"
             :style="marginNoteStyle(c.key)"
@@ -1718,11 +1739,12 @@ const LABELS: Record<ReviewItem['type'], string> = {
     box-shadow 0.12s ease,
     border-color 0.12s ease;
 }
-.tiptap .comment-anchor:hover,
-.tiptap .comment-anchor.comment-anchor--hover {
+.tiptap .comment-anchor:hover:not(.comment-anchor--selected),
+.tiptap .comment-anchor.comment-anchor--hover:not(.comment-anchor--selected) {
   background: color-mix(in srgb, var(--ct-comment-bg) 78%, var(--ct-warning) 22%);
 }
 .tiptap .comment-anchor.comment-anchor--selected {
+  background: var(--ct-comment-bg);
   border-bottom-color: var(--ct-accent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ct-accent) 35%, transparent);
 }
@@ -1851,6 +1873,10 @@ const LABELS: Record<ReviewItem['type'], string> = {
   border-radius: var(--ct-radius-md);
   border: 1px solid var(--ct-border);
   cursor: pointer;
+}
+.manuscript-editor .comments li:not(.selected):hover,
+.continuous-review-rail .comments li:not(.selected):hover {
+  background: color-mix(in srgb, var(--ct-comment-bg) 42%, transparent);
 }
 .manuscript-editor .comments li.selected,
 .continuous-review-rail .comments li.selected {

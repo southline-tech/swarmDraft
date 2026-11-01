@@ -88,6 +88,7 @@ export * from './decisions';
 export * from './comments';
 export * from './author-labels';
 export * from './author-suggestion-colors';
+export * from './comment-anchor-ui';
 export * from './find-replace';
 export * from './human-track';
 export * from './format-track';

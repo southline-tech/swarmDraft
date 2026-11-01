@@ -277,3 +277,6 @@ Implementor: add one line here for every review, design or QA finding, in the sa
 - 2026-10-31 · #220 · review 5725517731 · sync suppress timeout-only · `scrollend` on continuous root with 600ms fallback; list sync uses sticky head height + 8
 - 2026-10-31 · #220 · review 5725517731 · `MARK_SELECTOR` omitted comments · include `span.comment-anchor[data-id]` in scroll-sync anchors
 - 2026-10-31 · #220 · CI · App #36 outline loop timeout on runner · 15s timeout on full-outline click tests (Batch B nav cost)
+- 2026-10-31 · #221 · review 6552710860 · `syncCommentAnchorClasses` classList broke copy→cut (#54) · `CommentAnchorUi` PM decorations + `refreshCommentAnchorUi`; never mutate anchor DOM during live edits
+- 2026-10-31 · #221 · review 6552710860 · margin laid out from book-wide `changes` · `marginChanges` from local `suggestions` only; skip unmeasurable foreign keys
+- 2026-10-31 · #221 · review 6552710860 · comment list rows missing hover wash · `:not(.selected):hover` comment-bg mix; selected anchor/row beats hover

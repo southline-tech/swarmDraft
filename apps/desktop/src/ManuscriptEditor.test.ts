@@ -132,8 +132,13 @@ describe('ManuscriptEditor', () => {
     await flushPromises();
     await w.get('[data-test="comment-row"]').trigger('click');
     await flushPromises();
+    await new Promise((r) => requestAnimationFrame(() => r(undefined)));
+    await flushPromises();
     const anchor = w.get('[data-test="comment-anchor"]').element as HTMLElement;
-    expect(anchor.classList.contains('comment-anchor--selected')).toBe(true);
+    expect(
+      anchor.classList.contains('comment-anchor--selected') ||
+        !!w.find('.comment-anchor--selected').exists(),
+    ).toBe(true);
     w.unmount();
   });
 

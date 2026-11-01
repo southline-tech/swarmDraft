@@ -50,3 +50,26 @@ export function stackMarginNoteTops(
     nudged: Math.abs(tops[i]! - it.idealTop) > MARGIN_CONNECTOR_FADE_PX,
   }));
 }
+
+/** Keep the selected card visible inside the margin column when ideal top is off-screen. */
+export function clampSelectedMarginTop(
+  layouts: readonly MarginNoteLayout[],
+  selectedKey: string | null,
+  heights: Readonly<Record<string, number>>,
+  viewportHeight: number,
+): MarginNoteLayout[] {
+  if (!selectedKey || viewportHeight <= 0) return [...layouts];
+  const si = layouts.findIndex((l) => l.key === selectedKey);
+  if (si < 0) return [...layouts];
+  const height = heights[selectedKey] ?? 48;
+  const maxTop = Math.max(0, viewportHeight - height);
+  return layouts.map((l, i) => {
+    if (i !== si) return { ...l };
+    const top = Math.min(Math.max(l.idealTop, 0), maxTop);
+    return {
+      ...l,
+      top,
+      nudged: Math.abs(top - l.idealTop) > MARGIN_CONNECTOR_FADE_PX,
+    };
+  });
+}
