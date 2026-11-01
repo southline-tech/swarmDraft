@@ -189,6 +189,8 @@ const props = defineProps<{
   sliceMode?: boolean;
   /** Open book id for spell dictionary / ignore (#159). */
   manuscriptId?: string;
+  /** Toolbar draft picker label (#245). */
+  draftLabel?: string;
   /** Parent-hosted review column (outside the scroll area). */
   reviewTarget?: string;
   /** Parent-hosted status bar (outside the scroll area). */
@@ -229,6 +231,10 @@ const emit = defineEmits<{
   'ask-bot': [];
   'toggle-story-notes': [];
   'save-retry': [];
+  'open-settings': [];
+  'open-agents': [];
+  'draft-new': [];
+  'draft-import': [];
   /** Words before the caret in this section doc (lead editor → parent book page estimate). */
   'caret-words': [count: number];
   /** Writer placed the caret (click or key); scroll-based page estimate stops (#216). */
@@ -267,7 +273,9 @@ watch(writerProfile, (p) => setWriterProfileForColors(p.name, p.color), {
   immediate: true,
 });
 const trackSeedFromComputer = computed(() => Boolean(props.computerName?.trim()));
-const trackToggleBtn = useTemplateRef<HTMLButtonElement>('trackToggleBtn');
+function trackToggleEl() {
+  return document.querySelector<HTMLButtonElement>('[data-test="track-changes-toggle"]');
+}
 function dismissNamePrompt() {
   namePromptOpen.value = false;
   saveTrackPromptSeen(prefStore());
@@ -1401,26 +1409,19 @@ const LABELS: Record<ReviewItem['type'], string> = {
             loadError ? 'document failed to load' : props.readOnlyReason || undefined
           "
           :find-enabled="true"
+          :draft-label="props.draftLabel ?? 'Untitled draft'"
+          :manuscript-id="props.manuscriptId"
+          :book-title="props.chapterTitle"
+          :tracking="tracking"
           @toggle-navigator="emit('toggle-navigator')"
           @toggle-review="reviewOpen = !reviewOpen"
+          @toggle-track="toggleTrackChanges"
+          @open-settings="emit('open-settings')"
+          @open-agents="emit('open-agents')"
+          @draft-new="emit('draft-new')"
+          @draft-import="emit('draft-import')"
           @find="findOpen = true"
         >
-          <template #end>
-            <button
-              ref="trackToggleBtn"
-              type="button"
-              class="sh-track"
-              data-test="track-changes"
-              :aria-pressed="tracking"
-              :title="tracking ? 'Recording changes on' : 'Recording changes off'"
-              @click="toggleTrackChanges"
-            >
-              <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M3 13l1-3.5L11 2.5l2.5 2.5L6.5 12z" />
-              </svg>
-              Track changes<template v-if="tracking"> · On</template>
-            </button>
-          </template>
           <template #menu>
             <button
               type="button"
@@ -1468,7 +1469,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
             :color-name="profileColorName"
             :color="swatchVar(writerProfile.color)"
             :used-computer-name="trackSeedFromComputer"
-            :return-focus="trackToggleBtn ?? undefined"
+            :return-focus="trackToggleEl() ?? undefined"
             @ok="dismissNamePrompt"
             @close="dismissNamePrompt"
             @change="onNamePromptChange"

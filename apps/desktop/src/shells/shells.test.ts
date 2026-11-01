@@ -261,7 +261,7 @@ describe('UI shells (Part of #36)', () => {
     localStorage.removeItem(TRACK_PROMPT_SEEN_KEY);
     localStorage.removeItem(PROFILE_KEY);
     const { w, editor, unchanged } = await mounted();
-    const t = w.find('[data-test="track-changes"]');
+    const t = w.find('[data-test="track-changes-toggle"]');
     expect(t.attributes('aria-pressed')).toBe('false');
     await t.trigger('click');
     expect(t.attributes('aria-pressed')).toBe('true');

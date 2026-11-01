@@ -1,11 +1,14 @@
 <script setup lang="ts">
 /**
- * Single-row formatting toolbar (RAD-254, board WP 1). Groups, in order: navigator toggle |
- * undo, redo | paragraph style | B, I, U | align | comment, overflow | Find | review toggle.
- * Formatting runs through Tiptap commands (./toolbar). Colors come only from --ct-* tokens.
+ * Manuscript toolbar (Wave 6a): draft picker | undo/redo | style/B/I | track | review |
+ * export | agents | theme | settings. Formatting uses Tiptap (./toolbar). --ct-* tokens only.
  */
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, toRaw, watch } from 'vue';
 import type { Editor } from '@tiptap/core';
+import AppIcon from '../icons/AppIcon.vue';
+import DraftPicker from './DraftPicker.vue';
+import ToolbarExportMenu from './ToolbarExportMenu.vue';
+import { applyTheme, loadTheme, saveTheme, type Theme } from '../settings/prefs';
 import {
   SHORTCUTS,
   STYLE_LABELS,
@@ -30,6 +33,11 @@ const props = withDefaults(
     /** Why the editor is read-only (e.g. 'document failed to load', 'restore in progress'). */
     readOnlyReason?: string;
     findEnabled?: boolean;
+    /** Active draft label for the picker (Wave 6a placeholder). */
+    draftLabel?: string;
+    manuscriptId?: string;
+    bookTitle?: string;
+    tracking?: boolean;
   }>(),
   {
     reviewOpen: true,
@@ -38,6 +46,10 @@ const props = withDefaults(
     readOnlyReason: '',
     commentEnabled: false,
     findEnabled: false,
+    draftLabel: 'Untitled draft',
+    manuscriptId: undefined,
+    bookTitle: undefined,
+    tracking: false,
   },
 );
 const emit = defineEmits<{
@@ -46,6 +58,11 @@ const emit = defineEmits<{
   'toggle-review': [];
   comment: [];
   find: [];
+  'toggle-track': [];
+  'open-settings': [];
+  'open-agents': [];
+  'draft-new': [];
+  'draft-import': [];
 }>();
 
 /** The live editor, unwrapped from Vue's reactive proxy (Tiptap's view getter throws through it). */
@@ -207,36 +224,38 @@ const SOON_ATTRS: Record<string, string> = { 'aria-disabled': 'true', 'aria-desc
 const soon = (label: string, key?: string) => `${tip(label, key)} — ${SOON}`;
 const btn =
   'inline-flex h-7.5 min-w-7.5 items-center justify-center gap-1.5 rounded-sm border-0 bg-transparent px-1.75 font-ui text-[13px] font-medium text-text cursor-pointer hover:bg-selected disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent aria-pressed:bg-selected aria-pressed:text-accent';
+
+const themeMode = ref<Theme>(
+  document.documentElement.dataset.theme === 'dark' ? 'dark' : loadTheme(),
+);
+function toggleTheme() {
+  const next: Theme = themeMode.value === 'light' ? 'dark' : 'light';
+  themeMode.value = next;
+  applyTheme(next);
+  saveTheme(next);
+}
+const themeLabel = computed(() =>
+  themeMode.value === 'dark' ? 'Switch to light theme' : 'Switch to dark theme',
+);
 </script>
 
 <template>
   <div
     role="toolbar"
-    aria-label="Formatting"
+    aria-label="Manuscript"
     data-test="editor-toolbar"
     class="flex h-11 items-center gap-0.5 border-b border-border bg-surface px-2.5 font-ui text-text"
   >
-    <button
-      type="button"
-      data-test="tb-navigator"
-      :class="btn"
-      aria-label="Chapters"
-      title="Chapters"
-      :aria-pressed="props.navigatorOpen"
-      :aria-expanded="props.navigatorOpen"
-      :aria-controls="props.navigatorControls"
-      @click="emit('toggle-navigator')"
-    >
-      <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
-        <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
-        <path d="M6 3v10" />
-      </svg>
-    </button>
+    <DraftPicker
+      :label="props.draftLabel"
+      @new-blank="emit('draft-new')"
+      @import="emit('draft-import')"
+    />
     <span class="mx-1.5 h-5 w-px bg-border" aria-hidden="true" />
 
     <button
       type="button"
-      data-test="tb-undo"
+      data-test="toolbar-undo"
       :class="btn"
       aria-label="Undo"
       :aria-keyshortcuts="editable && state.hasHistory ? 'Control+Z' : undefined"
@@ -252,7 +271,7 @@ const btn =
     </button>
     <button
       type="button"
-      data-test="tb-redo"
+      data-test="toolbar-redo"
       :class="btn"
       aria-label="Redo"
       :aria-keyshortcuts="editable && state.hasHistory ? 'Control+Y' : undefined"
@@ -310,22 +329,38 @@ const btn =
     >
       I
     </button>
-    <button
-      type="button"
-      data-test="tb-underline"
-      :class="[btn, 'underline']"
-      :aria-pressed="state.underline"
-      aria-label="Underline"
-      :aria-keyshortcuts="editable ? 'Control+U' : undefined"
-      :title="ftip('Underline', SHORTCUTS.underline)"
-      v-bind="ro"
-      @click="run('underline')"
-    >
-      U
-    </button>
     <span class="mx-1.5 h-5 w-px bg-border" aria-hidden="true" />
 
-    <div ref="wrapEl" class="relative" @keydown.esc="closeMenu()">
+    <button
+      type="button"
+      class="sh-track"
+      data-test="track-changes-toggle"
+      :aria-pressed="props.tracking"
+      :title="props.tracking ? 'Recording changes on' : 'Recording changes off'"
+      @click="emit('toggle-track')"
+    >
+      <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M3 13l1-3.5L11 2.5l2.5 2.5L6.5 12z" />
+      </svg>
+      Track changes<template v-if="props.tracking"> · On</template>
+    </button>
+    <button
+      type="button"
+      data-test="review-panel-toggle"
+      :class="btn"
+      :aria-pressed="props.reviewOpen"
+      aria-label="Review panel"
+      title="Review panel"
+      @click="emit('toggle-review')"
+    >
+      <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
+        <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
+        <path d="M10 3v10" />
+      </svg>
+      Review
+    </button>
+
+    <div ref="wrapEl" class="relative ml-1" @keydown.esc="closeMenu()">
       <button
         ref="moreBtn"
         type="button"
@@ -352,12 +387,40 @@ const btn =
         class="absolute top-9 left-0 z-10 w-64 rounded-md border border-border bg-surface p-1.5 shadow-3"
         @keydown="onMenuKey"
       >
-        <!-- Designer pass (#66): alignment, comment, Find and the editor's view actions live here. -->
         <div
           class="mb-1 flex flex-wrap items-center gap-0.5 border-b border-border pb-1"
           role="group"
-          aria-label="Paragraph and view"
+          aria-label="Chapters and formatting"
         >
+          <button
+            type="button"
+            data-test="tb-navigator"
+            :class="btn"
+            aria-label="Chapters"
+            title="Chapters"
+            :aria-pressed="props.navigatorOpen"
+            :aria-expanded="props.navigatorOpen"
+            :aria-controls="props.navigatorControls"
+            @click="emit('toggle-navigator')"
+          >
+            <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
+              <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
+              <path d="M6 3v10" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            data-test="tb-underline"
+            :class="[btn, 'underline']"
+            :aria-pressed="state.underline"
+            aria-label="Underline"
+            :aria-keyshortcuts="editable ? 'Control+U' : undefined"
+            :title="ftip('Underline', SHORTCUTS.underline)"
+            v-bind="ro"
+            @click="run('underline')"
+          >
+            U
+          </button>
           <button
             v-for="a in ALIGNS"
             :key="a.id"
@@ -426,21 +489,38 @@ const btn =
       </div>
     </div>
 
-    <span class="flex-1" />
-    <slot name="end" />
+    <span class="flex-1" aria-hidden="true" />
+
+    <ToolbarExportMenu :manuscript-id="manuscriptId" :book-title="bookTitle" />
     <button
       type="button"
-      data-test="tb-review"
       :class="btn"
-      :aria-pressed="props.reviewOpen"
-      aria-label="Review panel"
-      :title="'Review panel'"
-      @click="emit('toggle-review')"
+      data-test="toolbar-agents"
+      aria-label="Agents"
+      title="Agents"
+      @click="emit('open-agents')"
     >
-      <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
-        <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
-        <path d="M10 3v10" />
-      </svg>
+      Agents
+    </button>
+    <button
+      type="button"
+      :class="btn"
+      data-test="toolbar-theme"
+      :aria-label="themeLabel"
+      :title="themeLabel"
+      @click="toggleTheme"
+    >
+      <AppIcon :name="themeMode === 'dark' ? 'sun' : 'moon'" class="h-4 w-4" aria-hidden="true" />
+    </button>
+    <button
+      type="button"
+      :class="btn"
+      data-test="toolbar-settings"
+      aria-label="Settings"
+      title="Settings"
+      @click="emit('open-settings')"
+    >
+      <AppIcon name="settings" class="h-4 w-4" aria-hidden="true" />
     </button>
   </div>
 </template>

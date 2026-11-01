@@ -68,6 +68,7 @@ const props = defineProps<{
   /** Persisted review decisions keyed by section id (#51). */
   decisionRecordsBySection?: Readonly<Record<string, DecisionRecord[]>>;
   manuscriptId?: string;
+  draftLabel?: string;
 }>();
 
 const commentRows = shallowRef<readonly CommentRow[]>([]);
@@ -112,6 +113,10 @@ const emit = defineEmits<{
   'save-retry': [];
   'words-before-caret': [count: number];
   'change-counts': [counts: Record<string, number>];
+  'open-settings': [];
+  'open-agents': [];
+  'draft-new': [];
+  'draft-import': [];
 }>();
 
 const suggestionsBySection = shallowRef(new Map<string, SuggestionItem[]>());
@@ -454,9 +459,14 @@ onBeforeUnmount(() => {
             :computer-name="computerName"
             :decision-records="decisionRecordsBySection?.[sec.id] ?? []"
             :manuscript-id="manuscriptId"
+            :draft-label="draftLabel"
             @update:author-filter="authorFilter = $event"
             @reload="emit('reload')"
             @toggle-navigator="emit('toggle-navigator')"
+            @open-settings="emit('open-settings')"
+            @open-agents="emit('open-agents')"
+            @draft-new="emit('draft-new')"
+            @draft-import="emit('draft-import')"
             @decisions="(records) => emit('decisions', sec.id, records)"
             @focus-mode="emit('focus-mode', $event)"
             @load-error="(msg) => sec.id === selectedId && emit('load-error', msg)"

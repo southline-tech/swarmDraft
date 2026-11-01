@@ -29,6 +29,7 @@ import {
   type StoredManuscriptRow,
 } from './backend';
 import SettingsScreen from './settings/SettingsScreen.vue';
+import AgentsWindow from './agents/AgentsWindow.vue';
 import { markAuthorLabel, refreshAgents, reloadOnFocus } from './agent-names';
 import ContinuousManuscript from './ContinuousManuscript.vue';
 import SectionNav from './SectionNav.vue';
@@ -394,6 +395,35 @@ async function getStarted() {
 /** "Open another book" from inside an open manuscript shows the open screen over it. */
 const choosingBook = ref(false);
 const settingsOpen = ref(false);
+const agentsOpen = ref(false);
+const draftPickerLabel = computed(() => session.value?.title?.trim() || 'Untitled draft');
+function openToolbarSettings() {
+  settingsFocusReturn.value =
+    document.querySelector<HTMLElement>('[data-test="toolbar-settings"]') ?? null;
+  settingsOpen.value = true;
+}
+function openToolbarAgents() {
+  agentsFocusReturn.value =
+    document.querySelector<HTMLElement>('[data-test="toolbar-agents"]') ?? null;
+  agentsOpen.value = true;
+}
+function closeAgentsWindow() {
+  agentsOpen.value = false;
+  void nextTick(() => {
+    agentsFocusReturn.value?.focus();
+    agentsFocusReturn.value = null;
+  });
+}
+function openAgentsSettingsFromWindow() {
+  agentsOpen.value = false;
+  settingsOpen.value = true;
+}
+function onToolbarDraftImport() {
+  chooseFile();
+}
+function onToolbarDraftNew() {
+  openBookPicker();
+}
 // UI-shell previews (Part of #36): `?preview=<id|all>`, or Settings → Preview new screens.
 applyThemeParam(window.location.search, document.documentElement);
 const evidence = ref(readEvidenceQuery(window.location.search));
@@ -403,6 +433,8 @@ function openPreview(id: 'all') {
   preview.value = id;
 }
 const settingsButton = ref<HTMLButtonElement | null>(null);
+const settingsFocusReturn = shallowRef<HTMLElement | null>(null);
+const agentsFocusReturn = shallowRef<HTMLElement | null>(null);
 const recentOpen = ref(false);
 const recentBooks = ref<StoredManuscriptRow[]>([]);
 async function refreshRecentBooks() {
@@ -476,8 +508,10 @@ async function quitApp() {
 }
 watch(settingsOpen, async (isOpen) => {
   await nextTick();
-  // SettingsScreen moves focus into itself on mount; back to the button that opened it on close.
-  if (!isOpen) settingsButton.value?.focus();
+  if (!isOpen) {
+    (settingsFocusReturn.value ?? settingsButton.value)?.focus();
+    settingsFocusReturn.value = null;
+  }
 });
 const fileInput = ref<HTMLInputElement | null>(null);
 const chooseFile = () => fileInput.value?.click();
@@ -1178,6 +1212,11 @@ defineExpose({ open, closeSession });
         @cancel-restore="confirmingRestore = false"
         @dismiss-notice="tokensNotice = null"
       />
+      <AgentsWindow
+        v-if="agentsOpen"
+        @close="closeAgentsWindow"
+        @open-settings="openAgentsSettingsFromWindow"
+      />
       <p v-if="askBotRequested" class="visually-hidden" data-test="ask-bot-requested" role="status">
         Ask bot requested
       </p>
@@ -1355,6 +1394,7 @@ defineExpose({ open, closeSession });
               :computer-name="info?.computerName"
               :decision-records-by-section="decisionRecordsBySection"
               :manuscript-id="session.id"
+              :draft-label="draftPickerLabel"
               @update:selected-id="selectedId = $event"
               @load-error="editorLoadError = $event"
               @reload="reloadSection"
@@ -1367,6 +1407,10 @@ defineExpose({ open, closeSession });
               @save-retry="onManuscriptSaveRetry"
               @words-before-caret="onWordsBeforeCaret"
               @change-counts="changeCounts = $event"
+              @open-settings="openToolbarSettings"
+              @open-agents="openToolbarAgents"
+              @draft-new="onToolbarDraftNew"
+              @draft-import="onToolbarDraftImport"
             />
           </div>
           <div
