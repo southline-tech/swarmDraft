@@ -340,7 +340,9 @@ describe('ReviewPanel (RAD-258)', () => {
       'utf8',
     );
     expect(css).toMatch(/\.card\.active::before/);
-    expect(css).toMatch(/\.card\.current\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px/s);
+    expect(css).toMatch(
+      /\.card\.current:not\(\.outdated\)\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px/s,
+    );
     const w = mount(ReviewPanel, {
       props: {
         items,
@@ -351,6 +353,26 @@ describe('ReviewPanel (RAD-258)', () => {
     });
     const card = w.findAll('[data-test=item]')[0]!;
     expect(card.classes()).toEqual(expect.arrayContaining(['current', 'active']));
+    w.unmount();
+  });
+
+  it('outdated cards are muted with Dismiss only (#179)', async () => {
+    const outdatedItems: SuggestionItem[] = [
+      {
+        id: 'o1',
+        kind: 'suggestion_insert',
+        author: 'agent:a',
+        ts: 't',
+        text: 'old',
+        outdated: true,
+      },
+    ];
+    const w = mount(ReviewPanel, { props: { items: outdatedItems, labels } });
+    const card = w.get('[data-test=item]');
+    expect(card.classes()).toContain('outdated');
+    expect(card.find('[data-test=accept]').exists()).toBe(false);
+    await card.find('[data-test=dismiss]').trigger('click');
+    expect(w.emitted('dismiss-one')).toEqual([[key(outdatedItems[0]!)]]);
     w.unmount();
   });
 });

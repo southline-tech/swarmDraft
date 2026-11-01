@@ -374,6 +374,19 @@ export async function markSectionSuggestionsOutdated(
   });
 }
 
+export async function dismissSectionOutdatedSuggestions(
+  manuscriptId: string,
+  sectionId: string,
+  suggestionIds: string[],
+): Promise<void> {
+  if (!isTauri() || !suggestionIds.length) return;
+  await invoke('section_dismiss_outdated_suggestions', {
+    manuscriptId,
+    sectionId,
+    suggestionIds,
+  });
+}
+
 export type SpellLintIssue = import('@swarmdraft/editor').SpellLintResult;
 
 export async function spellLintParagraph(

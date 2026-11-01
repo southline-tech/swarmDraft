@@ -56,6 +56,13 @@ export function cycleAuthorView(
   return seq[(at + dir + seq.length) % seq.length]!;
 }
 
+export function pendingCountForAuthor(
+  items: readonly { author: string; outdated?: boolean }[],
+  author: string,
+): number {
+  return items.filter((c) => c.author === author && !c.outdated).length;
+}
+
 type ItemWithOutdated = SuggestionItem & { outdated?: boolean };
 
 export function outdatedCountForAuthor(items: readonly ItemWithOutdated[], author: string): number {
@@ -106,6 +113,8 @@ export interface ReviewChange {
   format?: { target: string; before: string; after: string; label: string };
   /** Bot rationale shown on the review card (#60). */
   reason?: string;
+  /** Index-only outdated row (#179); Dismiss only in the panel. */
+  outdated?: boolean;
   targets: SuggestionTarget[];
 }
 
@@ -135,6 +144,7 @@ export function groupChanges(items: readonly SuggestionItem[]): ReviewChange[] {
       };
     } else if (i.kind === 'suggestion_delete') c.del = (c.del ?? '') + i.text;
     else if (i.kind === 'suggestion_insert') c.ins = (c.ins ?? '') + i.text;
+    if (i.outdated) c.outdated = true;
     c.reason = mergeReason(c.reason, i.reason);
   }
   return [...out.values()];

@@ -18,6 +18,7 @@ import {
   bulkActionLabel,
   groupChanges,
   outdatedCountForAuthor,
+  pendingCountForAuthor,
   REVIEW_SHORTCUTS,
   REVIEW_VIEW_CYCLE,
   viewScopeAnnouncement,
@@ -82,6 +83,8 @@ const emit = defineEmits<{
   /** Single-select author view (#177); null is All. */
   'select-view': [author: string | null];
   'update:follow': [on: boolean];
+  /** Clear an outdated index row without applying its text (#179). */
+  'dismiss-one': [key: string];
 }>();
 
 const changes = computed(() =>
@@ -89,7 +92,6 @@ const changes = computed(() =>
 );
 const authors = computed(() => authorsOf(changes.value));
 const visible = computed(() => visibleItems(changes.value, props.filter));
-const countOf = (a: string) => changes.value.filter((c) => c.author === a).length;
 const index = computed(() => visible.value.findIndex((v) => v.key === props.currentKey));
 const parts = (a: string) => props.labels(a);
 const name = (a: string) => {
@@ -98,7 +100,8 @@ const name = (a: string) => {
 };
 const initial = (a: string) => (parts(a).name[0] ?? '?').toUpperCase();
 const outdatedOf = (a: string) => outdatedCountForAuthor(props.items, a);
-const pendingOf = (a: string) => countOf(a);
+const pendingOf = (a: string) => pendingCountForAuthor(changes.value, a);
+const actionableVisible = computed(() => visible.value.filter((c) => !c.outdated));
 const scopeStatus = computed(() =>
   viewScopeAnnouncement(
     props.filter,
@@ -157,8 +160,8 @@ const confirming = ref<{ decision: Decision; keys: string[]; authors: string[] }
 function openConfirm(decision: Decision) {
   confirming.value = {
     decision,
-    keys: visible.value.map((v) => v.key),
-    authors: [...new Set(visible.value.map((v) => name(v.author)))],
+    keys: actionableVisible.value.map((v) => v.key),
+    authors: [...new Set(actionableVisible.value.map((v) => name(v.author)))],
   };
 }
 const confirmText = computed(() => {
@@ -276,10 +279,11 @@ function activateChangeRow(key: string, e: Event) {
   if (el instanceof HTMLElement) void nextTick(() => el.focus());
 }
 
-function cardClasses(c: { key: string }) {
+function cardClasses(c: { key: string; outdated?: boolean }) {
   return {
     current: c.key === props.currentKey,
     active: c.key === props.activeScrollKey,
+    outdated: !!c.outdated,
   };
 }
 
@@ -518,7 +522,18 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
               <div v-if="authorKind(c.author) === 'Bot' && c.reason" class="reason" @click.stop>
                 <ReasonLine :reason="c.reason" />
               </div>
-              <div class="actions">
+              <div v-if="c.outdated" class="actions">
+                <button
+                  type="button"
+                  class="secondary"
+                  data-test="dismiss"
+                  :disabled="busy"
+                  @click.stop="emit('dismiss-one', c.key)"
+                >
+                  Dismiss
+                </button>
+              </div>
+              <div v-else class="actions">
                 <button
                   type="button"
                   class="primary"
@@ -586,7 +601,18 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
           <div v-if="authorKind(c.author) === 'Bot' && c.reason" class="reason" @click.stop>
             <ReasonLine :reason="c.reason" />
           </div>
-          <div class="actions">
+          <div v-if="c.outdated" class="actions">
+            <button
+              type="button"
+              class="secondary"
+              data-test="dismiss"
+              :disabled="busy"
+              @click.stop="emit('dismiss-one', c.key)"
+            >
+              Dismiss
+            </button>
+          </div>
+          <div v-else class="actions">
             <button
               type="button"
               class="primary"
@@ -622,7 +648,7 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
       </button>
     </div>
 
-    <footer v-if="visible.length" class="bulk">
+    <footer v-if="actionableVisible.length" class="bulk">
       <button type="button" data-test="accept-all" :disabled="busy" @click="openConfirm('accept')">
         {{ acceptAllLabel }}
       </button>
@@ -1074,7 +1100,22 @@ button.secondary {
   padding: var(--ct-space-3) var(--ct-space-4);
   cursor: pointer;
 }
-.card.current {
+.card.outdated {
+  opacity: 0.72;
+  border-left-color: var(--ct-text-muted);
+  background: color-mix(in srgb, var(--ct-surface-raised) 88%, var(--ct-bg));
+}
+.card.outdated .who,
+.card.outdated .q,
+.card.outdated .format {
+  color: var(--ct-text-muted);
+}
+.card.outdated.current {
+  border-color: var(--ct-border-strong);
+  box-shadow: none;
+  background: color-mix(in srgb, var(--ct-surface-raised) 82%, var(--ct-bg));
+}
+.card.current:not(.outdated) {
   border-color: var(--ct-accent);
   border-left-color: var(--ct-suggester);
   background: color-mix(in srgb, var(--ct-accent) 12%, var(--ct-selected-bg));

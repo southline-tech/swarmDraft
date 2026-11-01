@@ -33,6 +33,7 @@ import { countWords, watchBookWords } from './status/wordcount';
 import { agentDirectory, authorLabel, markAuthorLabel, type AgentName } from './agent-names';
 import { clampZoom, loadZoom, saveZoom } from './desk/zoom';
 import ReviewPanel from './review/ReviewPanel.vue';
+import OverlapPopover, { type OverlapEntry } from './review/OverlapPopover.vue';
 import EmptyState from './shells/EmptyState.vue';
 import {
   DecisionLog,
@@ -96,6 +97,10 @@ import {
   listSuggestions,
   refreshAuthorLabels,
   refreshSuggestionColors,
+  SuggestionOverlap,
+  refreshSuggestionOverlap,
+  withOutdatedFlags,
+  type OverlapCluster,
   manuscriptEditorOptions,
   type Decision,
   type DecisionRecord,
@@ -109,7 +114,12 @@ import { spellDictionaryAdd, spellDictionaryIgnore } from './backend';
 import { lintBlockText } from './spellcheck/lint';
 import SpellMenu from './spellcheck/SpellMenu.vue';
 import { loadSpellPrefs, spellcheckEnabled } from './settings/prefs';
-import { applyHumanReviewDecision, persistOutdatedAfterAccept } from './review/apply';
+import {
+  applyHumanReviewDecision,
+  persistOutdatedAfterAccept,
+  dismissOutdatedOnView,
+  persistDismissOutdated,
+} from './review/apply';
 import { collabColor, setWriterProfileForColors } from './author-colors';
 import { commentRowLabel, primaryCommentByThread } from './review/review-sidebar';
 import { parseBookChangeKey, scopeBookChangeKey } from './review/review-book';
@@ -488,6 +498,8 @@ const commentAuthor = (item: ReviewItem): AgentName | null => {
 
 /** Review step-through (RAD-258). Suggestions in document order, keyed on raw author id. */
 const suggestions = shallowRef<SuggestionItem[]>([]);
+const outdatedIds = ref(new Set<string>());
+const overlapPopover = shallowRef<{ x: number; y: number; cluster: OverlapCluster } | null>(null);
 const filter = shallowRef<AuthorFilter>(null);
 const viewScopeLive = shallowRef('');
 const currentKey = shallowRef<string | null>(null);
@@ -523,9 +535,10 @@ watch(
 
 function refreshReview(e: Editor) {
   review.value = collectReviewItems(e.state.doc);
-  suggestions.value = withSuggestionReasons(
-    listSuggestions(e.state.doc.toJSON() as DocNode),
-    props.suggestionReasons,
+  const raw = listSuggestions(e.state.doc.toJSON() as DocNode);
+  suggestions.value = withOutdatedFlags(
+    withSuggestionReasons(raw, props.suggestionReasons),
+    outdatedIds.value,
   );
   // Undo/redo of a decision brings a suggestion back or removes it again: keep the log in step.
   if (log.sync(suggestions.value)) emit('decisions', log.records());
@@ -548,6 +561,7 @@ function refreshAuthorFilterDecorations() {
   if (e && !e.isDestroyed) {
     refreshSuggestionColors(e.view);
     refreshAuthorLabels(e.view);
+    refreshSuggestionOverlap(e.view);
   }
 }
 watch(filter, () => {
@@ -716,6 +730,11 @@ function decide(targets: SuggestionTarget[], decision: Decision) {
   void persistOutdatedAfterAccept(props.manuscriptId, props.sectionId, effects.outdated).catch(
     (err) => console.error('Outdated suggestion index update failed', err),
   );
+  if (effects.outdated.length) {
+    const next = new Set(outdatedIds.value);
+    for (const t of effects.outdated) next.add(t.id);
+    outdatedIds.value = next;
+  }
   refreshReview(e);
   emit('decisions', log.records());
   // Auto-advance: the change now at the old position becomes current.
@@ -749,6 +768,37 @@ const decideVisible = (d: Decision, keys: readonly string[]) =>
     keys.flatMap((k) => targetOf(k)),
     d,
   );
+
+function overlapEntries(cluster: OverlapCluster): OverlapEntry[] {
+  const keys = new Set(cluster.spans.map((s) => keyOf(s)));
+  return groupChanges(suggestions.value.filter((s) => keys.has(keyOf(s)))).map((c) => ({
+    targets: c.targets,
+    author: c.author,
+    del: c.del,
+    ins: c.ins,
+    format: c.format?.label,
+    ts: suggestions.value.find((s) => s.id === c.id)?.ts ?? '',
+  }));
+}
+
+function dismissOne(key: string) {
+  const targets = targetOf(key);
+  const e = editor.value;
+  if (!e || !targets.length || !e.isEditable) return;
+  if (!dismissOutdatedOnView(e.view, targets)) return;
+  void persistDismissOutdated(props.manuscriptId, props.sectionId, targets).catch((err) =>
+    console.error('Dismiss outdated failed', err),
+  );
+  const next = new Set(outdatedIds.value);
+  for (const t of targets) next.delete(t.id);
+  outdatedIds.value = next;
+  refreshReview(e);
+}
+
+function onOverlapDecide(targets: OverlapEntry['targets'], decision: Decision) {
+  overlapPopover.value = null;
+  decide(targets, decision);
+}
 
 function onSelectView(author: string | null) {
   filter.value = selectAuthorView(filter.value, author);
@@ -1110,6 +1160,21 @@ const options: Partial<EditorOptions> = {
       colorFor: collabColor,
       authorVisible: (author) => authorVisibleInFilter(filter.value, author),
     }),
+    SuggestionOverlap.configure({
+      filterAuthor: () => filter.value,
+      authorVisible: (author) => authorVisibleInFilter(filter.value, author),
+      handlers: () => ({
+        labelAuthor: (author) => labelAuthor(author).name,
+        onGutterClick: (author) => {
+          filter.value = selectAuthorView(filter.value, author);
+          refreshAuthorFilterDecorations();
+          if (editor.value) refreshReview(editor.value);
+        },
+        onOverlapClick: (cluster, anchor) => {
+          overlapPopover.value = { cluster, x: anchor.x, y: anchor.y + 4 };
+        },
+      }),
+    }),
     CommentAnchorUi.configure({
       uiState: () => ({
         selectedId: selectedCommentId.value,
@@ -1453,6 +1518,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
             @decide-visible="decideVisible"
             @toggle-collapsed="collapsed = !collapsed"
             @select-view="onSelectView"
+            @dismiss-one="dismissOne"
             @update:follow="emit('update:reviewFollow', $event)"
           />
           <div class="visually-hidden" aria-live="polite" data-test="view-scope-live">
@@ -1516,17 +1582,28 @@ const LABELS: Record<ReviewItem['type'], string> = {
       </Teleport>
     </div>
     <div
-      v-if="spellMenu || menuAt"
+      v-if="spellMenu || menuAt || overlapPopover"
       class="fixed inset-0 z-30"
       data-test="context-dismiss"
       @click="
         spellMenu = null;
         menuAt = null;
+        overlapPopover = null;
       "
       @contextmenu.prevent="
         spellMenu = null;
         menuAt = null;
+        overlapPopover = null;
       "
+    />
+    <OverlapPopover
+      v-if="overlapPopover"
+      :x="overlapPopover.x"
+      :y="overlapPopover.y"
+      :entries="overlapEntries(overlapPopover.cluster)"
+      :labels="labelAuthor"
+      @decide="onOverlapDecide"
+      @close="overlapPopover = null"
     />
     <SpellMenu
       v-if="spellMenu"

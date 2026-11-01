@@ -87,3 +87,46 @@
   font-weight: normal;
   line-height: 1;
 }
+
+/* Tracked-change overlap (#179): All-view neutral underline, count badge, gutter dot. */
+.manuscript-editor .tiptap .suggest-overlap [data-suggester] {
+  --ct-suggester: var(--ct-suggest-overlap);
+}
+.manuscript-editor .tiptap .suggest-overlap-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.125rem;
+  height: 1.125rem;
+  margin-left: 2px;
+  padding: 0 var(--ct-space-1);
+  border-radius: var(--ct-radius-full);
+  border: 1px solid var(--ct-border-strong);
+  background: var(--ct-surface-raised);
+  color: var(--ct-text);
+  font-family: var(--ct-font-ui);
+  font-size: var(--ct-text-xs);
+  font-weight: var(--ct-weight-semibold);
+  vertical-align: text-top;
+  cursor: pointer;
+}
+.manuscript-editor .tiptap .suggest-overlap-badge:focus-visible {
+  outline: var(--ct-focus-outline);
+  outline-offset: var(--ct-focus-offset);
+}
+.manuscript-editor .tiptap .suggest-overlap-gutter {
+  position: absolute;
+  left: -1.25rem;
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: var(--ct-radius-full);
+  border: 1px solid var(--ct-border-strong);
+  background: var(--ct-warning);
+  box-shadow: var(--ct-elevation-1);
+  cursor: pointer;
+  padding: 0;
+}
+.manuscript-editor .tiptap .suggest-overlap-gutter:focus-visible {
+  outline: var(--ct-focus-outline);
+  outline-offset: var(--ct-focus-offset);
+}

@@ -146,6 +146,8 @@
 
   /* Suggestions: base suggester. Marks set data-suggester and --ct-suggester: var(--ct-collab-N). */
   --ct-suggester: var(--ct-collab-1);
+  /* Neutral overlap underline in All view (#179). */
+  --ct-suggest-overlap: var(--ct-collab-8);
   /* Spell / grammar underlines (#159) */
   --ct-spell: #c43a2f;
   --ct-grammar: #2a7a45;

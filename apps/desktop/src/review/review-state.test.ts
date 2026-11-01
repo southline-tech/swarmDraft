@@ -17,6 +17,7 @@ import {
   authorViewSequence,
   viewScopeAnnouncement,
   outdatedCountForAuthor,
+  pendingCountForAuthor,
   visibleItems,
 } from './review-state';
 
@@ -74,6 +75,7 @@ describe('review state (RAD-258)', () => {
       { id: 's2', kind: 'suggestion_insert' as const, author: 'a', ts: 't', text: 'y' },
     ];
     expect(outdatedCountForAuthor(outdated, 'a')).toBe(1);
+    expect(pendingCountForAuthor([{ author: 'a', outdated: true }, { author: 'a' }], 'a')).toBe(1);
   });
 
   it('steps with wraparound and auto-advances to the change at the old position', () => {

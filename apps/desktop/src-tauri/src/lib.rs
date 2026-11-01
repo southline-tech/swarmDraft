@@ -724,6 +724,38 @@ async fn section_mark_suggestions_outdated(
     .await
 }
 
+/// Clear outdated suggestion index rows after dismiss (#179).
+#[tauri::command]
+async fn section_dismiss_outdated_suggestions(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+    section_id: String,
+    suggestion_ids: Vec<String>,
+) -> Result<(), String> {
+    blocking(&store, move |s| {
+        let owner: String = s.with_conn(|c| {
+            c.query_row(
+                "SELECT manuscript_id FROM sections WHERE id = ?1",
+                [&section_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    storage::StorageError::NotFound(section_id.clone())
+                }
+                e => storage::StorageError::from(e),
+            })
+        })?;
+        if owner != manuscript_id {
+            return Err(storage::StorageError::Invalid(
+                "section belongs to another manuscript".into(),
+            ));
+        }
+        s.dismiss_outdated_suggestions(&section_id, &suggestion_ids)
+    })
+    .await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -828,6 +860,7 @@ pub fn run() {
             manuscript_review_decisions,
             section_save_review_decisions,
             section_mark_suggestions_outdated,
+            section_dismiss_outdated_suggestions,
             manuscript_open_comments,
             spell_lint_paragraph,
             spell_dictionary_list,
