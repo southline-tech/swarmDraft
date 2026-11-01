@@ -11,6 +11,7 @@ function setup(
     selectedId?: string;
     sections?: Section[];
     save?: (s: Section[]) => unknown;
+    changeCounts?: Record<string, number>;
   } = {},
 ) {
   const w = mount(SectionNav, {
@@ -19,6 +20,7 @@ function setup(
       sections: opts.sections ?? sampleOutline(),
       ...(opts.selectedId ? { selectedId: opts.selectedId } : {}),
       ...(opts.save ? { save: opts.save as never } : {}),
+      ...(opts.changeCounts ? { changeCounts: opts.changeCounts } : {}),
       'onUpdate:sections': (s: Section[]) => w.setProps({ sections: s }),
       onSelect: (id: string) => w.setProps({ selectedId: id }),
     },
@@ -547,6 +549,17 @@ describe('SectionNav', () => {
       'Part Two',
       'About the author',
     ]);
+    w.unmount();
+  });
+
+  it('shows chapter change-count badges and hides zero (#210)', () => {
+    const w = setup({
+      changeCounts: { 'ch-1': 2 },
+    });
+    const badge = w.find('[data-test="chapter-change-count"]');
+    expect(badge.exists()).toBe(true);
+    expect(badge.text()).toBe('2');
+    expect(badge.attributes('aria-label')).toBe('2 open tracked changes');
     w.unmount();
   });
 });

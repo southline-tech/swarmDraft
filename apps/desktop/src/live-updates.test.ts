@@ -138,7 +138,7 @@ describe('live agent updates (RAD-264)', () => {
     expect(page().text()).toContain('Late. ');
     const cards = w.findAll('[data-test="item"]').map((i) => i.text());
     expect(cards.some((t) => t.includes('guttered') && t.includes('Unnamed agent'))).toBe(true);
-    const items = w.findAll('[data-test="review-item"]').map((i) => i.text());
+    const items = w.findAll('[data-test="comment-row"]').map((i) => i.text());
     expect(cards.some((t) => t.includes('agent:'))).toBe(false);
     expect(items.some((t) => t.includes('agent:'))).toBe(false);
     expect(items.some((t) => t.includes('Comment'))).toBe(true);
@@ -258,7 +258,7 @@ describe('live agent updates (RAD-264)', () => {
 
     expect(w.findAll('[data-test="item"] [data-test=ins]')).toHaveLength(1);
     expect(w.findAll('[data-test="item"] [data-test=del]')).toHaveLength(1);
-    const items = w.findAll('[data-test="review-item"]').map((i) => i.text());
+    const items = w.findAll('[data-test="comment-row"]').map((i) => i.text());
     expect(items.filter((t) => t.startsWith('Comment'))).toHaveLength(1);
     expect(w.find('.tiptap').text()).toContain('flickeredguttered only twice.');
     // Everything from the poll came in as remote, and nothing it carried was saved back.

@@ -182,7 +182,7 @@ describe('UI shells (Part of #36)', () => {
     await openContextMenu(w);
     await w.find('[data-test="ctx-comment"]').trigger('click');
     await flushPromises();
-    expect(w.find('[data-test="review-item"]').exists()).toBe(true);
+    expect(w.find('[data-test="comment-row"]').exists()).toBe(true);
 
     await openContextMenu(w);
     await w.find('[data-test="ctx-ask-bot"]').trigger('click');

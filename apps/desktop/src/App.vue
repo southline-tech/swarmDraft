@@ -844,6 +844,7 @@ const selected = computed(() =>
 );
 /** Per-section word counts for the outline (#52): read-only, recounted after edits settle. */
 const wordCounts = shallowRef<Record<string, number>>({});
+const changeCounts = shallowRef<Record<string, number>>({});
 let countTimer: ReturnType<typeof setTimeout> | undefined;
 let stopCounts = () => {};
 function recount() {
@@ -1292,6 +1293,7 @@ defineExpose({ open, closeSession });
           :selected-id="selectedId"
           :save="session.save"
           :word-counts="wordCounts"
+          :change-counts="changeCounts"
           :numbering-style="session.numberingStyle.value"
           @select="selectedId = $event"
           @activate="focusEditor"
@@ -1340,6 +1342,7 @@ defineExpose({ open, closeSession });
             @toggle-story-notes="toggleStoryNotes"
             @save-retry="onManuscriptSaveRetry"
             @words-before-caret="onWordsBeforeCaret"
+            @change-counts="changeCounts = $event"
           />
         </div>
         <div

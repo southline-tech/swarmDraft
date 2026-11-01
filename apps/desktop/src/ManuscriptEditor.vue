@@ -22,7 +22,7 @@ import {
 import { forcedPageNarrow, type EditorLayout } from './desk/outline-auto-collapse';
 import { EditorContent, useEditor } from '@tiptap/vue-3';
 import type { Editor, EditorOptions, JSONContent } from '@tiptap/core';
-import { Selection } from '@tiptap/pm/state';
+import { Selection, TextSelection } from '@tiptap/pm/state';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import type * as Y from 'yjs';
 import EditorToolbar from './toolbar/EditorToolbar.vue';
@@ -107,6 +107,11 @@ import { loadSpellPrefs, spellcheckEnabled } from './settings/prefs';
 import { applyReviewDecision } from './review/apply';
 import { collabColor, setWriterProfileForColors } from './author-colors';
 import { commentRowLabel, primaryCommentByThread } from './review/review-sidebar';
+import { parseBookChangeKey, scopeBookChangeKey } from './review/review-book';
+import type { BookChapterGroup } from './review/review-book';
+import { scrollBehavior, scrollElementCenterInRoot } from './review/review-scroll';
+import { CONTINUOUS_REVIEW_NAV, CONTINUOUS_SCROLL_ROOT } from './continuous-review-nav';
+import type { ReviewChange } from './review/review-state';
 import { SECTION_LOAD_ERROR_COPY } from './errors/map-error';
 import type { DocNode } from '@coauthor/schema';
 import { useDeferredValue } from './a11y/deferred';
@@ -175,6 +180,13 @@ const props = defineProps<{
   decisionRecords?: readonly DecisionRecord[];
   /** Designer evidence (#55 / wp5): start in focus mode for screenshot harness. */
   initialFocusMode?: boolean;
+  /** Section id for continuous book-wide review (#210). */
+  sectionId?: string;
+  /** Book-wide merged changes for the review rail (lead section only). */
+  bookChanges?: readonly ReviewChange[];
+  bookChapterGroups?: readonly BookChapterGroup[];
+  reviewActiveScrollKey?: string | null;
+  reviewFollow?: boolean;
 }>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
@@ -198,9 +210,14 @@ const emit = defineEmits<{
   'caret-words': [count: number];
   /** Writer placed the caret (click or key); scroll-based page estimate stops (#216). */
   'caret-placed': [];
+  /** Open suggestions in this section for book-wide aggregation (#210). */
+  'open-suggestions': [items: SuggestionItem[]];
+  'update:reviewFollow': [on: boolean];
 }>();
 
 const appFooterEditor = inject(APP_FOOTER_EDITOR_KEY, null);
+const continuousNav = inject(CONTINUOUS_REVIEW_NAV, null);
+const continuousScroll = inject(CONTINUOUS_SCROLL_ROOT, null);
 
 /* UI shells for the audit review (Part of #36). Local view state only: none of these change the
    manuscript, the Y.Doc, the selection or the undo history. */
@@ -428,6 +445,7 @@ watch(zoom, (z) => saveZoom(z));
 
 const review = shallowRef<ReviewItem[]>([]);
 const comments = computed(() => review.value.filter((r) => r.type === 'comment_anchor'));
+const selectedCommentId = ref<string | null>(null);
 const commentByThread = computed(() => primaryCommentByThread(props.commentRows ?? []));
 const labelAuthor = (author: string) => {
   const resolved = markAuthorLabel(author, props.authorSavedNames);
@@ -450,7 +468,11 @@ const currentKey = shallowRef<string | null>(null);
 let currentIndex = -1;
 const collapsed = shallowRef(loadCollapsed());
 watch(collapsed, (v) => saveCollapsed(v));
-const changes = computed(() => groupChanges(suggestions.value));
+const changes = computed(() =>
+  props.reviewTarget && props.bookChanges != null
+    ? [...props.bookChanges]
+    : groupChanges(suggestions.value),
+);
 const visible = computed(() => visibleItems(changes.value, filter.value));
 const log = new DecisionLog();
 watch(
@@ -474,6 +496,7 @@ function refreshReview(e: Editor) {
   const i = resolveCurrent(visible.value, currentKey.value, currentIndex);
   currentIndex = i;
   currentKey.value = i >= 0 ? visible.value[i]!.key : null;
+  emit('open-suggestions', suggestions.value);
 }
 function refreshAuthorFilterDecorations() {
   const e = editor.value;
@@ -507,7 +530,54 @@ function rangeOf(e: Editor, t: SuggestionTarget): { from: number; to: number } |
   });
   return from < 0 ? null : { from, to };
 }
+function scrollSelectionIntoManuscriptColumn(
+  e: Editor,
+  r: { from: number; to: number },
+  opts?: { focusEditor?: boolean },
+) {
+  const root = continuousScroll?.root.value;
+  if (!root || !props.sectionId) {
+    if (opts?.focusEditor === false) {
+      const tr = e.state.tr.setSelection(TextSelection.create(e.state.doc, r.from, r.to));
+      e.view.dispatch(tr);
+      return;
+    }
+    e.chain().setTextSelection(r).scrollIntoView().run();
+    return;
+  }
+  if (opts?.focusEditor === false) {
+    const tr = e.state.tr.setSelection(TextSelection.create(e.state.doc, r.from, r.to));
+    e.view.dispatch(tr);
+  } else {
+    e.chain().setTextSelection(r).run();
+  }
+  void nextTick(() => {
+    const dom = e.view.domAtPos(r.from).node;
+    const el =
+      dom instanceof Element
+        ? dom.closest(
+            'ins[data-suggestion], del[data-suggestion], span[data-format-change], span.comment-anchor',
+          )
+        : dom.parentElement?.closest(
+            'ins[data-suggestion], del[data-suggestion], span[data-format-change], span.comment-anchor',
+          );
+    if (el) scrollElementCenterInRoot(root, el, scrollBehavior());
+  });
+}
+
 function select(key: string) {
+  const parsed = parseBookChangeKey(key);
+  if (parsed && continuousNav) {
+    currentKey.value = key;
+    currentIndex = visible.value.findIndex((v) => v.key === key);
+    void continuousNav.navigateToChange(key, {
+      follow: true,
+      suppressSync: true,
+      focusEditor: false,
+    });
+    emit('update:reviewFollow', true);
+    return;
+  }
   const e = editor.value;
   const item = visible.value.find((v) => v.key === key);
   if (!e || !item) return;
@@ -519,7 +589,58 @@ function select(key: string) {
     from: Math.min(...parts.map((p) => p.from)),
     to: Math.max(...parts.map((p) => p.to)),
   };
-  e.chain().setTextSelection(r).scrollIntoView().run();
+  scrollSelectionIntoManuscriptColumn(e, r);
+}
+
+function selectLocalChange(
+  changeKey: string,
+  displayKey?: string,
+  opts?: { focusEditor?: boolean },
+) {
+  const e = editor.value;
+  if (!e) return;
+  const listKey =
+    displayKey ?? (props.sectionId ? scopeBookChangeKey(props.sectionId, changeKey) : changeKey);
+  const item =
+    visible.value.find((v) => v.key === listKey) ??
+    visible.value.find((v) => parseBookChangeKey(v.key)?.changeKey === changeKey) ??
+    changes.value.find((c) => c.key === changeKey);
+  if (!item) return;
+  currentKey.value = listKey;
+  currentIndex = visible.value.findIndex((v) => v.key === listKey);
+  const parts = item.targets.map((t) => rangeOf(e, t)).filter((r) => !!r);
+  if (!parts.length) return;
+  const r = {
+    from: Math.min(...parts.map((p) => p.from)),
+    to: Math.max(...parts.map((p) => p.to)),
+  };
+  if (opts?.focusEditor === false) {
+    const tr = e.state.tr.setSelection(TextSelection.create(e.state.doc, r.from, r.to));
+    e.view.dispatch(tr);
+    return;
+  }
+  e.chain().setTextSelection(r).run();
+}
+
+function focusComment(item: ReviewItem, rowEl?: HTMLElement | null) {
+  const e = editor.value;
+  if (!e) return;
+  selectedCommentId.value = item.id;
+  continuousNav?.beginSuppressSync();
+  let from = -1;
+  let to = -1;
+  e.state.doc.descendants((n, pos) => {
+    if (!n.isText) return true;
+    if (n.marks.some((m) => m.type.name === 'comment_anchor' && String(m.attrs.id) === item.id)) {
+      if (from < 0) from = pos;
+      to = pos + n.nodeSize;
+    }
+    return true;
+  });
+  if (from < 0) return;
+  scrollSelectionIntoManuscriptColumn(e, { from, to }, { focusEditor: false });
+  const row = rowEl ?? document.querySelector(`[data-comment-id="${CSS.escape(item.id)}"]`);
+  void nextTick(() => (row as HTMLElement | null)?.focus());
 }
 function move(dir: 1 | -1) {
   const list = visible.value;
@@ -547,13 +668,28 @@ function decide(targets: SuggestionTarget[], decision: Decision) {
   // Auto-advance: the change now at the old position becomes current.
   if (currentKey.value) select(currentKey.value);
 }
-const targetOf = (key: string | null) => changes.value.find((c) => c.key === key)?.targets ?? [];
+const targetOf = (key: string | null) => {
+  if (!key) return [];
+  const parsed = parseBookChangeKey(key);
+  const local = parsed?.changeKey ?? key;
+  return changes.value.find((c) => c.key === key || c.key === local)?.targets ?? [];
+};
 const decideCurrent = (d: Decision) => decide(targetOf(currentKey.value), d);
 const decideOne = (key: string, d: Decision) => {
+  const parsed = parseBookChangeKey(key);
+  if (parsed && continuousNav && parsed.sectionId !== props.sectionId) {
+    continuousNav.decideInSection(parsed.sectionId, parsed.changeKey, d);
+    return;
+  }
   currentKey.value = key;
   currentIndex = visible.value.findIndex((v) => v.key === key);
-  decide(targetOf(key), d);
+  decide(targetOf(parsed?.changeKey ?? key), d);
 };
+
+function decideLocalChange(changeKey: string, decision: Decision) {
+  currentKey.value = props.sectionId ? scopeBookChangeKey(props.sectionId, changeKey) : changeKey;
+  decide(targetOf(changeKey), decision);
+}
 /** Bulk decision over the change keys locked when the confirmation opened. */
 const decideVisible = (d: Decision, keys: readonly string[]) =>
   decide(
@@ -773,7 +909,14 @@ function reportLoadError() {
 function setZoom(next: number) {
   zoom.value = clampZoom(next);
 }
-defineExpose({ focusBody, reportLoadError, setZoom, wordsBeforeClientY });
+defineExpose({
+  focusBody,
+  reportLoadError,
+  setZoom,
+  wordsBeforeClientY,
+  selectLocalChange,
+  decideLocalChange,
+});
 
 /** Set when the content does not fit the schema; the editor is then read-only and never emits. */
 const loadError = shallowRef<string>('');
@@ -1103,6 +1246,10 @@ const LABELS: Record<ReviewItem['type'], string> = {
         >
           <ReviewPanel
             :items="suggestions"
+            :book-changes="reviewTarget ? bookChanges : undefined"
+            :chapter-groups="reviewTarget ? bookChapterGroups : undefined"
+            :active-scroll-key="reviewTarget ? reviewActiveScrollKey : undefined"
+            :follow="reviewTarget ? (reviewFollow ?? true) : true"
             :load-failed="!!loadError"
             :filter="filter"
             :current-key="currentKey"
@@ -1116,6 +1263,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
             @decide-visible="decideVisible"
             @toggle-collapsed="collapsed = !collapsed"
             @toggle-author="onToggleAuthor"
+            @update:follow="emit('update:reviewFollow', $event)"
           />
           <EmptyState
             v-if="!collapsed && !comments.length && !loadError"
@@ -1125,10 +1273,27 @@ const LABELS: Record<ReviewItem['type'], string> = {
             title="No comments yet"
             text="Select some text and choose Comment to leave yourself a note."
           />
-          <section v-else-if="!collapsed && comments.length" class="comments" aria-label="Comments">
+          <section
+            v-else-if="!collapsed && comments.length"
+            class="comments"
+            aria-label="Comments"
+            data-test="comments-list"
+          >
             <h3>Comments</h3>
-            <ul>
-              <li v-for="r in comments" :key="r.id" data-test="review-item">
+            <ul role="listbox">
+              <li
+                v-for="r in comments"
+                :key="r.id"
+                role="option"
+                tabindex="-1"
+                data-test="comment-row"
+                :data-comment-id="r.id"
+                :class="{ selected: r.id === selectedCommentId }"
+                :aria-selected="r.id === selectedCommentId ? 'true' : 'false'"
+                @click="focusComment(r, $event.currentTarget as HTMLElement)"
+                @keydown.enter.prevent="focusComment(r, $event.currentTarget as HTMLElement)"
+                @keydown.space.prevent="focusComment(r, $event.currentTarget as HTMLElement)"
+              >
                 <div class="review-comment-head">
                   <strong>{{ LABELS[r.type] }}</strong>
                   <span
@@ -1517,8 +1682,24 @@ const LABELS: Record<ReviewItem['type'], string> = {
   margin: var(--ct-space-2) 0 0;
   quotes: none;
 }
-.manuscript-editor .comments ul {
+.manuscript-editor .comments ul,
+.continuous-review-rail .comments ul {
   padding-left: var(--ct-space-4);
+  list-style: none;
+  margin: 0;
+}
+.manuscript-editor .comments li,
+.continuous-review-rail .comments li {
+  margin-bottom: var(--ct-space-2);
+  padding: var(--ct-space-2) var(--ct-space-3);
+  border-radius: var(--ct-radius-md);
+  border: 1px solid var(--ct-border);
+  cursor: pointer;
+}
+.manuscript-editor .comments li.selected,
+.continuous-review-rail .comments li.selected {
+  background: color-mix(in srgb, var(--ct-comment-bg) 45%, var(--ct-selected-bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ct-accent) 35%, transparent);
 }
 .manuscript-editor .muted {
   color: var(--ct-text-muted);
