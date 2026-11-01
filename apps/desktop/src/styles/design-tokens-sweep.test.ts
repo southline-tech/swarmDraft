@@ -62,8 +62,8 @@ describe('design token sweep (#37)', () => {
     '%s only references defined --ct-* tokens',
     (rel) => {
       const css = styleCss(join(root, rel), readFileSync(join(root, rel), 'utf8'));
-    const used = [...css.matchAll(/var\((--[\w-]+)/g)].map((m) => m[1] ?? '');
-    expect(used.filter((v) => v.startsWith('--ct-') && !defined.has(v))).toEqual([]);
+      const used = [...css.matchAll(/var\((--[\w-]+)/g)].map((m) => m[1] ?? '');
+      expect(used.filter((v) => v.startsWith('--ct-') && !defined.has(v))).toEqual([]);
     },
   );
 });
