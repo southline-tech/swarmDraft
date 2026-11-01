@@ -9,6 +9,7 @@ import {
   runDismissOutdated,
   runDecision,
   selectTargets,
+  portResultAfterDecision,
   type DecisionOp,
   type SuggestionKind,
 } from './decisions';
@@ -175,6 +176,23 @@ describe('decideSuggestions (reference model)', () => {
     expect(textOf(r.doc)).toEqual(['a ']);
     expect(r.outdated).toEqual([t(I, 'x1')]);
     expect(r.superseded).toEqual([]);
+  });
+
+  it('portResultAfterDecision matches decideSuggestions side effects', () => {
+    const overlap: DocNode = {
+      type: 'doc',
+      content: [
+        para(
+          { text: 'a ' },
+          { text: 'bright', marks: [ins('x1', 'Bot A'), del('y1', 'Bot B')] },
+          { text: ' day', marks: [del('y1', 'Bot B')] },
+        ),
+      ],
+    };
+    const model = decideSuggestions(overlap, op('accept', t(D, 'y1')));
+    const effects = portResultAfterDecision(overlap, model.doc, op('accept', t(D, 'y1')));
+    expect(effects.outdated).toEqual(model.outdated);
+    expect(effects.decided).toEqual(model.decided);
   });
   it('accept re-anchors non-overlapping pending suggestions', () => {
     const adjoin: DocNode = {

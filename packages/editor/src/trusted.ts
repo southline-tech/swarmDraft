@@ -24,6 +24,7 @@ export function allowReviewEdits(tr: Transaction): Transaction {
 
 export {
   applyReviewDecision as applyReviewDecisionWith,
+  applyReviewDecisionWithPortResult,
   buildReviewTransaction,
   type ReviewDecision,
   type ReviewDecisionOp,

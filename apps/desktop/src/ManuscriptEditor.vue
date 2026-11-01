@@ -106,7 +106,7 @@ import { spellDictionaryAdd, spellDictionaryIgnore } from './backend';
 import { lintBlockText } from './spellcheck/lint';
 import SpellMenu from './spellcheck/SpellMenu.vue';
 import { loadSpellPrefs, spellcheckEnabled } from './settings/prefs';
-import { applyReviewDecision } from './review/apply';
+import { applyHumanReviewDecision, persistOutdatedAfterAccept } from './review/apply';
 import { collabColor, setWriterProfileForColors } from './author-colors';
 import { commentRowLabel, primaryCommentByThread } from './review/review-sidebar';
 import { parseBookChangeKey, scopeBookChangeKey } from './review/review-book';
@@ -692,11 +692,15 @@ function decide(targets: SuggestionTarget[], decision: Decision) {
   if (!e || !targets.length || !e.isEditable) return;
   const keys = new Set(targets.map(keyOf));
   const decided = suggestions.value.filter((s) => keys.has(keyOf(s)));
-  if (!applyReviewDecision(e.view, { targets, decision })) return;
+  const effects = applyHumanReviewDecision(e.view, { targets, decision });
+  if (!effects.applied) return;
   const decidedAt = new Date().toISOString();
   const status = decision === 'accept' ? 'accepted' : 'rejected';
   log.record(
     decided.map((s) => ({ kind: s.kind, id: s.id, status, decidedAt, decidedBy: 'author' })),
+  );
+  void persistOutdatedAfterAccept(props.manuscriptId, props.sectionId, effects.outdated).catch(
+    (err) => console.error('Outdated suggestion index update failed', err),
   );
   refreshReview(e);
   emit('decisions', log.records());

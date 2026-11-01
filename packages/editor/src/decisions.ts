@@ -318,6 +318,26 @@ export function decideSuggestions(doc: DocNode, op: DecisionOp): DecisionResult 
   return { doc: next, decided, outdated, superseded };
 }
 
+/** Side effects of a decision already applied on the live doc (ProseMirror path, #178). */
+export function portResultAfterDecision(
+  before: DocNode,
+  after: DocNode,
+  op: DecisionOp,
+): PortResult {
+  const keys = new Set(op.targets.map(targetKey));
+  const beforeItems = listSuggestions(before);
+  const decided = beforeItems
+    .filter((i) => keys.has(targetKey(i)))
+    .map(({ kind, id }) => ({ kind, id }));
+  const remaining = new Set(listSuggestions(after).map(targetKey));
+  const vanished = beforeItems
+    .filter((i) => !keys.has(targetKey(i)) && !remaining.has(targetKey(i)))
+    .map(({ kind, id }) => ({ kind, id }));
+  const outdated = op.decision === 'accept' ? vanished : [];
+  const superseded = op.decision === 'reject' ? vanished : [];
+  return { decided, outdated, superseded };
+}
+
 /** Attach index outdated flags for the review panel (#178 data layer). */
 export function withOutdatedFlags(
   items: readonly SuggestionItem[],

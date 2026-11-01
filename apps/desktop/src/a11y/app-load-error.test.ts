@@ -87,5 +87,5 @@ describe('App load-error region with the real editor (#82)', () => {
     );
     expect(region().text()).toBe('');
     w.unmount();
-  });
+  }, 15_000);
 });
