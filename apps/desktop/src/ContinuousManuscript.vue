@@ -37,7 +37,7 @@ import {
   scrollElementCenterInRoot,
 } from './review/review-scroll';
 import { CONTINUOUS_REVIEW_NAV, CONTINUOUS_SCROLL_ROOT } from './continuous-review-nav';
-import type { ReviewChange } from './review/review-state';
+import type { AuthorFilter, ReviewChange } from './review/review-state';
 
 const REVIEW_RAIL = '#continuous-review-rail';
 import { docWordCount } from './status/wordcount';
@@ -117,6 +117,8 @@ const emit = defineEmits<{
 const suggestionsBySection = shallowRef(new Map<string, SuggestionItem[]>());
 const activeScrollKey = ref<string | null>(null);
 const reviewFollow = ref(true);
+/** Book session scope (#241): survives section switches while the manuscript is open. */
+const authorFilter = shallowRef<AuthorFilter>(null);
 
 function onOpenSuggestions(sectionId: string, items: SuggestionItem[]) {
   const next = new Map(suggestionsBySection.value);
@@ -266,9 +268,12 @@ async function navigateToChange(
   }
   const root = scrollRoot.value;
   await nextTick();
-  const mark = root ? findMarkElement(root, scopedKey) : null;
+  let mark = root ? findMarkElement(root, scopedKey) : null;
+  if (!mark && root) {
+    await nextTick();
+    mark = findMarkElement(root, scopedKey);
+  }
   if (root && mark) scrollElementCenterInRoot(root, mark, scrollBehavior());
-  else scrollToSection(parsed.sectionId);
   await nextTick();
   editors.value.get(parsed.sectionId)?.selectLocalChange(parsed.changeKey, scopedKey, {
     focusEditor: opts?.focusEditor ?? true,
@@ -431,6 +436,7 @@ onBeforeUnmount(() => {
             :book-chapter-groups="sec.id === selectedId ? bookChapterGroups : undefined"
             :review-active-scroll-key="sec.id === selectedId ? activeScrollKey : undefined"
             :review-follow="sec.id === selectedId ? reviewFollow : undefined"
+            :author-filter="sec.id === selectedId ? authorFilter : undefined"
             :chapter-title="sec.id === selectedId ? chapterTitle : undefined"
             :chapter-label="sectionLabels?.get(sec.id)"
             :book-docs="sec.id === selectedId ? bookDocs : undefined"
@@ -448,6 +454,7 @@ onBeforeUnmount(() => {
             :computer-name="computerName"
             :decision-records="decisionRecordsBySection?.[sec.id] ?? []"
             :manuscript-id="manuscriptId"
+            @update:author-filter="authorFilter = $event"
             @reload="emit('reload')"
             @toggle-navigator="emit('toggle-navigator')"
             @decisions="(records) => emit('decisions', sec.id, records)"
@@ -484,6 +491,8 @@ onBeforeUnmount(() => {
   grid-template-columns: minmax(0, 1fr);
 }
 .continuous-review-rail {
+  position: relative;
+  z-index: 35;
   display: flex;
   flex-direction: column;
   min-height: 0;

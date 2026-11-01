@@ -208,6 +208,8 @@ const props = defineProps<{
   bookChapterGroups?: readonly BookChapterGroup[];
   reviewActiveScrollKey?: string | null;
   reviewFollow?: boolean;
+  /** Book-wide author filter owned by ContinuousManuscript (#241). */
+  authorFilter?: AuthorFilter | null;
 }>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
@@ -234,6 +236,7 @@ const emit = defineEmits<{
   /** Open suggestions in this section for book-wide aggregation (#210). */
   'open-suggestions': [items: SuggestionItem[]];
   'update:reviewFollow': [on: boolean];
+  'update:authorFilter': [filter: AuthorFilter];
 }>();
 
 const appFooterEditor = inject(APP_FOOTER_EDITOR_KEY, null);
@@ -501,7 +504,16 @@ const commentAuthor = (item: ReviewItem): AgentName | null => {
 const suggestions = shallowRef<SuggestionItem[]>([]);
 const outdatedIds = ref(new Set<string>());
 const overlapPopover = shallowRef<{ x: number; y: number; cluster: OverlapCluster } | null>(null);
-const filter = shallowRef<AuthorFilter>(null);
+const localAuthorFilter = shallowRef<AuthorFilter>(null);
+const filter = computed({
+  get(): AuthorFilter {
+    return props.authorFilter !== undefined ? props.authorFilter : localAuthorFilter.value;
+  },
+  set(v: AuthorFilter) {
+    if (props.authorFilter !== undefined) emit('update:authorFilter', v);
+    else localAuthorFilter.value = v;
+  },
+});
 const viewScopeLive = shallowRef('');
 const currentKey = shallowRef<string | null>(null);
 let currentIndex = -1;
@@ -565,11 +577,14 @@ function refreshAuthorFilterDecorations() {
     refreshSuggestionOverlap(e.view);
   }
 }
-watch(filter, () => {
-  refreshAuthorFilterDecorations();
-  if (editor.value) refreshReview(editor.value);
-  else announceViewScope();
-});
+watch(
+  () => filter.value,
+  () => {
+    refreshAuthorFilterDecorations();
+    if (editor.value) refreshReview(editor.value);
+    else announceViewScope();
+  },
+);
 watch(
   () => props.suggestionReasons,
   () => {
@@ -626,16 +641,25 @@ function scrollSelectionIntoManuscriptColumn(
   });
 }
 
+function focusReviewRow(key: string) {
+  void nextTick(() => {
+    const row = document.querySelector<HTMLElement>(`[data-review-row-key="${CSS.escape(key)}"]`);
+    row?.focus({ preventScroll: true });
+  });
+}
+
 function select(key: string) {
   const parsed = parseBookChangeKey(key);
   if (parsed && continuousNav) {
     currentKey.value = key;
     currentIndex = visible.value.findIndex((v) => v.key === key);
-    void continuousNav.navigateToChange(key, {
-      follow: true,
-      suppressSync: true,
-      focusEditor: false,
-    });
+    void continuousNav
+      .navigateToChange(key, {
+        follow: true,
+        suppressSync: true,
+        focusEditor: false,
+      })
+      .then(() => focusReviewRow(key));
     emit('update:reviewFollow', true);
     return;
   }
@@ -738,8 +762,19 @@ function decide(targets: SuggestionTarget[], decision: Decision) {
   }
   refreshReview(e);
   emit('decisions', log.records());
-  // Auto-advance: the change now at the old position becomes current.
-  if (currentKey.value) select(currentKey.value);
+  const key = currentKey.value;
+  if (!key) return;
+  if (continuousNav) {
+    void continuousNav.navigateToChange(key, {
+      follow: false,
+      suppressSync: true,
+      focusEditor: false,
+    });
+  } else {
+    const parsed = parseBookChangeKey(key);
+    const localKey = parsed?.changeKey ?? key;
+    selectLocalChange(localKey, key, { focusEditor: false });
+  }
 }
 const targetOf = (key: string | null) => {
   if (!key) return [];
@@ -1585,7 +1620,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
     </div>
     <div
       v-if="spellMenu || menuAt || overlapPopover"
-      class="fixed inset-0 z-30"
+      class="fixed inset-0 z-30 context-dismiss"
       data-test="context-dismiss"
       @click="
         spellMenu = null;

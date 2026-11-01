@@ -24,7 +24,8 @@ const kindLabel = computed(() => (props.issue.kind === 'spelling' ? 'Spelling' :
 function restoreEditorFocus() {
   void nextTick(() => {
     const page = document.querySelector<HTMLElement>('.manuscript-editor .ProseMirror');
-    (page ?? opener)?.focus?.();
+    if (page) page.focus({ preventScroll: true });
+    else opener?.focus?.({ preventScroll: true });
   });
 }
 
