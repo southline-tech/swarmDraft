@@ -1281,7 +1281,10 @@ async fn writes_never_touch_existing_review_marks() {
     assert_ne!(r["isError"], true, "{r}");
     let after = raw_keys(&s, &sid);
     for k in &before {
-        assert!(after.contains(k), "existing mark key {k} must survive overlap");
+        assert!(
+            after.contains(k),
+            "existing mark key {k} must survive overlap"
+        );
     }
     assert!(after.len() > before.len(), "overlap adds new mark keys");
     assert_eq!(

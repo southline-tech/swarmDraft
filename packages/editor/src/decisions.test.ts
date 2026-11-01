@@ -5,7 +5,6 @@ import {
   listSuggestions,
   parseDecisionRecord,
   parseDecisionRecords,
-  dismissOutdatedMarks,
   withOutdatedFlags,
   runDismissOutdated,
   runDecision,

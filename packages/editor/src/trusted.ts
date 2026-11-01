@@ -4,7 +4,6 @@
  * the review decision port (RAD-211): accept/reject as one trusted ProseMirror transaction.
  */
 import type { Transaction } from '@tiptap/pm/state';
-import type { DocNode } from '@swarmdraft/schema';
 import { REVIEW_EDIT_TOKEN, reviewGuardKey } from './review';
 import {
   applyReviewDecision as applyWith,
