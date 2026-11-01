@@ -129,6 +129,8 @@ describe('continuous manuscript (#107)', () => {
       if (!doc) continue;
       const words = docWordCount(doc);
       if (words < 2) continue;
+      // #235: title-page boilerplate is stripped from stored body; skip length vs Y.Doc word heuristic.
+      if (sec.kind === 'front_matter' && sec.title === 'Title Page') continue;
       const pm = w.find(`[data-section-anchor="${sec.id}"] .ProseMirror`);
       expect(pm.exists(), sec.title).toBe(true);
       expect(pm.text().replace(/\s+/g, ' ').trim().length, sec.title).toBeGreaterThan(20);
