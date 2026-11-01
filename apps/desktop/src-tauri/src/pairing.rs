@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 
 pub const PAIRING_SECRET_PREFIX: &str = "pair_";
 const PAIRING_TTL_SECS: i64 = 300;
-const MAX_PENDING: i64 = 3;
+pub(crate) const MAX_PENDING: i64 = 20;
 const PAIRING_RATE_WINDOW_SECS: i64 = 60;
-const PAIRING_RATE_MAX: i64 = 5;
+pub(crate) const PAIRING_RATE_MAX: i64 = 20;
 
 const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
@@ -106,14 +106,52 @@ fn count_pending(c: &rusqlite::Connection) -> Result<i64, StorageError> {
     Ok(n)
 }
 
-fn pairing_rate_ok(c: &rusqlite::Connection) -> Result<bool, StorageError> {
-    let n: i64 = c.query_row(
+fn pairing_rate_count(c: &rusqlite::Connection) -> Result<i64, StorageError> {
+    c.query_row(
         "SELECT count(*) FROM agent_pairings
              WHERE created_at > strftime('%Y-%m-%dT%H:%M:%fZ','now',?1)",
         [format!("-{PAIRING_RATE_WINDOW_SECS} seconds")],
         |r| r.get(0),
-    )?;
-    Ok(n < PAIRING_RATE_MAX)
+    )
+    .map_err(StorageError::from)
+}
+
+/// Seconds until the oldest request in the rate window falls out (at least 1).
+fn pairing_rate_retry_after_secs(c: &rusqlite::Connection) -> Result<i64, StorageError> {
+    let secs: i64 = c
+        .query_row(
+            "SELECT MAX(1, CAST(
+                (julianday(strftime('%Y-%m-%dT%H:%M:%fZ','now',?2))
+                 - julianday(created_at)) * 86400 AS INTEGER))
+             FROM agent_pairings
+             WHERE created_at > strftime('%Y-%m-%dT%H:%M:%fZ','now',?1)",
+            [
+                format!("-{PAIRING_RATE_WINDOW_SECS} seconds"),
+                format!("+{PAIRING_RATE_WINDOW_SECS} seconds"),
+            ],
+            |r| r.get(0),
+        )
+        .unwrap_or(PAIRING_RATE_WINDOW_SECS);
+    Ok(secs.clamp(1, PAIRING_RATE_WINDOW_SECS))
+}
+
+/// Seconds until the soonest pending pairing expires (at least 1).
+fn pending_limit_retry_after_secs(c: &rusqlite::Connection) -> Result<i64, StorageError> {
+    let secs: i64 = c
+        .query_row(
+            "SELECT MAX(1, CAST(
+                (julianday(MIN(expires_at)) - julianday(strftime('%Y-%m-%dT%H:%M:%fZ','now')))
+                * 86400 AS INTEGER))
+             FROM agent_pairings WHERE status = 'pending'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(1);
+    Ok(secs.max(1))
+}
+
+fn pairing_limit_message(kind: &str, retry_after_secs: i64) -> String {
+    format!("{kind}; retry after {retry_after_secs} seconds")
 }
 
 impl Store {
@@ -137,15 +175,19 @@ impl Store {
         let id = new_pairing_id();
         let scopes_s = scopes.join(" ");
         self.with_conn(|c| {
-            if !pairing_rate_ok(c)? {
-                return Err(StorageError::Invalid(
-                    "too many pairing requests; try again later".into(),
-                ));
+            if pairing_rate_count(c)? >= PAIRING_RATE_MAX {
+                let retry = pairing_rate_retry_after_secs(c)?;
+                return Err(StorageError::Invalid(pairing_limit_message(
+                    "too many pairing requests in the last minute",
+                    retry,
+                )));
             }
             if count_pending(c)? >= MAX_PENDING {
-                return Err(StorageError::Invalid(
-                    "too many pending pairing requests".into(),
-                ));
+                let retry = pending_limit_retry_after_secs(c)?;
+                return Err(StorageError::Invalid(pairing_limit_message(
+                    "too many pending pairing requests",
+                    retry,
+                )));
             }
             c.execute(
                 &format!(
@@ -408,21 +450,74 @@ mod tests {
     #[test]
     fn rate_limits_pairing_requests_per_minute() {
         let (_t, s) = store();
-        for i in 0..5 {
+        for i in 0..PAIRING_RATE_MAX {
             let r = s.request_pairing(&format!("Bot {i}"), None, None).unwrap();
             s.deny_pairing(&r.pairing_id).unwrap();
         }
-        assert!(s.request_pairing("One too many", None, None).is_err());
+        let err = s.request_pairing("One too many", None, None).unwrap_err();
+        assert!(
+            matches!(err, StorageError::Invalid(ref m)
+                if m.contains("too many pairing requests") && m.contains("retry after")),
+            "{err:?}"
+        );
     }
 
     #[test]
-    fn at_most_three_pending_pairings() {
+    fn at_most_max_pending_pairings() {
         let (_t, s) = store();
-        let _a = s.request_pairing("A", None, None).unwrap();
-        let _b = s.request_pairing("B", None, None).unwrap();
-        let _c = s.request_pairing("C", None, None).unwrap();
-        let err = s.request_pairing("D", None, None).unwrap_err();
-        assert!(matches!(err, StorageError::Invalid(ref m) if m.contains("pending")));
+        for i in 0..MAX_PENDING {
+            let _ = s
+                .request_pairing(&format!("Pending {i}"), None, None)
+                .unwrap();
+        }
+        // Pending rows stay, but stop counting against the per-minute rate cap.
+        s.with_conn(|c| {
+            c.execute(
+                "UPDATE agent_pairings SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-120 seconds')
+                 WHERE status = 'pending'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        let err = s.request_pairing("Overflow", None, None).unwrap_err();
+        assert!(
+            matches!(err, StorageError::Invalid(ref m)
+                if m.contains("pending") && m.contains("retry after")),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn five_pairings_including_revoked_name_all_approve() {
+        let (_t, s) = store();
+        let retired = s.create_agent("Line Editor", "#3366ff").unwrap();
+        s.revoke_agent(&retired.id).unwrap();
+        let names = [
+            "Line Editor",
+            "Copy Bot",
+            "Continuity Bot",
+            "Style Bot",
+            "Fact Bot",
+        ];
+        let mut pending = Vec::new();
+        for name in names {
+            pending.push(s.request_pairing(name, None, None).unwrap());
+        }
+        assert_eq!(pending.len(), 5);
+        for r in &pending {
+            let (agent, token) = s.approve_pairing(&r.pairing_id, None).unwrap();
+            assert!(token.token.starts_with("cat_"));
+            assert!(agent.revoked_at.is_none());
+        }
+        let agents = s.list_agents().unwrap();
+        assert_eq!(agents.len(), 5);
+        let editors: Vec<_> = agents
+            .iter()
+            .filter(|a| a.name.eq_ignore_ascii_case("line editor"))
+            .collect();
+        assert_eq!(editors.len(), 1);
+        assert_ne!(editors[0].id, retired.id);
     }
 
     #[test]

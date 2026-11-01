@@ -160,7 +160,7 @@ async fn deny_and_wrong_secret_over_mcp() {
 #[tokio::test]
 async fn pairing_rate_limit() {
     let s = start_pairing_server().await;
-    for i in 0..5 {
+    for i in 0..20 {
         let r = tool_call(
             &s.url,
             None,
@@ -180,4 +180,9 @@ async fn pairing_rate_limit() {
     )
     .await;
     assert_eq!(r["isError"], true);
+    let msg = r["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        msg.contains("retry after"),
+        "limit error should tell the bot when to retry: {msg}"
+    );
 }
