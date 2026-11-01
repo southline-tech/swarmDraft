@@ -655,12 +655,13 @@ async fn write_tools_listed_and_decisions_absent() {
     for t in [
         "add_comment",
         "suggest_edit",
+        "suggest_insert",
         "suggest_style",
         "list_suggestions",
     ] {
         assert!(names.contains(&t), "missing {t}");
     }
-    assert_eq!(names.len(), 14, "{names:?}");
+    assert_eq!(names.len(), 15, "{names:?}");
     let r = call(&s, "accept_suggestion", json!({"id": "x"})).await;
     let r2 = rpc(
         &s,
@@ -1322,6 +1323,7 @@ async fn suggest_only_no_tool_can_accept_or_reject() {
             "request_pairing",
             "search_text",
             "suggest_edit",
+            "suggest_insert",
             "suggest_style",
             "trigger_export",
             "write_note"
@@ -1656,4 +1658,211 @@ async fn write_note_requires_comment_scope() {
     .await;
     assert_eq!(r["isError"], true, "{r}");
     assert!(text(&r).contains("comment"));
+}
+
+async fn call_as(s: &Server, token: &str, tool: &str, args: Value) -> Value {
+    let v = rpc_as(
+        s,
+        token,
+        "tools/call",
+        json!({"name": tool, "arguments": args}),
+    )
+    .await;
+    v["result"].clone()
+}
+
+async fn rpc_as(s: &Server, token: &str, method: &str, params: Value) -> Value {
+    let r = post(
+        &s.url,
+        Some(token),
+        json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}),
+    )
+    .await;
+    assert_eq!(r.status(), 200, "{method}");
+    r.json().await.unwrap()
+}
+
+async fn second_agent_token(s: &Server, name: &str) -> String {
+    let agent = s.store.create_agent(name, "#aabbcc").unwrap();
+    let scopes = vec![
+        "read".to_string(),
+        "suggest".to_string(),
+        "comment".to_string(),
+    ];
+    s.store
+        .create_token(&agent.id, Some(&scopes))
+        .unwrap()
+        .token
+}
+
+#[tokio::test]
+async fn read_chapter_json_responses_declare_utf8_charset() {
+    let s = start(&["read"], 1000).await;
+    let ch = call(
+        &s,
+        "list_chapters",
+        json!({"manuscript_id": s.manuscript_id}),
+    )
+    .await;
+    let sid = ch["structuredContent"]["sections"][0]["id"]
+        .as_str()
+        .unwrap();
+    let r = post(
+        &s.url,
+        Some(&s.token),
+        json!({
+            "jsonrpc":"2.0","id":1,"method":"tools/call",
+            "params":{"name":"read_chapter","arguments":{
+                "manuscript_id": s.manuscript_id,
+                "section_id": sid,
+                "format": "json"
+            }}
+        }),
+    )
+    .await;
+    assert_eq!(r.status(), 200);
+    let ct = r
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    assert!(
+        ct.contains("charset=utf-8"),
+        "content-type must declare UTF-8 for PowerShell 5.1: {ct}"
+    );
+}
+
+#[tokio::test]
+async fn read_chapter_preserves_curly_quotes_in_markdown() {
+    let s = start(&["read"], 1000).await;
+    let quote = "She said \u{201c}hello\u{201d} and it\u{2019}s fine.";
+    let sec = s
+        .store
+        .import_section_json(
+            &s.manuscript_id,
+            "chapter",
+            "Quotes",
+            &json!({"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text": quote}]}]}),
+        )
+        .unwrap();
+    let r = call(
+        &s,
+        "read_chapter",
+        json!({"manuscript_id": s.manuscript_id, "section_id": sec.id}),
+    )
+    .await;
+    assert_ne!(r["isError"], true, "{r}");
+    let md = text(&r);
+    assert!(md.contains('\u{201c}'), "left curly quote intact: {md}");
+    assert!(md.contains('\u{201d}'), "right curly quote intact: {md}");
+    assert!(md.contains('\u{2019}'), "curly apostrophe intact: {md}");
+    assert!(
+        !md.contains('\u{FFFD}'),
+        "must not contain replacement char: {md}"
+    );
+}
+
+#[tokio::test]
+async fn suggest_edit_rejects_overlap_from_another_agent() {
+    let s = start(&["read", "suggest"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    let args = json!({
+        "manuscript_id": s.manuscript_id,
+        "section_id": sid,
+        "block_id": bid,
+        "quote": "flickered",
+        "replacement": "guttered",
+    });
+    let first = call(&s, "suggest_edit", args.clone()).await;
+    assert_ne!(first["isError"], true, "{first}");
+    let other = second_agent_token(&s, "Continuity Bot").await;
+    let second = call_as(&s, &other, "suggest_edit", args).await;
+    assert_eq!(second["isError"], true, "{second}");
+    assert!(
+        text(&second).contains("overlaps a pending suggestion"),
+        "{}",
+        text(&second)
+    );
+    assert_eq!(s.store.open_suggestions(&sid).unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn suggest_insert_adds_tracked_paragraphs_after_block() {
+    let s = start(&["read", "suggest"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    let before = read_json(&s, &sid).await;
+    let n = before["blocks"].as_array().unwrap().len();
+    let r = call(
+        &s,
+        "suggest_insert",
+        json!({
+            "manuscript_id": s.manuscript_id,
+            "section_id": sid,
+            "after_block_id": bid,
+            "paragraphs": ["First new beat.", "Second new beat."],
+        }),
+    )
+    .await;
+    assert_ne!(r["isError"], true, "{r}");
+    assert_eq!(r["structuredContent"]["suggestion"]["kind"], "insert");
+    let ids = r["structuredContent"]["blockIds"].as_array().unwrap();
+    assert_eq!(ids.len(), 2);
+    let after = read_json(&s, &sid).await;
+    assert_eq!(after["blocks"].as_array().unwrap().len(), n + 2);
+    let md = read_md(&s, &sid).await;
+    assert!(md.contains("{++First new beat.++}"), "{md}");
+    assert!(md.contains("{++Second new beat.++}"), "{md}");
+}
+
+#[tokio::test]
+async fn initialize_and_poll_pairing_carry_work_guide() {
+    let s = start(&["read"], 1000).await;
+    let init = rpc(
+        &s,
+        "initialize",
+        json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "t", "version": "0"}
+        }),
+    )
+    .await;
+    let instr = init["result"]["instructions"].as_str().unwrap_or_default();
+    assert!(instr.contains("tools/call"), "{instr}");
+    assert!(
+        instr.contains("not chat") || instr.contains("never paste"),
+        "{instr}"
+    );
+
+    let req_resp = post(
+        &s.url,
+        None,
+        json!({
+            "jsonrpc":"2.0","id":2,"method":"tools/call",
+            "params":{"name":"request_pairing","arguments":{"name":"Guide Bot"}}
+        }),
+    )
+    .await;
+    assert_eq!(req_resp.status(), 200);
+    let req_body: Value = req_resp.json().await.unwrap();
+    let sc = &req_body["result"]["structuredContent"];
+    let pid = sc["pairingId"].as_str().unwrap();
+    let secret = sc["pairingSecret"].as_str().unwrap();
+    s.store.approve_pairing(pid, None).unwrap();
+    let poll_resp = post(
+        &s.url,
+        None,
+        json!({
+            "jsonrpc":"2.0","id":3,"method":"tools/call",
+            "params":{"name":"poll_pairing","arguments":{"pairing_id": pid, "pairing_secret": secret}}
+        }),
+    )
+    .await;
+    let poll_body: Value = poll_resp.json().await.unwrap();
+    let guide = poll_body["result"]["structuredContent"]["workGuide"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(guide.contains("suggest_edit"), "{guide}");
+    assert!(poll_body["result"]["structuredContent"]["token"].is_string());
 }
