@@ -6,7 +6,7 @@ vi.mock('./brand', () => ({ PRODUCT_NAME: 'ZzBrandProbe' }));
 
 describe('PRODUCT_NAME', () => {
   it('drives the welcome heading, welcome copy and top bar name', async () => {
-    localStorage.removeItem('coauthor.welcomed');
+    localStorage.removeItem('swarmdraft.welcomed');
     const { default: App } = await import('../App.vue');
     const w = mount(App);
     await flushPromises();

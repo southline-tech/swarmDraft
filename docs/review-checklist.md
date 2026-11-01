@@ -17,7 +17,7 @@ Built from review, design and QA findings on PRs #1–#46. Most common first. Ti
 - [ ] Agent/remote updates applied with `REMOTE_ORIGIN`; the saver skips them. _Why: echo loops and duplicate marks._
 - [ ] Rust: create yrs docs only with content::new_doc (UTF-16 offsets); no bare Doc::new() or with_client_id. Add a non-ASCII cross-language (TS ↔ Rust) round-trip test.
 - [ ] Navigation, focus and selection changes don't modify the doc or add an undo step (`addToHistory: false`; assert doc `eq` and undo depth). _Why: moving around must not edit the book._
-- [ ] Accept/reject only via `review/apply.ts` → `@coauthor/editor/trusted`; undo/redo keeps the decision log in step. _Why: human-approval gating of bot edits._
+- [ ] Accept/reject only via `review/apply.ts` → `@swarmdraft/editor/trusted`; undo/redo keeps the decision log in step. _Why: human-approval gating of bot edits._
 - [ ] Accept/reject are human-only and keyed on the raw agent id (never a display name).
 - [ ] Review-guard or trust changes: a real two-client test (two mounted editors on synced Y.Docs). Accept and reject on A show on B, and bot suggestions appear on B. Remote Yjs transactions that touch review marks are never dropped; local untrusted mark edits are still blocked.
 - [ ] Concurrent cases tested: typing mid-word while an agent update lands, edits in another section, non-ASCII text (`naïve café — 😀`). _Why: repeatedly requested._

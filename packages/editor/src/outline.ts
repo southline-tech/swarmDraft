@@ -3,7 +3,7 @@
  * front and back matter sit at the top level. Every function is pure and returns a new flat
  * `Section[]` in reading order, so the list can be stored as-is.
  */
-import { isSectionKind, sectionDocId, type Section, type SectionKind } from '@coauthor/schema';
+import { isSectionKind, sectionDocId, type Section, type SectionKind } from '@swarmdraft/schema';
 
 export type OutlineNode = Section & { children: OutlineNode[] };
 

@@ -8,7 +8,7 @@
  */
 import { strFromU8 } from 'fflate';
 import { safeUnzip } from './zip';
-import { sectionDocId, type SectionKind } from '@coauthor/schema';
+import { sectionDocId, type SectionKind } from '@swarmdraft/schema';
 import { child, kids, onOff, parseXml, textOf, val, type XmlElement } from './xml';
 import {
   normalizeInline,

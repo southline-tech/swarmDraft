@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
-import { docToYDoc } from '@coauthor/docx';
+import { docToYDoc } from '@swarmdraft/docx';
 import StatusBar from './StatusBar.vue';
 import ManuscriptEditor from '../ManuscriptEditor.vue';
 import { SAMPLE_DOC } from '../fixtures/sample';

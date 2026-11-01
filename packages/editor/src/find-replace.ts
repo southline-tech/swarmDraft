@@ -24,7 +24,7 @@ export interface FindHighlightState {
   active: number;
 }
 
-export const findHighlightKey = new PluginKey<FindHighlightState>('coauthorFindHighlight');
+export const findHighlightKey = new PluginKey<FindHighlightState>('swarmdraftFindHighlight');
 
 const isSuggestion = (m: PMMark) => (SUGGESTION_MARKS as readonly string[]).includes(m.type.name);
 

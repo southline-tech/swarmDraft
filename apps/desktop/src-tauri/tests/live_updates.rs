@@ -7,8 +7,8 @@
 //! into a mounted editor. Without it, the committed fixture is checked against a fresh run
 //! (client ids, mark ids and timestamps differ per run, so the decoded documents are compared).
 
-use coauthor_lib::{mcp, storage::Store};
 use serde_json::{json, Value};
+use swarmdraft_lib::{mcp, storage::Store};
 use yrs::updates::decoder::Decode;
 use yrs::{Doc, ReadTxn, StateVector, Transact, Update};
 
@@ -60,7 +60,7 @@ async fn call(s: &Server, tool: &str, args: Value) -> Value {
 }
 
 fn import(store: &Store, title: &str) -> String {
-    let sections: Vec<coauthor_lib::manuscripts::ImportSection> = serde_json::from_value(json!([
+    let sections: Vec<swarmdraft_lib::manuscripts::ImportSection> = serde_json::from_value(json!([
         {"kind": "chapter", "title": "Chapter One", "doc": {"type":"doc","content":[
             {"type":"heading","attrs":{"level":1},"content":[{"type":"text","text":"Chapter One"}]},
             {"type":"paragraph","attrs":{"style":"body"},"content":[{"type":"text","text":"The lantern flickered twice."}]}
@@ -155,7 +155,7 @@ async fn agent_writes_reach_an_open_editor() {
     s.store
         .append_doc_update(
             &o.sections[0].section.doc_id,
-            &state(&coauthor_lib::content::new_doc()),
+            &state(&swarmdraft_lib::content::new_doc()),
         )
         .unwrap();
 
@@ -244,7 +244,7 @@ fn replay(opened: &impl serde::Serialize, live: &impl serde::Serialize) -> Vec<D
         .unwrap()
         .iter()
         .map(|sec| {
-            let doc = coauthor_lib::content::new_doc();
+            let doc = swarmdraft_lib::content::new_doc();
             apply(&doc, &bytes(&sec["state"]));
             for u in live["updates"].as_array().unwrap() {
                 if u["docId"] == sec["docId"] {
@@ -284,7 +284,7 @@ fn fixture_shape(f: &Value) -> Value {
         .iter()
         .zip(&docs)
         .map(|(sec, doc)| {
-            let nodes: Vec<Value> = coauthor_lib::content::decode(doc)
+            let nodes: Vec<Value> = swarmdraft_lib::content::decode(doc)
                 .into_iter()
                 .map(|b| b.node)
                 .collect();
@@ -307,16 +307,16 @@ fn updates_since_pages_and_resumes() {
     let mid = import(&store, "Paged");
     let m = store.load_manuscript(&mid).unwrap();
     let sec = &m.sections[0].section;
-    let total = coauthor_lib::manuscripts::UPDATES_PAGE as usize + 5;
+    let total = swarmdraft_lib::manuscripts::UPDATES_PAGE as usize + 5;
     for _ in 0..total {
         store
-            .append_doc_update(&sec.doc_id, &state(&coauthor_lib::content::new_doc()))
+            .append_doc_update(&sec.doc_id, &state(&swarmdraft_lib::content::new_doc()))
             .unwrap();
     }
     let first = store.updates_since(&mid, m.updates_cursor).unwrap();
     assert_eq!(
         first.updates.len(),
-        coauthor_lib::manuscripts::UPDATES_PAGE as usize
+        swarmdraft_lib::manuscripts::UPDATES_PAGE as usize
     );
     let rest = store.updates_since(&mid, first.cursor).unwrap();
     assert_eq!(rest.updates.len(), 5);

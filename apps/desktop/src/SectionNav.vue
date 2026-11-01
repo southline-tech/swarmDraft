@@ -10,7 +10,7 @@
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import './shells/shells.css';
-import type { NumberingStyle, Section, SectionKind } from '@coauthor/schema';
+import type { NumberingStyle, Section, SectionKind } from '@swarmdraft/schema';
 import { NUMBERING_STYLE_LABELS, NUMBERING_STYLES } from './numbering-style-labels';
 import { formatCount } from './status/wordcount';
 import AppIcon from './icons/AppIcon.vue';
@@ -29,7 +29,7 @@ import {
   renameSection,
   validParents,
   type OutlineNode,
-} from '@coauthor/editor';
+} from '@swarmdraft/editor';
 import { OUTLINE_CHAPTER_ADD_UI } from './outline-chapter-add';
 
 const props = defineProps<{

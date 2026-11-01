@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    coauthor_lib::run()
+    swarmdraft_lib::run()
 }

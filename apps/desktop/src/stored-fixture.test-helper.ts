@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import * as Y from 'yjs';
-import { docToYDoc, importDocx } from '@coauthor/docx';
+import { docToYDoc, importDocx } from '@swarmdraft/docx';
 import { mockOutlineDisplayTitle } from '../../../fixtures/manuscripts/docx-import/outline-display-titles';
 import type { StoredManuscript } from './backend';
 

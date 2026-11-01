@@ -14,7 +14,8 @@ The P1 builds are **unsigned**. Code signing is deferred until a certificate is 
    build is unsigned. Click **More info** then **Run anyway**.
 4. If WebView2 is missing (rare on Windows 10/11), the installer downloads it.
 
-Data is stored locally in `%APPDATA%\com.radiancelux.swarmdraft\` (`coauthor.db`, SQLite; the
+Data is stored locally in `%APPDATA%\com.radiancelux.swarmdraft\` (`swarmdraft.db`, SQLite; an
+existing install may still have `coauthor.db` until the app opens it once). The
 file name is kept on purpose so backups and older builds stay compatible). Uninstalling keeps it
 unless you tick **Also delete my manuscripts and settings** in the uninstaller (see
 [Uninstalling](#uninstalling)).
@@ -107,6 +108,6 @@ The uninstaller shows an **Also delete my manuscripts and settings** checkbox, u
 
 - Unticked: everything swarmDraft stored stays on your computer (manuscripts, settings, agent tokens).
 - Ticked: it also deletes both `com.radiancelux.swarmdraft` folders,
-  `%APPDATA%\com.radiancelux.swarmdraft\` (roaming, including `coauthor.db`) and
+  `%APPDATA%\com.radiancelux.swarmdraft\` (roaming, including `swarmdraft.db`) and
   `%LOCALAPPDATA%\com.radiancelux.swarmdraft\` (local). This cannot be undone. The old
   `com.radiancelux.coauthor` folders are left alone.

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { isProxy, reactive } from 'vue';
 import * as Y from 'yjs';
-import type { Section } from '@coauthor/schema';
-import { docToYDoc, readStructure, writeStructure, yDocToDoc } from '@coauthor/docx';
+import type { Section } from '@swarmdraft/schema';
+import { docToYDoc, readStructure, writeStructure, yDocToDoc } from '@swarmdraft/docx';
 import { openSession } from './manuscript-session';
 
 const ch = (id: string, title: string, docId: string): Section => ({

@@ -704,8 +704,12 @@ mod tests {
         assert_ne!(stored, t.token);
         // The plaintext token appears nowhere in the database file.
         drop(s);
-        let bytes = std::fs::read(_t.path().join("coauthor.db")).unwrap();
-        let wal = std::fs::read(_t.path().join("coauthor.db-wal")).unwrap_or_default();
+        let bytes = std::fs::read(_t.path().join(crate::storage::DB_FILENAME)).unwrap();
+        let wal = std::fs::read(
+            _t.path()
+                .join(format!("{}-wal", crate::storage::DB_FILENAME)),
+        )
+        .unwrap_or_default();
         let needle = t.token.as_bytes();
         for buf in [&bytes, &wal] {
             assert!(!buf.windows(needle.len()).any(|w| w == needle));

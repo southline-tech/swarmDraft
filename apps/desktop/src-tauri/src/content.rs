@@ -1,7 +1,7 @@
 //! Section content in Rust (RAD-209): Yjs (y-prosemirror encoding) <-> ProseMirror JSON, the
 //! agent read view, and markdown/json renderings for the MCP read tools.
 //!
-//! Mirrors `@coauthor/schema` `content.ts` and `readView()` in `packages/docx/src/model.ts`.
+//! Mirrors `@swarmdraft/schema` `content.ts` and `readView()` in `packages/docx/src/model.ts`.
 //! `fixtures/mcp/` holds a section encoded by the TypeScript code; tests on both sides check that
 //! they agree (see `fixtures/mcp/README.md`).
 //!
@@ -77,13 +77,13 @@ pub struct ReadView {
 }
 
 /// Node and mark types the schema knows (`BLOCK_NODE_TYPES`, `INLINE_NODE_TYPES`, `MARK_TYPES`
-/// in `@coauthor/schema`).
+/// in `@swarmdraft/schema`).
 pub const BLOCK_NODE_TYPES: &[&str] = &["paragraph", "heading", "scene_break", "page_break"];
 pub const INLINE_NODE_TYPES: &[&str] = &["text", "hard_break", "footnote", "image"];
 
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-/// `markIdHash` in `@coauthor/schema` marks.ts: 64-bit FNV-1a over the UTF-8 bytes, low 48
+/// `markIdHash` in `@swarmdraft/schema` marks.ts: 64-bit FNV-1a over the UTF-8 bytes, low 48
 /// bits big-endian as 8 standard base64 chars (y-prosemirror's `--[a-zA-Z0-9+/=]{8}` suffix).
 pub fn mark_id_hash(s: &str) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
@@ -763,7 +763,7 @@ mod tests {
 
     /// The validator's lists are the schema's (exported by mcp-fixture.test.ts).
     #[test]
-    fn allowed_types_match_coauthor_schema() {
+    fn allowed_types_match_swarmdraft_schema() {
         let f: Value = serde_json::from_str(
             &std::fs::read_to_string(fixture("synthetic-section.json")).unwrap(),
         )

@@ -1,5 +1,5 @@
-import { buildOutline, type OutlineNode } from '@coauthor/editor';
-import type { Section } from '@coauthor/schema';
+import { buildOutline, type OutlineNode } from '@swarmdraft/editor';
+import type { Section } from '@swarmdraft/schema';
 
 /** Outline sections in reading order (depth-first), for one continuous scroll. */
 export function sectionsInReadingOrder(sections: readonly Section[]): Section[] {

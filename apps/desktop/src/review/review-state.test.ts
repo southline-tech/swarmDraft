@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { DecisionRecord, SuggestionItem } from '@coauthor/editor';
+import type { DecisionRecord, SuggestionItem } from '@swarmdraft/editor';
 import {
   DecisionLog,
   filterSummary,

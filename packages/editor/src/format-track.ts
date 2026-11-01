@@ -16,7 +16,7 @@ import { humanTrackKey, REVIEW_EDIT_TOKEN, reviewGuardKey } from './review';
 import { isBindingTransaction } from './ysource';
 
 export const formatTrackKey = new PluginKey<{ active: boolean; author: string }>(
-  'coauthorFormatTrack',
+  'swarmdraftFormatTrack',
 );
 
 function skipFormatTrack(tr: Transaction): boolean {

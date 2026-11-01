@@ -6,7 +6,7 @@
  */
 import { ref } from 'vue';
 import EmptyState from '../shells/EmptyState.vue';
-import { type CommentRow, type CommentThread } from '@coauthor/editor';
+import { type CommentRow, type CommentThread } from '@swarmdraft/editor';
 import { agentIdOf, agentName } from '../agent-names';
 import { collabColor } from '../author-colors';
 

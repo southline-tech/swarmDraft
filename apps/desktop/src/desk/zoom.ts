@@ -6,7 +6,8 @@ export const ZOOM_LEVELS = [50, 67, 75, 90, 100, 110, 125, 150, 175, 200] as con
 export const ZOOM_MIN = 50;
 export const ZOOM_MAX = 200;
 export const ZOOM_DEFAULT = 100;
-export const ZOOM_STORAGE_KEY = 'coauthor.editor.zoom';
+export const ZOOM_STORAGE_KEY = 'swarmdraft.editor.zoom';
+const LEGACY_ZOOM_STORAGE_KEY = 'coauthor.editor.zoom';
 
 /** Page sheet at 100% zoom: 864px tall, 72px side padding; text measure capped at 70ch (#105). */
 export const PAGE = { height: 864, margin: 72, measureCh: 70 } as const;
@@ -27,7 +28,7 @@ export function loadZoom(
   storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage,
 ): number {
   try {
-    const v = storage?.getItem(ZOOM_STORAGE_KEY);
+    const v = storage?.getItem(ZOOM_STORAGE_KEY) ?? storage?.getItem(LEGACY_ZOOM_STORAGE_KEY);
     return v == null || v.trim() === '' ? ZOOM_DEFAULT : clampZoom(Number(v));
   } catch {
     return ZOOM_DEFAULT;

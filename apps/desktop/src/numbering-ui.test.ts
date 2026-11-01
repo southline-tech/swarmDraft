@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
-import { sectionNumberLabels } from '@coauthor/editor';
-import type { Section } from '@coauthor/schema';
+import { sectionNumberLabels } from '@swarmdraft/editor';
+import type { Section } from '@swarmdraft/schema';
 import SectionNav from './SectionNav.vue';
 import SettingsScreen from './settings/SettingsScreen.vue';
 import { sessionFromStored } from './manuscript-session';

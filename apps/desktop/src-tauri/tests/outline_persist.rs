@@ -1,12 +1,12 @@
 //! RAD-263: outline renames, reorders, moves, adds and deletes are saved to the database,
 //! survive a restart, and show in MCP `list_chapters`. Synthetic text only.
 
-use coauthor_lib::{
+use serde_json::{json, Value};
+use swarmdraft_lib::{
     manuscripts::{ImportSection, OutlineEntry, Section},
     mcp,
     storage::Store,
 };
-use serde_json::{json, Value};
 
 fn sec(id: &str, parent: Option<&str>, kind: &str, title: &str) -> ImportSection {
     ImportSection {
@@ -98,7 +98,7 @@ async fn outline_edits_persist_across_restart_and_show_over_mcp() {
         );
         // The deleted section's text rows are kept, and the delete is audited.
         let rows = store.load_doc(&secs[3].doc_id).unwrap();
-        assert!(!coauthor_lib::content::decode(&rows).is_empty());
+        assert!(!swarmdraft_lib::content::decode(&rows).is_empty());
         let audit = store.audit_log().unwrap();
         let last = audit.last().unwrap();
         assert_eq!(last.1, "delete_sections");
@@ -114,7 +114,7 @@ async fn outline_edits_persist_across_restart_and_show_over_mcp() {
     assert_eq!(rows[3].parent_id.as_deref(), Some(rows[1].id.as_str()));
     // The renamed section kept its document and text.
     assert_eq!(rows[3].doc_id, kept_doc);
-    let blocks = coauthor_lib::content::decode(&store.load_doc(&kept_doc).unwrap());
+    let blocks = swarmdraft_lib::content::decode(&store.load_doc(&kept_doc).unwrap());
     assert!(!blocks.is_empty());
     let ch = list_chapters(store, &token, &mid).await;
     let titles: Vec<_> = ch.iter().map(|s| s["title"].as_str().unwrap()).collect();

@@ -13,7 +13,7 @@ import {
   yDocToDoc,
   type ImportedComment,
   type ImportedManuscript,
-} from '@coauthor/docx';
+} from '@swarmdraft/docx';
 import { manuscriptOpenComments, saveManuscriptCopy, type ManuscriptCopyComment } from '../backend';
 import type { ManuscriptSession } from '../manuscript-session';
 import { mapError, type MappedError } from './map-error';

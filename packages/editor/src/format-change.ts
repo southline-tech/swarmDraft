@@ -1,7 +1,7 @@
 /**
  * Helpers for the `format_change` suggestion mark (#160).
  */
-import type { FormatChangeAttrs } from '@coauthor/schema';
+import type { FormatChangeAttrs } from '@swarmdraft/schema';
 import { PARAGRAPH_STYLE_LABELS, type ParagraphStyle } from './content';
 
 export const PARAGRAPH_STYLE_TARGET = 'paragraph_style';

@@ -4,7 +4,7 @@
  * so backup status, the restore banner and a shown agent key survive switching sections, just
  * like the single panel this replaces.
  */
-import { DEFAULT_TRIM, TRIM_SIZES, type NumberingStyle } from '@coauthor/schema';
+import { DEFAULT_TRIM, TRIM_SIZES, type NumberingStyle } from '@swarmdraft/schema';
 import { NUMBERING_STYLE_LABELS, NUMBERING_STYLES } from '../numbering-style-labels';
 import { nextTick, onMounted, ref } from 'vue';
 import AgentsSettings from '../AgentsSettings.vue';

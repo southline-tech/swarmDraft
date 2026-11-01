@@ -1,16 +1,16 @@
 /**
  * Content node and mark names the editor works with (docs/mvp-spec.md section 7).
- * The shared model lives in `@coauthor/schema`; this file adds editor-only helpers.
+ * The shared model lives in `@swarmdraft/schema`; this file adds editor-only helpers.
  */
-import type { ParagraphStyle } from '@coauthor/schema';
+import type { ParagraphStyle } from '@swarmdraft/schema';
 
-export type { ParagraphStyle } from '@coauthor/schema';
+export type { ParagraphStyle } from '@swarmdraft/schema';
 export {
   BLOCK_NODE_TYPES,
   INLINE_NODE_TYPES,
   MARK_TYPES,
   NON_EXCLUSIVE_MARKS,
-} from '@coauthor/schema';
+} from '@swarmdraft/schema';
 
 export const PARAGRAPH_STYLES = [
   'body',
@@ -57,4 +57,4 @@ export {
   markKeys,
   markTypeFromKey,
   MARK_ID_HASH_TEST_VECTOR,
-} from '@coauthor/schema';
+} from '@swarmdraft/schema';

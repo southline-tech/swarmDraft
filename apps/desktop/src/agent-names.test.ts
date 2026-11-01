@@ -12,7 +12,7 @@ vi.mock('./backend', async (orig) => {
   return { ...real, agentsApi: { ...real.agentsApi, list: () => tauri.list() } };
 });
 import { flushPromises, mount } from '@vue/test-utils';
-import type { SuggestionItem } from '@coauthor/editor';
+import type { SuggestionItem } from '@swarmdraft/editor';
 import type { Agent } from './backend';
 import {
   agentDirectory,

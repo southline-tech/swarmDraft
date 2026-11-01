@@ -6,7 +6,7 @@ import {
   parseBookChangeKey,
   scopeBookChangeKey,
 } from './review-book';
-import type { SuggestionItem } from '@coauthor/editor';
+import type { SuggestionItem } from '@swarmdraft/editor';
 import { pickActiveManuscriptMark, type ManuscriptMarkAnchor } from './review-scroll';
 
 const s1: SuggestionItem[] = [

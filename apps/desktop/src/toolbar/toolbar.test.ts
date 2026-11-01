@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { Editor, type JSONContent } from '@tiptap/core';
 import { NodeSelection, TextSelection } from '@tiptap/pm/state';
-import { docToYDoc } from '@coauthor/docx';
-import { collaborativeEditorOptions, manuscriptEditorOptions } from '@coauthor/editor';
+import { docToYDoc } from '@swarmdraft/docx';
+import { collaborativeEditorOptions, manuscriptEditorOptions } from '@swarmdraft/editor';
 import EditorToolbar from './EditorToolbar.vue';
 import { SHORTCUTS, caretStyle, runCommand, toolbarState } from './toolbar';
 

@@ -1,4 +1,4 @@
-import type { SuggestionItem } from '@coauthor/editor';
+import type { SuggestionItem } from '@swarmdraft/editor';
 import type { ReviewChange } from './review-state';
 import { groupChanges } from './review-state';
 

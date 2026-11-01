@@ -15,7 +15,7 @@ pub const SECTION_KINDS: &[&str] = &["front_matter", "part", "chapter", "back_ma
 const DECISION_KINDS: &[&str] = &["suggestion_insert", "suggestion_delete"];
 const DECISION_STATUS: &[&str] = &["accepted", "rejected"];
 
-/// Human accept/reject of a tracked-change mark (#51). Mirrors `@coauthor/editor` `DecisionRecord`.
+/// Human accept/reject of a tracked-change mark (#51). Mirrors `@swarmdraft/editor` `DecisionRecord`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewDecisionRecord {

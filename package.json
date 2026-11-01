@@ -1,5 +1,5 @@
 {
-  "name": "coauthor",
+  "name": "swarmdraft",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -8,10 +8,10 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "pnpm --filter @coauthor/desktop tauri dev",
-    "dev:web": "pnpm --filter @coauthor/desktop dev",
+    "dev": "pnpm --filter @swarmdraft/desktop tauri dev",
+    "dev:web": "pnpm --filter @swarmdraft/desktop dev",
     "build": "pnpm -r build",
-    "tauri": "pnpm --filter @coauthor/desktop tauri",
+    "tauri": "pnpm --filter @swarmdraft/desktop tauri",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

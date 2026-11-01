@@ -9,7 +9,7 @@ import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import { lintableBlockText, mapLintSpan, surfaceWord } from './extract';
 import type { SpellIssue, SpellLintResult, SpellcheckOptions } from './types';
 
-export const spellcheckKey = new PluginKey<SpellPluginState>('coauthorSpellcheck');
+export const spellcheckKey = new PluginKey<SpellPluginState>('swarmdraftSpellcheck');
 
 export interface SpellPluginState {
   decorations: DecorationSet;

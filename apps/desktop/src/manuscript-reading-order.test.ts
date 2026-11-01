@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addSection } from '@coauthor/editor';
+import { addSection } from '@swarmdraft/editor';
 import { sectionsInReadingOrder } from './manuscript-reading-order';
 
 describe('sectionsInReadingOrder', () => {

@@ -80,9 +80,9 @@ import { CLOSE_FLUSH_TIMEOUT_MS, confirmQuit, flushOnClose, flushWithTimeout } f
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { resetCollabSlots } from './author-colors';
-import { sectionNumberLabels } from '@coauthor/editor';
-import type { NumberingStyle } from '@coauthor/schema';
-import type { DecisionRecord } from '@coauthor/editor';
+import { sectionNumberLabels } from '@swarmdraft/editor';
+import type { NumberingStyle } from '@swarmdraft/schema';
+import type { DecisionRecord } from '@swarmdraft/editor';
 import { mergeLoadedDecisionRecords } from './review/decision-records-load';
 import { docWordCount, outlineDocs, sectionTreeDocs } from './status/wordcount';
 import type { ManuscriptSaveView } from './status/save-status';
@@ -361,11 +361,18 @@ function onEditorLayout(l: EditorLayout) {
 }
 
 /** First-run welcome (ob4) shows once; the flag survives restarts and updates. */
-const WELCOMED_KEY = 'coauthor.welcomed';
+const WELCOMED_KEY = 'swarmdraft.welcomed';
+const LEGACY_WELCOMED_KEY = 'coauthor.welcomed';
 const welcomed = ref(readWelcomed());
 function readWelcomed(): boolean {
   try {
-    return globalThis.localStorage?.getItem(WELCOMED_KEY) === '1';
+    const ls = globalThis.localStorage;
+    if (ls?.getItem(WELCOMED_KEY) === '1') return true;
+    if (ls?.getItem(LEGACY_WELCOMED_KEY) === '1') {
+      ls?.setItem(WELCOMED_KEY, '1');
+      return true;
+    }
+    return false;
   } catch {
     return false;
   }

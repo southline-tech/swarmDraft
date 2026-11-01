@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { nextTick } from 'vue';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
-import { docToYDoc, importDocx, readStructure, writeStructure, yDocToDoc } from '@coauthor/docx';
+import { docToYDoc, importDocx, readStructure, writeStructure, yDocToDoc } from '@swarmdraft/docx';
 import App from './App.vue';
 import { PRODUCT_NAME } from './lib/brand';
 import { storedFixture } from './stored-fixture.test-helper';
@@ -1823,14 +1823,14 @@ describe('restore closes the open manuscript', () => {
 
 describe('home screen', () => {
   it('shows the welcome once, then the open screen, and remembers it', async () => {
-    localStorage.removeItem('coauthor.welcomed');
+    localStorage.removeItem('swarmdraft.welcomed');
     const w = mount(App);
     await flushPromises();
     expect(w.find('[data-test="home-welcome"]').text()).toContain('Welcome to swarmDraft');
     expect(w.find('[data-test="open-manuscript"]').exists()).toBe(false);
     await w.find('[data-test="get-started"]').trigger('click');
     expect(w.find('[data-test="home-open"]').text()).toContain("Let's open your book");
-    expect(localStorage.getItem('coauthor.welcomed')).toBe('1');
+    expect(localStorage.getItem('swarmdraft.welcomed')).toBe('1');
     w.unmount();
     const again = mount(App);
     await flushPromises();
@@ -1840,7 +1840,7 @@ describe('home screen', () => {
   });
 
   it('"Open my Word manuscript" opens the Word file picker', async () => {
-    localStorage.setItem('coauthor.welcomed', '1');
+    localStorage.setItem('swarmdraft.welcomed', '1');
     const w = mount(App, { attachTo: document.body });
     await flushPromises();
     const input = w.find('[data-test="open-docx"]').element as HTMLInputElement;
@@ -1852,7 +1852,7 @@ describe('home screen', () => {
   });
 
   it('opens a manuscript dropped on the drop zone', async () => {
-    localStorage.setItem('coauthor.welcomed', '1');
+    localStorage.setItem('swarmdraft.welcomed', '1');
     const w = mount(App, { attachTo: document.body });
     await flushPromises();
     const file = new File([bytes()], 'synthetic.docx');
@@ -1878,7 +1878,7 @@ describe('home screen', () => {
   });
 
   it('moves focus to the open button after Get started', async () => {
-    localStorage.removeItem('coauthor.welcomed');
+    localStorage.removeItem('swarmdraft.welcomed');
     const w = mount(App, { attachTo: document.body });
     await flushPromises();
     await w.find('[data-test="get-started"]').trigger('click');
@@ -1920,9 +1920,9 @@ describe('home screen', () => {
   });
 
   it('skips the welcome for a returning user whose book reopens', async () => {
-    localStorage.removeItem('coauthor.welcomed');
+    localStorage.removeItem('swarmdraft.welcomed');
     const { w } = await withManuscript();
-    expect(localStorage.getItem('coauthor.welcomed')).toBe('1');
+    expect(localStorage.getItem('swarmdraft.welcomed')).toBe('1');
     w.unmount();
   });
 

@@ -13,16 +13,16 @@ import {
   shallowRef,
   watch,
 } from 'vue';
-import type { Section } from '@coauthor/schema';
+import type { Section } from '@swarmdraft/schema';
 import type * as Y from 'yjs';
-import type { CommentRow, Decision, SuggestionItem } from '@coauthor/editor';
+import type { CommentRow, Decision, SuggestionItem } from '@swarmdraft/editor';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import { sectionReviewMeta } from './backend';
 import { sectionsInReadingOrder } from './manuscript-reading-order';
 import type { ManuscriptSaveView } from './status/save-status';
 import type { EditorLayout } from './desk/outline-auto-collapse';
 import type { AgentName } from './agent-names';
-import type { DecisionRecord } from '@coauthor/editor';
+import type { DecisionRecord } from '@swarmdraft/editor';
 import {
   bookChangesFromSections,
   bookChapterGroups as buildBookChapterGroups,

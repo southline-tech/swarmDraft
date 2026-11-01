@@ -1,11 +1,11 @@
 //! #51: review decision records persist with the manuscript and survive reopening the database.
 //! #162: saving decisions keeps the suggestions index in step with the document.
 
-use coauthor_lib::{
+use serde_json::json;
+use swarmdraft_lib::{
     manuscripts::{Author, ImportSection, ReviewDecisionRecord, Suggestion},
     storage::Store,
 };
-use serde_json::json;
 use yrs::{ReadTxn, StateVector, Transact};
 
 fn sec(id: &str, title: &str) -> ImportSection {

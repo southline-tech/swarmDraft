@@ -1,6 +1,6 @@
 /**
  * Outline titles for UI/tests (#111): optional names without chapter/part prefixes.
- * `@coauthor/docx` import tests keep Word heading text; numbers come from numbering style.
+ * `@swarmdraft/docx` import tests keep Word heading text; numbers come from numbering style.
  */
 export const MOCK_OUTLINE_DISPLAY_TITLES: Readonly<Record<string, string>> = {
   'Part One: The Bell That Stopped': 'The Bell That Stopped',

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
-import type { CommentThread } from '@coauthor/editor';
+import type { CommentThread } from '@swarmdraft/editor';
 import CommentsPanel from './CommentsPanel.vue';
 
 const c = (id: string, authorKind: 'human' | 'agent' = 'agent') => ({

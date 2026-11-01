@@ -2,7 +2,7 @@
  * Merge prose that still lives in legacy scene sections into parent chapter docs (#131).
  * Runs on stored outlines before normalizeOutline turns scene rows into sibling chapters.
  */
-import type { BlockNode, DocNode, InlineNode, Section } from '@coauthor/schema';
+import type { BlockNode, DocNode, InlineNode, Section } from '@swarmdraft/schema';
 
 const SCENE_BREAK = '* * *';
 const CHAPTER_MARKER = /^(?:chapter|CHAPTER)\b/i;

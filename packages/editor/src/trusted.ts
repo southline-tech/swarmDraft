@@ -1,10 +1,10 @@
 /**
- * Trusted-only helpers, imported from `@coauthor/editor/trusted` by app code. Not re-exported
+ * Trusted-only helpers, imported from `@swarmdraft/editor/trusted` by app code. Not re-exported
  * from the package root, so editor plugins and agent-facing code do not get them. Also hosts
  * the review decision port (RAD-211): accept/reject as one trusted ProseMirror transaction.
  */
 import type { Transaction } from '@tiptap/pm/state';
-import type { DocNode } from '@coauthor/schema';
+import type { DocNode } from '@swarmdraft/schema';
 import { REVIEW_EDIT_TOKEN, reviewGuardKey } from './review';
 import {
   applyReviewDecision as applyWith,

@@ -1,8 +1,8 @@
 //! Protocol tests for the in-app MCP server: raw JSON-RPC over Streamable HTTP, the way an
 //! MCP inspector or agent client talks to it. Uses only synthetic text.
 
-use coauthor_lib::{mcp, storage::Store};
 use serde_json::{json, Value};
+use swarmdraft_lib::{mcp, storage::Store};
 
 const SECTION_FIXTURE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -508,7 +508,7 @@ async fn revoking_a_token_drops_it_from_the_known_token_cache() {
         post(&s.url, Some(&s.token), body.clone()).await.status(),
         200
     );
-    let hash = coauthor_lib::agents::hash_token(&s.token);
+    let hash = swarmdraft_lib::agents::hash_token(&s.token);
     assert!(s.store.is_known_token_hash(&hash));
     let agent = &s.store.list_agents().unwrap()[0];
     let tok = &s.store.list_tokens(&agent.id).unwrap()[0];
@@ -522,7 +522,7 @@ async fn revoking_an_agent_drops_its_tokens_from_the_cache() {
     let s = start(&["read"], 100).await;
     let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}});
     assert_eq!(post(&s.url, Some(&s.token), body).await.status(), 200);
-    let hash = coauthor_lib::agents::hash_token(&s.token);
+    let hash = swarmdraft_lib::agents::hash_token(&s.token);
     let agent = &s.store.list_agents().unwrap()[0];
     s.store.revoke_agent(&agent.id).unwrap();
     assert!(!s.store.is_known_token_hash(&hash));
@@ -572,10 +572,15 @@ async fn cached_token_revoked_out_of_band_gets_401() {
         post(&s.url, Some(&s.token), body.clone()).await.status(),
         200
     );
-    let hash = coauthor_lib::agents::hash_token(&s.token);
+    let hash = swarmdraft_lib::agents::hash_token(&s.token);
     assert!(s.store.is_known_token_hash(&hash));
     // Bypass the revoke API, as a restore would.
-    let db = rusqlite::Connection::open(s.store.data_dir().join("coauthor.db")).unwrap();
+    let db = rusqlite::Connection::open(
+        s.store
+            .data_dir()
+            .join(swarmdraft_lib::storage::DB_FILENAME),
+    )
+    .unwrap();
     db.execute("UPDATE agent_tokens SET revoked_at = 'x'", [])
         .unwrap();
     assert_eq!(post(&s.url, Some(&s.token), body).await.status(), 401);
@@ -832,11 +837,11 @@ async fn cached_token_is_rejected_after_a_restore() {
         post(&s.url, Some(&s.token), body.clone()).await.status(),
         200
     );
-    let hash = coauthor_lib::agents::hash_token(&s.token);
+    let hash = swarmdraft_lib::agents::hash_token(&s.token);
     assert!(s.store.is_known_token_hash(&hash), "token is cached");
     let zip = s.store.data_dir().join("synthetic-backup.zip");
-    coauthor_lib::backup::create_backup_to(&s.store, "0.0.0", &zip, false).unwrap();
-    let report = coauthor_lib::backup::restore_backup(&s.store, "0.0.0", &zip).unwrap();
+    swarmdraft_lib::backup::create_backup_to(&s.store, "0.0.0", &zip, false).unwrap();
+    let report = swarmdraft_lib::backup::restore_backup(&s.store, "0.0.0", &zip).unwrap();
     assert!(report.tokens_revoked >= 1);
     assert!(
         !s.store.is_known_token_hash(&hash),
@@ -1082,7 +1087,7 @@ fn raw_keys(s: &Server, sid: &str) -> Vec<String> {
     use yrs::{Text, Transact};
     let sec = s.store.get_section(&s.manuscript_id, sid).unwrap();
     let doc = s.store.load_doc(&sec.doc_id).unwrap();
-    let frag = doc.get_or_insert_xml_fragment(coauthor_lib::content::FRAGMENT);
+    let frag = doc.get_or_insert_xml_fragment(swarmdraft_lib::content::FRAGMENT);
     let txn = doc.transact();
     let mut keys = Vec::new();
     for c in frag.children(&txn) {
@@ -1119,7 +1124,7 @@ async fn write_tools_key_marks_with_the_shared_hash() {
     let keys = raw_keys(&s, &sid);
     let want = format!(
         "comment_anchor--{}",
-        coauthor_lib::content::mark_id_hash(&cid)
+        swarmdraft_lib::content::mark_id_hash(&cid)
     );
     assert!(keys.contains(&want), "{keys:?}");
     assert!(
@@ -1139,10 +1144,10 @@ async fn writes_that_would_leave_unknown_marks_are_refused() {
     // Plant a mark the schema doesn't know (as a foreign client might).
     let sec = s.store.get_section(&s.manuscript_id, &sid).unwrap();
     let doc = s.store.load_doc(&sec.doc_id).unwrap();
-    let sv = coauthor_lib::manuscripts::state_vector(&doc);
+    let sv = swarmdraft_lib::manuscripts::state_vector(&doc);
     {
         use yrs::types::xml::{XmlFragment, XmlOut};
-        let frag = doc.get_or_insert_xml_fragment(coauthor_lib::content::FRAGMENT);
+        let frag = doc.get_or_insert_xml_fragment(swarmdraft_lib::content::FRAGMENT);
         let mut txn = doc.transact_mut();
         let XmlOut::Element(p) = frag.get(&txn, 0).unwrap() else {
             panic!()
@@ -1355,7 +1360,7 @@ async fn suggest_style_mark_survives_reload() {
     assert!(has, "{js}");
     drop(doc);
     let doc2 = s.store.load_doc(&sec.doc_id).unwrap();
-    let blocks = coauthor_lib::content::decode_checked(&doc2).unwrap();
+    let blocks = swarmdraft_lib::content::decode_checked(&doc2).unwrap();
     let again = blocks[0].node["content"]
         .as_array()
         .unwrap()
@@ -1450,7 +1455,7 @@ async fn trigger_export_epub_returns_job_and_get_export_polls() {
         json!({"manuscript_id": s.manuscript_id, "format": "epub"}),
     )
     .await;
-    if coauthor_lib::export::locate_pandoc().is_err() {
+    if swarmdraft_lib::export::locate_pandoc().is_err() {
         assert_ne!(r["isError"], true, "{r}");
         let id = r["structuredContent"]["exportId"].as_str().unwrap();
         for _ in 0..80 {

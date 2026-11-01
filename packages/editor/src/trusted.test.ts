@@ -15,7 +15,7 @@ function* files(dir: string): Generator<string> {
   }
 }
 
-it('agent/MCP code paths cannot import @coauthor/editor/trusted', () => {
+it('agent/MCP code paths cannot import @swarmdraft/editor/trusted', () => {
   const offenders: string[] = [];
   for (const f of files(join(root, 'apps'))) check(f);
   for (const f of files(join(root, 'packages'))) check(f);
@@ -23,7 +23,7 @@ it('agent/MCP code paths cannot import @coauthor/editor/trusted', () => {
     const rel = relative(root, f).replace(/\\/g, '/');
     const src = readFileSync(f, 'utf8');
     if (
-      /(from\s+|import\(\s*)['"](@coauthor\/editor\/trusted|\.{1,2}\/(\.\.\/)*trusted)['"]/.test(
+      /(from\s+|import\(\s*)['"](@swarmdraft\/editor\/trusted|\.{1,2}\/(\.\.\/)*trusted)['"]/.test(
         src,
       ) &&
       !ALLOWED.some((r) => r.test(rel)) &&

@@ -1,4 +1,4 @@
-import type { CommentRow } from '@coauthor/editor';
+import type { CommentRow } from '@swarmdraft/editor';
 import { agentIdOf, agentName, type AgentName } from '../agent-names';
 
 /** First comment row per thread (by createdAt), for review-sidebar author lines. */

@@ -15,7 +15,8 @@
 //!   db. SQLite never opens anything in the old folder. If the old database keeps changing or is
 //!   locked, the copy fails with a message to close coAuthor and is retried on the next launch.
 //! - Nothing happens when there is no old folder (fresh install), or when the old folder holds
-//!   no database: a folder without `coauthor.db` has no user data (for example the old
+//!   no database: a folder without a user database (`coauthor.db` or `swarmdraft.db`) has no user
+//!   data (for example the old
 //!   `%LOCALAPPDATA%` folder, which only holds the WebView2 `EBWebView` cache), so it is never
 //!   copied. Caches the runtime recreates are not migrated.
 //! - Only the roaming data folder is migrated ([`startup_migration`]); the local folder is
@@ -41,11 +42,34 @@ const TEMP_PREFIX: &str = ".swarmdraft-migrating-";
 /// Written into the copy last; its presence means the copy is complete.
 pub const MARKER: &str = ".swarmdraft-migrated";
 
-/// Database file name (unchanged by the rename).
-pub const DB_FILE: &str = "coauthor.db";
+/// Database file name in the new data folder (#198).
+pub const DB_FILE: &str = "swarmdraft.db";
+
+/// Database file name before the #198 rename; still used under the old identifier folder.
+pub const LEGACY_DB_FILE: &str = "coauthor.db";
 
 /// SQLite side files that are never copied raw; the snapshot replaces them.
-const DB_SIDE_FILES: [&str; 3] = ["coauthor.db-wal", "coauthor.db-shm", "coauthor.db-journal"];
+const DB_SIDE_FILES: [&str; 3] = [
+    "swarmdraft.db-wal",
+    "swarmdraft.db-shm",
+    "swarmdraft.db-journal",
+];
+
+const LEGACY_DB_SIDE_FILES: [&str; 3] =
+    ["coauthor.db-wal", "coauthor.db-shm", "coauthor.db-journal"];
+
+/// User database in `dir`, if any (modern name first).
+fn user_db_in(dir: &Path) -> Option<PathBuf> {
+    let modern = dir.join(DB_FILE);
+    if modern.is_file() {
+        return Some(modern);
+    }
+    let legacy = dir.join(LEGACY_DB_FILE);
+    if legacy.is_file() {
+        return Some(legacy);
+    }
+    None
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
@@ -80,14 +104,14 @@ pub fn migrate(old: &Path, new: &Path) -> io::Result<Outcome> {
     if new.exists() && !old.is_dir() {
         return Ok(Outcome::AlreadyPresent);
     }
-    if !old.is_dir() || !old.join(DB_FILE).is_file() {
+    if !old.is_dir() || user_db_in(old).is_none() {
         // No database means no user data (e.g. only a WebView2 cache): nothing to copy.
         return Ok(Outcome::NothingToMigrate);
     }
     if new.exists() && has_documents(new) {
         // Real work already lives here; never hide it behind a copy of the old data.
         write_marker(new)?;
-        return Ok(if old.join(DB_FILE).is_file() {
+        return Ok(if user_db_in(old).is_some() {
             Outcome::KeptExisting
         } else {
             Outcome::AlreadyPresent
@@ -174,10 +198,9 @@ fn write_marker(dir: &Path) -> io::Result<()> {
 
 /// True when `dir` holds a database with at least one manuscript.
 fn has_documents(dir: &Path) -> bool {
-    let db = dir.join(DB_FILE);
-    if !db.is_file() {
+    let Some(db) = user_db_in(dir) else {
         return false;
-    }
+    };
     let Ok(conn) = Connection::open_with_flags(&db, OpenFlags::SQLITE_OPEN_READ_ONLY) else {
         return true; // unreadable: assume it matters and leave it alone
     };
@@ -352,13 +375,19 @@ fn copy_tree(from: &Path, to: &Path, top: bool) -> io::Result<()> {
         let ty = entry.file_type()?;
         let name = entry.file_name();
         let dest = to.join(&name);
-        if top && (name == MARKER || DB_SIDE_FILES.iter().any(|f| name == *f)) {
+        if top
+            && (name == MARKER
+                || DB_SIDE_FILES.iter().any(|f| name == *f)
+                || LEGACY_DB_SIDE_FILES.iter().any(|f| name == *f))
+        {
             continue;
         }
         if ty.is_dir() {
             copy_tree(&entry.path(), &dest, false)?;
         } else if ty.is_file() {
-            if top && name == DB_FILE {
+            if top && name == LEGACY_DB_FILE {
+                snapshot_db(&entry.path(), &to.join(DB_FILE))?;
+            } else if top && name == DB_FILE {
                 snapshot_db(&entry.path(), &dest)?;
             } else {
                 fs::copy(entry.path(), &dest)?;
@@ -395,20 +424,29 @@ mod tests {
         out
     }
 
-    fn seed(old: &Path) {
-        fs::create_dir_all(old.join("files/sub")).unwrap();
-        let c = Connection::open(old.join(DB_FILE)).unwrap();
+    fn seed_db(dir: &Path, db_file: &str) {
+        fs::create_dir_all(dir.join("files/sub")).unwrap();
+        let c = Connection::open(dir.join(db_file)).unwrap();
         c.pragma_update(None, "journal_mode", "WAL").unwrap();
         c.execute_batch(
             "CREATE TABLE manuscripts (id TEXT); INSERT INTO manuscripts VALUES ('m1');",
         )
         .unwrap();
         drop(c);
-        fs::write(old.join("files/sub/a.png"), [0u8, 1, 2, 255]).unwrap();
+        fs::write(dir.join("files/sub/a.png"), [0u8, 1, 2, 255]).unwrap();
+    }
+
+    fn seed_old(dir: &Path) {
+        seed_db(dir, LEGACY_DB_FILE);
+    }
+
+    fn seed_new(dir: &Path) {
+        seed_db(dir, DB_FILE);
     }
 
     fn rows(dir: &Path) -> Vec<String> {
-        let c = Connection::open(dir.join(DB_FILE)).unwrap();
+        let db = user_db_in(dir).expect("database");
+        let c = Connection::open(db).unwrap();
         let mut st = c.prepare("SELECT id FROM manuscripts ORDER BY id").unwrap();
         let v = st
             .query_map([], |r| r.get(0))
@@ -421,7 +459,9 @@ mod tests {
     /// Files other than the database (which is a snapshot, not a byte copy) and the marker.
     fn non_db(v: Vec<(String, Vec<u8>)>) -> Vec<(String, Vec<u8>)> {
         v.into_iter()
-            .filter(|(n, _)| !n.starts_with(DB_FILE) && n != MARKER)
+            .filter(|(n, _)| {
+                !n.starts_with(DB_FILE) && !n.starts_with(LEGACY_DB_FILE) && n != MARKER
+            })
             .collect()
     }
 
@@ -430,9 +470,9 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let old = t.path().join(OLD_IDENTIFIER);
         let new = t.path().join("com.radiancelux.swarmdraft");
-        seed(&old);
+        seed_old(&old);
         // Launch 1: old db locked, copy fails; the app then opens an empty store in `new`.
-        let locker = Connection::open(old.join(DB_FILE)).unwrap();
+        let locker = Connection::open(old.join(LEGACY_DB_FILE)).unwrap();
         locker
             .pragma_update(None, "journal_mode", "DELETE")
             .unwrap();
@@ -472,8 +512,8 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let old = t.path().join(OLD_IDENTIFIER);
         let new = t.path().join("com.radiancelux.swarmdraft");
-        seed(&old);
-        seed(&new);
+        seed_old(&old);
+        seed_new(&new);
         Connection::open(new.join(DB_FILE))
             .unwrap()
             .execute("INSERT INTO manuscripts VALUES ('mine')", [])
@@ -502,14 +542,14 @@ mod tests {
     /// by a coAuthor crash. Built by copying a live db + wal, so nothing is checkpointed.
     fn crashed_old(root: &Path) -> PathBuf {
         let live_dir = root.join("live");
-        seed(&live_dir);
-        let live = Connection::open(live_dir.join(DB_FILE)).unwrap();
+        seed_old(&live_dir);
+        let live = Connection::open(live_dir.join(LEGACY_DB_FILE)).unwrap();
         live.pragma_update(None, "wal_autocheckpoint", 0).unwrap();
         live.execute("INSERT INTO manuscripts VALUES ('m2')", [])
             .unwrap();
         let old = root.join(OLD_IDENTIFIER);
         fs::create_dir_all(old.join("files/sub")).unwrap();
-        fs::copy(live_dir.join(DB_FILE), old.join(DB_FILE)).unwrap();
+        fs::copy(live_dir.join(LEGACY_DB_FILE), old.join(LEGACY_DB_FILE)).unwrap();
         fs::copy(
             live_dir.join("coauthor.db-wal"),
             old.join("coauthor.db-wal"),
@@ -537,8 +577,8 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let old = t.path().join(OLD_IDENTIFIER);
         let new = t.path().join("com.radiancelux.swarmdraft");
-        seed(&old);
-        let live = Connection::open(old.join(DB_FILE)).unwrap();
+        seed_old(&old);
+        let live = Connection::open(old.join(LEGACY_DB_FILE)).unwrap();
         live.pragma_update(None, "wal_autocheckpoint", 0).unwrap();
         live.execute("INSERT INTO manuscripts VALUES ('m2')", [])
             .unwrap();
@@ -554,15 +594,15 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let old = t.path().join(OLD_IDENTIFIER);
         let new = t.path().join("com.radiancelux.swarmdraft");
-        seed(&old);
+        seed_old(&old);
         // coAuthor still running: a committed write sits only in the -wal file.
-        let live = Connection::open(old.join(DB_FILE)).unwrap();
+        let live = Connection::open(old.join(LEGACY_DB_FILE)).unwrap();
         live.pragma_update(None, "wal_autocheckpoint", 0).unwrap();
         live.execute("INSERT INTO manuscripts VALUES ('m2')", [])
             .unwrap();
         assert!(old.join("coauthor.db-wal").exists());
         let dest = t.path().join("snap.db");
-        snapshot_db(&old.join(DB_FILE), &dest).unwrap();
+        snapshot_db(&old.join(LEGACY_DB_FILE), &dest).unwrap();
         // No side files: everything is in the single file.
         for ext in ["-wal", "-shm", "-journal"] {
             assert!(!side_path(&dest, ext).exists(), "{ext} next to snapshot");
@@ -612,7 +652,7 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let old = t.path().join(OLD_IDENTIFIER);
         let new = t.path().join("com.radiancelux.swarmdraft");
-        seed(&old);
+        seed_old(&old);
         let before = snapshot(&old);
         assert_eq!(migrate(&old, &new).unwrap(), Outcome::Copied);
         assert_eq!(snapshot(&old), before, "old folder changed");
@@ -625,7 +665,7 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let old = t.path().join(OLD_IDENTIFIER);
         let new = t.path().join("com.radiancelux.swarmdraft");
-        seed(&old);
+        seed_old(&old);
         migrate(&old, &new).unwrap();
         fs::write(new.join("files/n.txt"), b"newer").unwrap();
         fs::write(old.join("files/n.txt"), b"older").unwrap();
@@ -648,13 +688,13 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let old = t.path().join(OLD_IDENTIFIER);
         let new = t.path().join("com.radiancelux.swarmdraft");
-        seed(&old);
+        seed_old(&old);
         // A half-finished copy from a run that was killed mid-way.
         let stale = t
             .path()
             .join(format!("{TEMP_PREFIX}com.radiancelux.swarmdraft-999999"));
         fs::create_dir_all(&stale).unwrap();
-        fs::write(stale.join("coauthor.db"), b"partial").unwrap();
+        fs::write(stale.join(DB_FILE), b"partial").unwrap();
         assert!(
             !new.exists(),
             "a partial copy must never be visible as the data folder"
@@ -709,7 +749,7 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let old = t.path().join(OLD_IDENTIFIER);
         let new = t.path().join("com.radiancelux.swarmdraft");
-        seed(&old);
+        seed_old(&old);
         assert!(startup_migration(&new).is_empty(), "launch 1");
         assert!(new.join(MARKER).exists());
         for launch in 2..=3 {
@@ -729,8 +769,8 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let old = t.path().join(OLD_IDENTIFIER);
         let new = t.path().join("com.radiancelux.swarmdraft");
-        seed(&old);
-        fs::write(old.join(DB_FILE), b"not a sqlite database at all").unwrap();
+        seed_old(&old);
+        fs::write(old.join(LEGACY_DB_FILE), b"not a sqlite database at all").unwrap();
         let notices = startup_migration(&new);
         assert_eq!(notices.len(), 1);
         assert_eq!(notices[0].kind, NoticeKind::Warn);

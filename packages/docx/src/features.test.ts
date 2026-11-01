@@ -1,6 +1,6 @@
 import { strToU8, zipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
-import { MARK_TYPES, INLINE_NODE_TYPES } from '@coauthor/schema';
+import { MARK_TYPES, INLINE_NODE_TYPES } from '@swarmdraft/schema';
 import {
   DOCX_LIMITS,
   docToYDoc,
@@ -150,7 +150,7 @@ describe('formatting, notes and dropped features', () => {
     expect(b.comments).toEqual(m.comments);
   });
 
-  it('declares the new nodes and marks in @coauthor/schema', () => {
+  it('declares the new nodes and marks in @swarmdraft/schema', () => {
     expect(MARK_TYPES).toEqual(expect.arrayContaining(['underline', 'strike', 'smallcaps']));
     expect(INLINE_NODE_TYPES).toEqual(expect.arrayContaining(['hard_break', 'footnote', 'image']));
   });

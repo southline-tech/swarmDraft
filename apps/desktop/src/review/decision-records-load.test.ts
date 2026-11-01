@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { DecisionRecord } from '@coauthor/editor';
+import type { DecisionRecord } from '@swarmdraft/editor';
 import { mergeLoadedDecisionRecords } from './decision-records-load';
 
 const row = (id: string): DecisionRecord => ({

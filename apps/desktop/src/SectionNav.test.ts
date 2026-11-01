@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
-import type { Section } from '@coauthor/schema';
+import type { Section } from '@swarmdraft/schema';
 import SectionNav from './SectionNav.vue';
 import { SAMPLE_MANUSCRIPT_ID, sampleOutline } from './fixtures/outline-sample';
 

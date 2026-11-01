@@ -3,7 +3,7 @@
 Designer screenshots for wp5 focus mode. Captured from the production App shell with a manuscript open (not shells preview or editor-only):
 
 ```text
-pnpm --filter @coauthor/desktop dev
+pnpm --filter @swarmdraft/desktop dev
 # light: http://localhost:1420/?evidence=rad55&theme=light
 # dark:  http://localhost:1420/?evidence=rad55&theme=dark
 ```

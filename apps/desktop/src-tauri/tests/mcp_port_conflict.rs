@@ -1,6 +1,6 @@
 //! #43 / #88: MCP port in use at startup shows plain wording; legacy coAuthor only when detected.
 
-use coauthor_lib::mcp;
+use swarmdraft_lib::mcp;
 
 #[test]
 fn port_held_by_another_process_reports_generic_message() {

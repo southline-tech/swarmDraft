@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Editor } from '@tiptap/core';
 import { undoDepth } from '@tiptap/pm/history';
-import { docToYDoc } from '@coauthor/docx';
+import { docToYDoc } from '@swarmdraft/docx';
 import { collaborativeEditorOptions } from './collab';
 import {
   FindHighlight,

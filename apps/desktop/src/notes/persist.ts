@@ -36,8 +36,8 @@ export type NotesSaveStatus = {
   savedAt: number | null;
 };
 
-const SAVE = Symbol('coauthorNotesSaveState');
-const FLUSH = Symbol('coauthorNotesFlush');
+const SAVE = Symbol('swarmdraftNotesSaveState');
+const FLUSH = Symbol('swarmdraftNotesFlush');
 
 type DocWithSave = Y.Doc & {
   [SAVE]?: NotesSaveStatus;
@@ -46,8 +46,8 @@ type DocWithSave = Y.Doc & {
 
 const IDLE: NotesSaveStatus = { phase: 'idle', savedAt: null };
 
-const g = globalThis as typeof globalThis & { __coauthorNotesSaveTick?: number };
-if (g.__coauthorNotesSaveTick == null) g.__coauthorNotesSaveTick = 0;
+const g = globalThis as typeof globalThis & { __swarmdraftNotesSaveTick?: number };
+if (g.__swarmdraftNotesSaveTick == null) g.__swarmdraftNotesSaveTick = 0;
 
 const saveListeners = new WeakMap<Y.Doc, Set<() => void>>();
 
@@ -57,13 +57,13 @@ function notesDocKey(doc: Y.Doc): Y.Doc {
 
 function bumpSaveStatus(doc: Y.Doc) {
   const key = notesDocKey(doc);
-  g.__coauthorNotesSaveTick! += 1;
+  g.__swarmdraftNotesSaveTick! += 1;
   saveListeners.get(key)?.forEach((fn) => fn());
 }
 
 /** Bumped whenever any watched notes doc save status changes (legacy dep; prefer subscribe). */
 export function notesSaveStatusTick(): number {
-  return g.__coauthorNotesSaveTick!;
+  return g.__swarmdraftNotesSaveTick!;
 }
 
 /** Notified when `readNotesSaveStatus(doc)` changes (successful save, error, etc.). */

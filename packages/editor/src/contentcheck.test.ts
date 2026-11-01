@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { Editor, type JSONContent } from '@tiptap/core';
-import { FRAGMENT_NAME } from '@coauthor/docx';
+import { FRAGMENT_NAME } from '@swarmdraft/docx';
 import {
   checkYDocContent,
   collaborativeEditorOptions,

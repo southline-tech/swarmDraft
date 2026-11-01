@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
-import { yDocToDoc } from '@coauthor/docx';
+import { yDocToDoc } from '@swarmdraft/docx';
 import { sessionFromStored, UnsavedEditsError } from './manuscript-session';
 import { storedFixture } from './stored-fixture.test-helper';
 
@@ -267,7 +267,7 @@ describe('outline edits and section saves together (RAD-263)', () => {
         },
         debounceMs: 50,
       },
-      saveOutline: async (next: import('@coauthor/schema').Section[]) => {
+      saveOutline: async (next: import('@swarmdraft/schema').Section[]) => {
         for (const x of next) {
           if (!rows.has(x.id)) updates.set(x.id, []);
           rows.set(x.id, {

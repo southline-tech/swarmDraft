@@ -1,8 +1,8 @@
 //! An imported manuscript is persisted at once: the MCP server lists it and it survives a
 //! restart (reopening the Store). Synthetic text only.
 
-use coauthor_lib::{manuscripts::ImportSection, mcp, storage::Store};
 use serde_json::{json, Value};
+use swarmdraft_lib::{manuscripts::ImportSection, mcp, storage::Store};
 
 fn para(t: &str) -> Value {
     json!({"type":"doc","content":[{"type":"paragraph","attrs":{"style":"body"},"content":[{"type":"text","text":t}]}]})
@@ -88,7 +88,7 @@ async fn import_is_listed_over_mcp_and_survives_restart() {
             .unwrap();
         assert_eq!(secs.len(), 2);
         for s in &secs {
-            let blocks = coauthor_lib::content::decode(&store.load_doc(&s.doc_id).unwrap());
+            let blocks = swarmdraft_lib::content::decode(&store.load_doc(&s.doc_id).unwrap());
             assert!(
                 !blocks.is_empty(),
                 "initial doc state saved for {}",
@@ -167,12 +167,12 @@ fn hierarchy_is_kept_and_ids_match_doc_ids() {
         );
         // The returned state is the stored content.
         use yrs::updates::decoder::Decode;
-        let d = coauthor_lib::content::new_doc();
+        let d = swarmdraft_lib::content::new_doc();
         yrs::Transact::transact_mut(&d)
             .apply_update(yrs::Update::decode_v1(&s.state).unwrap())
             .unwrap();
         let text = serde_json::to_string(
-            &coauthor_lib::content::decode(&d)
+            &swarmdraft_lib::content::decode(&d)
                 .iter()
                 .map(|b| &b.node)
                 .collect::<Vec<_>>(),
@@ -197,12 +197,12 @@ fn hierarchy_is_kept_and_ids_match_doc_ids() {
 fn edit_update(state: &[u8], prefix: &str) -> Vec<u8> {
     use yrs::updates::decoder::Decode;
     use yrs::{GetString, ReadTxn, Text, Transact, Update, XmlFragment, XmlOut};
-    let doc = coauthor_lib::content::new_doc();
+    let doc = swarmdraft_lib::content::new_doc();
     doc.transact_mut()
         .apply_update(Update::decode_v1(state).unwrap())
         .unwrap();
     let before = doc.transact().state_vector();
-    let frag = doc.get_or_insert_xml_fragment(coauthor_lib::content::FRAGMENT);
+    let frag = doc.get_or_insert_xml_fragment(swarmdraft_lib::content::FRAGMENT);
     let mut txn = doc.transact_mut();
     let Some(XmlOut::Element(p)) = frag.get(&txn, 0) else {
         panic!("no paragraph")
@@ -248,8 +248,9 @@ async fn editor_edits_are_saved_reopened_and_read_over_mcp() {
     let store = Store::open(tmp.path()).unwrap();
     let latest = store.latest_manuscript().unwrap().expect("reopens");
     assert_eq!(latest.manuscript.id, id);
-    let blocks =
-        coauthor_lib::content::decode(&store.load_doc(&latest.sections[1].section.doc_id).unwrap());
+    let blocks = swarmdraft_lib::content::decode(
+        &store.load_doc(&latest.sections[1].section.doc_id).unwrap(),
+    );
     let text = serde_json::to_string(&blocks.iter().map(|b| &b.node).collect::<Vec<_>>()).unwrap();
     assert!(text.contains("Twice Edited: Rain tapped"), "{text}");
     let url = serve(store).await;
@@ -297,12 +298,12 @@ fn a_resent_full_state_recovers_lost_edits_idempotently() {
         let loaded = store.load_manuscript(&m.id).unwrap();
         let s = &loaded.sections[1];
         // The editor's copy: LOST is typed (its save fails, never stored), then LATER.
-        let client = coauthor_lib::content::new_doc();
+        let client = swarmdraft_lib::content::new_doc();
         client
             .transact_mut()
             .apply_update(Update::decode_v1(&s.state).unwrap())
             .unwrap();
-        let frag = client.get_or_insert_xml_fragment(coauthor_lib::content::FRAGMENT);
+        let frag = client.get_or_insert_xml_fragment(swarmdraft_lib::content::FRAGMENT);
         for word in ["LOST ", "LATER "] {
             let mut txn = client.transact_mut();
             let Some(XmlOut::Element(p)) = frag.get(&txn, 0) else {
@@ -327,7 +328,7 @@ fn a_resent_full_state_recovers_lost_edits_idempotently() {
         (m.id, s.section.id.clone(), s.section.doc_id.clone())
     };
     let store = Store::open(tmp.path()).unwrap();
-    let blocks = coauthor_lib::content::decode(&store.load_doc(&doc_id).unwrap());
+    let blocks = swarmdraft_lib::content::decode(&store.load_doc(&doc_id).unwrap());
     let text = serde_json::to_string(&blocks.iter().map(|b| &b.node).collect::<Vec<_>>()).unwrap();
     assert!(text.contains("LATER LOST Rain tapped"), "{text}");
     assert_eq!(text.matches("LOST").count(), 1, "{text}");

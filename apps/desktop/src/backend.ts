@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { parseDecisionRecords } from '@coauthor/editor';
+import { parseDecisionRecords } from '@swarmdraft/editor';
 
 export interface AppInfo {
   version: string;
@@ -330,7 +330,7 @@ export async function saveManuscriptCopy(title: string, bytes: Uint8Array): Prom
 
 /** Open comments and saved agent names for the active section's review sidebar (#47). */
 export interface SectionReviewMeta {
-  comments: import('@coauthor/editor').CommentRow[];
+  comments: import('@swarmdraft/editor').CommentRow[];
   authorSavedNames: Record<string, string>;
   /** Open suggestion id → bot rationale for review cards (#60). */
   suggestionReasons: Record<string, string>;
@@ -338,13 +338,13 @@ export interface SectionReviewMeta {
 
 export async function manuscriptReviewDecisions(
   manuscriptId: string,
-): Promise<Record<string, import('@coauthor/editor').DecisionRecord[]>> {
+): Promise<Record<string, import('@swarmdraft/editor').DecisionRecord[]>> {
   if (!isTauri()) return {};
   const res = await invoke<{ bySection: Record<string, unknown[]> }>(
     'manuscript_review_decisions',
     { manuscriptId },
   );
-  const out: Record<string, import('@coauthor/editor').DecisionRecord[]> = {};
+  const out: Record<string, import('@swarmdraft/editor').DecisionRecord[]> = {};
   for (const [sectionId, rows] of Object.entries(res.bySection ?? {})) {
     out[sectionId] = parseDecisionRecords(rows);
   }
@@ -354,13 +354,13 @@ export async function manuscriptReviewDecisions(
 export async function saveSectionReviewDecisions(
   manuscriptId: string,
   sectionId: string,
-  records: import('@coauthor/editor').DecisionRecord[],
+  records: import('@swarmdraft/editor').DecisionRecord[],
 ): Promise<void> {
   if (!isTauri()) return;
   await invoke('section_save_review_decisions', { manuscriptId, sectionId, records });
 }
 
-export type SpellLintIssue = import('@coauthor/editor').SpellLintResult;
+export type SpellLintIssue = import('@swarmdraft/editor').SpellLintResult;
 
 export async function spellLintParagraph(
   manuscriptId: string | undefined,

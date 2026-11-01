@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Section } from '@coauthor/schema';
+import type { Section } from '@swarmdraft/schema';
 import {
   addSection,
   applyOutlineEdit,

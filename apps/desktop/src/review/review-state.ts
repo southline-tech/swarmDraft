@@ -12,7 +12,7 @@ import {
   type DecisionRecord,
   type SuggestionItem,
   type SuggestionTarget,
-} from '@coauthor/editor';
+} from '@swarmdraft/editor';
 
 /** Raw author ids in first-appearance (document) order. */
 export function authorsOf(items: readonly { author: string }[]): string[] {
@@ -198,10 +198,17 @@ export class DecisionLog {
 }
 
 /** Collapsed state of the panel persists per device. */
-export const REVIEW_COLLAPSED_KEY = 'coauthor.review.collapsed';
+export const REVIEW_COLLAPSED_KEY = 'swarmdraft.review.collapsed';
+const LEGACY_REVIEW_COLLAPSED_KEY = 'coauthor.review.collapsed';
 export function loadCollapsed(): boolean {
   try {
-    return globalThis.localStorage?.getItem(REVIEW_COLLAPSED_KEY) === '1';
+    const ls = globalThis.localStorage;
+    if (ls?.getItem(REVIEW_COLLAPSED_KEY) === '1') return true;
+    if (ls?.getItem(LEGACY_REVIEW_COLLAPSED_KEY) === '1') {
+      ls?.setItem(REVIEW_COLLAPSED_KEY, '1');
+      return true;
+    }
+    return false;
   } catch {
     return false;
   }

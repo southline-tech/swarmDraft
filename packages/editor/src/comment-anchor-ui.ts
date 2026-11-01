@@ -7,7 +7,7 @@ import { Plugin, PluginKey, type EditorState } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { Node as PMNode } from '@tiptap/pm/model';
 
-export const commentAnchorUiKey = new PluginKey<DecorationSet>('coauthorCommentAnchorUi');
+export const commentAnchorUiKey = new PluginKey<DecorationSet>('swarmdraftCommentAnchorUi');
 
 export type CommentAnchorUiState = () => { selectedId: string | null; hoverId: string | null };
 

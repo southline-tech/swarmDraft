@@ -13,7 +13,7 @@ import { REVIEW_MARKS, SUGGESTION_MARKS, type ReviewMarkType } from './content';
 
 /** Per-editor human track toggle; state is owned by the HumanTrackChanges plugin. */
 export const humanTrackKey = new PluginKey<{ active: boolean; author: string }>(
-  'coauthorHumanTrack',
+  'swarmdraftHumanTrack',
 );
 
 export function humanTrackFromState(state: EditorState): { active: boolean; author: string } {
@@ -83,15 +83,15 @@ export function ownPendingInsertRange(
  * agents and are resolved elsewhere. The guard rejects any transaction that adds or removes a
  * review mark, pastes one in, or edits text inside a pending suggestion. Code that legitimately
  * changes them (a future accept/reject flow) marks the transaction with `allowReviewEdits(tr)`
- * from `@coauthor/editor/trusted`. The meta is an unforgeable token: a plain
+ * from `@swarmdraft/editor/trusted`. The meta is an unforgeable token: a plain
  * `setMeta('allowReviewEdits', true)` from a plugin or bot is ignored. Changes the Yjs binding
  * applies from the section's Y.Doc pass, since the Y.Doc is the source of truth; the y-sync
  * meta alone is forgeable, so only transaction objects the binding itself dispatched pass
  * (tracked privately in ./ysource).
  */
-export const reviewGuardKey = new PluginKey('coauthorReviewGuard');
+export const reviewGuardKey = new PluginKey('swarmdraftReviewGuard');
 /** Module-private token; only `allowReviewEdits` in ./trusted can attach it. */
-export const REVIEW_EDIT_TOKEN: unique symbol = Symbol('coauthorReviewEdit');
+export const REVIEW_EDIT_TOKEN: unique symbol = Symbol('swarmdraftReviewEdit');
 
 const isReview = (m: PMMark) => (REVIEW_MARKS as readonly string[]).includes(m.type.name);
 const isSuggestion = (m: PMMark) => (SUGGESTION_MARKS as readonly string[]).includes(m.type.name);

@@ -2,7 +2,7 @@
  * ProseMirror JSON <-> Yjs, using the same encoding as y-prosemirror
  * (Y.XmlFragment named "prosemirror"; nodes are Y.XmlElement, marks are
  * Y.XmlText format attributes keyed by mark type, or `type--<8 base64>` (see
- * markKeys in @coauthor/schema) for marks that may overlap another of the same type).
+ * markKeys in @swarmdraft/schema) for marks that may overlap another of the same type).
  */
 import * as Y from 'yjs';
 import {
@@ -11,13 +11,13 @@ import {
   markKey,
   markKeys,
   markTypeFromKey,
-} from '@coauthor/schema';
+} from '@swarmdraft/schema';
 import { sortMarks, type DocNode, type InlineNode, type Mark } from './model';
 import type { ImportedManuscript } from './import';
 
 export const FRAGMENT_NAME = 'prosemirror';
 
-export { markKey, markTypeFromKey } from '@coauthor/schema';
+export { markKey, markTypeFromKey } from '@swarmdraft/schema';
 
 interface PMNode {
   type: string;
@@ -120,7 +120,7 @@ function texts(el: Y.XmlFragment | Y.XmlElement, out: Y.XmlText[] = []): Y.XmlTe
  * needed re-keying. Runs in one
  * transaction with origin `REKEY_ORIGIN`.
  */
-export const REKEY_ORIGIN = 'coauthor:rekey-marks';
+export const REKEY_ORIGIN = 'swarmdraft:rekey-marks';
 export function rekeyMarks(ydoc: Y.Doc): number {
   const ops: [Y.XmlText, number, number, Record<string, unknown>][] = [];
   for (const t of texts(ydoc.getXmlFragment(FRAGMENT_NAME))) {

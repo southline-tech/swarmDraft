@@ -11,7 +11,7 @@ import EmptyState from '../shells/EmptyState.vue';
 import ReasonLine from '../shells/ReasonLine.vue';
 import PanelRail from '../desk/PanelRail.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { Decision, SuggestionItem } from '@coauthor/editor';
+import type { Decision, SuggestionItem } from '@swarmdraft/editor';
 import {
   authorKind,
   authorsOf,

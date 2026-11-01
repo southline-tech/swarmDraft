@@ -7,12 +7,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
 import type { Editor } from '@tiptap/core';
-import type { DecisionRecord } from '@coauthor/editor';
+import type { DecisionRecord } from '@swarmdraft/editor';
 import ManuscriptEditor from '../ManuscriptEditor.vue';
 import { SAMPLE_DOC } from '../fixtures/sample';
 import { LIVE_POLL_MS, sessionFromStored } from '../manuscript-session';
 import type { StoredManuscript, UpdatesSince } from '../backend';
-import { allowReviewEdits } from '@coauthor/editor/trusted';
+import { allowReviewEdits } from '@swarmdraft/editor/trusted';
 import { REVIEW_COLLAPSED_KEY } from './review-state';
 
 const fixture = JSON.parse(

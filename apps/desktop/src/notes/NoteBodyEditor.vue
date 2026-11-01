@@ -2,7 +2,7 @@
 import { onBeforeUnmount } from 'vue';
 import { EditorContent, useEditor } from '@tiptap/vue-3';
 import type * as Y from 'yjs';
-import { collaborativeEditorOptions } from '@coauthor/editor';
+import { collaborativeEditorOptions } from '@swarmdraft/editor';
 import { bodyField } from './doc';
 
 const props = defineProps<{

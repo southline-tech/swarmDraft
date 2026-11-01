@@ -1,8 +1,8 @@
 //! Cross-language Yjs round trip with UTF-16 offsets; see
 //! packages/editor/src/rust-roundtrip.test.ts for the TS half and how to regenerate.
 use base64::{engine::general_purpose::STANDARD, Engine};
-use coauthor_lib::content::{decode, encode, new_doc, validate_doc};
 use serde_json::{json, Value};
+use swarmdraft_lib::content::{decode, encode, new_doc, validate_doc};
 use yrs::{updates::decoder::Decode, ReadTxn, StateVector, Transact, Update};
 
 fn path(f: &str) -> std::path::PathBuf {

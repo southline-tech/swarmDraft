@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { markKey } from '@coauthor/schema';
+import { markKey } from '@swarmdraft/schema';
 import { FRAGMENT_NAME, docToYDoc, rekeyMarks, yDocToDoc } from './ydoc';
 
 const by = { author: 'agent:fixture', ts: '2026-01-01T00:00:00Z' };
