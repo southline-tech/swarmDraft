@@ -39,6 +39,19 @@ impl std::fmt::Display for AnchorError {
     }
 }
 
+fn mark_author(v: &Any) -> Option<String> {
+    serde_json::to_value(v)
+        .ok()
+        .and_then(|j| j.get("author").and_then(|a| a.as_str()).map(str::to_string))
+}
+
+fn suggestion_authors_in_attrs(a: &Attrs) -> std::collections::HashSet<String> {
+    a.iter()
+        .filter(|(k, _)| is_suggestion_key(k))
+        .filter_map(|(_, v)| mark_author(v))
+        .collect()
+}
+
 /// A resolved anchor: a range in one Y.XmlText, in the doc's offset units.
 pub struct Range {
     pub text: XmlTextRef,
@@ -46,6 +59,8 @@ pub struct Range {
     pub len: u32,
     /// The range touches text with a suggestion mark.
     pub overlaps_suggestion: bool,
+    /// Authors of pending suggestion marks touching this range (from mark attrs).
+    pub suggestion_authors: std::collections::HashSet<String>,
     /// Formatting (non-overlapping marks) at the end of the range, for inserted text.
     pub formatting: Attrs,
     /// Yjs attribute keys already present anywhere in the range (to avoid key collisions).
@@ -215,11 +230,21 @@ pub fn resolve(
                     .iter()
                     .flat_map(|m| m.2.iter().flat_map(|a| a.keys().map(|k| k.to_string())))
                     .collect();
+                let suggestion_authors = map[i..i + q.len()]
+                    .iter()
+                    .flat_map(|m| {
+                        m.2.as_ref()
+                            .map(|a| suggestion_authors_in_attrs(a))
+                            .into_iter()
+                            .flatten()
+                    })
+                    .collect();
                 found.push(Range {
                     text: t.clone(),
                     start,
                     len: end - start,
                     overlaps_suggestion: gaps || marked,
+                    suggestion_authors,
                     formatting,
                     keys,
                 });
@@ -281,6 +306,86 @@ pub fn add_suggestion_marks(
         r.text
             .insert_with_attributes(txn, r.start + r.len, replacement, a);
     }
+}
+
+/// True when the range touches a pending suggestion attributed to someone other than
+/// `self_author`.
+pub fn overlaps_other_author_suggestion(r: &Range, self_author: &str) -> bool {
+    if !r.overlaps_suggestion {
+        return false;
+    }
+    r.suggestion_authors.iter().any(|a| a != self_author)
+}
+
+fn block_child_index(txn: &TransactionMut, block: &str) -> Result<usize, AnchorError> {
+    let frag = txn
+        .get_xml_fragment(FRAGMENT)
+        .ok_or_else(|| AnchorError::BlockNotFound(block.into()))?;
+    frag.children(txn)
+        .enumerate()
+        .find_map(|(i, c)| match c {
+            XmlOut::Element(e)
+                if block_id(AsRef::<yrs::branch::Branch>::as_ref(&e).id()) == block =>
+            {
+                Some(i)
+            }
+            _ => None,
+        })
+        .ok_or_else(|| AnchorError::BlockNotFound(block.into()))
+}
+
+fn fragment_len(txn: &TransactionMut, frag: &yrs::types::xml::XmlFragmentRef) -> usize {
+    frag.children(txn).count()
+}
+
+/// Insert one or more suggested paragraphs after `after_block` (or at section end when `None`).
+/// Returns stable block ids of the new paragraphs.
+pub fn insert_suggested_paragraphs(
+    txn: &mut TransactionMut,
+    frag: &yrs::types::xml::XmlFragmentRef,
+    after_block: Option<&str>,
+    paragraphs: &[(&str, &str)],
+    id: &str,
+    author: &str,
+    ts: &str,
+) -> Result<Vec<String>, AnchorError> {
+    if paragraphs.is_empty() {
+        return Err(AnchorError::EmptyQuote);
+    }
+    let insert_at = match after_block {
+        Some(b) => block_child_index(txn, b)? + 1,
+        None => fragment_len(txn, frag),
+    };
+    let multi = paragraphs.len() > 1;
+    let mut out = Vec::with_capacity(paragraphs.len());
+    for (i, (text, style)) in paragraphs.iter().enumerate() {
+        if text.is_empty() {
+            return Err(AnchorError::EmptyQuote);
+        }
+        let el = frag.insert(
+            txn,
+            (insert_at + i) as u32,
+            yrs::XmlElementPrelim::empty("paragraph"),
+        );
+        el.insert_attribute(txn, "style", json_to_any(&serde_json::json!(style)));
+        let meta = serde_json::json!({ "id": id, "author": author, "ts": ts });
+        if i > 0 {
+            el.insert_attribute(txn, "blockSplitInsert", json_to_any(&meta));
+        }
+        let mut ins_meta = meta.clone();
+        if multi {
+            ins_meta["blockSplit"] = serde_json::json!(true);
+        }
+        let t = el.push_back(txn, yrs::XmlTextPrelim::new(""));
+        let key = free_key("suggestion_insert", id, &Default::default());
+        t.insert_with_attributes(txn, 0, text, attrs1(key, ins_meta));
+        out.push(block_id(AsRef::<yrs::branch::Branch>::as_ref(&el).id()));
+    }
+    Ok(out)
+}
+
+fn json_to_any(v: &serde_json::Value) -> Any {
+    serde_json::from_value(v.clone()).unwrap_or(Any::Null)
 }
 
 /// Paragraph style of a block, if it is a paragraph.

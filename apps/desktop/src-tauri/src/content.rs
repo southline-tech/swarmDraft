@@ -499,18 +499,24 @@ fn md_inline(nodes: &[Value]) -> String {
             Some("text") => {
                 let mut t = md_escape(n["text"].as_str().unwrap_or_default());
                 let marks = n["marks"].as_array().cloned().unwrap_or_default();
+                let mut comments = Vec::new();
+                let mut dels = Vec::new();
+                let mut ins = Vec::new();
                 for m in &marks {
                     let id = m["attrs"]["id"].as_str().unwrap_or_default();
-                    t = match m["type"].as_str().unwrap_or_default() {
-                        "italic" => format!("*{t}*"),
-                        "bold" => format!("**{t}**"),
-                        "strike" => format!("~~{t}~~"),
+                    match m["type"].as_str().unwrap_or_default() {
+                        "italic" => t = format!("*{t}*"),
+                        "bold" => t = format!("**{t}**"),
+                        "strike" => t = format!("~~{t}~~"),
                         "link" => {
-                            format!("[{t}]({})", m["attrs"]["href"].as_str().unwrap_or_default())
+                            t = format!(
+                                "[{t}]({})",
+                                m["attrs"]["href"].as_str().unwrap_or_default()
+                            );
                         }
-                        "comment_anchor" => format!("{{=={t}==}}{{>>comment:{id}<<}}"),
-                        "suggestion_insert" => format!("{{++{t}++}}{{>>suggestion:{id}<<}}"),
-                        "suggestion_delete" => format!("{{--{t}--}}{{>>suggestion:{id}<<}}"),
+                        "comment_anchor" => comments.push(id.to_string()),
+                        "suggestion_insert" => ins.push(id.to_string()),
+                        "suggestion_delete" => dels.push(id.to_string()),
                         "format_change" => {
                             let target = m["attrs"]["target"].as_str().unwrap_or_default();
                             let before = m["attrs"]["before"].as_str().unwrap_or_default();
@@ -524,10 +530,25 @@ fn md_inline(nodes: &[Value]) -> String {
                             } else {
                                 format!("change {target}")
                             };
-                            format!("{{~~{t}~~}}{{>>format:{id}: {summary}<<}}")
+                            t = format!("{{~~{t}~~}}{{>>format:{id}: {summary}<<}}");
                         }
-                        _ => t,
-                    };
+                        _ => {}
+                    }
+                }
+                if !dels.is_empty() {
+                    t = format!("{{--{t}--}}");
+                    for id in dels {
+                        t.push_str(&format!("{{>>suggestion:{id}<<}}"));
+                    }
+                }
+                if !ins.is_empty() {
+                    t = format!("{{++{t}++}}");
+                    for id in ins {
+                        t.push_str(&format!("{{>>suggestion:{id}<<}}"));
+                    }
+                }
+                for id in comments {
+                    t = format!("{{=={t}==}}{{>>comment:{id}<<}}");
                 }
                 s.push_str(&t);
             }

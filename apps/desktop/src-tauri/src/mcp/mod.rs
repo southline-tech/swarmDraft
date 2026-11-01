@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::extract::{Request, State};
-use axum::http::{header, StatusCode};
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use rmcp::transport::streamable_http_server::session::never::NeverSessionManager;
@@ -329,6 +329,25 @@ fn too_large() -> Response {
     (StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response()
 }
 
+/// PowerShell 5.1 defaults to ISO-8859-1 when `Content-Type` has no charset (#234).
+async fn utf8_content_type(req: Request, next: Next) -> Response {
+    let mut res = next.run(req).await;
+    if let Some(v) = res
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+    {
+        let needs = (v.starts_with("application/json") || v.starts_with("text/event-stream"))
+            && !v.to_ascii_lowercase().contains("charset=");
+        if needs {
+            if let Ok(h) = HeaderValue::from_str(&format!("{v}; charset=utf-8")) {
+                res.headers_mut().insert(header::CONTENT_TYPE, h);
+            }
+        }
+    }
+    res
+}
+
 /// The `/mcp` router plus its counters. Layers run outermost first: Host/Origin guard, body limit,
 /// then auth (pairing bypass reads the buffered body), then the MCP service.
 pub fn router_with_stats(
@@ -369,6 +388,7 @@ pub fn router_with_stats(
     let stats = gate.stats.clone();
     let app = axum::Router::new()
         .nest_service("/mcp", service)
+        .layer(axum::middleware::from_fn(utf8_content_type))
         .layer(axum::middleware::from_fn_with_state(gate.clone(), auth))
         .layer(axum::middleware::from_fn(body_limit))
         .layer(axum::middleware::from_fn_with_state(gate, host_guard));

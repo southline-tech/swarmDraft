@@ -31,7 +31,8 @@ versions (`final`, `final_v2`, edits…).
 1. Confirm swarmDraft is open on their Windows PC (the MCP server only runs while the app is open).
 2. Create `%USERPROFILE%\swarmdraft-bot` on their PC if it does not exist.
 3. Copy the helper scripts below to that folder as `pair.ps1` and `mcp.ps1` (for example with
-   `CopyFromBox`). Never put a key in chat.
+   `CopyFromBox`). Never put a key in chat. Each bot should use its own folder and `key.txt`
+   (pass `-Dir` to `pair.ps1` and `-Tok` to `mcp.ps1`).
 4. Request pairing. In old PowerShell use `;` between commands, not `&&`:
 
    ```
@@ -71,13 +72,16 @@ Body shape:
 `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"<tool>","arguments":{...}}}`
 
 Tools include: `list_documents`, `list_chapters`, `read_chapter`, `search_text`, `suggest_edit`,
-`suggest_style`, `add_comment`, `list_suggestions`, `trigger_export`, `get_export`. Run
+`suggest_insert`, `suggest_style`, `add_comment`, `list_suggestions`, `trigger_export`, `get_export`. Run
 `tools/list` first for the exact argument names.
 
 - Read before you suggest. Quote the exact text you're changing.
-- One suggestion at a time per passage. Overlapping a pending suggestion is rejected, so pick
-  another passage or wait.
+- One suggestion at a time per passage **from another bot**. Overlapping another author's pending
+  suggestion is rejected; your own overlapping suggestions can stack for the author to compare.
+- Put new scenes and paragraphs in the manuscript with `suggest_insert`, not long replacements in
+  `suggest_edit`.
 - Your suggestions appear live in their book under your name. They decide in **Review changes**.
+- After pairing succeeds, `poll_pairing` returns a short `workGuide`—follow it; do not post edits in chat.
 
 ## Rules
 
@@ -94,10 +98,14 @@ param([string]$Mode="request",[string]$Name="Grok Bot",[string]$Dir="$env:USERPR
 if (-not (Test-Path $Dir)) { New-Item -ItemType Directory -Path $Dir | Out-Null }
 $h = @{ Accept = 'application/json, text/event-stream' }
 function C($b) {
-  $r = (Invoke-WebRequest -UseBasicParsing -Uri http://127.0.0.1:7337/mcp -Method Post -Headers $h -ContentType 'application/json' -Body $b).Content
-  $line = ($r -split "`n" | Where-Object { $_ -like 'data:*' } | Select-Object -Last 1)
-  if ($line) { $r = $line.Substring(5) }
-  $r | ConvertFrom-Json
+  $r = Invoke-WebRequest -UseBasicParsing -Uri http://127.0.0.1:7337/mcp -Method Post -Headers $h -ContentType 'application/json; charset=utf-8' -Body $b
+  $enc = New-Object System.Text.UTF8Encoding $false
+  $ms = New-Object System.IO.MemoryStream
+  $r.RawContentStream.CopyTo($ms)
+  $raw = $enc.GetString($ms.ToArray())
+  $line = ($raw -split "`n" | Where-Object { $_ -like 'data:*' } | Select-Object -Last 1)
+  if ($line) { $raw = $line.Substring(5) }
+  $raw | ConvertFrom-Json
 }
 C '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"swarmdraft-bot","version":"1"}}}' | Out-Null
 $pf = Join-Path $Dir "pairing.json"
@@ -132,10 +140,14 @@ param([string]$Body,[string]$Tok="$env:USERPROFILE\swarmdraft-bot\key.txt")
 $t = (Get-Content $Tok -Raw).Trim()
 $h = @{ Authorization = "Bearer $t"; Accept = 'application/json, text/event-stream' }
 function C($b) {
-  $r = (Invoke-WebRequest -UseBasicParsing -Uri http://127.0.0.1:7337/mcp -Method Post -Headers $h -ContentType 'application/json' -Body $b).Content
-  $line = ($r -split "`n" | Where-Object { $_ -like 'data:*' } | Select-Object -Last 1)
-  if ($line) { $r = $line.Substring(5) }
-  $r
+  $r = Invoke-WebRequest -UseBasicParsing -Uri http://127.0.0.1:7337/mcp -Method Post -Headers $h -ContentType 'application/json; charset=utf-8' -Body $b
+  $enc = New-Object System.Text.UTF8Encoding $false
+  $ms = New-Object System.IO.MemoryStream
+  $r.RawContentStream.CopyTo($ms)
+  $raw = $enc.GetString($ms.ToArray())
+  $line = ($raw -split "`n" | Where-Object { $_ -like 'data:*' } | Select-Object -Last 1)
+  if ($line) { $raw = $line.Substring(5) }
+  $raw
 }
 C '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"swarmdraft-bot","version":"1"}}}' | Out-Null
 if ($Body) { C (Get-Content $Body -Raw) } else { C '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' }

@@ -50,6 +50,15 @@ pub const MAX_REPLACEMENT: usize = 4000;
 pub const MAX_RATIONALE: usize = 2000;
 pub const MAX_QUERY: usize = 500;
 pub const MAX_ID: usize = 128;
+pub const MAX_INSERT_PARAGRAPHS: usize = 20;
+pub const MAX_INSERT_BODY: usize = 12_000;
+
+/// Shown once when pairing succeeds (#233) and echoed in MCP `initialize` instructions.
+pub const MCP_WORK_GUIDE: &str = "You are connected to swarmDraft on the author's PC. \
+All manuscript work must go through MCP tools (tools/call), not chat: read with read_chapter and \
+search_text before suggesting; propose edits with suggest_edit and suggest_insert; comment with \
+add_comment. Suggestions are tracked changes the author accepts or rejects in the app—you never \
+accept or reject. Do not paste rewrites or suggestions in chat when the tools can record them.";
 
 fn check_ids(ids: &[(&str, Option<&str>)]) -> Result<(), ToolErr> {
     for (field, v) in ids {
@@ -161,6 +170,19 @@ pub struct SuggestStyleArgs {
     pub block_id: String,
     /// One of: body, first, block_quote, epigraph, verse, centered.
     pub style: String,
+    pub rationale: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SuggestInsertArgs {
+    pub manuscript_id: String,
+    pub section_id: String,
+    /// Insert after this block id from `read_chapter`; omit to append at section end.
+    pub after_block_id: Option<String>,
+    /// Paragraphs to insert (each becomes its own block when accepted).
+    pub paragraphs: Vec<String>,
+    /// Paragraph style for every block (default `body`).
+    pub style: Option<String>,
     pub rationale: Option<String>,
 }
 
@@ -318,7 +340,9 @@ impl SwarmdraftMcp {
 
 #[tool_router]
 impl SwarmdraftMcp {
-    #[tool(description = "List the manuscripts in this workspace.")]
+    #[tool(
+        description = "List manuscripts in this workspace. Call this first to get manuscript_id values for other tools."
+    )]
     async fn list_documents(
         &self,
         Extension(parts): Extension<Parts>,
@@ -364,7 +388,7 @@ impl SwarmdraftMcp {
     }
 
     #[tool(
-        description = "Read one section. Markdown (default) marks each block with <!-- block:ID --> and shows suggestions as {++insert++}/{--delete--} and comments as {==quote==}, each followed by {>>kind:id<<}, with notes as [^id]. JSON returns the blocks with ids, the read view text and notes, and open comments and suggestions. Block ids are stable anchors for comments and suggestions."
+        description = "Read one section through MCP (do not ask the author to paste chapter text). Markdown (default) marks each block with <!-- block:ID --> and shows suggestions as {++insert++}/{--delete--} and comments as {==quote==}, each followed by {>>kind:id<<}, with notes as [^id]. JSON returns the blocks with ids, the read view text and notes, and open comments and suggestions. Block ids are stable anchors for comments and suggestions."
     )]
     async fn read_chapter(
         &self,
@@ -727,7 +751,10 @@ impl SwarmdraftMcp {
     }
 
     #[tool(
-        description = "Suggest replacing (or, with an empty replacement, deleting) an exact quote inside a block. Recorded as a tracked change attributed to you; the text is not changed until the author accepts it."
+        description = "Suggest replacing (or, with an empty replacement, deleting) an exact quote inside a block. \
+Always call this tool to record the change—never paste rewrites in chat. Recorded as a tracked change \
+attributed to you; the text is not changed until the author accepts it. Rejected when the quote \
+overlaps another bot's pending suggestion on the same passage."
     )]
     async fn suggest_edit(
         &self,
@@ -765,6 +792,12 @@ impl SwarmdraftMcp {
                     let mut txn = yrs::Transact::transact_mut(&doc);
                     let r = crate::anchor::resolve(&doc, &txn, &a.block_id, &a.quote)
                         .map_err(|e| ToolErr::invalid(e.to_string()))?;
+                    let self_author = format!("agent:{}", p.agent_id);
+                    if crate::anchor::overlaps_other_author_suggestion(&r, &self_author) {
+                        return Err(ToolErr::invalid(
+                            crate::anchor::AnchorError::OverlapsSuggestion.to_string(),
+                        ));
+                    }
                     crate::anchor::add_suggestion_marks(
                         &mut txn,
                         &r,
@@ -806,6 +839,135 @@ impl SwarmdraftMcp {
                     },
                 )?;
                 Ok(Output::Json(json!({ "suggestion": x })))
+            },
+        )
+    }
+
+    #[tool(
+        description = "Suggest inserting one or more new paragraphs after a block (or at section end). \
+Each paragraph is a tracked insertion attributed to you; nothing is added until the author accepts. \
+Use this instead of cramming new scenes into suggest_edit replacements."
+    )]
+    async fn suggest_insert(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(a): Parameters<SuggestInsertArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let args = json!({
+            "sectionId": a.section_id,
+            "afterBlockId": a.after_block_id,
+            "paragraphCount": a.paragraphs.len(),
+        });
+        self.run(
+            &parts,
+            "suggest",
+            "suggest_insert",
+            Some(&a.manuscript_id),
+            args,
+            |p| {
+                check_ids(&[
+                    ("manuscript_id", Some(&a.manuscript_id)),
+                    ("section_id", Some(&a.section_id)),
+                    ("after_block_id", a.after_block_id.as_deref()),
+                ])?;
+                if a.paragraphs.is_empty() {
+                    return Err(ToolErr::invalid("paragraphs must not be empty"));
+                }
+                if a.paragraphs.len() > MAX_INSERT_PARAGRAPHS {
+                    return Err(ToolErr::invalid(format!(
+                        "too many paragraphs ({}; the limit is {MAX_INSERT_PARAGRAPHS})",
+                        a.paragraphs.len()
+                    )));
+                }
+                let total: usize = a.paragraphs.iter().map(|p| p.chars().count()).sum();
+                if total > MAX_INSERT_BODY {
+                    return Err(ToolErr::invalid(format!(
+                        "inserted text is too long ({total} characters; the limit is {MAX_INSERT_BODY})"
+                    )));
+                }
+                for (i, para) in a.paragraphs.iter().enumerate() {
+                    if para.trim().is_empty() {
+                        return Err(ToolErr::invalid(format!(
+                            "paragraphs[{i}] must not be empty"
+                        )));
+                    }
+                    check_len(&format!("paragraphs[{i}]"), para, MAX_REPLACEMENT)?;
+                }
+                if let Some(r) = &a.rationale {
+                    check_len("rationale", r, MAX_RATIONALE)?;
+                }
+                let style = a.style.as_deref().unwrap_or("body");
+                if !PARAGRAPH_STYLES.contains(&style) {
+                    return Err(ToolErr::invalid(format!(
+                        "unknown style {:?}; use one of {}",
+                        style,
+                        PARAGRAPH_STYLES.join(", ")
+                    )));
+                }
+                if let Some(b) = &a.after_block_id {
+                    let s = self.store.get_section(&a.manuscript_id, &a.section_id)?;
+                    let doc = self.store.load_doc(&s.doc_id)?;
+                    let txn = yrs::Transact::transact_mut(&doc);
+                    if crate::anchor::block_kind(&txn, b).is_none() {
+                        return Err(ToolErr::invalid(
+                            crate::anchor::AnchorError::BlockNotFound(b.clone()).to_string(),
+                        ));
+                    }
+                }
+                let s = self.store.get_section(&a.manuscript_id, &a.section_id)?;
+                let id = format!("s{}", crate::manuscripts::new_id());
+                let ts = self.store.now()?;
+                let doc = self.store.load_doc(&s.doc_id)?;
+                let sv = crate::manuscripts::state_vector(&doc);
+                let review_before = blocks_of(&doc);
+                let block_ids = {
+                    let frag = doc.get_or_insert_xml_fragment(crate::content::FRAGMENT);
+                    let mut txn = yrs::Transact::transact_mut(&doc);
+                    let pairs: Vec<(&str, &str)> = a
+                        .paragraphs
+                        .iter()
+                        .map(|p| p.as_str())
+                        .map(|t| (t, style))
+                        .collect();
+                    crate::anchor::insert_suggested_paragraphs(
+                        &mut txn,
+                        &frag,
+                        a.after_block_id.as_deref(),
+                        &pairs,
+                        &id,
+                        &format!("agent:{}", p.agent_id),
+                        &ts,
+                    )
+                    .map_err(|e| ToolErr::invalid(e.to_string()))?
+                };
+                check_schema(&doc)?;
+                {
+                    let (b, a2) = review_marks_pair(&review_before, &blocks_of(&doc));
+                    check_review_marks(&b, &a2)?;
+                }
+                let joined = a.paragraphs.join("\n\n");
+                let x = crate::manuscripts::Suggestion {
+                    id: id.clone(),
+                    section_id: s.id.clone(),
+                    block_id: block_ids.first().cloned(),
+                    kind: "insert".into(),
+                    quote: None,
+                    replacement: Some(joined),
+                    rationale: a.rationale.clone(),
+                    author: author(p),
+                    status: "open".into(),
+                    created_at: ts,
+                };
+                self.store.agent_write(
+                    &p.token_id,
+                    AgentWrite {
+                        manuscript_id: &a.manuscript_id,
+                        doc: Some((s.doc_id.as_str(), &doc, &sv)),
+                        comment: None,
+                        suggestion: Some(&x),
+                    },
+                )?;
+                Ok(Output::Json(json!({ "suggestion": x, "blockIds": block_ids })))
             },
         )
     }
@@ -1053,10 +1215,14 @@ impl SwarmdraftMcp {
             .store
             .poll_pairing(&a.pairing_id, &a.pairing_secret)
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-        Ok(CallToolResult::structured(json!({
+        let mut body = json!({
             "status": result.status,
             "token": result.token,
-        })))
+        });
+        if result.token.is_some() {
+            body["workGuide"] = json!(MCP_WORK_GUIDE);
+        }
+        Ok(CallToolResult::structured(body))
     }
 }
 
@@ -1268,11 +1434,14 @@ fn check_schema(doc: &yrs::Doc) -> Result<(), ToolErr> {
 impl ServerHandler for SwarmdraftMcp {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "swarmDraft manuscript tools. Read with list_documents, list_chapters, read_chapter, \
-             list_suggestions, list_notes, search_text, trigger_export and get_export; comment with \
-             add_comment and write_note; propose changes with suggest_edit and suggest_style. Anchor \
-             comments and suggestions with a block id plus an exact quote. Accepting or rejecting \
-             suggestions is reserved for the human author.",
+            format!(
+                "{MCP_WORK_GUIDE} Tools: list_documents and list_chapters to orient; \
+read_chapter (markdown with block ids) and search_text before edits; suggest_edit to replace or \
+delete an exact quote; suggest_insert for new paragraphs or scenes; suggest_style for paragraph \
+format; add_comment and write_note for comments; list_suggestions to see pending work; \
+trigger_export/get_export only when the author asks. Pair with request_pairing/poll_pairing. \
+Accepting or rejecting suggestions is human-only in the app."
+            ),
         )
     }
 }
