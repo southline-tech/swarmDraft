@@ -89,8 +89,25 @@
 }
 
 /* Tracked-change overlap (#179): All-view neutral underline, count badge, gutter hint. */
+.manuscript-editor .tiptap .suggest-overlap {
+  background: color-mix(in srgb, var(--ct-suggest-overlap) 14%, transparent);
+  text-decoration: underline 2px var(--ct-suggest-overlap);
+  text-underline-offset: 3px;
+  border-radius: 2px;
+}
+.manuscript-editor .tiptap .suggest-overlap ins.suggestion-insert,
+.manuscript-editor .tiptap .suggest-overlap del.suggestion-delete,
+.manuscript-editor .tiptap .suggest-overlap span.format-change {
+  text-decoration: none;
+  background: none;
+  box-shadow: none;
+}
 .manuscript-editor .tiptap .suggest-overlap [data-suggester] {
   --ct-suggester: var(--ct-suggest-overlap);
+  color: var(--ct-text);
+  background: none;
+  text-decoration: none;
+  box-shadow: none;
 }
 .manuscript-editor .tiptap .suggest-overlap-badge {
   display: inline-flex;
@@ -134,9 +151,14 @@
   width: 0.875rem;
   height: 0.875rem;
   border-radius: var(--ct-radius-full);
-  border: 2px solid var(--ct-border-strong);
-  background: var(--ct-surface-raised);
-  box-shadow: var(--ct-elevation-1);
+  border: 2px solid var(--ct-suggest-overlap);
+  background: transparent;
+  box-shadow: none;
+  transition: background-color 120ms ease;
+}
+.manuscript-editor .tiptap .suggest-overlap-gutter:hover .suggest-overlap-gutter-ring,
+.manuscript-editor .tiptap .suggest-overlap-gutter:focus-visible .suggest-overlap-gutter-ring {
+  background: var(--ct-suggest-overlap);
 }
 .manuscript-editor .tiptap .suggest-overlap-gutter-hint {
   color: var(--ct-text-muted);

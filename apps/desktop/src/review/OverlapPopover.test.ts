@@ -31,8 +31,10 @@ describe('OverlapPopover (#179)', () => {
     });
     const dialog = w.find('[data-test=overlap-popover]');
     expect(dialog.attributes('tabindex')).toBe('0');
-    expect(w.find('[data-test=overlap-title]').text()).toBe('Overlapping suggestions');
-    expect(w.find('[data-test=overlap-sort-hint]').text()).toBe('Newest first');
+    expect(w.find('[data-test=overlap-title]').text()).toBe('2 overlapping suggestions');
+    expect(w.find('[data-test=overlap-sort-hint]').text()).toBe(
+      'Newest first · ↑↓ to move between suggestions',
+    );
     const rows = w.findAll('[data-test=overlap-row]');
     expect(rows).toHaveLength(2);
     expect(rows[0]!.attributes('tabindex')).toBe('-1');

@@ -36,6 +36,15 @@ const sorted = computed(() =>
   [...props.entries].sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0)),
 );
 
+const overlapTitle = computed(() => {
+  const n = props.entries.length;
+  return `${n} overlapping suggestion${n === 1 ? '' : 's'}`;
+});
+
+const sortHint = computed(
+  () => 'Newest first · ↑↓ to move between suggestions',
+);
+
 const parts = (a: string) =>
   (props.labels ?? ((id) => ({ name: id, agent: id.startsWith('agent:') })))(a);
 const initial = (a: string) => (parts(a).name[0] ?? '?').toUpperCase();
@@ -105,8 +114,8 @@ onBeforeUnmount(restoreEditorFocus);
     :style="{ left: `${x}px`, top: `${y}px` }"
     @keydown="onKey"
   >
-    <h2 :id="titleId" class="overlap-title" data-test="overlap-title">Overlapping suggestions</h2>
-    <p class="overlap-sort-hint" data-test="overlap-sort-hint">Newest first</p>
+    <h2 :id="titleId" class="overlap-title" data-test="overlap-title">{{ overlapTitle }}</h2>
+    <p class="overlap-sort-hint" data-test="overlap-sort-hint">{{ sortHint }}</p>
     <ul class="overlap-list" role="list">
       <li
         v-for="(e, idx) in sorted"
