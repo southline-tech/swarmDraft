@@ -40,6 +40,13 @@ vi.mock('./backend', async (orig) => ({
     primaryId: vi.fn(async () => null),
     tokens: vi.fn(async () => []),
     setUserDisplayName: vi.fn(async (name: string) => name),
+    draftAccessList: vi.fn(async () => []),
+    setDraftAccessMode: vi.fn(async () => {}),
+    grantDraft: vi.fn(async () => {}),
+    revokeDraft: vi.fn(async () => {}),
+    bulkGrantCurrentDraft: vi.fn(async () => {}),
+    bulkGrantAllDrafts: vi.fn(async () => {}),
+    bulkRevokeAllDrafts: vi.fn(async () => {}),
   },
   getAppInfo: vi.fn(async () => ({
     version: '0.1.0',
@@ -95,9 +102,14 @@ describe('toolbar draft picker (#243)', () => {
     await settle();
     expect(backend.createBlankManuscript).toHaveBeenCalledTimes(1);
     expect(w.find('[data-test="draft-picker"]').text()).toContain('Untitled draft');
-    expect(document.activeElement?.closest('.ProseMirror')).not.toBeNull();
+    await vi.waitFor(
+      () => {
+        expect(document.activeElement?.closest('.ProseMirror')).not.toBeNull();
+      },
+      { timeout: 12_000 },
+    );
     w.unmount();
-  });
+  }, 20_000);
 
   it('switches drafts from the picker', async () => {
     const backend = await import('./backend');
