@@ -25,9 +25,11 @@ const props = defineProps<{
 
 const currentDraftLabel = computed(() => props.currentDraftTitle?.trim() || 'Untitled draft');
 
+const newlyPairedCount = computed(() => props.initialSelectedAgentIds?.length ?? 0);
+
 const batchBannerText = computed(
   () =>
-    `Five agents paired with access to ${currentDraftLabel.value} only. Select them below to grant draft access in bulk.`,
+    `${newlyPairedCount.value} bots paired · each starts with access to ${currentDraftLabel.value} only. Adjust below or use bulk actions.`,
 );
 
 const emit = defineEmits<{

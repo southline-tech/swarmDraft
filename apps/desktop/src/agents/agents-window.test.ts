@@ -58,11 +58,16 @@ describe('AgentsWindow', () => {
   });
 
   it('shows batch banner with current draft title (ba2)', async () => {
-    const w = mountWindow({ batchBanner: true, currentDraftTitle: 'Lanterns' });
+    const w = mountWindow({
+      batchBanner: true,
+      currentDraftTitle: 'Lanterns',
+      initialSelectedAgentIds: ['a1', 'a2', 'a3', 'a4', 'a5'],
+    });
     await flushPromises();
     const banner = w.get('[data-test="agents-batch-banner"]');
-    expect(banner.text()).toContain('Lanterns');
-    expect(banner.text()).toMatch(/Five agents paired with access to Lanterns only/);
+    expect(banner.text()).toBe(
+      '5 bots paired · each starts with access to Lanterns only. Adjust below or use bulk actions.',
+    );
   });
 
   it('bulk bar appears when an agent is selected', async () => {
