@@ -510,11 +510,11 @@ const themeLabel = computed(() =>
       :title="themeLabel"
       @click="toggleTheme"
     >
-      <AppIcon v-if="themeMode === 'dark'" name="sparkle" class="h-4 w-4" aria-hidden="true" />
-      <svg v-else class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M8 2.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8z" />
-        <path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15" />
-      </svg>
+      <AppIcon
+        :name="themeMode === 'dark' ? 'sun' : 'moon'"
+        class="h-4 w-4"
+        aria-hidden="true"
+      />
     </button>
     <button
       type="button"

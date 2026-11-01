@@ -33,7 +33,9 @@ describe('Wave 6a toolbar (#245)', () => {
     delete document.documentElement.dataset.theme;
     const w = mountBar();
     expect(document.documentElement.dataset.theme).not.toBe('dark');
+    expect(w.get('[data-test="toolbar-theme"]').find('[data-icon="moon"]').exists()).toBe(true);
     await w.get('[data-test="toolbar-theme"]').trigger('click');
+    expect(w.get('[data-test="toolbar-theme"]').find('[data-icon="sun"]').exists()).toBe(true);
     expect(document.documentElement.dataset.theme).toBe('dark');
     await w.get('[data-test="toolbar-theme"]').trigger('click');
     expect(document.documentElement.dataset.theme).toBe('light');
@@ -59,12 +61,13 @@ describe('Wave 6a toolbar (#245)', () => {
     w.unmount();
   });
 
-  it('PDF shows coming-later copy without running export (#250)', async () => {
+  it('PDF is greyed out as coming later without running export (#250)', async () => {
     const { runBookExport } = await import('../export/run-book-export');
     const w = mountBar();
     await w.get('[data-test="toolbar-export"]').trigger('click');
-    await w.get('[data-test="export-pdf"]').trigger('click');
-    expect(w.get('[data-test="toolbar-export-status"]').text()).toContain('coming');
+    const pdf = w.get('[data-test="export-pdf"]');
+    expect(pdf.attributes('disabled')).toBeDefined();
+    expect(pdf.text()).toContain('Coming later');
     expect(runBookExport).not.toHaveBeenCalled();
     w.unmount();
   });

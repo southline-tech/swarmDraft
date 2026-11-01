@@ -114,11 +114,14 @@ const btn =
         type="button"
         role="menuitem"
         tabindex="-1"
-        class="tb-menu-item"
+        class="tb-menu-item tb-menu-item--soon"
         data-test="export-pdf"
-        @click="runComingLater('pdf')"
+        disabled
+        aria-disabled="true"
+        title="PDF export is coming in a later update."
       >
-        PDF
+        <span class="tb-menu-item__label">PDF</span>
+        <span class="tb-menu-item__hint">Coming later</span>
       </button>
       <button
         type="button"
@@ -164,11 +167,22 @@ const btn =
   text-align: left;
   cursor: pointer;
 }
-.tb-menu-item:hover,
-.tb-menu-item:focus-visible {
+.tb-menu-item:hover:not(:disabled),
+.tb-menu-item:focus-visible:not(:disabled) {
   background: var(--ct-selected-bg);
   color: var(--ct-accent);
   outline: none;
+}
+.tb-menu-item--soon {
+  justify-content: space-between;
+  gap: var(--ct-space-2);
+  cursor: default;
+  opacity: 0.55;
+  color: var(--ct-text-muted);
+}
+.tb-menu-item__hint {
+  font-size: var(--ct-text-xs);
+  color: var(--ct-text-muted);
 }
 .tb-export-feedback {
   position: absolute;
@@ -208,6 +222,9 @@ const btn =
 .tb-export-open:focus-visible {
   background: var(--ct-selected-bg);
   outline: none;
-  box-shadow: var(--ct-focus-ring);
+}
+.tb-export-open:focus-visible {
+  outline: 2px solid var(--ct-focus-ring-color);
+  outline-offset: 2px;
 }
 </style>
