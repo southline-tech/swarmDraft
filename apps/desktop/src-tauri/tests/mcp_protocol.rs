@@ -134,6 +134,8 @@ async fn initialize_and_list_tools() {
         "list_chapters",
         "read_chapter",
         "search_text",
+        "list_notes",
+        "write_note",
         "trigger_export",
         "get_export",
     ] {
@@ -658,7 +660,7 @@ async fn write_tools_listed_and_decisions_absent() {
     ] {
         assert!(names.contains(&t), "missing {t}");
     }
-    assert_eq!(names.len(), 12, "{names:?}");
+    assert_eq!(names.len(), 14, "{names:?}");
     let r = call(&s, "accept_suggestion", json!({"id": "x"})).await;
     let r2 = rpc(
         &s,
@@ -1313,6 +1315,7 @@ async fn suggest_only_no_tool_can_accept_or_reject() {
             "get_export",
             "list_chapters",
             "list_documents",
+            "list_notes",
             "list_suggestions",
             "poll_pairing",
             "read_chapter",
@@ -1320,7 +1323,8 @@ async fn suggest_only_no_tool_can_accept_or_reject() {
             "search_text",
             "suggest_edit",
             "suggest_style",
-            "trigger_export"
+            "trigger_export",
+            "write_note"
         ]
     );
     for name in [
@@ -1567,4 +1571,89 @@ async fn trigger_export_epub_returns_job_and_get_export_polls() {
         .to_string();
     assert!(path.contains("exports"));
     assert!(std::path::Path::new(&path).is_file());
+}
+
+#[tokio::test]
+async fn notes_tools_list_and_write_agent_notes() {
+    let s = start(&["read", "comment"], 1000).await;
+    let empty = call(&s, "list_notes", json!({"manuscript_id": s.manuscript_id})).await;
+    assert_ne!(empty["isError"], true, "{empty}");
+    assert_eq!(
+        empty["structuredContent"]["notes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+
+    let ch = call(
+        &s,
+        "list_chapters",
+        json!({"manuscript_id": s.manuscript_id}),
+    )
+    .await;
+    let sid = ch["structuredContent"]["sections"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let w = call(
+        &s,
+        "write_note",
+        json!({
+            "manuscript_id": s.manuscript_id,
+            "title": "Continuity check",
+            "body": "Lantern motif\nSecond line",
+            "section_id": sid,
+        }),
+    )
+    .await;
+    assert_ne!(w["isError"], true, "{w}");
+    let note = &w["structuredContent"]["note"];
+    assert!(note["id"].as_str().unwrap().starts_with("note-"));
+    assert_eq!(note["authorKind"], "agent");
+    assert_eq!(note["title"], "Continuity check");
+    assert_eq!(note["sectionId"], sid);
+
+    let listed = call(&s, "list_notes", json!({"manuscript_id": s.manuscript_id})).await;
+    let notes = listed["structuredContent"]["notes"].as_array().unwrap();
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0]["id"], note["id"]);
+    assert_eq!(notes[0]["authorKind"], "agent");
+    assert_eq!(notes[0]["authorName"], "Grok Bot");
+
+    let doc = s.store.load_notes_doc(&s.manuscript_id).unwrap();
+    let entries = swarmdraft_lib::notes::list_note_entries(&doc);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].author_kind, "agent");
+
+    let md = text(
+        &call(
+            &s,
+            "read_chapter",
+            json!({"manuscript_id": s.manuscript_id, "section_id": sid}),
+        )
+        .await,
+    );
+    assert!(
+        !md.contains("Continuity check"),
+        "story notes must not appear in chapter export/read text"
+    );
+}
+
+#[tokio::test]
+async fn write_note_requires_comment_scope() {
+    let s = start(&["read"], 1000).await;
+    let r = call(
+        &s,
+        "write_note",
+        json!({
+            "manuscript_id": s.manuscript_id,
+            "title": "Blocked",
+            "body": "No scope",
+        }),
+    )
+    .await;
+    assert_eq!(r["isError"], true, "{r}");
+    assert!(text(&r).contains("comment"));
 }

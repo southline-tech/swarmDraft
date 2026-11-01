@@ -372,7 +372,12 @@ fn fill(
 /// Append the blocks of a ProseMirror `doc` JSON to a section document (same encoding as
 /// `docToYDoc` in ydoc.ts). Errors only if a run's mark keys can't be made unique.
 pub fn encode(doc: &Doc, pm_doc: &Value) -> Result<(), String> {
-    let frag: XmlFragmentRef = doc.get_or_insert_xml_fragment(FRAGMENT);
+    encode_fragment(doc, FRAGMENT, pm_doc)
+}
+
+/// Same as [`encode`], but targets a named XmlFragment (e.g. story-note bodies at `body:{id}`).
+pub fn encode_fragment(doc: &Doc, fragment: &str, pm_doc: &Value) -> Result<(), String> {
+    let frag: XmlFragmentRef = doc.get_or_insert_xml_fragment(fragment);
     let mut txn = doc.transact_mut();
     if let Some(c) = pm_doc["content"].as_array() {
         fill(&mut txn, &frag, c)?;

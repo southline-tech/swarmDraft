@@ -15,6 +15,7 @@ use serde_json::{json, Value};
 use crate::agents::AgentPrincipal;
 use crate::content;
 use crate::manuscripts::AgentWrite;
+use crate::notes::{self, NoteEntry};
 use crate::storage::{StorageError, Store};
 
 /// A tool failure the agent should see (`isError: true`), with its audit outcome.
@@ -205,6 +206,15 @@ pub struct RequestPairingArgs {
 pub struct PollPairingArgs {
     pub pairing_id: String,
     pub pairing_secret: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct WriteNoteArgs {
+    pub manuscript_id: String,
+    pub title: String,
+    pub body: String,
+    /// Optional section id from `list_chapters` to link this note.
+    pub section_id: Option<String>,
 }
 
 pub const PARAGRAPH_STYLES: &[&str] = &[
@@ -920,6 +930,76 @@ impl SwarmdraftMcp {
     }
 
     #[tool(
+        description = "List story notes for a manuscript (titles, authors, optional section links). Notes are planning workspace only and are not part of the exported book."
+    )]
+    async fn list_notes(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(a): Parameters<ManuscriptArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let args = json!({ "manuscriptId": a.manuscript_id });
+        self.run(
+            &parts,
+            "read",
+            "list_notes",
+            Some(&a.manuscript_id),
+            args,
+            |_| {
+                check_ids(&[("manuscript_id", Some(&a.manuscript_id))])?;
+                let doc = self.store.load_notes_doc(&a.manuscript_id)?;
+                let notes: Vec<NoteEntry> = notes::list_note_entries(&doc);
+                Ok(Output::Json(json!({ "notes": notes })))
+            },
+        )
+    }
+
+    #[tool(
+        description = "Add a story note attributed to you (shown with a Bot badge in the app). Does not change manuscript sections or exports."
+    )]
+    async fn write_note(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(a): Parameters<WriteNoteArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let args = json!({
+            "manuscriptId": a.manuscript_id,
+            "title": clip(&a.title, notes::MAX_NOTE_TITLE),
+            "sectionId": clip_opt(&a.section_id, MAX_ID),
+        });
+        self.run(
+            &parts,
+            "comment",
+            "write_note",
+            Some(&a.manuscript_id),
+            args,
+            |p| {
+                check_ids(&[
+                    ("manuscript_id", Some(&a.manuscript_id)),
+                    ("section_id", a.section_id.as_deref()),
+                ])?;
+                check_len("title", &a.title, notes::MAX_NOTE_TITLE)?;
+                check_len("body", &a.body, notes::MAX_NOTE_BODY)?;
+                if a.title.trim().is_empty() {
+                    return Err(ToolErr::invalid("title must not be empty"));
+                }
+                if a.body.trim().is_empty() {
+                    return Err(ToolErr::invalid("body must not be empty"));
+                }
+                let note = notes::write_agent_note(
+                    &self.store,
+                    &p.token_id,
+                    &a.manuscript_id,
+                    &author(p),
+                    &a.title,
+                    &a.body,
+                    a.section_id.as_deref(),
+                )?;
+                Ok(Output::Json(json!({ "note": note })))
+            },
+        )
+    }
+
+    #[tool(
         description = "Request author approval to connect as an agent. Returns a pairing id and secret; poll with poll_pairing until approved or denied."
     )]
     async fn request_pairing(
@@ -1189,10 +1269,10 @@ impl ServerHandler for SwarmdraftMcp {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "swarmDraft manuscript tools. Read with list_documents, list_chapters, read_chapter, \
-             list_suggestions, search_text, trigger_export and get_export; comment with add_comment \
-             and propose changes with suggest_edit and suggest_style. Anchor comments and \
-             suggestions with a block id plus an exact quote. Accepting or rejecting suggestions \
-             is reserved for the human author.",
+             list_suggestions, list_notes, search_text, trigger_export and get_export; comment with \
+             add_comment and write_note; propose changes with suggest_edit and suggest_style. Anchor \
+             comments and suggestions with a block id plus an exact quote. Accepting or rejecting \
+             suggestions is reserved for the human author.",
         )
     }
 }
