@@ -331,7 +331,8 @@ mod tests {
         let a = s.create_agent("Bot", "#3366ff").unwrap();
         let m = s.create_manuscript("One").unwrap();
         s.grant_agent_manuscript(&a.id, &m.id).unwrap();
-        s.bulk_revoke_all_draft_access(&[a.id.clone()]).unwrap();
+        s.bulk_revoke_all_draft_access(std::slice::from_ref(&a.id))
+            .unwrap();
         assert_eq!(
             s.agent_manuscript_access_mode(&a.id).unwrap(),
             ACCESS_MODE_SELECTED

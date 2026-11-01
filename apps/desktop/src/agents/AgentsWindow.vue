@@ -19,7 +19,16 @@ const props = defineProps<{
   agents: Agent[];
   manuscripts: StoredManuscriptRow[];
   currentManuscriptId: string | null;
+  /** Active draft title for ba2 batch banner (#245). */
+  currentDraftTitle?: string;
 }>();
+
+const currentDraftLabel = computed(() => props.currentDraftTitle?.trim() || 'Untitled draft');
+
+const batchBannerText = computed(
+  () =>
+    `Five agents paired with access to ${currentDraftLabel.value} only. Select them below to grant draft access in bulk.`,
+);
 
 const emit = defineEmits<{
   close: [];
@@ -192,14 +201,20 @@ onMounted(async () => {
         </button>
       </header>
       <p v-if="batchBanner" class="aw__banner" role="status" data-test="agents-batch-banner">
-        Five bots paired. Select them below to grant draft access in bulk.
+        {{ batchBannerText }}
       </p>
-      <div v-if="canBulk" class="aw__bulk" data-test="agents-bulk-bar">
+      <div
+        v-if="canBulk"
+        class="aw__bulk"
+        role="toolbar"
+        aria-label="Bulk draft access actions"
+        data-test="agents-bulk-bar"
+      >
         <span class="aw__bulk-label">{{ selected.size }} selected</span>
         <button
           type="button"
           class="aw__bulk-btn"
-          data-test="agents-bulk-current"
+          data-test="bulk-grant-current"
           :disabled="!currentManuscriptId || busy"
           @click="bulkGrantCurrent"
         >
@@ -208,7 +223,7 @@ onMounted(async () => {
         <button
           type="button"
           class="aw__bulk-btn"
-          data-test="agents-bulk-all"
+          data-test="bulk-grant-all"
           :disabled="busy"
           @click="bulkGrantAll"
         >
@@ -217,7 +232,7 @@ onMounted(async () => {
         <button
           type="button"
           class="aw__bulk-btn aw__bulk-btn--danger"
-          data-test="agents-bulk-revoke"
+          data-test="bulk-revoke-all"
           :disabled="busy"
           @click="bulkRevokeAll"
         >
@@ -232,23 +247,30 @@ onMounted(async () => {
             v-for="agent in activeAgents"
             :key="agent.id"
             class="aw__agent"
-            data-test="agents-row"
+            data-test="agent-row"
+            :data-agent="agent.name"
           >
             <label class="aw__select">
               <input
                 type="checkbox"
-                :data-test="`agents-select-${agent.id}`"
+                data-test="agent-select"
                 :checked="selected.has(agent.id)"
                 @change="toggleSelected(agent.id)"
               />
               <span class="aw__swatch" aria-hidden="true" :style="{ background: agent.color }" />
               <bdi dir="auto" class="aw__name">{{ agent.name }}</bdi>
             </label>
-            <fieldset class="aw__mode" :data-test="`agents-mode-${agent.id}`">
+            <fieldset
+              class="aw__mode"
+              role="radiogroup"
+              data-test="access-mode"
+              :aria-label="`Draft access for ${agent.name}`"
+            >
               <legend class="visually-hidden">Draft access for {{ agent.name }}</legend>
               <label class="aw__radio">
                 <input
                   type="radio"
+                  data-test="mode-selected"
                   :name="`mode-${agent.id}`"
                   value="selected"
                   :checked="accessFor(agent.id).mode === 'selected'"
@@ -259,6 +281,7 @@ onMounted(async () => {
               <label class="aw__radio">
                 <input
                   type="radio"
+                  data-test="mode-all"
                   :name="`mode-${agent.id}`"
                   value="all"
                   :checked="accessFor(agent.id).mode === 'all'"
@@ -270,14 +293,13 @@ onMounted(async () => {
             <ul
               v-if="accessFor(agent.id).mode === 'selected'"
               class="aw__drafts"
-              :data-test="`agents-drafts-${agent.id}`"
+              data-test="access-checklist"
             >
               <li v-for="m in manuscripts" :key="m.id">
                 <label class="aw__draft">
                   <input
                     type="checkbox"
                     :checked="isGranted(agent.id, m.id)"
-                    :data-test="`agents-draft-${agent.id}-${m.id}`"
                     :disabled="busy"
                     @change="
                       toggleDraft(agent.id, m.id, ($event.target as HTMLInputElement).checked)

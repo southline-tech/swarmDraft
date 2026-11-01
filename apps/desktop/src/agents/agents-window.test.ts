@@ -57,10 +57,12 @@ describe('AgentsWindow', () => {
     vi.clearAllMocks();
   });
 
-  it('shows batch banner when requested', async () => {
-    const w = mountWindow({ batchBanner: true });
+  it('shows batch banner with current draft title (ba2)', async () => {
+    const w = mountWindow({ batchBanner: true, currentDraftTitle: 'Lanterns' });
     await flushPromises();
-    expect(w.find('[data-test="agents-batch-banner"]').exists()).toBe(true);
+    const banner = w.get('[data-test="agents-batch-banner"]');
+    expect(banner.text()).toContain('Lanterns');
+    expect(banner.text()).toMatch(/Five agents paired with access to Lanterns only/);
   });
 
   it('bulk bar appears when an agent is selected', async () => {
@@ -69,7 +71,9 @@ describe('AgentsWindow', () => {
     ]);
     const w = mountWindow({ initialSelectedAgentIds: ['a1'] });
     await flushPromises();
-    expect(w.find('[data-test="agents-bulk-bar"]').exists()).toBe(true);
+    const bar = w.get('[data-test="agents-bulk-bar"]');
+    expect(bar.attributes('role')).toBe('toolbar');
+    expect(bar.attributes('aria-label')).toBe('Bulk draft access actions');
   });
 
   it('bulk grant current calls IPC with selected ids and current draft', async () => {
@@ -78,7 +82,7 @@ describe('AgentsWindow', () => {
     ]);
     const w = mountWindow({ initialSelectedAgentIds: ['a1'], currentManuscriptId: 'm1' });
     await flushPromises();
-    await w.get('[data-test="agents-bulk-current"]').trigger('click');
+    await w.get('[data-test="bulk-grant-current"]').trigger('click');
     await flushPromises();
     expect(agentsApi.bulkGrantCurrentDraft).toHaveBeenCalledWith(['a1'], 'm1');
   });

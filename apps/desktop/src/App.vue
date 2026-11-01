@@ -1321,6 +1321,7 @@ defineExpose({ open, closeSession });
         :agents="agentsForWindow"
         :manuscripts="draftRows"
         :current-manuscript-id="session?.id ?? null"
+        :current-draft-title="draftPickerLabel"
         @close="closeAgentsWindow"
         @open-settings="openAgentsSettingsFromWindow"
         @dismiss-batch="dismissAgentsBatch"
