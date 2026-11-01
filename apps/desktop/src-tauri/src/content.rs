@@ -14,9 +14,7 @@ use serde_json::{json, Map, Value};
 use yrs::types::text::YChange;
 use yrs::types::xml::{Xml, XmlFragment, XmlOut};
 use yrs::types::Attrs;
-use yrs::{
-    Any, BranchID, Doc, GetString, Out, ReadTxn, Text, Transact, TransactionMut, XmlFragmentRef,
-};
+use yrs::{Any, BranchID, Doc, GetString, Out, ReadTxn, Text, Transact, TransactionMut, WriteTxn};
 
 /// Name of the Y.XmlFragment that holds a section (same as y-prosemirror / `FRAGMENT_NAME`).
 pub const FRAGMENT: &str = "prosemirror";
@@ -377,8 +375,8 @@ pub fn encode(doc: &Doc, pm_doc: &Value) -> Result<(), String> {
 
 /// Same as [`encode`], but targets a named XmlFragment (e.g. story-note bodies at `body:{id}`).
 pub fn encode_fragment(doc: &Doc, fragment: &str, pm_doc: &Value) -> Result<(), String> {
-    let frag: XmlFragmentRef = doc.get_or_insert_xml_fragment(fragment);
     let mut txn = doc.transact_mut();
+    let frag = txn.get_or_insert_xml_fragment(fragment);
     if let Some(c) = pm_doc["content"].as_array() {
         fill(&mut txn, &frag, c)?;
     }

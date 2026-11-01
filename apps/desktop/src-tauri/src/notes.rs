@@ -10,7 +10,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use yrs::updates::decoder::Decode;
 use yrs::{
-    Any, Array, Doc, In, Map, MapPrelim, MapRef, Out, ReadTxn, StateVector, Transact, Update,
+    Any, Array, Doc, Map, MapPrelim, MapRef, Out, ReadTxn, StateVector, Transact, Update, WriteTxn,
 };
 
 use crate::content;
@@ -166,26 +166,29 @@ pub fn write_agent_note(
     }
     content::validate_doc(&body_to_pm(body)).map_err(StorageError::Invalid)?;
     let doc = store.load_notes_doc(manuscript_id)?;
-    let since = doc.transact().state_vector();
+    let since = {
+        let txn = doc.transact();
+        txn.state_vector()
+    };
     let id = new_note_id();
     let now = store.now()?;
-    let entries = doc.get_or_insert_map(ENTRIES_KEY);
-    let order = doc.get_or_insert_array(ORDER_KEY);
     let body_name = body_field(&id);
-    let _body_frag = doc.get_or_insert_xml_fragment(body_name.as_str());
     {
         let mut txn = doc.transact_mut();
         let entry = MapPrelim::from([
-            ("title", In::from(title)),
-            ("sectionId", In::from(section_id.unwrap_or(""))),
-            ("authorKind", In::from("agent")),
-            ("authorId", In::from(author.id.as_str())),
-            ("authorName", In::from(author.name.as_str())),
-            ("createdAt", In::from(now.as_str())),
-            ("updatedAt", In::from(now.as_str())),
+            ("title", title),
+            ("sectionId", section_id.unwrap_or("")),
+            ("authorKind", "agent"),
+            ("authorId", author.id.as_str()),
+            ("authorName", author.name.as_str()),
+            ("createdAt", now.as_str()),
+            ("updatedAt", now.as_str()),
         ]);
-        entries.insert(&mut txn, id.as_str(), entry);
-        order.push_back(&mut txn, id.as_str());
+        txn.get_or_insert_map(ENTRIES_KEY)
+            .insert(&mut txn, id.as_str(), entry);
+        txn.get_or_insert_array(ORDER_KEY)
+            .push_back(&mut txn, id.as_str());
+        txn.get_or_insert_xml_fragment(body_name.as_str());
     }
     content::encode_fragment(&doc, body_name.as_str(), &body_to_pm(body))
         .map_err(StorageError::Invalid)?;
@@ -221,7 +224,13 @@ impl Store {
     /// Load the notes Y.Doc for a manuscript (empty when never written).
     pub fn load_notes_doc(&self, manuscript_id: &str) -> Result<Doc, StorageError> {
         self.ensure_manuscript_exists(manuscript_id)?;
-        self.load_doc(&notes_doc_id(manuscript_id))
+        let doc = self.load_doc(&notes_doc_id(manuscript_id))?;
+        {
+            let mut txn = doc.transact_mut();
+            txn.get_or_insert_array(ORDER_KEY);
+            txn.get_or_insert_map(ENTRIES_KEY);
+        }
+        Ok(doc)
     }
 
     /// Append one editor update to the notes doc (validated as Yjs v1).
