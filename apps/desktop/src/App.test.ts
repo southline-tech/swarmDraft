@@ -392,16 +392,14 @@ describe('App', () => {
     expect(sidebar().isVisible()).toBe(false);
     expect(rail().isVisible()).toBe(true);
     const ws = w.find('[data-test="workspace"]');
-    expect(ws.classes()).toContain(
-      'grid-cols-[var(--ct-rail-w)_minmax(0,1fr)_var(--ct-story-notes-w)]',
-    );
-    expect(ws.classes()).not.toContain('grid-cols-[18rem_minmax(0,1fr)_var(--ct-story-notes-w)]');
+    expect(ws.classes()).toContain('grid-cols-[var(--ct-rail-w)_minmax(0,1fr)_minmax(0,0fr)]');
+    expect(ws.classes()).not.toContain('grid-cols-[18rem_minmax(0,1fr)_minmax(0,0fr)]');
     expect(nav.attributes('aria-controls')).toBe('chapter-navigator-rail');
     await nav.trigger('click');
     expect(nav.attributes('aria-pressed')).toBe('true');
     expect(sidebar().isVisible()).toBe(true);
     expect(w.find('[data-test="workspace"]').classes()).toContain(
-      'grid-cols-[18rem_minmax(0,1fr)_var(--ct-story-notes-w)]',
+      'grid-cols-[18rem_minmax(0,1fr)_minmax(0,0fr)]',
     );
     w.unmount();
   });
@@ -1748,7 +1746,8 @@ describe('migration notice banner (#71)', () => {
     const region = wrapper.find('[data-test="migration-notice-region"]').element;
     const topbar = wrapper.find('header.topbar').element;
     expect(topbar.contains(region)).toBe(false);
-    expect(topbar.nextElementSibling).toBe(region);
+    const afterChrome = wrapper.get('[data-test="shell-chrome"]').element.nextElementSibling;
+    expect(afterChrome?.contains(region)).toBe(true);
   });
 });
 
@@ -2033,15 +2032,17 @@ describe('App UI shells (Part of #36)', () => {
 });
 
 describe('full-width toolbar (#84)', () => {
-  // The toolbar row sits between the title bar and the panel row, as a sibling of both, so it
-  // spans the window and the outline / review panels start below it.
+  // The toolbar row sits between the title bar and the panel row inside shell chrome; the desk
+  // scrolls underneath without taking the chrome with it (#232).
   const order = (w: ReturnType<typeof mount>) => {
-    const main = w.get('.shell__main').element;
-    const kids = [...main.children];
+    const chrome = w.get('[data-test="shell-chrome"]').element;
+    const kids = [...chrome.children];
+    const desk = w.get('[data-test="shell-desk"]').element;
+    const deskKids = [...desk.children];
     return {
       topbar: kids.indexOf(w.get('.topbar').element),
       row: kids.indexOf(w.get('[data-test="toolbar-row"]').element),
-      workspace: kids.indexOf(w.get('[data-test="workspace"]').element),
+      workspace: deskKids.indexOf(w.get('[data-test="workspace"]').element),
     };
   };
   const toolbarIn = (w: ReturnType<typeof mount>, sel: string) =>
@@ -2052,7 +2053,7 @@ describe('full-width toolbar (#84)', () => {
     const o = order(w);
     expect(o.topbar).toBeGreaterThanOrEqual(0);
     expect(o.row).toBeGreaterThan(o.topbar);
-    expect(o.workspace).toBeGreaterThan(o.row);
+    expect(o.workspace).toBeGreaterThanOrEqual(0);
     expect(toolbarIn(w, '[data-test="toolbar-row"]')).toBe(true);
     expect(toolbarIn(w, '[data-test="workspace"]')).toBe(false);
     // The panels stay in the panel row, never in the toolbar row.
@@ -2113,6 +2114,35 @@ describe('full-width toolbar (#84)', () => {
     await settle();
     expect(pd).toHaveBeenCalledTimes(1);
     expect(leadFocusModeOn(w)).toBe(true);
+    w.unmount();
+  });
+});
+
+describe('shell layout after import and review burst (#232)', () => {
+  it('keeps chrome outside the desk, reserves no story-notes strip when closed, and min-widths the scroll chain', async () => {
+    const { w } = await withManuscript();
+    const desk = w.get('[data-test="shell-desk"]').element as HTMLElement;
+    expect(desk.className).toContain('overflow-hidden');
+    expect(desk.className).toContain('min-w-0');
+    expect(w.get('[data-test="shell-chrome"]').element.contains(w.get('.topbar').element)).toBe(
+      true,
+    );
+    expect(
+      w
+        .get('[data-test="shell-chrome"]')
+        .element.contains(w.get('[data-test="toolbar-row"]').element),
+    ).toBe(true);
+    expect(w.get('[data-test="workspace"]').classes().join(' ')).toContain('minmax(0,0fr)');
+    expect(w.get('[data-test="continuous-root"]').classes()).toContain('min-w-0');
+    expect(w.get('[data-test="continuous-manuscript"]').classes()).toContain('min-w-0');
+    const bar = w.get('[data-test="status-bar"]').element as HTMLElement;
+    expect(bar.style.gridTemplateColumns).toContain('minmax(0, 0fr)');
+    for (let i = 0; i < 80; i++) {
+      await w.get('[data-test="tb-review"]').trigger('click');
+    }
+    await settle();
+    expect(w.find('[data-test="tb-navigator"]').exists()).toBe(true);
+    expect(w.get('.topbar').isVisible()).toBe(true);
     w.unmount();
   });
 });

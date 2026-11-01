@@ -903,9 +903,12 @@ function onAskBotFromEditor() {
 /** #96: the writer opened the outline by hand while the review panel shows. */
 const outlineForced = computed(() => outlineAuto.manual.value && navigatorOpen.value);
 /** wp2 (#67): full outline, collapsed rail, or hidden in focus mode. */
+const STORY_NOTES_TRACK = 'var(--ct-story-notes-w)';
+/** #232: no empty strip beside the review rail when Story notes is closed. */
+const STORY_NOTES_CLOSED_TRACK = 'minmax(0,0fr)';
 const workspaceGridClass = computed(() => {
   if (focusMode.value) return 'grid-cols-1';
-  const notes = 'var(--ct-story-notes-w)';
+  const notes = storyNotesOpen.value ? STORY_NOTES_TRACK : STORY_NOTES_CLOSED_TRACK;
   return navigatorOpen.value
     ? `grid-cols-[18rem_minmax(0,1fr)_${notes}]`
     : `grid-cols-[var(--ct-rail-w)_minmax(0,1fr)_${notes}]`;
@@ -913,7 +916,8 @@ const workspaceGridClass = computed(() => {
 const footerColumnTracks = computed(() => {
   if (focusMode.value) return undefined;
   const left = navigatorOpen.value ? '18rem' : 'var(--ct-rail-w)';
-  return `${left} minmax(0, 1fr) var(--ct-story-notes-w)`;
+  const notes = storyNotesOpen.value ? STORY_NOTES_TRACK : 'minmax(0, 0fr)';
+  return `${left} minmax(0, 1fr) ${notes}`;
 });
 const chapterCount = computed(
   () => session.value?.outline.value.filter((s) => s.kind === 'chapter').length ?? 0,
@@ -984,160 +988,174 @@ defineExpose({ open, closeSession });
   <main v-else class="shell" :class="{ 'shell--focus-mode': focusMode }">
     <div class="shell__main">
       <PairingPrompt v-if="info && isTauri()" />
-      <header v-show="!focusMode" class="topbar">
-        <details ref="appMenu" class="topbar__menu" data-test="app-menu" @toggle="onAppMenuToggle">
-          <summary
-            class="topbar__trigger"
-            data-test="app-menu-trigger"
-            aria-label="Book menu"
-            title="Book menu"
-            aria-haspopup="menu"
+      <div v-show="!focusMode" class="shell__chrome" data-test="shell-chrome">
+        <header class="topbar">
+          <details
+            ref="appMenu"
+            class="topbar__menu"
+            data-test="app-menu"
+            @toggle="onAppMenuToggle"
           >
-            <AppIcon name="menu" class="topbar__hamburger" />
-            <AppLogo :size="24" />
-          </summary>
-          <div class="topbar__menu-list sh-menu" role="menu">
-            <button
-              type="button"
-              class="sh-mi"
-              role="menuitem"
-              data-test="app-menu-new"
-              :aria-disabled="importing ? 'true' : undefined"
-              @click="
-                () => {
-                  if (importing) return;
-                  chooseFile();
-                  closeBookMenu();
-                }
-              "
+            <summary
+              class="topbar__trigger"
+              data-test="app-menu-trigger"
+              aria-label="Book menu"
+              title="Book menu"
+              aria-haspopup="menu"
             >
-              <span class="sh-mi-lead" aria-hidden="true"
-                ><AppIcon name="plus" class="app-menu-icon"
-              /></span>
-              New<span v-if="appMenuShortcuts.new" class="sh-k">{{ appMenuShortcuts.new }}</span>
-            </button>
-            <button
-              type="button"
-              class="sh-mi topbar__open"
-              role="menuitem"
-              data-test="app-menu-open"
-              @click="
-                () => {
-                  openBookPicker();
-                  closeBookMenu();
-                }
-              "
-            >
-              <span class="sh-mi-lead" aria-hidden="true"
-                ><AppIcon name="folder" class="app-menu-icon"
-              /></span>
-              Open<span class="sh-k">{{ appMenuShortcuts.open }}</span>
-            </button>
-            <div
-              class="topbar__recent"
-              @mouseenter="recentOpen = true"
-              @mouseleave="recentOpen = false"
-            >
+              <AppIcon name="menu" class="topbar__hamburger" />
+              <AppLogo :size="24" />
+            </summary>
+            <div class="topbar__menu-list sh-menu" role="menu">
               <button
                 type="button"
                 class="sh-mi"
                 role="menuitem"
-                aria-haspopup="menu"
-                :aria-expanded="recentOpen"
-                data-test="app-menu-recent"
-                :aria-disabled="!recentBooks.length ? 'true' : undefined"
-                @click.stop="recentBooks.length && (recentOpen = !recentOpen)"
+                data-test="app-menu-new"
+                :aria-disabled="importing ? 'true' : undefined"
+                @click="
+                  () => {
+                    if (importing) return;
+                    chooseFile();
+                    closeBookMenu();
+                  }
+                "
               >
                 <span class="sh-mi-lead" aria-hidden="true"
-                  ><AppIcon name="clock" class="app-menu-icon"
+                  ><AppIcon name="plus" class="app-menu-icon"
                 /></span>
-                Recent<span class="sh-k">›</span>
+                New<span v-if="appMenuShortcuts.new" class="sh-k">{{ appMenuShortcuts.new }}</span>
+              </button>
+              <button
+                type="button"
+                class="sh-mi topbar__open"
+                role="menuitem"
+                data-test="app-menu-open"
+                @click="
+                  () => {
+                    openBookPicker();
+                    closeBookMenu();
+                  }
+                "
+              >
+                <span class="sh-mi-lead" aria-hidden="true"
+                  ><AppIcon name="folder" class="app-menu-icon"
+                /></span>
+                Open<span class="sh-k">{{ appMenuShortcuts.open }}</span>
               </button>
               <div
-                v-if="recentOpen && recentBooks.length"
-                class="topbar__menu-list sh-menu sh-sub topbar__submenu"
-                role="menu"
-                aria-label="Recent books"
-                @click.stop
+                class="topbar__recent"
+                @mouseenter="recentOpen = true"
+                @mouseleave="recentOpen = false"
               >
                 <button
-                  v-for="m in recentBooks"
-                  :key="m.id"
                   type="button"
                   class="sh-mi"
                   role="menuitem"
-                  :data-test="`app-menu-recent-${m.id}`"
-                  @click="openRecentBook(m.id)"
+                  aria-haspopup="menu"
+                  :aria-expanded="recentOpen"
+                  data-test="app-menu-recent"
+                  :aria-disabled="!recentBooks.length ? 'true' : undefined"
+                  @click.stop="recentBooks.length && (recentOpen = !recentOpen)"
                 >
-                  {{ m.title || 'Untitled' }}
+                  <span class="sh-mi-lead" aria-hidden="true"
+                    ><AppIcon name="clock" class="app-menu-icon"
+                  /></span>
+                  Recent<span class="sh-k">›</span>
                 </button>
+                <div
+                  v-if="recentOpen && recentBooks.length"
+                  class="topbar__menu-list sh-menu sh-sub topbar__submenu"
+                  role="menu"
+                  aria-label="Recent books"
+                  @click.stop
+                >
+                  <button
+                    v-for="m in recentBooks"
+                    :key="m.id"
+                    type="button"
+                    class="sh-mi"
+                    role="menuitem"
+                    :data-test="`app-menu-recent-${m.id}`"
+                    @click="openRecentBook(m.id)"
+                  >
+                    {{ m.title || 'Untitled' }}
+                  </button>
+                </div>
               </div>
+              <div class="sh-sep" role="separator" />
+              <button
+                v-if="session && !choosingBook && isTauri()"
+                type="button"
+                class="sh-mi"
+                role="menuitemcheckbox"
+                data-test="app-menu-story-notes"
+                :aria-checked="storyNotesOpen ? 'true' : 'false'"
+                @click="
+                  () => {
+                    void toggleStoryNotes();
+                    closeBookMenu();
+                  }
+                "
+              >
+                <span class="sh-mi-lead" aria-hidden="true"
+                  ><AppIcon name="sparkle" class="app-menu-icon"
+                /></span>
+                Story notes
+              </button>
+              <button
+                ref="settingsButton"
+                type="button"
+                class="sh-mi"
+                role="menuitem"
+                data-test="settings-open"
+                :aria-expanded="settingsOpen"
+                @click="
+                  () => {
+                    settingsOpen = !settingsOpen;
+                    closeBookMenu();
+                  }
+                "
+              >
+                <span class="sh-mi-lead" aria-hidden="true"
+                  ><AppIcon name="settings" class="app-menu-icon"
+                /></span>
+                Settings<span class="sh-k">{{ appMenuShortcuts.settings }}</span>
+              </button>
+              <button
+                v-if="isTauri()"
+                type="button"
+                class="sh-mi"
+                role="menuitem"
+                data-test="app-menu-quit"
+                @click="
+                  () => {
+                    void quitApp();
+                    closeBookMenu();
+                  }
+                "
+              >
+                <span class="sh-mi-lead" aria-hidden="true"
+                  ><AppIcon name="power" class="app-menu-icon"
+                /></span>
+                Quit<span class="sh-k">{{ appMenuShortcuts.quit }}</span>
+              </button>
             </div>
-            <div class="sh-sep" role="separator" />
-            <button
-              v-if="session && !choosingBook && isTauri()"
-              type="button"
-              class="sh-mi"
-              role="menuitemcheckbox"
-              data-test="app-menu-story-notes"
-              :aria-checked="storyNotesOpen ? 'true' : 'false'"
-              @click="
-                () => {
-                  void toggleStoryNotes();
-                  closeBookMenu();
-                }
-              "
-            >
-              <span class="sh-mi-lead" aria-hidden="true"
-                ><AppIcon name="sparkle" class="app-menu-icon"
-              /></span>
-              Story notes
-            </button>
-            <button
-              ref="settingsButton"
-              type="button"
-              class="sh-mi"
-              role="menuitem"
-              data-test="settings-open"
-              :aria-expanded="settingsOpen"
-              @click="
-                () => {
-                  settingsOpen = !settingsOpen;
-                  closeBookMenu();
-                }
-              "
-            >
-              <span class="sh-mi-lead" aria-hidden="true"
-                ><AppIcon name="settings" class="app-menu-icon"
-              /></span>
-              Settings<span class="sh-k">{{ appMenuShortcuts.settings }}</span>
-            </button>
-            <button
-              v-if="isTauri()"
-              type="button"
-              class="sh-mi"
-              role="menuitem"
-              data-test="app-menu-quit"
-              @click="
-                () => {
-                  void quitApp();
-                  closeBookMenu();
-                }
-              "
-            >
-              <span class="sh-mi-lead" aria-hidden="true"
-                ><AppIcon name="power" class="app-menu-icon"
-              /></span>
-              Quit<span class="sh-k">{{ appMenuShortcuts.quit }}</span>
-            </button>
-          </div>
-        </details>
-        <span class="topbar__brand">
-          <span class="topbar__name">{{
-            session && !choosingBook ? session.title : PRODUCT_NAME
-          }}</span>
-        </span>
-      </header>
+          </details>
+          <span class="topbar__brand">
+            <span class="topbar__name">{{
+              session && !choosingBook ? session.title : PRODUCT_NAME
+            }}</span>
+          </span>
+        </header>
+        <!-- #84 / #232: chrome row stays outside the scrolling desk; toolbar teleports here. -->
+        <div
+          v-if="session && !choosingBook"
+          id="toolbar-row"
+          class="toolbar-row"
+          data-test="toolbar-row"
+        />
+      </div>
       <MigrationNoticeBanner :notices="migrationNotices" @dismiss="dismissMigration" />
       <SettingsScreen
         v-if="settingsOpen"
@@ -1278,97 +1296,95 @@ defineExpose({ open, closeSession });
           />
         </div>
       </div>
-      <!-- #84: full-width toolbar row under the title bar; the side panels start below it. -->
       <div
         v-if="session && !choosingBook"
-        id="toolbar-row"
-        class="toolbar-row"
-        data-test="toolbar-row"
-      />
-      <div
-        v-if="session && !choosingBook"
-        class="workspace grid min-h-0 flex-1 gap-0 overflow-hidden pt-4 pb-4 pl-4 pr-0"
-        :class="workspaceGridClass"
-        data-test="workspace"
+        class="shell__desk min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden"
+        data-test="shell-desk"
       >
-        <SectionNav
-          v-show="navigatorOpen && !focusMode"
-          id="chapter-navigator"
-          class="min-h-0 overflow-auto"
-          :sections="session.outline.value"
-          :manuscript-id="session.id"
-          :selected-id="selectedId"
-          :save="session.save"
-          :word-counts="wordCounts"
-          :change-counts="changeCounts"
-          :numbering-style="session.numberingStyle.value"
-          @select="selectedId = $event"
-          @activate="focusEditor"
-          @numbering-style="onNumberingStyle"
-        />
-        <OutlineRail v-show="!navigatorOpen && !focusMode" @expand="outlineAuto.toggleByHand()" />
-        <div class="editor-stack min-h-0 min-w-0">
-          <ContinuousManuscript
-            ref="editorPane"
-            class="editor-stack__page min-h-0 min-w-0 flex-1"
-            :outline="session.outline.value"
-            :sections="session.sections"
-            :selected-id="selectedId"
-            :reload-token="reloads"
-            :readonly="session.closed || restoreInProgress"
-            :read-only-reason="restoreInProgress ? 'restore in progress' : undefined"
-            :navigator-open="navigatorOpen"
-            :navigator-controls="chapterNavControls"
-            :chapter-title="selected?.title"
-            :section-labels="sectionLabels"
-            :book-docs="outlineDocs(session.outline.value, session.sections)"
-            :chapter-docs="
-              selectedId
-                ? sectionTreeDocs(session.outline.value, selectedId, session.sections)
-                : undefined
-            "
-            :manuscript-save="manuscriptSave"
-            :story-notes-open="storyNotesOpen"
-            story-notes-panel-id="story-notes-panel"
-            :author-labels="markAuthorLabel"
-            toolbar-target="#toolbar-row"
-            external-load-error
-            :outline-forced="outlineForced"
-            :notes-hidden="notesHidden"
-            :computer-name="info?.computerName"
-            :decision-records-by-section="decisionRecordsBySection"
-            :manuscript-id="session.id"
-            @update:selected-id="selectedId = $event"
-            @load-error="editorLoadError = $event"
-            @reload="reloadSection"
-            @toggle-navigator="outlineAuto.toggleByHand()"
-            @decisions="onSectionDecisions"
-            @layout="onEditorLayout"
-            @focus-mode="focusMode = $event"
-            @ask-bot="onAskBotFromEditor"
-            @toggle-story-notes="toggleStoryNotes"
-            @save-retry="onManuscriptSaveRetry"
-            @words-before-caret="onWordsBeforeCaret"
-            @change-counts="changeCounts = $event"
-          />
-        </div>
         <div
-          v-if="!focusMode"
-          class="story-notes-col min-h-0 min-w-0 overflow-hidden"
-          data-test="story-notes-col"
+          class="workspace grid min-h-0 min-w-0 flex-1 gap-0 overflow-hidden pt-4 pb-4 pl-4 pr-0"
+          :class="workspaceGridClass"
+          data-test="workspace"
         >
-          <StoryNotesPanel
-            v-if="storyNotesOpen && notesSession"
-            id="story-notes-panel"
-            class="story-notes-col__panel"
-            :notes-doc="notesSession.doc"
-            :outline="session.outline.value"
-            :human-author="humanNotesAuthor"
-            :readonly="session.closed || restoreInProgress"
-            data-test="story-notes-panel"
-            @select-section="focusEditor"
-            @close="storyNotesOpen = false"
+          <SectionNav
+            v-show="navigatorOpen && !focusMode"
+            id="chapter-navigator"
+            class="min-h-0 overflow-auto"
+            :sections="session.outline.value"
+            :manuscript-id="session.id"
+            :selected-id="selectedId"
+            :save="session.save"
+            :word-counts="wordCounts"
+            :change-counts="changeCounts"
+            :numbering-style="session.numberingStyle.value"
+            @select="selectedId = $event"
+            @activate="focusEditor"
+            @numbering-style="onNumberingStyle"
           />
+          <OutlineRail v-show="!navigatorOpen && !focusMode" @expand="outlineAuto.toggleByHand()" />
+          <div class="editor-stack min-h-0 min-w-0">
+            <ContinuousManuscript
+              ref="editorPane"
+              class="editor-stack__page min-h-0 min-w-0 flex-1"
+              :outline="session.outline.value"
+              :sections="session.sections"
+              :selected-id="selectedId"
+              :reload-token="reloads"
+              :readonly="session.closed || restoreInProgress"
+              :read-only-reason="restoreInProgress ? 'restore in progress' : undefined"
+              :navigator-open="navigatorOpen"
+              :navigator-controls="chapterNavControls"
+              :chapter-title="selected?.title"
+              :section-labels="sectionLabels"
+              :book-docs="outlineDocs(session.outline.value, session.sections)"
+              :chapter-docs="
+                selectedId
+                  ? sectionTreeDocs(session.outline.value, selectedId, session.sections)
+                  : undefined
+              "
+              :manuscript-save="manuscriptSave"
+              :story-notes-open="storyNotesOpen"
+              story-notes-panel-id="story-notes-panel"
+              :author-labels="markAuthorLabel"
+              toolbar-target="#toolbar-row"
+              external-load-error
+              :outline-forced="outlineForced"
+              :notes-hidden="notesHidden"
+              :computer-name="info?.computerName"
+              :decision-records-by-section="decisionRecordsBySection"
+              :manuscript-id="session.id"
+              @update:selected-id="selectedId = $event"
+              @load-error="editorLoadError = $event"
+              @reload="reloadSection"
+              @toggle-navigator="outlineAuto.toggleByHand()"
+              @decisions="onSectionDecisions"
+              @layout="onEditorLayout"
+              @focus-mode="focusMode = $event"
+              @ask-bot="onAskBotFromEditor"
+              @toggle-story-notes="toggleStoryNotes"
+              @save-retry="onManuscriptSaveRetry"
+              @words-before-caret="onWordsBeforeCaret"
+              @change-counts="changeCounts = $event"
+            />
+          </div>
+          <div
+            v-if="!focusMode"
+            class="story-notes-col min-h-0 min-w-0 overflow-hidden"
+            data-test="story-notes-col"
+          >
+            <StoryNotesPanel
+              v-if="storyNotesOpen && notesSession"
+              id="story-notes-panel"
+              class="story-notes-col__panel"
+              :notes-doc="notesSession.doc"
+              :outline="session.outline.value"
+              :human-author="humanNotesAuthor"
+              :readonly="session.closed || restoreInProgress"
+              data-test="story-notes-panel"
+              @select-section="focusEditor"
+              @close="storyNotesOpen = false"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -1426,24 +1442,37 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
+}
+.shell__chrome {
+  flex: none;
+  min-width: 0;
+}
+.shell__desk {
+  min-width: 0;
 }
 .shell__status {
   padding-left: var(--ct-space-4);
 }
 .toolbar-row {
   flex: none;
+  min-height: 2.75rem;
   background: var(--ct-surface);
 }
+.toolbar-row:not(:empty) {
+  min-height: 0;
+}
 .toolbar-row:empty {
-  display: none;
+  visibility: hidden;
 }
 .editor-error-region .load-error {
   margin: var(--ct-space-2) var(--ct-space-4) 0;
 }
-.shell > .workspace {
+.shell__desk > .workspace {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 .editor-stack {
