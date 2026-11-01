@@ -301,6 +301,35 @@ fn export_list(
         .map_err(err)
 }
 
+#[tauri::command]
+async fn export_save_via_dialog(
+    app: tauri::AppHandle,
+    window: tauri::Window,
+    store: tauri::State<'_, storage::Store>,
+    job_id: String,
+) -> Result<Option<String>, String> {
+    let app = app.clone();
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let job = store.get_export_job(&job_id).map_err(err)?;
+        if job.status != "succeeded" {
+            return Err("Export is not ready to save yet.".into());
+        }
+        let path = export::delivery::save_export_via_dialog(&app, &window, &store, &job)?;
+        if let Some(ref p) = path {
+            store.set_export_job_user_path(&job_id, p).map_err(err)?;
+        }
+        Ok(path)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn export_reveal_in_folder(path: String) -> Result<(), String> {
+    export::delivery::reveal_in_file_manager(&path)
+}
+
 /// Recovery notices that could not be saved to disk; shown from memory until dismissed.
 #[derive(Default)]
 struct UnsavedNotices(std::sync::Mutex<Vec<backup::RecoveryNotice>>);
@@ -872,7 +901,9 @@ pub fn run() {
             export_trigger,
             pandoc_download_status,
             export_get,
-            export_list
+            export_list,
+            export_save_via_dialog,
+            export_reveal_in_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running swarmDraft");

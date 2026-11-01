@@ -1,6 +1,7 @@
 //! Export orchestration: AST → Pandoc → files under app data (#39, #186).
 
 mod ast;
+pub mod delivery;
 mod jobs;
 mod markdown;
 mod pandoc;

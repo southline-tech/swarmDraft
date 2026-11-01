@@ -1,11 +1,12 @@
 <script setup lang="ts">
 /**
- * Settings → Export (#39, #186): EPUB / .docx jobs for the open manuscript.
+ * Settings → Export (#39, #186, #242): EPUB / .docx with a native Save dialog.
  */
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { isTauri } from '@tauri-apps/api/core';
 import {
   exportApi,
+  exportJobPathLabel,
   exportStatusLabel,
   pandocDownloadStatusLabel,
   type ExportFormat,
@@ -53,6 +54,14 @@ async function refresh() {
   if (list) jobs.value = list;
 }
 
+async function reveal(path: string) {
+  try {
+    await exportApi.revealInFolder(path);
+  } catch (e) {
+    status.value = errorLine(e, 'export');
+  }
+}
+
 async function start(format: ExportFormat) {
   if (!props.manuscriptId || busy.value) return;
   busy.value = format;
@@ -76,9 +85,24 @@ async function start(format: ExportFormat) {
         }
       },
     });
+    if (!done) {
+      status.value = 'Still working… check again in a moment.';
+      return;
+    }
+    if (done.status === 'failed') {
+      status.value = exportStatusLabel(done);
+      await refresh();
+      return;
+    }
+    const saved = await exportApi.saveToDialog(done.id);
+    if (saved === null) {
+      status.value = 'Export cancelled.';
+    } else if (saved) {
+      status.value = exportStatusLabel({ ...done, filePath: saved });
+    } else {
+      status.value = exportStatusLabel(done);
+    }
     await refresh();
-    if (done) status.value = exportStatusLabel(done);
-    else status.value = 'Still working… check again in a moment.';
   } catch (e) {
     status.value = errorLine(e, 'export');
   } finally {
@@ -114,7 +138,7 @@ onUnmounted(() => {
     <h1 class="st-h1">Export</h1>
     <p class="st-muted st-sub">
       Build a reader-ready EPUB 3 or .docx from the accepted manuscript text (suggestions and
-      comments are not included). Files are saved under your swarmDraft data folder.
+      comments are not included). Choose where to save the file when export finishes.
     </p>
     <p v-if="!manuscriptId" class="st-muted" data-test="export-no-book">
       Open a book to export it.
@@ -183,7 +207,21 @@ onUnmounted(() => {
         <ul class="ex__list" data-test="export-jobs">
           <li v-for="j in jobs" :key="j.id" class="ex__row">
             <span class="ex__fmt">{{ j.format.toUpperCase() }}</span>
-            <span class="ex__state" :data-status="j.status">{{ exportStatusLabel(j) }}</span>
+            <div class="ex__detail">
+              <span class="ex__state" :data-status="j.status">{{ exportStatusLabel(j) }}</span>
+              <span v-if="exportJobPathLabel(j)" class="ex__path" data-test="export-job-path">{{
+                exportJobPathLabel(j)
+              }}</span>
+              <button
+                v-if="j.status === 'succeeded' && exportJobPathLabel(j)"
+                type="button"
+                class="st-btn ex__open"
+                data-test="export-open-folder"
+                @click="reveal(exportJobPathLabel(j))"
+              >
+                Open folder
+              </button>
+            </div>
           </li>
         </ul>
       </section>
@@ -243,7 +281,20 @@ onUnmounted(() => {
   font-weight: var(--ct-weight-semibold);
   color: var(--ct-text-muted);
 }
+.ex__detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-space-2);
+  min-width: 0;
+}
 .ex__state {
   word-break: break-word;
+}
+.ex__path {
+  word-break: break-word;
+  color: var(--ct-text-muted);
+}
+.ex__open {
+  align-self: flex-start;
 }
 </style>

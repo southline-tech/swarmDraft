@@ -139,6 +139,25 @@ impl Store {
         })
     }
 
+    pub fn set_export_job_user_path(
+        &self,
+        job_id: &str,
+        file_path: &str,
+    ) -> Result<(), StorageError> {
+        self.with_conn(|c| {
+            let n = c.execute(
+                "UPDATE export_jobs SET file_path = ?2 WHERE id = ?1 AND status = 'succeeded'",
+                params![job_id, file_path],
+            )?;
+            if n == 0 {
+                return Err(StorageError::NotFound(format!(
+                    "export job {job_id} not found or not succeeded"
+                )));
+            }
+            Ok(())
+        })
+    }
+
     pub fn exports_dir(&self) -> std::path::PathBuf {
         self.data_dir().join("exports")
     }

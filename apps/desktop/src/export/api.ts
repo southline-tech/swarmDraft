@@ -57,6 +57,16 @@ export async function listExportJobs(
   return invoke<ExportJob[]>('export_list', { manuscriptId, limit });
 }
 
+export async function saveExportViaDialog(jobId: string): Promise<string | null> {
+  if (!isTauri()) return null;
+  return invoke<string | null>('export_save_via_dialog', { jobId });
+}
+
+export async function revealExportInFolder(filePath: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('export_reveal_in_folder', { path: filePath });
+}
+
 export function pandocDownloadStatusLabel(status: PandocDownloadStatus): string {
   if (!status.active) return '';
   if (status.message) {
@@ -94,9 +104,12 @@ export async function waitForExportJob(
 export function exportStatusLabel(job: ExportJob): string {
   if (job.status === 'queued') return 'Waiting to start…';
   if (job.status === 'running') return 'Exporting…';
-  if (job.status === 'succeeded')
-    return job.filePath ? `Saved to ${job.filePath}` : 'Export finished.';
+  if (job.status === 'succeeded') return job.filePath ? 'Export saved.' : 'Export finished.';
   return job.errorMessage ?? 'Export failed.';
+}
+
+export function exportJobPathLabel(job: ExportJob): string {
+  return job.filePath ?? '';
 }
 
 export const exportApi = {
@@ -104,7 +117,10 @@ export const exportApi = {
   get: getExportJob,
   list: listExportJobs,
   wait: waitForExportJob,
+  saveToDialog: saveExportViaDialog,
+  revealInFolder: revealExportInFolder,
   statusLabel: exportStatusLabel,
+  pathLabel: exportJobPathLabel,
   pandocStatus: getPandocDownloadStatus,
   pandocStatusLabel: pandocDownloadStatusLabel,
 };

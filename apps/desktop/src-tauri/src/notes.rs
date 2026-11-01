@@ -9,9 +9,7 @@ use rusqlite::OptionalExtension;
 use serde::Serialize;
 use serde_json::{json, Value};
 use yrs::updates::decoder::Decode;
-use yrs::{
-    Any, Array, Doc, Map, MapPrelim, MapRef, Out, ReadTxn, StateVector, Transact, Update, WriteTxn,
-};
+use yrs::{Any, Array, Doc, Map, MapPrelim, MapRef, Out, ReadTxn, StateVector, Transact, Update};
 
 use crate::content;
 use crate::manuscripts::Author;
@@ -172,21 +170,24 @@ pub fn write_agent_note(
     let body_name = body_field(&id);
     let body_pm = body_to_pm(body);
     {
+        let body = doc.get_or_insert_map(ENTRIES_KEY);
+        let order = doc.get_or_insert_array(ORDER_KEY);
+        doc.get_or_insert_xml_fragment(body_name.as_str());
         let mut txn = doc.transact_mut();
-        let entry = MapPrelim::from([
-            ("title", title),
-            ("sectionId", section_id.unwrap_or("")),
-            ("authorKind", "agent"),
-            ("authorId", author.id.as_str()),
-            ("authorName", author.name.as_str()),
-            ("createdAt", now.as_str()),
-            ("updatedAt", now.as_str()),
-        ]);
-        txn.get_or_insert_map(ENTRIES_KEY)
-            .insert(&mut txn, id.as_str(), entry);
-        txn.get_or_insert_array(ORDER_KEY)
-            .push_back(&mut txn, id.as_str());
-        txn.get_or_insert_xml_fragment(body_name.as_str());
+        body.insert(
+            &mut txn,
+            id.as_str(),
+            MapPrelim::from([
+                ("title", title),
+                ("sectionId", section_id.unwrap_or("")),
+                ("authorKind", "agent"),
+                ("authorId", author.id.as_str()),
+                ("authorName", author.name.as_str()),
+                ("createdAt", now.as_str()),
+                ("updatedAt", now.as_str()),
+            ]),
+        );
+        order.push_back(&mut txn, id.as_str());
     }
     content::encode_fragment(&doc, body_name.as_str(), &body_pm).map_err(StorageError::Invalid)?;
     store.agent_notes_write(token_id, manuscript_id, &doc, &since)?;

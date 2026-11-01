@@ -326,7 +326,7 @@ describe('import title resolution (#215)', () => {
         ),
         { manuscriptId: 'm1' },
       ).title,
-    ).toBe('THE HARBOR');
+    ).toBe('The Harbor');
 
     expect(
       importDocx(docx(`<w:p><w:r><w:t>Only body</w:t></w:r></w:p>`), {
@@ -345,5 +345,31 @@ describe('import title resolution (#215)', () => {
         { manuscriptId: 'm1' },
       ).title,
     ).toBe('Core Title');
+  });
+
+  it('manuscript title page: core title wins, then centered title not contact block (#235)', () => {
+    const body =
+      `<w:p><w:r><w:t>Brett Humphreys</w:t></w:r></w:p>` +
+      `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:t>12,000 words</w:t></w:r></w:p>` +
+      `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>MEMORY WIPE</w:t></w:r></w:p>` +
+      `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:t>by Brett Humphreys</w:t></w:r></w:p>` +
+      `<w:p><w:r><w:br w:type="page"/></w:r></w:p>` +
+      `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Chapter One</w:t></w:r></w:p>` +
+      `<w:p><w:r><w:t>Opening with “curly” quotes.</w:t></w:r></w:p>`;
+    const m = importDocx(docx(body), { manuscriptId: 'm1' });
+    expect(m.title).toBe('Memory Wipe');
+    expect(m.author).toBe('Brett Humphreys');
+    const ch = m.sections.find((s) => s.kind === 'chapter')!;
+    const bodyText = ch.content.content
+      .map((b) =>
+        'content' in b
+          ? (b.content ?? []).map((n) => (n.type === 'text' ? n.text : '')).join('')
+          : '',
+      )
+      .join('\n');
+    expect(bodyText).not.toContain('MEMORY WIPE');
+    expect(bodyText).not.toContain('Brett Humphreys');
+    expect(bodyText).toContain('“curly”');
+    expect(ch.content.content.filter((b) => b.type === 'heading')).toHaveLength(1);
   });
 });
