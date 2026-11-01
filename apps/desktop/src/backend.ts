@@ -243,6 +243,7 @@ export async function notesApplyUpdate(manuscriptId: string, update: Uint8Array)
 /** The import payload the backend persists: one entry per section, in outline order. */
 export interface ImportPayload {
   title: string;
+  author?: string;
   sections: { id: string; parentId?: string; kind: string; title: string; doc: unknown }[];
 }
 
@@ -255,6 +256,7 @@ export async function persistImport(payload: ImportPayload): Promise<StoredManus
   if (!isTauri()) return null;
   return invoke<StoredManuscript>('manuscript_import_json', {
     title: payload.title,
+    author: payload.author ?? null,
     sections: payload.sections,
   });
 }

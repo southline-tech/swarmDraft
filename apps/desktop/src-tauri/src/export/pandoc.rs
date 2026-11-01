@@ -325,12 +325,18 @@ pub fn run_pandoc(
     format: &str,
     css: &Path,
     reference: &Path,
+    author: Option<&str>,
 ) -> Result<String, String> {
     let mut cmd = Command::new(pandoc);
     cmd.arg(markdown)
         .arg("--standalone")
-        .arg("--from=markdown+raw_html+fenced_divs")
-        .arg("--metadata=author=Author");
+        .arg("--from=markdown+raw_html+fenced_divs");
+    if let Some(a) = author {
+        let a = a.trim();
+        if !a.is_empty() {
+            cmd.arg(format!("--metadata=author={a}"));
+        }
+    }
     match format {
         "epub" => {
             cmd.arg("--to=epub3")

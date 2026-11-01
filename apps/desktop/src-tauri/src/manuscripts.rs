@@ -52,6 +52,7 @@ pub struct Manuscript {
     pub title: String,
     pub created_at: String,
     pub numbering_style: String,
+    pub book_author: Option<String>,
 }
 
 const NUMBERING_STYLES: [&str; 4] = [
@@ -70,10 +71,11 @@ fn row_manuscript(r: &rusqlite::Row<'_>) -> rusqlite::Result<Manuscript> {
         title: r.get(1)?,
         created_at: r.get(2)?,
         numbering_style: r.get(3)?,
+        book_author: r.get(4)?,
     })
 }
 
-const MANUSCRIPT_COLS: &str = "id, title, created_at, numbering_style";
+const MANUSCRIPT_COLS: &str = "id, title, created_at, numbering_style, book_author";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -259,8 +261,8 @@ impl Store {
         self.with_conn(|c| {
             c.execute(
                 &format!(
-                    "INSERT INTO manuscripts (id, title, created_at, numbering_style) \
-                     VALUES (?1, ?2, {NOW}, ?3)"
+                    "INSERT INTO manuscripts (id, title, created_at, numbering_style, book_author) \
+                     VALUES (?1, ?2, {NOW}, ?3, NULL)"
                 ),
                 params![id, title, DEFAULT_NUMBERING_STYLE],
             )?;
@@ -498,13 +500,14 @@ impl Store {
         title: &str,
         sections: &[ImportSection],
     ) -> Result<(Manuscript, Vec<Section>), StorageError> {
-        self.import_manuscript_with_progress(title, sections, None)
+        self.import_manuscript_with_progress(title, sections, None, None)
     }
 
     pub fn import_manuscript_with_progress(
         &self,
         title: &str,
         sections: &[ImportSection],
+        book_author: Option<&str>,
         mut progress: Option<&mut crate::opening_progress::Callback<'_>>,
     ) -> Result<(Manuscript, Vec<Section>), StorageError> {
         let chapters_found = sections.iter().filter(|s| s.kind == "chapter").count() as u32;
@@ -545,10 +548,10 @@ impl Store {
             let tx = c.unchecked_transaction()?;
             tx.execute(
                 &format!(
-                    "INSERT INTO manuscripts (id, title, created_at, numbering_style) \
-                     VALUES (?1, ?2, {NOW}, ?3)"
+                    "INSERT INTO manuscripts (id, title, created_at, numbering_style, book_author) \
+                     VALUES (?1, ?2, {NOW}, ?3, ?4)"
                 ),
-                params![manuscript_id, title, DEFAULT_NUMBERING_STYLE],
+                params![manuscript_id, title, DEFAULT_NUMBERING_STYLE, book_author],
             )?;
             let mut out = Vec::with_capacity(sections.len());
             // Importer ids are only unique within one import, so every section gets a new

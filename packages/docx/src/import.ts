@@ -21,6 +21,13 @@ import {
   type ParagraphStyle,
 } from './model';
 import { ReportBuilder, type ImportReport } from './report';
+import {
+  displayTitleFromManuscriptLine,
+  headingsMatch,
+  parseTitlePageMeta,
+  titlePageSkipIndices,
+  type TitlePagePara,
+} from './title-page';
 
 export interface ImportedSection {
   id: string;
@@ -773,6 +780,24 @@ function corePropertyTitle(pkg: Pkg): string | undefined {
   return walk(core);
 }
 
+function corePropertyAuthor(pkg: Pkg): string | undefined {
+  const core = pkg.read('docProps/core.xml');
+  if (!core) return undefined;
+  const walk = (el: XmlElement): string | undefined => {
+    for (const c of kids(el)) {
+      if (typeof c === 'string') continue;
+      if (c.name === 'dc:creator') {
+        const t = textOf(c).trim();
+        if (t) return t;
+      }
+      const hit = walk(c);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+  return walk(core);
+}
+
 /** First short, display-style line before the main body (centered / large / bold title line). */
 function prominentFrontTitle(paras: Para[], endIndex: number): string | undefined {
   for (let i = 0; i < endIndex; i++) {
@@ -795,6 +820,23 @@ function prominentFrontTitle(paras: Para[], endIndex: number): string | undefine
   return undefined;
 }
 
+function paraTitleSignals(p: Para): TitlePagePara {
+  return {
+    text: p.text,
+    centered: p.centered,
+    maxSize: p.maxSize,
+    allBold: p.allBold,
+    indLeft: p.indLeft,
+  };
+}
+
+function titlePageMetaFromParas(
+  paras: Para[],
+  endIndex: number,
+): ReturnType<typeof parseTitlePageMeta> {
+  return parseTitlePageMeta(paras.slice(0, endIndex).map(paraTitleSignals));
+}
+
 function resolveImportedTitle(
   paras: Para[],
   sections: ImportedSection[],
@@ -802,17 +844,23 @@ function resolveImportedTitle(
   pkg: Pkg,
   fileNameStem?: string,
 ): string {
+  const core = corePropertyTitle(pkg);
+  if (core) return core.trim();
   const styleTitle = paras.find((p) => p.styleId.toLowerCase() === 'title')?.text.trim();
   if (styleTitle) return styleTitle;
   const titlePage = sections.find((s) => s.title === 'Title Page');
-  const tp = (titlePage?.content.content ?? []).map((b) =>
-    'content' in b ? plainText(b.content).trim() : '',
-  );
-  if (tp[0]) return tp[0]!;
-  const core = corePropertyTitle(pkg);
-  if (core) return core;
+  const tpEnd = bodyStart > 0 ? bodyStart : paras.length;
+  const fromPage = titlePageMetaFromParas(paras, tpEnd).title;
+  if (fromPage) return fromPage;
+  if (titlePage) {
+    const tp = (titlePage.content.content ?? []).map((b) =>
+      'content' in b ? plainText(b.content).trim() : '',
+    );
+    const prominent = tp.find((t) => t && !/^a novel$/i.test(t));
+    if (prominent) return displayTitleFromManuscriptLine(prominent);
+  }
   const prominent = prominentFrontTitle(paras, bodyStart);
-  if (prominent) return prominent;
+  if (prominent) return displayTitleFromManuscriptLine(prominent);
   const stem = fileNameStem?.trim();
   if (stem) return stem;
   return 'Untitled';
@@ -952,13 +1000,19 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
       if (content.length) {
         const s = newSection('front_matter', frontMatterTitle(content, groupIndex++));
         const epigraph = s.title === 'Epigraph';
-        s.content.content = content.map((p) => ({
-          type: 'paragraph',
-          attrs: {
-            style: epigraph && p.centered ? 'epigraph' : paragraphStyle(p, false, report),
-          },
-          ...(p.inline.length ? { content: p.inline } : {}),
-        }));
+        const skip =
+          s.title === 'Title Page'
+            ? titlePageSkipIndices(content.map(paraTitleSignals))
+            : new Set<number>();
+        s.content.content = content
+          .filter((_, i) => !skip.has(i))
+          .map((p) => ({
+            type: 'paragraph',
+            attrs: {
+              style: epigraph && p.centered ? 'epigraph' : paragraphStyle(p, false, report),
+            },
+            ...(p.inline.length ? { content: p.inline } : {}),
+          }));
       }
       group = [];
     };
@@ -1007,9 +1061,21 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
     ...(p.inline.length ? { content: p.inline } : {}),
   });
 
+  const skipRegionEnd = hasChapters
+    ? bodyStart
+    : (() => {
+        const i = roles.findIndex((r) => r.kind === 'chapter');
+        return i >= 0 ? i : paras.length;
+      })();
+  const preChapterSkip = new Set<number>();
+  titlePageSkipIndices(paras.slice(0, skipRegionEnd).map(paraTitleSignals)).forEach((idx) =>
+    preChapterSkip.add(idx),
+  );
+
   for (let i = bodyStart; i < paras.length; i++) {
     const p = paras[i]!;
     const role = roles[i]!;
+    if (!hasChapters && preChapterSkip.has(i)) continue;
     const title = p.text.replace(/\s+/g, ' ').trim();
     if (p.breakBefore && role.kind !== 'separator') pendingPageBreak = true;
     switch (role.kind) {
@@ -1029,7 +1095,7 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
         chapterHasBody = false;
         blanks = 0;
         break;
-      case 'chapter':
+      case 'chapter': {
         chapter = newSection('chapter', title, part?.id);
         chapter.content.content.push(titleBlock(p, 1));
         back = undefined;
@@ -1037,6 +1103,7 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
         chapterHasBody = false;
         blanks = 0;
         break;
+      }
       case 'back':
         back = newSection('back_matter', title);
         back.content.content.push(titleBlock(p, 1));
@@ -1069,8 +1136,17 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
           t.content.content.push({ type: 'page_break' });
         pendingPageBreak = false;
         if (role.kind === 'heading') {
-          report.add('info', 'subheading', `Heading ${role.level} kept as a subheading`, title);
-          t.content.content.push(titleBlock(p, role.level));
+          if (t === chapter && role.level === 1 && headingsMatch(title, chapter.title)) {
+            report.add(
+              'info',
+              'duplicate_heading',
+              'Chapter heading matching the section title was not duplicated in the body',
+              title,
+            );
+          } else {
+            report.add('info', 'subheading', `Heading ${role.level} kept as a subheading`, title);
+            t.content.content.push(titleBlock(p, role.level));
+          }
         } else {
           const first = t === chapter && !chapterHasBody;
           const style = paragraphStyle(p, first, report);
@@ -1199,10 +1275,14 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
     items: report.list(),
   };
 
-  const titlePage = doc.sections.find((s) => s.title === 'Title Page');
-  const tp = (titlePage?.content.content ?? []).map((b) =>
-    'content' in b ? plainText(b.content).trim() : '',
-  );
+  const titlePageEnd = (() => {
+    if (bodyStart <= 0) return Math.min(paras.length, 12);
+    for (let i = 0; i < bodyStart; i++) {
+      if (paras[i]!.breakAfter) return i + 1;
+    }
+    return Math.min(bodyStart, 12);
+  })();
+  const pageMeta = titlePageMetaFromParas(paras, titlePageEnd);
   const result: ImportedManuscript = {
     title: resolveImportedTitle(paras, doc.sections, bodyStart, pkg, options.fileNameStem),
     sections: doc.sections,
@@ -1210,8 +1290,8 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
     report: fullReport,
     warnings: fullReport.items.filter((i) => i.level === 'warning').map((i) => i.message),
   };
-  const author = tp.find((t, i) => i > 0 && t && !/^a novel$/i.test(t));
-  if (author) result.author = author.replace(/^by\s+/i, '');
+  if (pageMeta.author) result.author = pageMeta.author;
+  else if (corePropertyAuthor(pkg)) result.author = corePropertyAuthor(pkg);
   return result;
 }
 
