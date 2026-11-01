@@ -112,7 +112,7 @@ const btn =
         class="tb-menu-item"
         :class="{ 'tb-menu-item--on': row.id === currentId }"
         data-test="draft-item"
-        :data-draft-id="row.id"
+        :data-draft="row.id"
         :aria-checked="row.id === currentId ? 'true' : 'false'"
         :aria-current="row.id === currentId ? 'true' : undefined"
         @click="pickDraft(row.id)"

@@ -38,7 +38,7 @@ describe('DraftPicker (#243)', () => {
       attachTo: document.body,
     });
     await w.find('[data-test="draft-picker"]').trigger('click');
-    await w.find('[data-test="draft-item"][data-draft-id="b"]').trigger('click');
+    await w.find('[data-test="draft-item"][data-draft="b"]').trigger('click');
     expect(w.emitted('select')).toEqual([['b']]);
     w.unmount();
   });

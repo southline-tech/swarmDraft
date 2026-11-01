@@ -95,6 +95,7 @@ describe('toolbar draft picker (#243)', () => {
     await settle();
     expect(backend.createBlankManuscript).toHaveBeenCalledTimes(1);
     expect(w.find('[data-test="draft-picker"]').text()).toContain('Untitled draft');
+    expect(document.activeElement?.closest('.ProseMirror')).not.toBeNull();
     w.unmount();
   });
 
@@ -123,9 +124,7 @@ describe('toolbar draft picker (#243)', () => {
     const { w } = await withManuscript();
     await w.find('[data-test="draft-picker"]').trigger('click');
     await settle();
-    await w
-      .find(`[data-test="draft-item"][data-draft-id="${other.manuscript.id}"]`)
-      .trigger('click');
+    await w.find(`[data-test="draft-item"][data-draft="${other.manuscript.id}"]`).trigger('click');
     await settle();
     expect(backend.loadManuscript).toHaveBeenCalledWith(other.manuscript.id);
     expect(w.find('[data-test="draft-picker"]').text()).toContain('Second draft');
