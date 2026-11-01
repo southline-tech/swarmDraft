@@ -193,6 +193,30 @@ const MIGRATIONS: &[&str] = &[
      DROP TABLE agent_pairings;
      ALTER TABLE agent_pairings_claim RENAME TO agent_pairings;
      CREATE INDEX agent_pairings_status ON agent_pairings(status, expires_at);",
+    // #178: suggestion index may mark overlapping remainders outdated after an accept.
+    "PRAGMA foreign_keys=OFF;
+     CREATE TABLE suggestions_outdated_mig (
+        id TEXT PRIMARY KEY,
+        manuscript_id TEXT NOT NULL REFERENCES manuscripts(id),
+        section_id TEXT NOT NULL REFERENCES sections(id),
+        block_id TEXT,
+        kind TEXT NOT NULL,
+        quote TEXT,
+        replacement TEXT,
+        rationale TEXT,
+        author_kind TEXT NOT NULL CHECK (author_kind IN ('human','agent')),
+        author_id TEXT NOT NULL,
+        author_name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','accepted','rejected','outdated')),
+        created_at TEXT NOT NULL,
+        decided_at TEXT,
+        decided_by TEXT
+     );
+     INSERT INTO suggestions_outdated_mig SELECT * FROM suggestions;
+     DROP TABLE suggestions;
+     ALTER TABLE suggestions_outdated_mig RENAME TO suggestions;
+     CREATE INDEX suggestions_section ON suggestions(section_id, status);
+     PRAGMA foreign_keys=ON;",
 ];
 
 /// How long a statement waits on a locked database before failing.
@@ -328,6 +352,72 @@ impl Store {
     ) -> Result<T, StorageError> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         f(&mut conn)
+    }
+
+    /// Mark suggestion index rows outdated (#178). Missing ids are ignored.
+    pub fn mark_suggestions_outdated(
+        &self,
+        section_id: &str,
+        ids: &[String],
+        marked_at: &str,
+        marked_by: &str,
+    ) -> Result<(), StorageError> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        self.with_conn(|c| {
+            let tx = c.unchecked_transaction()?;
+            for id in ids {
+                tx.execute(
+                    "UPDATE suggestions SET status = 'outdated', decided_at = ?1, decided_by = ?2
+                     WHERE section_id = ?3 AND id = ?4 AND status = 'open'",
+                    rusqlite::params![marked_at, marked_by, section_id, id],
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    /// Remove outdated index rows without changing section text (#179 dismiss wiring).
+    pub fn dismiss_outdated_suggestions(
+        &self,
+        section_id: &str,
+        ids: &[String],
+    ) -> Result<(), StorageError> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        self.with_conn(|c| {
+            let tx = c.unchecked_transaction()?;
+            for id in ids {
+                tx.execute(
+                    "DELETE FROM suggestions WHERE section_id = ?1 AND id = ?2 AND status = 'outdated'",
+                    rusqlite::params![section_id, id],
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    /// Suggestions in a section with the given index status (`open`, `outdated`, …).
+    pub fn suggestions_with_status(
+        &self,
+        section_id: &str,
+        status: &str,
+    ) -> Result<Vec<crate::manuscripts::Suggestion>, StorageError> {
+        use crate::manuscripts::{row_suggestion, SUGGESTION_COLS};
+        self.with_conn(|c| {
+            let mut st = c.prepare(&format!(
+                "SELECT {SUGGESTION_COLS} FROM suggestions WHERE section_id = ?1 AND status = ?2
+                 ORDER BY created_at, id"
+            ))?;
+            let rows = st
+                .query_map(rusqlite::params![section_id, status], row_suggestion)?
+                .collect::<Result<_, _>>()?;
+            Ok(rows)
+        })
     }
 
     /// Prepare a staged database file for restore: migrate it, stamp `restore_id` into
@@ -512,5 +602,53 @@ mod tests {
             .unwrap();
         assert!(grok.primary);
         assert_eq!(s.primary_agent_id().unwrap().as_deref(), Some("a2"));
+    }
+
+    #[test]
+    fn outdated_status_persists_and_dismiss_clears() {
+        use crate::manuscripts::{Author, Suggestion};
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(tmp.path()).unwrap();
+        let m = store.create_manuscript("t").unwrap();
+        let sec = store.add_section(&m.id, "chapter", "One", None).unwrap();
+        let x = Suggestion {
+            id: "s9".into(),
+            section_id: sec.id.clone(),
+            block_id: None,
+            kind: "replace".into(),
+            quote: Some("old".into()),
+            replacement: Some("new".into()),
+            rationale: None,
+            author: Author {
+                kind: "agent".into(),
+                id: "bot1".into(),
+                name: "Bot".into(),
+            },
+            status: "open".into(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+        };
+        store.insert_suggestion(&m.id, &x).unwrap();
+        store
+            .mark_suggestions_outdated(&sec.id, &["s9".into()], "2026-01-02T00:00:00Z", "human:me")
+            .unwrap();
+        let outdated = store.suggestions_with_status(&sec.id, "outdated").unwrap();
+        assert_eq!(outdated.len(), 1);
+        assert_eq!(outdated[0].status, "outdated");
+        drop(store);
+        let store = Store::open(tmp.path()).unwrap();
+        assert_eq!(
+            store
+                .suggestions_with_status(&sec.id, "outdated")
+                .unwrap()
+                .len(),
+            1
+        );
+        store
+            .dismiss_outdated_suggestions(&sec.id, &["s9".into()])
+            .unwrap();
+        assert!(store
+            .suggestions_with_status(&sec.id, "outdated")
+            .unwrap()
+            .is_empty());
     }
 }
