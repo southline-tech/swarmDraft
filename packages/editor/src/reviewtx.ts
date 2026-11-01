@@ -6,7 +6,8 @@
  */
 import type { EditorState, Transaction } from '@tiptap/pm/state';
 import type { Mark as PMMark, Node as PMNode } from '@tiptap/pm/model';
-import type { ParagraphStyle } from '@swarmdraft/schema';
+import type { ParagraphStyle, DocNode } from '@swarmdraft/schema';
+import { portResultAfterDecision, type DecisionOp, type PortResult } from './decisions';
 import { inlineFormatOnBefore, PARAGRAPH_STYLE_TARGET, readFormatAttrs } from './format-change';
 
 export type SuggestionMarkType = 'suggestion_insert' | 'suggestion_delete' | 'format_change';
@@ -295,8 +296,24 @@ export function applyReviewDecision(
   op: ReviewDecisionOp,
   trust: ReviewTrust,
 ): boolean {
+  return applyReviewDecisionWithPortResult(view, op, trust, (s) => s.doc.toJSON() as DocNode)
+    .applied;
+}
+
+/**
+ * Trusted accept/reject on the live view, reporting decided / outdated / superseded by diffing
+ * suggestion marks before and after the transaction (#178).
+ */
+export function applyReviewDecisionWithPortResult(
+  view: ReviewView,
+  op: ReviewDecisionOp,
+  trust: ReviewTrust,
+  readDoc: (state: EditorState) => DocNode = (s) => s.doc.toJSON() as DocNode,
+): PortResult & { applied: boolean } {
+  const before = readDoc(view.state);
   const tr = buildReviewTransaction(view.state, op, trust);
-  if (!tr) return false;
+  if (!tr) return { applied: false, decided: [], outdated: [], superseded: [] };
   view.dispatch(tr);
-  return true;
+  const effects = portResultAfterDecision(before, readDoc(view.state), op as DecisionOp);
+  return { applied: true, ...effects };
 }

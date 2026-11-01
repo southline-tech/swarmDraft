@@ -758,7 +758,11 @@ async fn suggest_edit_is_tracked_never_applied() {
         .is_empty());
 
     let overlap = call(&s, "suggest_edit", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "flickered", "replacement": "dimmed"})).await;
-    assert!(text(&overlap).contains("pending suggestion"), "{overlap}");
+    assert_ne!(overlap["isError"], true, "{overlap}");
+    assert_ne!(
+        overlap["structuredContent"]["suggestion"]["id"], xid,
+        "overlapping suggest is allowed"
+    );
 
     let del = call(&s, "suggest_edit", json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": " twice", "replacement": ""})).await;
     assert_eq!(del["structuredContent"]["suggestion"]["kind"], "delete");
@@ -788,7 +792,7 @@ async fn suggest_edit_is_tracked_never_applied() {
     assert_eq!(marks[0]["attrs"]["target"], "paragraph_style");
     assert_eq!(marks[0]["attrs"]["before"], "body");
     assert_eq!(marks[0]["attrs"]["after"], "centered");
-    assert_eq!(js["suggestions"].as_array().unwrap().len(), 3);
+    assert_eq!(js["suggestions"].as_array().unwrap().len(), 4);
     // The paragraph style itself is unchanged.
     assert_eq!(
         read_json(&s, &sid).await["blocks"][0]["node"]["attrs"]["style"],
@@ -1267,13 +1271,27 @@ async fn writes_never_touch_existing_review_marks() {
     assert_ne!(r["isError"], true, "{r}");
     let before = raw_keys(&s, &sid);
     let n = s.store.open_suggestions(&sid).unwrap().len();
-    // Editing text inside an existing suggestion is refused and saves nothing.
-    for q in ["lantern", "lamp", "ante"] {
-        let r = call(&s, "suggest_edit", a(q, json!({"replacement": "torch"}))).await;
-        assert_eq!(r["isError"], true, "{q}: {r}");
+    // Overlapping suggestions on the same quote are allowed (#178); existing mark keys stay.
+    let r = call(
+        &s,
+        "suggest_edit",
+        a("lantern", json!({"replacement": "torch"})),
+    )
+    .await;
+    assert_ne!(r["isError"], true, "{r}");
+    let after = raw_keys(&s, &sid);
+    for k in &before {
+        assert!(
+            after.contains(k),
+            "existing mark key {k} must survive overlap"
+        );
     }
-    assert_eq!(raw_keys(&s, &sid), before, "nothing was saved");
-    assert_eq!(s.store.open_suggestions(&sid).unwrap().len(), n);
+    assert!(after.len() > before.len(), "overlap adds new mark keys");
+    assert_eq!(
+        s.store.open_suggestions(&sid).unwrap().len(),
+        n + 1,
+        "overlap adds an open index row"
+    );
 }
 
 #[tokio::test]
@@ -1430,7 +1448,55 @@ async fn list_suggestions_filters_by_author_and_status() {
     )
     .await;
     assert_eq!(closed["isError"], true);
-    assert!(text(&closed).contains("only open"));
+    assert!(text(&closed).contains("status must be"));
+    let outdated = call(
+        &s,
+        "list_suggestions",
+        json!({"manuscript_id": s.manuscript_id, "status": "outdated"}),
+    )
+    .await;
+    assert_ne!(outdated["isError"], true, "{outdated}");
+    assert!(outdated["structuredContent"]["suggestions"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn list_suggestions_returns_outdated_rows() {
+    let s = start(&["read", "suggest"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    let r = call(
+        &s,
+        "suggest_edit",
+        json!({"manuscript_id": s.manuscript_id, "section_id": sid, "block_id": bid, "quote": "flickered", "replacement": "dimmed"}),
+    )
+    .await;
+    assert_ne!(r["isError"], true, "{r}");
+    let id = r["structuredContent"]["suggestion"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    s.store
+        .mark_suggestions_outdated(
+            &sid,
+            std::slice::from_ref(&id),
+            "2026-01-03T00:00:00.000Z",
+            "human:author",
+        )
+        .unwrap();
+    let listed = call(
+        &s,
+        "list_suggestions",
+        json!({"manuscript_id": s.manuscript_id, "status": "outdated"}),
+    )
+    .await;
+    assert_ne!(listed["isError"], true, "{listed}");
+    assert_eq!(listed["structuredContent"]["suggestions"][0]["id"], id);
+    assert_eq!(
+        listed["structuredContent"]["suggestions"][0]["status"],
+        "outdated"
+    );
 }
 
 #[tokio::test]

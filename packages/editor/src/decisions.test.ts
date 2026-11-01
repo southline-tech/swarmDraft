@@ -5,8 +5,11 @@ import {
   listSuggestions,
   parseDecisionRecord,
   parseDecisionRecords,
+  withOutdatedFlags,
+  runDismissOutdated,
   runDecision,
   selectTargets,
+  portResultAfterDecision,
   type DecisionOp,
   type SuggestionKind,
 } from './decisions';
@@ -167,10 +170,45 @@ describe('decideSuggestions (reference model)', () => {
     };
     let r = decideSuggestions(overlap, op('reject', t(I, 'x1')));
     expect(textOf(r.doc)).toEqual(['a  day']);
+    expect(r.outdated).toEqual([]);
     expect(r.superseded).toEqual([]);
     r = decideSuggestions(overlap, op('accept', t(D, 'y1')));
     expect(textOf(r.doc)).toEqual(['a ']);
-    expect(r.superseded).toEqual([t(I, 'x1')]);
+    expect(r.outdated).toEqual([t(I, 'x1')]);
+    expect(r.superseded).toEqual([]);
+  });
+
+  it('portResultAfterDecision matches decideSuggestions side effects', () => {
+    const overlap: DocNode = {
+      type: 'doc',
+      content: [
+        para(
+          { text: 'a ' },
+          { text: 'bright', marks: [ins('x1', 'Bot A'), del('y1', 'Bot B')] },
+          { text: ' day', marks: [del('y1', 'Bot B')] },
+        ),
+      ],
+    };
+    const model = decideSuggestions(overlap, op('accept', t(D, 'y1')));
+    const effects = portResultAfterDecision(overlap, model.doc, op('accept', t(D, 'y1')));
+    expect(effects.outdated).toEqual(model.outdated);
+    expect(effects.decided).toEqual(model.decided);
+  });
+  it('accept re-anchors non-overlapping pending suggestions', () => {
+    const adjoin: DocNode = {
+      type: 'doc',
+      content: [
+        para(
+          { text: 'Say ' },
+          { text: 'hello', marks: [ins('a1', 'Bot A')] },
+          { text: ' to ' },
+          { text: 'world', marks: [ins('b1', 'Bot B')] },
+        ),
+      ],
+    };
+    const r = decideSuggestions(adjoin, op('accept', t(I, 'a1')));
+    expect(listSuggestions(r.doc).map((i) => i.id)).toEqual(['b1']);
+    expect(r.outdated).toEqual([]);
   });
   it('is order independent for disjoint suggestions (converges)', () => {
     const a = decideSuggestions(
@@ -243,7 +281,11 @@ describe('trusted port + runDecision', () => {
   });
   it('records status, decided_at, decided_by from what the port decided', async () => {
     const tx = {
-      applyReviewDecision: vi.fn(() => ({ decided: [t(I, 's1'), t(I, 's3')], superseded: [] })),
+      applyReviewDecision: vi.fn(() => ({
+        decided: [t(I, 's1'), t(I, 's3')],
+        outdated: [],
+        superseded: [],
+      })),
     };
     const sink = { recordDecisions: vi.fn() };
     const now = () => new Date('2026-10-26T03:00:00Z');
@@ -273,7 +315,13 @@ describe('trusted port + runDecision', () => {
     expect(out.unrecorded).toEqual([]);
   });
   it('hands failed sink writes to reconcile', async () => {
-    const tx = { applyReviewDecision: vi.fn(() => ({ decided: [t(D, 's2')], superseded: [] })) };
+    const tx = {
+      applyReviewDecision: vi.fn(() => ({
+        decided: [t(D, 's2')],
+        outdated: [],
+        superseded: [],
+      })),
+    };
     const sink = { recordDecisions: vi.fn(() => Promise.reject(new Error('db locked'))) };
     const reconcile = vi.fn();
     const out = await runDecision(listSuggestions(doc), { kind: 'all' }, 'reject', {
@@ -296,5 +344,69 @@ describe('trusted port + runDecision', () => {
       decidedBy: 'h',
     });
     expect(tx.applyReviewDecision).not.toHaveBeenCalled();
+  });
+});
+
+describe('outdated + dismiss (#178)', () => {
+  it('tags items with outdated flags from the index', () => {
+    const items = listSuggestions(doc);
+    const tagged = withOutdatedFlags(items, new Set(['s2']));
+    expect(tagged.find((i) => i.id === 's2')?.outdated).toBe(true);
+    expect(tagged.find((i) => i.id === 's1')?.outdated).toBeUndefined();
+  });
+
+  it('marks outdated via sink on accept, not as rejected', async () => {
+    const tx = {
+      applyReviewDecision: vi.fn(() => ({
+        decided: [t(D, 'y1')],
+        outdated: [t(I, 'x1')],
+        superseded: [],
+      })),
+    };
+    const sink = { recordDecisions: vi.fn(), markOutdated: vi.fn() };
+    const overlap: DocNode = {
+      type: 'doc',
+      content: [
+        para(
+          { text: 'a ' },
+          { text: 'bright', marks: [ins('x1', 'Bot A'), del('y1', 'Bot B')] },
+          { text: ' day', marks: [del('y1', 'Bot B')] },
+        ),
+      ],
+    };
+    const items = listSuggestions(overlap);
+    await runDecision(items, { kind: 'one', id: 'y1', suggestion: D }, 'accept', {
+      tx,
+      sink,
+      decidedBy: 'human:me',
+    });
+    expect(sink.markOutdated).toHaveBeenCalledWith([
+      expect.objectContaining({ kind: I, id: 'x1', markedBy: 'human:me' }),
+    ]);
+    expect(sink.recordDecisions).toHaveBeenCalledWith([
+      expect.objectContaining({ id: 'y1', status: 'accepted' }),
+    ]);
+  });
+
+  it('runDismissOutdated clears marks and calls dismissOutdated', async () => {
+    const overlap: DocNode = {
+      type: 'doc',
+      content: [
+        para(
+          { text: 'a ' },
+          { text: 'bright', marks: [ins('x1', 'Bot A'), del('y1', 'Bot B')] },
+          { text: ' day', marks: [del('y1', 'Bot B')] },
+        ),
+      ],
+    };
+    const afterAccept = decideSuggestions(overlap, op('accept', t(D, 'y1'))).doc;
+    let live = afterAccept;
+    const dismiss = vi.fn();
+    await runDismissOutdated(afterAccept, [t(I, 'x1')], {
+      store: { read: () => live, commit: (n) => (live = n) },
+      sink: { recordDecisions: () => {}, dismissOutdated: dismiss },
+      dismissedBy: 'human:me',
+    });
+    expect(dismiss).toHaveBeenCalledWith([t(I, 'x1')]);
   });
 });

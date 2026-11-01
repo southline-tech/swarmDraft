@@ -690,6 +690,40 @@ async fn section_save_review_decisions(
     .await
 }
 
+/// Mark open suggestions outdated in the index after an accept (#178).
+#[tauri::command]
+async fn section_mark_suggestions_outdated(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+    section_id: String,
+    suggestion_ids: Vec<String>,
+    marked_by: String,
+) -> Result<(), String> {
+    blocking(&store, move |s| {
+        let owner: String = s.with_conn(|c| {
+            c.query_row(
+                "SELECT manuscript_id FROM sections WHERE id = ?1",
+                [&section_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    storage::StorageError::NotFound(section_id.clone())
+                }
+                e => storage::StorageError::from(e),
+            })
+        })?;
+        if owner != manuscript_id {
+            return Err(storage::StorageError::Invalid(
+                "section belongs to another manuscript".into(),
+            ));
+        }
+        let at = s.now()?;
+        s.mark_suggestions_outdated(&section_id, &suggestion_ids, &at, &marked_by)
+    })
+    .await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -793,6 +827,7 @@ pub fn run() {
             section_review_meta,
             manuscript_review_decisions,
             section_save_review_decisions,
+            section_mark_suggestions_outdated,
             manuscript_open_comments,
             spell_lint_paragraph,
             spell_dictionary_list,

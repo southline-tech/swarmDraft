@@ -231,7 +231,7 @@ fn row_comment(r: &rusqlite::Row) -> rusqlite::Result<Comment> {
 const COMMENT_COLS: &str =
     "id, section_id, block_id, quote, body, thread_id, author_kind, author_id, author_name, created_at";
 
-fn row_suggestion(r: &rusqlite::Row) -> rusqlite::Result<Suggestion> {
+pub(crate) fn row_suggestion(r: &rusqlite::Row<'_>) -> rusqlite::Result<Suggestion> {
     Ok(Suggestion {
         id: r.get(0)?,
         section_id: r.get(1)?,
@@ -249,7 +249,8 @@ fn row_suggestion(r: &rusqlite::Row) -> rusqlite::Result<Suggestion> {
         created_at: r.get(11)?,
     })
 }
-const SUGGESTION_COLS: &str = "id, section_id, block_id, kind, quote, replacement, rationale, \
+pub(crate) const SUGGESTION_COLS: &str =
+    "id, section_id, block_id, kind, quote, replacement, rationale, \
      author_kind, author_id, author_name, status, created_at";
 
 impl Store {
@@ -1255,7 +1256,7 @@ fn sync_suggestion_index_for_decisions(
             if !decided.contains_key(id.as_str()) {
                 tx.execute(
                     "UPDATE suggestions SET status = 'open', decided_at = NULL, decided_by = NULL
-                     WHERE id = ?1 AND section_id = ?2",
+                     WHERE id = ?1 AND section_id = ?2 AND status NOT IN ('open', 'outdated')",
                     params![id, section_id],
                 )?;
             }

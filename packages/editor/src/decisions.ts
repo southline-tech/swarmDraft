@@ -29,6 +29,8 @@ export interface SuggestionItem {
   kind: SuggestionKind;
   author: string;
   ts: string;
+  /** Set when the suggestion index marks this id outdated (#178); marks may be gone from the doc. */
+  outdated?: boolean;
   /** Text covered by the suggestion, joined across text nodes in reading order (incl. notes). */
   text: string;
   /** Format suggestion target (#160). */
@@ -105,11 +107,25 @@ export function parseDecisionRecords(values: unknown): DecisionRecord[] {
 /** Writes status/decided_at/decided_by to the suggestion index. */
 export interface SuggestionDecisionSink {
   recordDecisions(records: DecisionRecord[]): void | Promise<void>;
+  /** Mark suggestions outdated in the index (accept side effect, #178). */
+  markOutdated?(records: OutdatedRecord[]): void | Promise<void>;
+  /** Clear outdated rows without applying suggestion text (#179 dismiss wiring). */
+  dismissOutdated?(targets: SuggestionTarget[]): void | Promise<void>;
 }
 
 export interface PortResult {
   decided: SuggestionTarget[];
+  /** On accept: pending suggestions that no longer apply after the decision (#178). */
+  outdated: SuggestionTarget[];
+  /** On reject: pending suggestions whose text was removed with the decision. */
   superseded: SuggestionTarget[];
+}
+
+export interface OutdatedRecord {
+  kind: SuggestionKind;
+  id: string;
+  markedAt: string;
+  markedBy: string;
 }
 /**
  * Applies a decision op to the live document in one trusted transaction. The implementation
@@ -294,10 +310,51 @@ export function decideSuggestions(doc: DocNode, op: DecisionOp): DecisionResult 
   });
   const next: DocNode = { ...doc, content };
   const remaining = new Set(listSuggestions(next).map(targetKey));
-  const superseded = before
+  const vanished = before
     .filter((i) => !keys.has(targetKey(i)) && !remaining.has(targetKey(i)))
     .map(({ kind, id }) => ({ kind, id }));
-  return { doc: next, decided, superseded };
+  const outdated = op.decision === 'accept' ? vanished : [];
+  const superseded = op.decision === 'reject' ? vanished : [];
+  return { doc: next, decided, outdated, superseded };
+}
+
+/** Side effects of a decision already applied on the live doc (ProseMirror path, #178). */
+export function portResultAfterDecision(
+  before: DocNode,
+  after: DocNode,
+  op: DecisionOp,
+): PortResult {
+  const keys = new Set(op.targets.map(targetKey));
+  const beforeItems = listSuggestions(before);
+  const decided = beforeItems
+    .filter((i) => keys.has(targetKey(i)))
+    .map(({ kind, id }) => ({ kind, id }));
+  const remaining = new Set(listSuggestions(after).map(targetKey));
+  const vanished = beforeItems
+    .filter((i) => !keys.has(targetKey(i)) && !remaining.has(targetKey(i)))
+    .map(({ kind, id }) => ({ kind, id }));
+  const outdated = op.decision === 'accept' ? vanished : [];
+  const superseded = op.decision === 'reject' ? vanished : [];
+  return { decided, outdated, superseded };
+}
+
+/** Attach index outdated flags for the review panel (#178 data layer). */
+export function withOutdatedFlags(
+  items: readonly SuggestionItem[],
+  outdatedIds: ReadonlySet<string>,
+): SuggestionItem[] {
+  if (!outdatedIds.size) return [...items];
+  return items.map((i) => (outdatedIds.has(i.id) ? { ...i, outdated: true } : i));
+}
+
+/**
+ * Strip outdated suggestion marks without applying their edits (dismiss, #179). Uses the same
+ * reject transform as a normal decision on any marks still present; index rows are cleared via
+ * `sink.dismissOutdated`.
+ */
+export function dismissOutdatedMarks(doc: DocNode, targets: SuggestionTarget[]): DocNode {
+  if (!targets.length) return doc;
+  return decideSuggestions(doc, { targets, decision: 'reject' }).doc;
 }
 
 /** Same formula as the .docx importer's note text (paragraph plain text joined by newlines). */
@@ -323,9 +380,8 @@ export interface RunOutcome extends PortResult {
 
 /**
  * Run a decision end to end: one op through the trusted port (which reports what it actually
- * decided on the live doc), then the index update. Superseded suggestions are recorded as
- * rejected. If the sink throws, the records are passed to `reconcile` (e.g. queue a retry or
- * rebuild the index from the CRDT) and returned as `unrecorded`.
+ * decided on the live doc), then the index update. On accept, vanished pending suggestions are
+ * marked outdated (not rejected). On reject, superseded suggestions are recorded as rejected.
  */
 export async function runDecision(
   items: SuggestionItem[],
@@ -341,22 +397,59 @@ export async function runDecision(
   },
 ): Promise<RunOutcome> {
   const targets = selectTargets(items, scope);
-  if (!targets.length) return { decided: [], superseded: [], unrecorded: [] };
+  if (!targets.length) return { decided: [], outdated: [], superseded: [], unrecorded: [] };
   const res = await ctx.tx.applyReviewDecision({ targets, decision });
   const decidedAt = (ctx.now?.() ?? new Date()).toISOString();
   const status = decision === 'accept' ? 'accepted' : 'rejected';
-  const records: DecisionRecord[] = [
-    ...res.decided.map((t) => ({ ...t, status, decidedAt, decidedBy: ctx.decidedBy }) as const),
-    ...res.superseded.map(
-      (t) => ({ ...t, status: 'rejected', decidedAt, decidedBy: ctx.decidedBy }) as const,
-    ),
-  ];
-  if (!records.length) return { ...res, unrecorded: [] };
+  const records: DecisionRecord[] = res.decided.map(
+    (t) => ({ ...t, status, decidedAt, decidedBy: ctx.decidedBy }) as const,
+  );
+  if (decision === 'reject') {
+    records.push(
+      ...res.superseded.map(
+        (t) => ({ ...t, status: 'rejected', decidedAt, decidedBy: ctx.decidedBy }) as const,
+      ),
+    );
+  }
+  const outdatedRecords: OutdatedRecord[] =
+    decision === 'accept'
+      ? res.outdated.map((t) => ({
+          ...t,
+          markedAt: decidedAt,
+          markedBy: ctx.decidedBy,
+        }))
+      : [];
+  const unrecorded: DecisionRecord[] = [];
   try {
-    await ctx.sink.recordDecisions(records);
+    if (records.length) await ctx.sink.recordDecisions(records);
+    if (outdatedRecords.length) await ctx.sink.markOutdated?.(outdatedRecords);
     return { ...res, unrecorded: [] };
   } catch (error) {
     await ctx.reconcile?.(records, error);
-    return { ...res, unrecorded: records };
+    unrecorded.push(...records);
+    return { ...res, unrecorded };
   }
+}
+
+/** End-to-end dismiss: strip any remaining marks, then clear outdated index rows. */
+export async function runDismissOutdated(
+  doc: DocNode,
+  targets: SuggestionTarget[],
+  ctx: {
+    store: LiveDocStore;
+    sink: SuggestionDecisionSink;
+    dismissedBy: string;
+  },
+): Promise<DocNode> {
+  if (!targets.length) return doc;
+  const next = dismissOutdatedMarks(doc, targets);
+  ctx.store.commit(next);
+  await ctx.sink.dismissOutdated?.(targets);
+  return next;
+}
+
+/** Minimal doc store for dismiss / review port wiring. */
+export interface LiveDocStore {
+  read(): DocNode;
+  commit(next: DocNode): void;
 }

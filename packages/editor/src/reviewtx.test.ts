@@ -5,7 +5,12 @@ import type { Editor, JSONContent } from '@tiptap/core';
 import { ReplaceStep } from '@tiptap/pm/transform';
 import * as root from './index';
 import { createManuscriptEditor } from './index';
-import { applyReviewDecision, buildReviewTransaction } from './trusted';
+import {
+  applyReviewDecision,
+  applyReviewDecisionWithPortResult,
+  allowReviewEdits,
+  buildReviewTransaction,
+} from './trusted';
 
 // Synthetic sample text only.
 const by = { author: 'agent:sample', ts: '2026-10-25T00:00:00Z' };
@@ -116,6 +121,44 @@ describe('review decision transaction', () => {
     expect(a.text).toBe('Note old .');
     expect(JSON.stringify(a.content)).not.toContain('s2');
     expect(text(e)).toContain('grey');
+  });
+
+  it('accept reports outdated overlapping suggestions on the live editor (#178)', () => {
+    const overlap: JSONContent = {
+      type: 'doc',
+      content: [
+        para([
+          { type: 'text', text: 'a ' },
+          {
+            type: 'text',
+            text: 'bright',
+            marks: [
+              { type: 'suggestion_insert', attrs: { id: 'x1', author: 'agent:a', ts: '1' } },
+              { type: 'suggestion_delete', attrs: { id: 'y1', author: 'agent:b', ts: '1' } },
+            ],
+          },
+          {
+            type: 'text',
+            text: ' day',
+            marks: [{ type: 'suggestion_delete', attrs: { id: 'y1', author: 'agent:b', ts: '1' } }],
+          },
+        ]),
+      ],
+    };
+    const e = createManuscriptEditor({ content: overlap });
+    const res = applyReviewDecisionWithPortResult(
+      e.view,
+      {
+        targets: [
+          { kind: 'suggestion_delete', id: 'y1' },
+          { kind: 'suggestion_insert', id: 'y1' },
+        ],
+        decision: 'accept',
+      },
+      allowReviewEdits,
+    );
+    expect(res.applied).toBe(true);
+    expect(res.outdated.map((t) => t.id)).toEqual(['x1']);
   });
 
   it('keeps an outside edit made after the suggestions were listed', () => {

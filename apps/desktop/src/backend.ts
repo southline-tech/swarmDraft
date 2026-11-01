@@ -360,6 +360,20 @@ export async function saveSectionReviewDecisions(
   await invoke('section_save_review_decisions', { manuscriptId, sectionId, records });
 }
 
+export async function markSectionSuggestionsOutdated(
+  manuscriptId: string,
+  sectionId: string,
+  suggestionIds: string[],
+): Promise<void> {
+  if (!isTauri() || !suggestionIds.length) return;
+  await invoke('section_mark_suggestions_outdated', {
+    manuscriptId,
+    sectionId,
+    suggestionIds,
+    markedBy: 'author',
+  });
+}
+
 export type SpellLintIssue = import('@swarmdraft/editor').SpellLintResult;
 
 export async function spellLintParagraph(

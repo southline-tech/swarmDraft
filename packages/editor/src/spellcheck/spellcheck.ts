@@ -31,8 +31,12 @@ function blockAtPos(doc: PMNode, pos: number): { node: PMNode; pos: number } | n
 }
 
 function blocksInRange(doc: PMNode, from: number, to: number): number[] {
+  const size = doc.content.size;
+  const a = Math.max(0, Math.min(from, size));
+  const b = Math.max(a, Math.min(to, size));
+  if (a >= b) return [];
   const out = new Set<number>();
-  doc.nodesBetween(from, to, (node, pos) => {
+  doc.nodesBetween(a, b, (node, pos) => {
     if (node.isTextblock) out.add(pos);
     return !node.isTextblock;
   });

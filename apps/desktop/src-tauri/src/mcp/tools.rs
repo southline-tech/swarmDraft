@@ -166,7 +166,7 @@ pub struct SuggestStyleArgs {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ListSuggestionsArgs {
     pub manuscript_id: String,
-    /// Filter by status (`open` by default; only `open` is supported today).
+    /// Filter by status (`open` by default; also `outdated`).
     pub status: Option<String>,
     /// Filter by author id (e.g. an agent id or `agent:<id>`).
     pub author: Option<String>,
@@ -435,7 +435,7 @@ impl SwarmdraftMcp {
     }
 
     #[tool(
-        description = "List suggestions in a manuscript from the index. Defaults to open items; optional filters by status (open only today) and author id."
+        description = "List suggestions in a manuscript from the index. Defaults to open items; optional filters by status (`open` or `outdated`) and author id."
     )]
     async fn list_suggestions(
         &self,
@@ -455,20 +455,22 @@ impl SwarmdraftMcp {
             args,
             |_| {
                 check_ids(&[("manuscript_id", Some(&a.manuscript_id))])?;
-                if let Some(st) = &a.status {
-                    check_len("status", st, MAX_ID)?;
-                    if st != "open" {
+                let status_filter = match a.status.as_deref() {
+                    None | Some("open") => "open",
+                    Some("outdated") => "outdated",
+                    Some(st) => {
+                        check_len("status", st, MAX_ID)?;
                         return Err(ToolErr::invalid(
-                            "only open suggestions are listed; omit status or use \"open\"",
+                            "status must be \"open\" or \"outdated\" (omit for open)",
                         ));
                     }
-                }
+                };
                 if let Some(au) = &a.author {
                     check_len("author", au, MAX_ID)?;
                 }
                 let mut out = Vec::new();
                 for sec in self.store.list_sections(&a.manuscript_id)? {
-                    for x in self.store.open_suggestions(&sec.id)? {
+                    for x in self.store.suggestions_with_status(&sec.id, status_filter)? {
                         if let Some(au) = &a.author {
                             let want = au.strip_prefix("agent:").unwrap_or(au.as_str());
                             if x.author.id != want && format!("agent:{}", x.author.id) != *au {
@@ -753,11 +755,6 @@ impl SwarmdraftMcp {
                     let mut txn = yrs::Transact::transact_mut(&doc);
                     let r = crate::anchor::resolve(&doc, &txn, &a.block_id, &a.quote)
                         .map_err(|e| ToolErr::invalid(e.to_string()))?;
-                    if r.overlaps_suggestion {
-                        return Err(ToolErr::invalid(
-                            crate::anchor::AnchorError::OverlapsSuggestion.to_string(),
-                        ));
-                    }
                     crate::anchor::add_suggestion_marks(
                         &mut txn,
                         &r,
