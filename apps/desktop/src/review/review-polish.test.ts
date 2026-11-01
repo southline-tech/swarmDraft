@@ -113,6 +113,33 @@ describe('review sidebar polish (#47)', () => {
     w.unmount();
   });
 
+  it('selects comment rows with aria-selected and keeps focus (#211 / review)', async () => {
+    const content: JSONContent = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              marks: [{ type: 'comment_anchor', attrs: { id: 'c1' } }],
+              text: 'rain',
+            },
+          ],
+        },
+      ],
+    };
+    const w = mount(ManuscriptEditor, { props: { content }, attachTo: document.body });
+    await flushPromises();
+    const row = w.get('[data-test="comment-row"]');
+    await row.trigger('click');
+    await flushPromises();
+    expect(row.attributes('aria-selected')).toBe('true');
+    expect(row.classes()).toContain('selected');
+    expect(document.activeElement).toBe(row.element);
+    w.unmount();
+  });
+
   it('omits the author line on comment rows until comment rows are supplied', async () => {
     const content: JSONContent = {
       type: 'doc',

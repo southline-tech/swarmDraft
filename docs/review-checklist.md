@@ -269,3 +269,10 @@ Implementor: add one line here for every review, design or QA finding, in the sa
 - 2026-10-31 · #219 · review 5725177562 · page stuck at 1 before caret click · scroll-center estimate in `ContinuousManuscript` until `caret-placed` (#216)
 - 2026-10-31 · #219 · review 5725395533 · collapsed nav omitted left footer cell but kept three tracks · explicit `grid-column` 2|3 on center|right when `columnTracks` set (#207)
 - 2026-10-31 · #219 · review 5725395533 · workspace `p-4` right inset misaligned writing|notes footer divider · `pr-0` workspace; Story notes toggle stays 12px via `status-seg-right`
+- 2026-10-31 · #220 · review 5725517731 · `.card.current` box-shadow hid `.card.active` inset bar · `::before` accent bar stacks with selected ring
+- 2026-10-31 · #220 · review 5725517731 · list `@pointerdown` / leave paused follow on #213 card click · wheel + list scroll + arrow keys only; leave clears `pointerOverList` only
+- 2026-10-31 · #220 · review 5725517731 · `pickActiveManuscriptMark` neighbor gap hysteresis · 8px band around +64px line; closest-below-line candidate when none at line
+- 2026-10-31 · #220 · review 5725517731 · comment rows missing `aria-selected` / selected wash · track `selectedCommentId`; `--ct-comment-bg` mix + inset ring; focus stays on row
+- 2026-10-31 · #220 · review 5725517731 · sync suppress timeout-only · `scrollend` on continuous root with 600ms fallback; list sync uses sticky head height + 8
+- 2026-10-31 · #220 · review 5725517731 · `MARK_SELECTOR` omitted comments · include `span.comment-anchor[data-id]` in scroll-sync anchors
+- 2026-10-31 · #220 · CI · App #36 outline loop timeout on runner · 15s timeout on full-outline click tests (Batch B nav cost)

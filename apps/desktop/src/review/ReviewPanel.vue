@@ -173,9 +173,14 @@ function scrollListToActive(key: string | null | undefined) {
   if (!row) return;
   programmaticListScroll = true;
   scrollListRowToTop(listEl.value, row, 8);
-  requestAnimationFrame(() => {
+  const list = listEl.value;
+  const end = () => {
     programmaticListScroll = false;
-  });
+    list.removeEventListener('scrollend', end);
+    clearTimeout(fallback);
+  };
+  list.addEventListener('scrollend', end, { once: true });
+  const fallback = setTimeout(end, 600);
 }
 
 watch(
@@ -200,6 +205,10 @@ function onListPointerEnter() {
 }
 function onListPointerLeave() {
   pointerOverList = false;
+}
+
+function onListScroll() {
+  if (programmaticListScroll) return;
   pauseFollowFromUser();
 }
 
@@ -220,9 +229,16 @@ function onListKeydown(e: KeyboardEvent) {
       if (key) {
         e.preventDefault();
         emit('select', key);
+        if (row instanceof HTMLElement) row.focus();
       }
     }
   }
+}
+
+function activateChangeRow(key: string, e: Event) {
+  emit('select', key);
+  const el = e.currentTarget;
+  if (el instanceof HTMLElement) void nextTick(() => el.focus());
 }
 
 function cardClasses(c: { key: string }) {
@@ -375,8 +391,8 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
       role="listbox"
       aria-label="Tracked changes"
       data-test="review-list"
-      @wheel.passive="pauseFollowFromUser"
-      @pointerdown="pauseFollowFromUser"
+      @wheel="pauseFollowFromUser"
+      @scroll="onListScroll"
       @pointerenter="onListPointerEnter"
       @pointerleave="onListPointerLeave"
       @keydown="onListKeydown"
@@ -404,7 +420,7 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
               :aria-selected="c.key === currentKey ? 'true' : 'false'"
               :aria-current="c.key === props.activeScrollKey ? 'true' : undefined"
               tabindex="-1"
-              @click="emit('select', c.key)"
+              @click="activateChangeRow(c.key, $event)"
             >
               <span
                 v-if="c.key === props.activeScrollKey"
@@ -472,7 +488,7 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
           :aria-selected="c.key === currentKey ? 'true' : 'false'"
           :aria-current="c.key === props.activeScrollKey ? 'true' : undefined"
           tabindex="-1"
-          @click="emit('select', c.key)"
+          @click="activateChangeRow(c.key, $event)"
         >
           <span
             v-if="c.key === props.activeScrollKey"
@@ -840,8 +856,19 @@ button.secondary {
   background: var(--ct-surface);
   border-bottom: 1px solid var(--ct-border-subtle);
 }
+.card.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--ct-accent);
+  border-radius: var(--ct-radius-md) 0 0 var(--ct-radius-md);
+  pointer-events: none;
+}
 .card.active {
-  box-shadow: inset 2px 0 0 var(--ct-accent);
+  box-shadow: none;
 }
 .follow-chip {
   position: sticky;

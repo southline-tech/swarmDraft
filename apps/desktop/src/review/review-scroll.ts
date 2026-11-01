@@ -1,7 +1,9 @@
 import { parseBookChangeKey, scopeBookChangeKey, BOOK_SCOPE } from './review-book';
 
 const MARK_SELECTOR =
-  'ins[data-suggestion][data-id], del[data-suggestion][data-id], span[data-format-change][data-id]';
+  'ins[data-suggestion][data-id], del[data-suggestion][data-id], span[data-format-change][data-id], span.comment-anchor[data-id]';
+
+const COMMENT_KEY_PREFIX = 'comment_anchor\u0000';
 
 export interface ManuscriptMarkAnchor {
   scopedKey: string;
@@ -10,13 +12,17 @@ export interface ManuscriptMarkAnchor {
 }
 
 function changeKeyFromMark(el: Element): string | null {
+  if (el.classList.contains('comment-anchor')) {
+    const id = el.getAttribute('data-id');
+    return id ? `${COMMENT_KEY_PREFIX}${id}` : null;
+  }
   const id = el.getAttribute('data-id');
   const author = el.getAttribute('data-author');
   if (!id || !author) return null;
   return `${author}\u0000${id}`;
 }
 
-/** Collect open suggestion marks in reading order within the continuous scroller. */
+/** Collect open suggestion and comment marks in reading order within the continuous scroller. */
 export function collectManuscriptMarkAnchors(root: HTMLElement): ManuscriptMarkAnchor[] {
   const out: ManuscriptMarkAnchor[] = [];
   const sections = root.querySelectorAll('[data-section-anchor]');
@@ -41,7 +47,7 @@ export function collectManuscriptMarkAnchors(root: HTMLElement): ManuscriptMarkA
 
 /**
  * Active mark per Designer (#217): first mark with top >= viewportTop + lineOffset, else last above.
- * Applies hysteresis before switching to a neighbor.
+ * Neighbor switches require the new mark to cross the decision line by `hysteresis` px.
  */
 export function pickActiveManuscriptMark(
   anchors: readonly ManuscriptMarkAnchor[],
@@ -52,18 +58,26 @@ export function pickActiveManuscriptMark(
 ): string | null {
   if (!anchors.length) return null;
   const line = root.getBoundingClientRect().top + lineOffset;
-  let candidate = anchors[0]!.scopedKey;
-  for (const a of anchors) {
-    if (a.top >= line) {
-      candidate = a.scopedKey;
-      break;
-    }
-    candidate = a.scopedKey;
+  const atOrBelow = anchors.filter((a) => a.top >= line);
+  let candidate: string;
+  if (atOrBelow.length) {
+    candidate = atOrBelow[0]!.scopedKey;
+  } else {
+    const aboveLine = anchors.filter((a) => a.top < line);
+    candidate = aboveLine.length
+      ? aboveLine[aboveLine.length - 1]!.scopedKey
+      : anchors[0]!.scopedKey;
   }
+  const candidateIdx = anchors.findIndex((a) => a.scopedKey === candidate);
   if (!previousKey || previousKey === candidate) return candidate;
-  const prev = anchors.find((a) => a.scopedKey === previousKey);
-  const next = anchors.find((a) => a.scopedKey === candidate);
-  if (prev && next && Math.abs(prev.top - next.top) < hysteresis) return previousKey;
+  const prevIdx = anchors.findIndex((a) => a.scopedKey === previousKey);
+  if (prevIdx < 0 || Math.abs(prevIdx - candidateIdx) !== 1) return candidate;
+  const t = anchors[candidateIdx]!.top;
+  if (t < line) {
+    if (t > line - hysteresis) return previousKey;
+  } else if (t < line + hysteresis) {
+    return previousKey;
+  }
   return candidate;
 }
 
@@ -97,9 +111,14 @@ export function findMarkElement(root: HTMLElement, scopedKey: string): Element |
   if (!parsed) return null;
   const section = root.querySelector(`[data-section-anchor="${CSS.escape(parsed.sectionId)}"]`);
   if (!section) return null;
+  if (parsed.changeKey.startsWith(COMMENT_KEY_PREFIX)) {
+    const id = parsed.changeKey.slice(COMMENT_KEY_PREFIX.length);
+    return section.querySelector(`span.comment-anchor[data-id="${CSS.escape(id)}"]`);
+  }
   const [author, id] = parsed.changeKey.split('\u0000');
   if (!author || !id) return null;
   for (const mark of section.querySelectorAll(MARK_SELECTOR)) {
+    if (mark.classList.contains('comment-anchor')) continue;
     if (mark.getAttribute('data-author') === author && mark.getAttribute('data-id') === id) {
       return mark;
     }
@@ -107,11 +126,18 @@ export function findMarkElement(root: HTMLElement, scopedKey: string): Element |
   return null;
 }
 
-/** Instant list scroll: row top at scrollTop = offsetTop - padding. */
+function stickyHeadHeightForRow(row: HTMLElement): number {
+  const group = row.closest('.chapter-group');
+  const head = group?.querySelector('.chapter-head');
+  return head?.getBoundingClientRect().height ?? 0;
+}
+
+/** Instant list scroll: row top below sticky chapter head + padding. */
 export function scrollListRowToTop(list: HTMLElement, row: HTMLElement, padding = 8): void {
   const listRect = list.getBoundingClientRect();
   const rowRect = row.getBoundingClientRect();
-  const delta = rowRect.top - listRect.top - padding;
+  const sticky = stickyHeadHeightForRow(row);
+  const delta = rowRect.top - listRect.top - padding - sticky;
   list.scrollTop += delta;
 }
 

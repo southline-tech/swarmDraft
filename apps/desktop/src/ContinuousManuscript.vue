@@ -216,15 +216,30 @@ const reviewRailShown = computed(
 );
 let spyFromScroll = false;
 let observer: IntersectionObserver | undefined;
-let suppressSyncUntil = 0;
+let suppressSyncActive = false;
+let suppressSyncFallback: ReturnType<typeof setTimeout> | undefined;
 let syncRaf = 0;
 
-function beginSuppressSync(ms = 600) {
-  suppressSyncUntil = performance.now() + ms;
+function endSuppressSync() {
+  suppressSyncActive = false;
+  clearTimeout(suppressSyncFallback);
+  suppressSyncFallback = undefined;
+}
+
+function beginSuppressSync() {
+  suppressSyncActive = true;
+  clearTimeout(suppressSyncFallback);
+  const root = scrollRoot.value;
+  const onEnd = () => {
+    root?.removeEventListener('scrollend', onEnd);
+    endSuppressSync();
+  };
+  if (root) root.addEventListener('scrollend', onEnd, { once: true });
+  suppressSyncFallback = setTimeout(onEnd, 600);
 }
 
 function updateActiveScrollKey() {
-  if (performance.now() < suppressSyncUntil) return;
+  if (suppressSyncActive) return;
   const root = scrollRoot.value;
   if (!root) return;
   activeScrollKey.value = pickActiveManuscriptMark(
@@ -238,7 +253,7 @@ function updateActiveScrollKey() {
 
 async function navigateToChange(
   scopedKey: string,
-  opts?: { follow?: boolean; suppressSync?: boolean },
+  opts?: { follow?: boolean; suppressSync?: boolean; focusEditor?: boolean },
 ) {
   const parsed = parseBookChangeKey(scopedKey);
   if (!parsed) return;
@@ -255,7 +270,9 @@ async function navigateToChange(
   if (root && mark) scrollElementCenterInRoot(root, mark, scrollBehavior());
   else scrollToSection(parsed.sectionId);
   await nextTick();
-  editors.value.get(parsed.sectionId)?.selectLocalChange(parsed.changeKey, scopedKey);
+  editors.value.get(parsed.sectionId)?.selectLocalChange(parsed.changeKey, scopedKey, {
+    focusEditor: opts?.focusEditor ?? true,
+  });
   activeScrollKey.value = scopedKey;
 }
 
@@ -375,6 +392,7 @@ onBeforeUnmount(() => {
   observer?.disconnect();
   scrollRoot.value?.removeEventListener('scroll', onManuscriptScroll);
   clearTimeout(scrollTimer);
+  endSuppressSync();
   if (syncRaf) cancelAnimationFrame(syncRaf);
 });
 </script>

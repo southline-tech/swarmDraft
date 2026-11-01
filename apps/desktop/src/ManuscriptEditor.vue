@@ -22,7 +22,7 @@ import {
 import { forcedPageNarrow, type EditorLayout } from './desk/outline-auto-collapse';
 import { EditorContent, useEditor } from '@tiptap/vue-3';
 import type { Editor, EditorOptions, JSONContent } from '@tiptap/core';
-import { Selection } from '@tiptap/pm/state';
+import { Selection, TextSelection } from '@tiptap/pm/state';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import type * as Y from 'yjs';
 import EditorToolbar from './toolbar/EditorToolbar.vue';
@@ -445,6 +445,7 @@ watch(zoom, (z) => saveZoom(z));
 
 const review = shallowRef<ReviewItem[]>([]);
 const comments = computed(() => review.value.filter((r) => r.type === 'comment_anchor'));
+const selectedCommentId = ref<string | null>(null);
 const commentByThread = computed(() => primaryCommentByThread(props.commentRows ?? []));
 const labelAuthor = (author: string) => {
   const resolved = markAuthorLabel(author, props.authorSavedNames);
@@ -529,13 +530,27 @@ function rangeOf(e: Editor, t: SuggestionTarget): { from: number; to: number } |
   });
   return from < 0 ? null : { from, to };
 }
-function scrollSelectionIntoManuscriptColumn(e: Editor, r: { from: number; to: number }) {
+function scrollSelectionIntoManuscriptColumn(
+  e: Editor,
+  r: { from: number; to: number },
+  opts?: { focusEditor?: boolean },
+) {
   const root = continuousScroll?.root.value;
   if (!root || !props.sectionId) {
+    if (opts?.focusEditor === false) {
+      const tr = e.state.tr.setSelection(TextSelection.create(e.state.doc, r.from, r.to));
+      e.view.dispatch(tr);
+      return;
+    }
     e.chain().setTextSelection(r).scrollIntoView().run();
     return;
   }
-  e.chain().setTextSelection(r).run();
+  if (opts?.focusEditor === false) {
+    const tr = e.state.tr.setSelection(TextSelection.create(e.state.doc, r.from, r.to));
+    e.view.dispatch(tr);
+  } else {
+    e.chain().setTextSelection(r).run();
+  }
   void nextTick(() => {
     const dom = e.view.domAtPos(r.from).node;
     const el =
@@ -555,7 +570,11 @@ function select(key: string) {
   if (parsed && continuousNav) {
     currentKey.value = key;
     currentIndex = visible.value.findIndex((v) => v.key === key);
-    void continuousNav.navigateToChange(key, { follow: true, suppressSync: true });
+    void continuousNav.navigateToChange(key, {
+      follow: true,
+      suppressSync: true,
+      focusEditor: false,
+    });
     emit('update:reviewFollow', true);
     return;
   }
@@ -573,7 +592,11 @@ function select(key: string) {
   scrollSelectionIntoManuscriptColumn(e, r);
 }
 
-function selectLocalChange(changeKey: string, displayKey?: string) {
+function selectLocalChange(
+  changeKey: string,
+  displayKey?: string,
+  opts?: { focusEditor?: boolean },
+) {
   const e = editor.value;
   if (!e) return;
   const listKey =
@@ -591,12 +614,19 @@ function selectLocalChange(changeKey: string, displayKey?: string) {
     from: Math.min(...parts.map((p) => p.from)),
     to: Math.max(...parts.map((p) => p.to)),
   };
+  if (opts?.focusEditor === false) {
+    const tr = e.state.tr.setSelection(TextSelection.create(e.state.doc, r.from, r.to));
+    e.view.dispatch(tr);
+    return;
+  }
   e.chain().setTextSelection(r).run();
 }
 
-function focusComment(item: ReviewItem) {
+function focusComment(item: ReviewItem, rowEl?: HTMLElement | null) {
   const e = editor.value;
   if (!e) return;
+  selectedCommentId.value = item.id;
+  continuousNav?.beginSuppressSync();
   let from = -1;
   let to = -1;
   e.state.doc.descendants((n, pos) => {
@@ -608,7 +638,9 @@ function focusComment(item: ReviewItem) {
     return true;
   });
   if (from < 0) return;
-  scrollSelectionIntoManuscriptColumn(e, { from, to });
+  scrollSelectionIntoManuscriptColumn(e, { from, to }, { focusEditor: false });
+  const row = rowEl ?? document.querySelector(`[data-comment-id="${CSS.escape(item.id)}"]`);
+  void nextTick(() => (row as HTMLElement | null)?.focus());
 }
 function move(dir: 1 | -1) {
   const list = visible.value;
@@ -1253,11 +1285,14 @@ const LABELS: Record<ReviewItem['type'], string> = {
                 v-for="r in comments"
                 :key="r.id"
                 role="option"
-                tabindex="0"
+                tabindex="-1"
                 data-test="comment-row"
-                @click="focusComment(r)"
-                @keydown.enter.prevent="focusComment(r)"
-                @keydown.space.prevent="focusComment(r)"
+                :data-comment-id="r.id"
+                :class="{ selected: r.id === selectedCommentId }"
+                :aria-selected="r.id === selectedCommentId ? 'true' : 'false'"
+                @click="focusComment(r, $event.currentTarget as HTMLElement)"
+                @keydown.enter.prevent="focusComment(r, $event.currentTarget as HTMLElement)"
+                @keydown.space.prevent="focusComment(r, $event.currentTarget as HTMLElement)"
               >
                 <div class="review-comment-head">
                   <strong>{{ LABELS[r.type] }}</strong>
@@ -1649,6 +1684,19 @@ const LABELS: Record<ReviewItem['type'], string> = {
 }
 .manuscript-editor .comments ul {
   padding-left: var(--ct-space-4);
+  list-style: none;
+  margin: 0;
+}
+.manuscript-editor .comments li {
+  margin-bottom: var(--ct-space-2);
+  padding: var(--ct-space-2) var(--ct-space-3);
+  border-radius: var(--ct-radius-md);
+  border: 1px solid var(--ct-border);
+  cursor: pointer;
+}
+.manuscript-editor .comments li.selected {
+  background: color-mix(in srgb, var(--ct-comment-bg) 45%, var(--ct-selected-bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ct-accent) 35%, transparent);
 }
 .manuscript-editor .muted {
   color: var(--ct-text-muted);

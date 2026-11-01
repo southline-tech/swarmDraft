@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 import type { SuggestionItem } from '@coauthor/editor';
 import ReviewPanel from './ReviewPanel.vue';
 import { REVIEW_CHANGES_REGION_ID } from './review-panel-a11y';
@@ -308,6 +308,55 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(w.find('[data-test="review-follow"]').exists()).toBe(true);
     await w.find('[data-test="review-follow"]').trigger('click');
     expect(w.emitted('update:follow')).toEqual([[true]]);
+    w.unmount();
+  });
+
+  it('user list scroll pauses follow; chip resumes (#217)', async () => {
+    const w = mount(ReviewPanel, {
+      props: { items, labels, follow: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    const list = w.find('[data-test="review-list"]').element;
+    list.dispatchEvent(new Event('scroll', { bubbles: true }));
+    await flushPromises();
+    expect(w.emitted('update:follow')).toEqual([[false]]);
+    await w.setProps({ follow: false, activeScrollKey: key(items[0]!) });
+    await w.find('[data-test="review-follow"]').trigger('click');
+    expect(w.emitted('update:follow')).toEqual([[false], [true]]);
+    w.unmount();
+  });
+
+  it('clicking a change row keeps focus on the row (#217 / review)', async () => {
+    const w = mount(ReviewPanel, {
+      props: { items, labels, currentKey: key(items[0]!) },
+      attachTo: document.body,
+    });
+    const row = w.findAll('[data-test=item]')[1]!.element as HTMLElement;
+    row.focus();
+    await w.findAll('[data-test=item]')[1]!.trigger('click');
+    expect(w.emitted('select')?.[0]).toEqual([key(items[1]!)]);
+    expect(document.activeElement).toBe(row);
+    w.unmount();
+  });
+
+  it('active and selected cards stack accent bar with selected ring (#217)', () => {
+    const css = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), 'ReviewPanel.vue'),
+      'utf8',
+    );
+    expect(css).toMatch(/\.card\.active::before/);
+    expect(css).toMatch(/\.card\.current\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px/s);
+    const w = mount(ReviewPanel, {
+      props: {
+        items,
+        labels,
+        currentKey: key(items[0]!),
+        activeScrollKey: key(items[0]!),
+      },
+    });
+    const card = w.findAll('[data-test=item]')[0]!;
+    expect(card.classes()).toEqual(expect.arrayContaining(['current', 'active']));
     w.unmount();
   });
 });

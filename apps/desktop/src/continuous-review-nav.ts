@@ -4,7 +4,7 @@ export type ContinuousReviewNav = {
   /** Scroll the manuscript column to a book-scoped change and select it (#213). */
   navigateToChange: (
     scopedKey: string,
-    opts?: { follow?: boolean; suppressSync?: boolean },
+    opts?: { follow?: boolean; suppressSync?: boolean; focusEditor?: boolean },
   ) => Promise<void>;
   /** Pause manuscript→list sync after list-driven scroll (#217). */
   beginSuppressSync: (ms?: number) => void;
