@@ -398,14 +398,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="continuous-root min-h-0 flex h-full flex-col" data-test="continuous-root">
+  <div class="continuous-root min-h-0 min-w-0 flex h-full flex-col" data-test="continuous-root">
     <div
-      class="continuous-layout min-h-0 flex-1"
+      class="continuous-layout min-h-0 min-w-0 flex-1"
       :class="{ 'continuous-layout--solo': !reviewRailShown }"
     >
       <div
         ref="scrollRoot"
-        class="continuous-manuscript min-h-0 overflow-auto"
+        class="continuous-manuscript min-h-0 min-w-0 overflow-auto"
         data-test="continuous-manuscript"
       >
         <div
@@ -476,16 +476,18 @@ onBeforeUnmount(() => {
 <style scoped>
 .continuous-layout {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   min-height: 0;
+  min-width: 0;
 }
 .continuous-layout--solo {
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
 }
 .continuous-review-rail {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 .continuous-section + .continuous-section {

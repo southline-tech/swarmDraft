@@ -300,7 +300,7 @@ describe('no room for the outline while notes show (#98)', () => {
     const app = readFileSync(resolve(__dirname, '../App.vue'), 'utf8');
     expect(app).toContain('18rem_minmax(0,1fr)_');
     expect(app).toContain('--ct-story-notes-w');
-    expect(app).toMatch(/class="workspace grid min-h-0 flex-1 gap-0/);
+    expect(app).toMatch(/class="workspace grid min-h-0 min-w-0 flex-1 gap-0/);
     expect(OUTLINE_ROOM).toBe(18 * 16);
   });
 });
