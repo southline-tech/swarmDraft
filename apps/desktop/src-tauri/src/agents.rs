@@ -249,7 +249,7 @@ pub(crate) fn insert_agent(
         )));
     }
     let taken = {
-        let mut st = c.prepare("SELECT name FROM agents")?;
+        let mut st = c.prepare("SELECT name FROM agents WHERE revoked_at IS NULL")?;
         let names = st
             .query_map([], |r| r.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
@@ -648,6 +648,28 @@ mod tests {
     }
 
     #[test]
+    fn live_agent_name_collision_is_clear() {
+        let (_t, s) = store();
+        s.create_agent("Line Editor", "#3366ff").unwrap();
+        let e = s.create_agent("  LINE editor ", "#112233").unwrap_err();
+        assert!(
+            matches!(e, StorageError::Invalid(ref m) if m.contains("already exists")),
+            "{e:?}"
+        );
+    }
+
+    #[test]
+    fn revoked_agent_name_can_be_reused() {
+        let (_t, s) = store();
+        let first = s.create_agent("Copy Bot", "#3366ff").unwrap();
+        s.revoke_agent(&first.id).unwrap();
+        let second = s.create_agent("copy bot", "#112233").unwrap();
+        assert_ne!(second.id, first.id);
+        assert_eq!(second.name, "copy bot");
+        assert!(second.revoked_at.is_none());
+    }
+
+    #[test]
     fn agent_names_reject_reserved_and_duplicates() {
         let (_t, s) = store();
         for bad in ["you", "  YOU ", "unnamed AGENT", "Removed agent"] {
@@ -667,15 +689,18 @@ mod tests {
             .create_agent("  cafe\u{301} HELPER ", "#3366ff")
             .unwrap_err();
         assert!(matches!(e, StorageError::Invalid(ref m) if m.contains("already exists")));
-        // Revoked agents still hold their name.
+        // Revoked agents no longer reserve the name.
         let r = s.create_agent("Line Editor", "#3366ff").unwrap();
         s.revoke_agent(&r.id).unwrap();
-        assert!(s.create_agent("line editor", "#3366ff").is_err());
         assert_eq!(
             s.list_agents().unwrap().len(),
             4,
             "revoked agents without open review are omitted from list_agents"
         );
+        let reused = s.create_agent("line editor", "#3366ff").unwrap();
+        assert_eq!(reused.name, "line editor");
+        assert_ne!(reused.id, r.id);
+        assert_eq!(s.list_agents().unwrap().len(), 5);
         // Names are stored NFC.
         let d = s.create_agent("Nai\u{308}ve", "#3366ff").unwrap();
         assert_eq!(d.name, "Na\u{ef}ve");
