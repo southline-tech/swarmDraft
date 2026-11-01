@@ -72,6 +72,8 @@ const props = defineProps<{
   /** Stored drafts for the toolbar picker (#243). */
   draftRows?: { id: string; title: string }[];
   currentDraftId?: string;
+  /** Bumped after comment reply/resolve saves (#255); does not remount editors. */
+  commentMetaVersion?: number;
 }>();
 
 const commentRows = shallowRef<readonly CommentRow[]>([]);
@@ -99,7 +101,7 @@ async function reloadReviewMeta(sectionId: string | undefined) {
 }
 
 watch(
-  () => [props.selectedId, props.reloadToken] as const,
+  () => [props.selectedId, props.commentMetaVersion, props.reloadToken] as const,
   async ([sectionId]) => {
     await reloadReviewMeta(sectionId);
     if (!caretPlaced.value) scheduleScrollPageEstimate();

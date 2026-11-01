@@ -278,6 +278,8 @@ const saveCopyOfOpen = () =>
  * editor was read-only after a content error was ever accepted, so there is nothing else to lose.
  */
 const reloads = ref(0);
+/** Refetch review comment rows without remounting section editors (#255). */
+const commentMetaVersion = ref(0);
 /** Persisted accept/reject records per section (#51). */
 const decisionRecordsBySection = shallowRef<Record<string, DecisionRecord[]>>({});
 let decisionLoadGeneration = 0;
@@ -324,18 +326,20 @@ async function onCommentReply(sectionId: string, threadId: string, body: string)
       profile.name,
       'local',
     );
-    reloads.value++;
+    commentMetaVersion.value++;
   } catch (err) {
     console.error('Comment reply save failed', err);
+    saveFailure.value = saveFailed(saveFailure.value, err);
   }
 }
 async function onCommentResolve(sectionId: string, threadId: string, resolved: boolean) {
   if (!session.value) return;
   try {
     await sectionCommentResolve(session.value.id, sectionId, threadId, resolved);
-    reloads.value++;
+    commentMetaVersion.value++;
   } catch (err) {
     console.error('Comment resolve save failed', err);
+    saveFailure.value = saveFailed(saveFailure.value, err);
   }
 }
 /** The open section's load error, shown in a live region that stays mounted (#79). */
@@ -1508,6 +1512,7 @@ defineExpose({ open, closeSession });
               :draft-label="draftPickerLabel"
               :draft-rows="draftRows"
               :current-draft-id="session.id"
+              :comment-meta-version="commentMetaVersion"
               @update:selected-id="selectedId = $event"
               @load-error="editorLoadError = $event"
               @reload="reloadSection"

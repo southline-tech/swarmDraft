@@ -390,6 +390,9 @@ export async function sectionCommentReply(
   authorName: string,
   authorId: string,
 ): Promise<import('@swarmdraft/editor').CommentRow> {
+  if (!isTauri()) {
+    return Promise.reject(new Error('Comment reply requires the desktop app'));
+  }
   return invoke('section_comment_reply', {
     manuscriptId,
     sectionId,
