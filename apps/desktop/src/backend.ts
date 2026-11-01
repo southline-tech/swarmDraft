@@ -381,6 +381,36 @@ export async function manuscriptReviewDecisions(
   return out;
 }
 
+/** Persist a human reply on a comment thread (#255). */
+export async function sectionCommentReply(
+  manuscriptId: string,
+  sectionId: string,
+  threadId: string,
+  body: string,
+  authorName: string,
+  authorId: string,
+): Promise<import('@swarmdraft/editor').CommentRow> {
+  return invoke('section_comment_reply', {
+    manuscriptId,
+    sectionId,
+    threadId,
+    body,
+    authorName,
+    authorId,
+  });
+}
+
+/** Resolve or reopen a comment thread (#255). */
+export async function sectionCommentResolve(
+  manuscriptId: string,
+  sectionId: string,
+  threadId: string,
+  resolved: boolean,
+): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('section_comment_resolve', { manuscriptId, sectionId, threadId, resolved });
+}
+
 export async function saveSectionReviewDecisions(
   manuscriptId: string,
   sectionId: string,

@@ -23,6 +23,8 @@ import {
   listenOpeningProgress,
   manuscriptReviewDecisions,
   saveSectionReviewDecisions,
+  sectionCommentReply,
+  sectionCommentResolve,
   type AppInfo,
   type OpeningProgressEvent,
   type RecoveryNotice,
@@ -309,6 +311,32 @@ function onSectionDecisions(sectionId: string, records: DecisionRecord[]) {
     console.error('Review decision save failed; next change will retry', err);
     saveFailure.value = saveFailed(saveFailure.value, err);
   });
+}
+async function onCommentReply(sectionId: string, threadId: string, body: string) {
+  if (!session.value) return;
+  const profile = loadProfile();
+  try {
+    await sectionCommentReply(
+      session.value.id,
+      sectionId,
+      threadId,
+      body,
+      profile.name,
+      'local',
+    );
+    reloads.value++;
+  } catch (err) {
+    console.error('Comment reply save failed', err);
+  }
+}
+async function onCommentResolve(sectionId: string, threadId: string, resolved: boolean) {
+  if (!session.value) return;
+  try {
+    await sectionCommentResolve(session.value.id, sectionId, threadId, resolved);
+    reloads.value++;
+  } catch (err) {
+    console.error('Comment resolve save failed', err);
+  }
 }
 /** The open section's load error, shown in a live region that stays mounted (#79). */
 const editorLoadError = ref('');
@@ -1485,6 +1513,8 @@ defineExpose({ open, closeSession });
               @reload="reloadSection"
               @toggle-navigator="outlineAuto.toggleByHand()"
               @decisions="onSectionDecisions"
+              @comment-reply="onCommentReply"
+              @comment-resolve="onCommentResolve"
               @layout="onEditorLayout"
               @focus-mode="focusMode = $event"
               @ask-bot="onAskBotFromEditor"

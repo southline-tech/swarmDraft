@@ -766,6 +766,7 @@ impl SwarmdraftMcp {
                     thread_id: a.thread_id.clone(),
                     author: author(p),
                     created_at: self.store.now()?,
+                    resolved_at: None,
                 };
                 self.store.agent_write(
                     &p.token_id,

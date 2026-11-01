@@ -78,30 +78,46 @@ const commentRows = shallowRef<readonly CommentRow[]>([]);
 const authorSavedNames = shallowRef<Readonly<Record<string, string>>>({});
 const suggestionReasons = shallowRef<Readonly<Record<string, string>>>({});
 
+async function reloadReviewMeta(sectionId: string | undefined) {
+  if (!sectionId) {
+    commentRows.value = [];
+    authorSavedNames.value = {};
+    suggestionReasons.value = {};
+    return;
+  }
+  try {
+    const meta = await sectionReviewMeta(sectionId);
+    commentRows.value = meta.comments;
+    authorSavedNames.value = meta.authorSavedNames;
+    suggestionReasons.value = meta.suggestionReasons;
+  } catch (err) {
+    console.error('Could not load review sidebar metadata', err);
+    commentRows.value = [];
+    authorSavedNames.value = {};
+    suggestionReasons.value = {};
+  }
+}
+
 watch(
-  () => props.selectedId,
-  async (sectionId) => {
-    if (!sectionId) {
-      commentRows.value = [];
-      authorSavedNames.value = {};
-      suggestionReasons.value = {};
-      return;
-    }
-    try {
-      const meta = await sectionReviewMeta(sectionId);
-      commentRows.value = meta.comments;
-      authorSavedNames.value = meta.authorSavedNames;
-      suggestionReasons.value = meta.suggestionReasons;
-    } catch (err) {
-      console.error('Could not load review sidebar metadata', err);
-      commentRows.value = [];
-      authorSavedNames.value = {};
-      suggestionReasons.value = {};
-    }
+  () => [props.selectedId, props.reloadToken] as const,
+  async ([sectionId]) => {
+    await reloadReviewMeta(sectionId);
     if (!caretPlaced.value) scheduleScrollPageEstimate();
   },
   { immediate: true },
 );
+
+function onCommentReply(threadId: string, body: string) {
+  const sectionId = props.selectedId;
+  if (!sectionId) return;
+  emit('comment-reply', sectionId, threadId, body);
+}
+
+function onCommentResolve(threadId: string, resolved: boolean) {
+  const sectionId = props.selectedId;
+  if (!sectionId) return;
+  emit('comment-resolve', sectionId, threadId, resolved);
+}
 
 const emit = defineEmits<{
   'update:selectedId': [id: string];
@@ -122,6 +138,8 @@ const emit = defineEmits<{
   'draft-import': [];
   'draft-select': [id: string];
   'draft-menu-open': [];
+  'comment-reply': [sectionId: string, threadId: string, body: string];
+  'comment-resolve': [sectionId: string, threadId: string, resolved: boolean];
 }>();
 
 const suggestionsBySection = shallowRef(new Map<string, SuggestionItem[]>());
@@ -487,6 +505,8 @@ onBeforeUnmount(() => {
             @caret-placed="onCaretPlaced"
             @open-suggestions="(items) => onOpenSuggestions(sec.id, items)"
             @update:review-follow="reviewFollow = $event"
+            @comment-reply="onCommentReply"
+            @comment-resolve="onCommentResolve"
           />
         </div>
       </div>

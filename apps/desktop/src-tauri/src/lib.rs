@@ -683,6 +683,7 @@ struct ReviewCommentRow {
     author_id: String,
     author_name: String,
     created_at: String,
+    resolved_at: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -702,6 +703,7 @@ fn review_comment_row(c: manuscripts::Comment) -> ReviewCommentRow {
         author_id: c.author.id,
         author_name: c.author.name,
         created_at: c.created_at,
+        resolved_at: c.resolved_at,
     }
 }
 
@@ -747,7 +749,7 @@ async fn section_review_meta(
     section_id: String,
 ) -> Result<SectionReviewMeta, String> {
     blocking(&store, move |s| {
-        let comments = s.open_comments(&section_id)?;
+        let comments = s.section_review_comments(&section_id)?;
         let suggestions = s.open_suggestions(&section_id)?;
         let mut author_saved_names = std::collections::HashMap::new();
         for sug in &suggestions {
@@ -792,6 +794,45 @@ async fn manuscript_review_decisions(
         Ok(ManuscriptReviewDecisions {
             by_section: s.review_decisions_for_manuscript(&manuscript_id)?,
         })
+    })
+    .await
+}
+
+/// Human reply on an existing comment thread (#255).
+#[tauri::command]
+async fn section_comment_reply(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+    section_id: String,
+    thread_id: String,
+    body: String,
+    author_name: String,
+    author_id: String,
+) -> Result<ReviewCommentRow, String> {
+    blocking(&store, move |s| {
+        Ok(review_comment_row(s.human_comment_reply(
+            &manuscript_id,
+            &section_id,
+            &thread_id,
+            &body,
+            &author_name,
+            &author_id,
+        )?))
+    })
+    .await
+}
+
+/// Resolve or reopen a comment thread (#255).
+#[tauri::command]
+async fn section_comment_resolve(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+    section_id: String,
+    thread_id: String,
+    resolved: bool,
+) -> Result<(), String> {
+    blocking(&store, move |s| {
+        s.set_comment_thread_resolved(&manuscript_id, &section_id, &thread_id, resolved)
     })
     .await
 }
@@ -985,6 +1026,8 @@ pub fn run() {
             notes_load,
             notes_apply_update,
             section_review_meta,
+            section_comment_reply,
+            section_comment_resolve,
             manuscript_review_decisions,
             section_save_review_decisions,
             section_mark_suggestions_outdated,

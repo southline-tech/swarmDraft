@@ -234,10 +234,25 @@ impl Store {
         agent_ids: &[String],
         manuscript_id: &str,
     ) -> Result<(), StorageError> {
-        for id in agent_ids {
-            self.grant_agent_manuscript(id, manuscript_id)?;
-        }
-        Ok(())
+        self.with_conn_mut_storage(|c| {
+            let tx = c.transaction()?;
+            for agent_id in agent_ids {
+                let active: Option<i64> = tx
+                    .query_row(
+                        "SELECT 1 FROM agents WHERE id = ?1 AND revoked_at IS NULL",
+                        [agent_id],
+                        |r| r.get(0),
+                    )
+                    .optional()
+                    .map_err(StorageError::from)?;
+                if active.is_none() {
+                    return Err(StorageError::NotFound(format!("active agent {agent_id}")));
+                }
+                Store::grant_agent_manuscript_on_conn(&tx, agent_id, manuscript_id)?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
     }
 
     pub fn bulk_grant_all_manuscripts(&self, agent_ids: &[String]) -> Result<(), StorageError> {
