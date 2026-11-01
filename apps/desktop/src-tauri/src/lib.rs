@@ -451,6 +451,7 @@ async fn manuscript_import_json(
     app: tauri::AppHandle,
     store: tauri::State<'_, storage::Store>,
     title: String,
+    author: Option<String>,
     sections: Vec<manuscripts::ImportSection>,
 ) -> Result<manuscripts::StoredManuscript, String> {
     let app = app.clone();
@@ -458,7 +459,9 @@ async fn manuscript_import_json(
         let mut emit = move |stage: &str, percent: u8, title: &str, chapters_found: u32| {
             opening_progress::emit(&app, stage, percent, title, chapters_found);
         };
-        let (m, _) = s.import_manuscript_with_progress(&title, &sections, Some(&mut emit))?;
+        let author_ref = author.as_deref();
+        let (m, _) =
+            s.import_manuscript_with_progress(&title, &sections, author_ref, Some(&mut emit))?;
         s.load_manuscript_with_progress(&m.id, Some(&mut emit))
     })
     .await

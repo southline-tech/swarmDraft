@@ -106,7 +106,15 @@ fn execute_export(
     let ext = if job.format == "epub" { "epub" } else { "docx" };
     let safe_title = sanitize_filename(&ast.title);
     let out_path = job_dir.join(format!("{safe_title}.{ext}"));
-    let log = pandoc::run_pandoc(&pandoc, &md_path, &out_path, &job.format, &css, &reference)?;
+    let log = pandoc::run_pandoc(
+        &pandoc,
+        &md_path,
+        &out_path,
+        &job.format,
+        &css,
+        &reference,
+        ast.author.as_deref(),
+    )?;
     Ok((out_path, log))
 }
 

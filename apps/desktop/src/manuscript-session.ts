@@ -194,6 +194,7 @@ export function sessionFromImported(
 export function importPayload(imported: ImportedManuscript): ImportPayload {
   return {
     title: imported.title,
+    ...(imported.author ? { author: imported.author } : {}),
     sections: imported.sections.map((s) => ({
       id: s.id,
       ...(s.parentId ? { parentId: s.parentId } : {}),

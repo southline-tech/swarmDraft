@@ -113,7 +113,7 @@ export function titlePageSkipIndices(paras: TitlePagePara[]): Set<number> {
     if (BYLINE_RE.test(t)) skip.add(i);
     if (NOVEL_RE.test(t)) skip.add(i);
     const meta = parseTitlePageMeta(paras);
-    if (meta.title && norm(p.text) === meta.title) skip.add(i);
+    if (meta.title && headingsMatch(p.text, meta.title)) skip.add(i);
   });
   return skip;
 }

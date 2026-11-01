@@ -112,6 +112,8 @@ const MIGRATIONS: &[&str] = &[
      CHECK (numbering_style IN ('chapter_arabic','chapter_words','chapter_upper','number_only'));",
     // #111: rows that picked up the provisional column default before INSERT was fixed.
     "UPDATE manuscripts SET numbering_style = 'chapter_arabic' WHERE numbering_style = 'chapter_words';",
+    // #235: book author from import (title page byline), not inferred from stripped body.
+    "ALTER TABLE manuscripts ADD COLUMN book_author TEXT;",
     // #76: stable primary-agent flag (P1 bot keeps collab-1 by id, not display name).
     "ALTER TABLE agents ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0 CHECK (is_primary IN (0, 1));
      CREATE UNIQUE INDEX agents_one_primary ON agents(is_primary) WHERE is_primary = 1;

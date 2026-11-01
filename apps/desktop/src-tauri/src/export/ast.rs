@@ -54,7 +54,11 @@ pub fn build_manuscript_ast(
         let blocks = content::decode_checked(&doc).map_err(StorageError::Invalid)?;
         sections.push(section_ast(&s, &blocks));
     }
-    let author = infer_author(&sections);
+    let author = m
+        .book_author
+        .clone()
+        .filter(|a| !a.trim().is_empty())
+        .or_else(|| infer_author(&sections));
     Ok(ManuscriptAst {
         manuscript_id: m.id,
         title: m.title,
