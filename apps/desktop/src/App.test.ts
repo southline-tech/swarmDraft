@@ -2136,7 +2136,11 @@ describe('shell layout after import and review burst (#232)', () => {
     expect(w.get('[data-test="continuous-root"]').classes()).toContain('min-w-0');
     expect(w.get('[data-test="continuous-manuscript"]').classes()).toContain('min-w-0');
     const bar = w.get('[data-test="status-bar"]').element as HTMLElement;
-    expect(bar.style.gridTemplateColumns).toContain('minmax(0, 0fr)');
+    expect(bar.style.gridTemplateColumns).toContain('auto');
+    expect(bar.style.gridTemplateColumns).not.toContain('0fr');
+    const notesToggle = w.get('[data-test="status-notes-toggle"]');
+    expect(notesToggle.isVisible()).toBe(true);
+    expect(notesToggle.attributes('aria-pressed')).toBe('false');
     for (let i = 0; i < 80; i++) {
       await w.get('[data-test="tb-review"]').trigger('click');
     }

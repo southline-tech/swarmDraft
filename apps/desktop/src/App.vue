@@ -913,10 +913,12 @@ const workspaceGridClass = computed(() => {
     ? `grid-cols-[18rem_minmax(0,1fr)_${notes}]`
     : `grid-cols-[var(--ct-rail-w)_minmax(0,1fr)_${notes}]`;
 });
+/** Footer keeps a usable right column for Story notes toggle when the dock is closed (#204). */
+const FOOTER_NOTES_CLOSED_TRACK = 'auto';
 const footerColumnTracks = computed(() => {
   if (focusMode.value) return undefined;
   const left = navigatorOpen.value ? '18rem' : 'var(--ct-rail-w)';
-  const notes = storyNotesOpen.value ? STORY_NOTES_TRACK : 'minmax(0, 0fr)';
+  const notes = storyNotesOpen.value ? STORY_NOTES_TRACK : FOOTER_NOTES_CLOSED_TRACK;
   return `${left} minmax(0, 1fr) ${notes}`;
 });
 const chapterCount = computed(
