@@ -110,6 +110,7 @@ import { commentRowLabel, primaryCommentByThread } from './review/review-sidebar
 import { parseBookChangeKey, scopeBookChangeKey } from './review/review-book';
 import type { BookChapterGroup } from './review/review-book';
 import { scrollBehavior, scrollElementCenterInRoot } from './review/review-scroll';
+import { stackMarginNoteTops, type MarginNoteLayout } from './review/margin-note-layout';
 import { CONTINUOUS_REVIEW_NAV, CONTINUOUS_SCROLL_ROOT } from './continuous-review-nav';
 import type { ReviewChange } from './review/review-state';
 import { SECTION_LOAD_ERROR_COPY } from './errors/map-error';
@@ -446,6 +447,33 @@ watch(zoom, (z) => saveZoom(z));
 const review = shallowRef<ReviewItem[]>([]);
 const comments = computed(() => review.value.filter((r) => r.type === 'comment_anchor'));
 const selectedCommentId = ref<string | null>(null);
+const hoveredCommentId = ref<string | null>(null);
+
+function editorDom(): HTMLElement | null {
+  const e = editor.value;
+  if (!e || e.isDestroyed) return null;
+  try {
+    return e.view.dom;
+  } catch {
+    return null;
+  }
+}
+
+function syncCommentAnchorClasses() {
+  if (!hostMounted.value) return;
+  const root = editorDom();
+  if (!root) return;
+  root.querySelectorAll('.comment-anchor').forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    const id = node.getAttribute('data-id') ?? node.getAttribute('data-comment-id') ?? '';
+    node.classList.toggle('comment-anchor--selected', id === selectedCommentId.value);
+    node.classList.toggle('comment-anchor--hover', id === hoveredCommentId.value);
+  });
+}
+
+watch([selectedCommentId, hoveredCommentId], () => {
+  void nextTick(syncCommentAnchorClasses);
+});
 const commentByThread = computed(() => primaryCommentByThread(props.commentRows ?? []));
 const labelAuthor = (author: string) => {
   const resolved = markAuthorLabel(author, props.authorSavedNames);
@@ -640,7 +668,10 @@ function focusComment(item: ReviewItem, rowEl?: HTMLElement | null) {
   if (from < 0) return;
   scrollSelectionIntoManuscriptColumn(e, { from, to }, { focusEditor: false });
   const row = rowEl ?? document.querySelector(`[data-comment-id="${CSS.escape(item.id)}"]`);
-  void nextTick(() => (row as HTMLElement | null)?.focus());
+  void nextTick(() => {
+    syncCommentAnchorClasses();
+    (row as HTMLElement | null)?.focus();
+  });
 }
 function move(dir: 1 | -1) {
   const list = visible.value;
@@ -732,9 +763,88 @@ onMounted(() => window.addEventListener('swarmdraft-spell-prefs', onSpellPrefs))
 const deskEl = shallowRef<HTMLElement | null>(null);
 const deskWidth = shallowRef(0);
 const deskLeft = shallowRef(0);
+const hostMounted = ref(false);
 const marginNotesShown = computed(
   () => !focusMode.value && !props.notesHidden && changes.value.length > 0,
 );
+const marginEl = shallowRef<HTMLElement | null>(null);
+const marginNoteHeights = ref<Record<string, number>>({});
+const marginLayouts = shallowRef<MarginNoteLayout[]>([]);
+const marginLayoutByKey = computed(
+  () => new Map(marginLayouts.value.map((layout) => [layout.key, layout])),
+);
+let marginLayoutRaf = 0;
+let marginMeasureTimer: ReturnType<typeof setTimeout> | undefined;
+
+function scheduleMeasureMarginNotes() {
+  clearTimeout(marginMeasureTimer);
+  marginMeasureTimer = setTimeout(() => measureMarginNotes(), 0);
+}
+
+function anchorFromForChange(e: Editor, change: ReviewChange): number | null {
+  const parts = change.targets.map((t) => rangeOf(e, t)).filter((r) => !!r);
+  if (!parts.length) return null;
+  return Math.min(...parts.map((p) => p!.from));
+}
+
+function measureMarginNotes() {
+  if (!hostMounted.value) return;
+  cancelAnimationFrame(marginLayoutRaf);
+  marginLayoutRaf = requestAnimationFrame(() => {
+    if (!hostMounted.value) return;
+    const e = editor.value;
+    const margin = marginEl.value;
+    if (!e || e.isDestroyed || !margin || !marginNotesShown.value) {
+      marginLayouts.value = [];
+      return;
+    }
+    let coordsAtPos: typeof e.view.coordsAtPos;
+    try {
+      coordsAtPos = e.view.coordsAtPos.bind(e.view);
+    } catch {
+      marginLayouts.value = [];
+      return;
+    }
+    const marginTop = margin.getBoundingClientRect().top;
+    const measures = changes.value.map((c) => {
+      const from = anchorFromForChange(e, c);
+      const height = marginNoteHeights.value[c.key] ?? 48;
+      if (from == null) return { key: c.key, idealTop: 0, height };
+      const coords = coordsAtPos(from);
+      return { key: c.key, idealTop: coords.top - marginTop, height };
+    });
+    marginLayouts.value = stackMarginNoteTops(measures, currentKey.value);
+  });
+}
+
+function marginNoteStyle(key: string): Record<string, string> {
+  const layout = marginLayoutByKey.value.get(key);
+  const change = changes.value.find((c) => c.key === key);
+  const style: Record<string, string> = {};
+  if (layout) style.top = `${layout.top}px`;
+  if (change) style['--ct-suggester'] = collabColor(change.author);
+  return style;
+}
+
+function bindMarginNoteEl(key: string, el: Element | null) {
+  if (!(el instanceof HTMLElement)) return;
+  void nextTick(() => {
+    if (!el.isConnected) return;
+    const h = el.offsetHeight;
+    if (marginNoteHeights.value[key] === h) return;
+    marginNoteHeights.value = { ...marginNoteHeights.value, [key]: h };
+    measureMarginNotes();
+  });
+}
+
+watch([changes, currentKey, zoom, marginNotesShown], () => scheduleMeasureMarginNotes(), {
+  deep: true,
+});
+watch(deskWidth, () => scheduleMeasureMarginNotes());
+
+function onDeskScroll() {
+  measureMarginNotes();
+}
 /** #96: page under 440px in the forced state, so it gets the narrower inner padding. */
 const pageNarrow = computed(() =>
   forcedPageNarrow(
@@ -753,14 +863,24 @@ const layout = computed<EditorLayout>(() => ({
 watch(layout, (l) => emit('layout', l), { immediate: true });
 let deskObserver: ResizeObserver | null = null;
 onMounted(() => {
+  hostMounted.value = true;
+  deskEl.value?.addEventListener('scroll', onDeskScroll, { passive: true });
   if (!deskEl.value || typeof ResizeObserver === 'undefined') return;
   deskObserver = new ResizeObserver(() => {
     deskWidth.value = deskEl.value?.clientWidth ?? 0;
     deskLeft.value = deskEl.value?.getBoundingClientRect().left ?? 0;
+    measureMarginNotes();
   });
   deskObserver.observe(deskEl.value);
+  void nextTick(measureMarginNotes);
 });
-onBeforeUnmount(() => deskObserver?.disconnect());
+onBeforeUnmount(() => {
+  hostMounted.value = false;
+  deskEl.value?.removeEventListener('scroll', onDeskScroll);
+  deskObserver?.disconnect();
+  cancelAnimationFrame(marginLayoutRaf);
+  clearTimeout(marginMeasureTimer);
+});
 
 /** Status bar counts (RAD-256), recounted off the typing path. */
 const chapterWords = shallowRef<number>();
@@ -972,6 +1092,10 @@ const options: Partial<EditorOptions> = {
   },
   onCreate: ({ editor }) => {
     refreshReview(editor);
+    void nextTick(() => {
+      syncCommentAnchorClasses();
+      measureMarginNotes();
+    });
     countChapter(editor);
     reportCaretWords(editor);
     // A bound doc may render its content just after create; try again once it has.
@@ -986,6 +1110,8 @@ const options: Partial<EditorOptions> = {
   onUpdate: ({ editor }) => {
     refreshReview(editor);
     scheduleCount(editor);
+    void nextTick(syncCommentAnchorClasses);
+    scheduleMeasureMarginNotes();
     if (loadError.value) return;
     emit('change', editor.getJSON());
   },
@@ -1221,11 +1347,24 @@ const LABELS: Record<ReviewItem['type'], string> = {
         <!-- Margin notes (wp1): suggestion callouts beside the page, read-only. -->
         <div
           v-if="marginNotesShown"
+          ref="marginEl"
           class="sh-margin"
           data-test="margin-notes"
           aria-label="Suggestion notes"
         >
-          <div v-for="c in changes" :key="`m-${c.key}`" class="sh-callout" data-test="margin-note">
+          <div
+            v-for="c in changes"
+            :key="`m-${c.key}`"
+            :ref="(el) => bindMarginNoteEl(c.key, el as Element | null)"
+            class="sh-callout"
+            :class="{
+              'sh-callout--selected': c.key === currentKey,
+              'sh-callout--nudged': marginLayoutByKey.get(c.key)?.nudged,
+            }"
+            :style="marginNoteStyle(c.key)"
+            data-test="margin-note"
+            :data-change-key="c.key"
+          >
             <b
               ><bdi dir="auto">{{ c.author ? labelAuthor(c.author).name : 'Suggestion' }}</bdi></b
             >
@@ -1293,6 +1432,8 @@ const LABELS: Record<ReviewItem['type'], string> = {
                 @click="focusComment(r, $event.currentTarget as HTMLElement)"
                 @keydown.enter.prevent="focusComment(r, $event.currentTarget as HTMLElement)"
                 @keydown.space.prevent="focusComment(r, $event.currentTarget as HTMLElement)"
+                @mouseenter="hoveredCommentId = r.id"
+                @mouseleave="hoveredCommentId = null"
               >
                 <div class="review-comment-head">
                   <strong>{{ LABELS[r.type] }}</strong>
@@ -1569,6 +1710,21 @@ const LABELS: Record<ReviewItem['type'], string> = {
 .tiptap .comment-anchor {
   background: var(--ct-comment-bg);
   color: inherit;
+  border-radius: 2px;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    box-shadow 0.12s ease,
+    border-color 0.12s ease;
+}
+.tiptap .comment-anchor:hover,
+.tiptap .comment-anchor.comment-anchor--hover {
+  background: color-mix(in srgb, var(--ct-comment-bg) 78%, var(--ct-warning) 22%);
+}
+.tiptap .comment-anchor.comment-anchor--selected {
+  border-bottom-color: var(--ct-accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ct-accent) 35%, transparent);
 }
 .tiptap .find-match {
   background: var(--ct-selected-bg);

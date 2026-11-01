@@ -307,21 +307,29 @@
   position: relative;
   width: var(--ct-margin-notes-w);
   flex: none;
+  align-self: flex-start;
   margin-top: 8rem;
-  display: flex;
-  flex-direction: column;
-  gap: var(--ct-space-3);
 }
 .sh-callout {
-  position: relative;
+  position: absolute;
+  left: 0;
+  right: 0;
   box-sizing: border-box;
   padding: 6px 10px;
   border: 1px solid var(--ct-border);
+  border-left: 3px solid var(--ct-suggester);
   border-radius: var(--ct-radius-lg);
   background: var(--ct-surface-raised);
   box-shadow: var(--ct-elevation-1);
   font: 10.5px/1.25 var(--ct-font-ui);
   color: var(--ct-text-muted);
+}
+.sh-callout--selected {
+  z-index: 2;
+  box-shadow: var(--ct-elevation-2);
+}
+.sh-callout--nudged::before {
+  opacity: 0.45;
 }
 .sh-callout::before {
   content: '';
@@ -330,6 +338,7 @@
   top: 12px;
   width: 12px;
   border-top: 1.5px dashed var(--ct-suggester);
+  transition: opacity 0.15s ease;
 }
 .sh-callout b {
   display: flex;

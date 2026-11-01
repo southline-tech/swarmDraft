@@ -91,6 +91,9 @@ describe('ManuscriptEditor', () => {
     expect(page.find('ins.suggestion-insert').text()).toBe('guttered');
     expect(page.find('del.suggestion-delete').text()).toBe('flickered');
     expect(page.find('.comment-anchor').text()).toBe('rain');
+    const anchor = page.find('[data-test="comment-anchor"]');
+    expect(anchor.exists()).toBe(true);
+    expect(anchor.attributes('data-comment-id')).toBe('sample-c1');
     const sceneBreak = page.find('.scene-break');
     expect(sceneBreak.exists()).toBe(true);
     expect(sceneBreak.text()).toBe('* * *');
@@ -106,6 +109,43 @@ describe('ManuscriptEditor', () => {
     // Comments stay read-only; only suggestions get Accept/Reject.
     expect(w.find('.comments button').exists()).toBe(false);
     expect(w.find('[data-test="comments-empty"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('applies selected comment-anchor styling when a comment row is clicked (#211)', async () => {
+    const content = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              marks: [{ type: 'comment_anchor', attrs: { id: 'c1' } }],
+              text: 'rain',
+            },
+          ],
+        },
+      ],
+    };
+    const w = mount(ManuscriptEditor, { props: { content }, attachTo: document.body });
+    await flushPromises();
+    await w.get('[data-test="comment-row"]').trigger('click');
+    await flushPromises();
+    const anchor = w.get('[data-test="comment-anchor"]').element as HTMLElement;
+    expect(anchor.classList.contains('comment-anchor--selected')).toBe(true);
+    w.unmount();
+  });
+
+  it('positions margin notes with absolute top from layout (#212)', async () => {
+    const w = mount(ManuscriptEditor, { props: { content: SAMPLE_DOC }, attachTo: document.body });
+    await flushPromises();
+    await new Promise((r) => requestAnimationFrame(() => r(undefined)));
+    await flushPromises();
+    const note = w.get('[data-test="margin-note"]').element as HTMLElement;
+    expect(note.style.position).toBe('');
+    expect(w.get('.sh-margin').classes()).not.toContain('flex');
+    expect(note.style.top).toMatch(/^\d+(\.\d+)?px$/);
     w.unmount();
   });
 
