@@ -84,6 +84,10 @@ watch(
   },
   { immediate: true },
 );
+watch(
+  () => ed()?.isEditable,
+  () => bump(),
+);
 onBeforeUnmount(() => {
   listen(ed(), false);
   observer?.disconnect();
