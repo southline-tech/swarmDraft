@@ -273,6 +273,12 @@ export async function listManuscripts(): Promise<StoredManuscriptRow[]> {
   return invoke<StoredManuscriptRow[]>('manuscripts_list');
 }
 
+/** Create a blank stored draft (#243): title-page row + empty chapter; null in a plain browser. */
+export async function createBlankManuscript(): Promise<StoredManuscript | null> {
+  if (!isTauri()) return null;
+  return invoke<StoredManuscript>('manuscript_create_blank');
+}
+
 /** Load one stored manuscript by id; null in a plain browser. */
 export async function loadManuscript(manuscriptId: string): Promise<StoredManuscript | null> {
   if (!isTauri()) return null;

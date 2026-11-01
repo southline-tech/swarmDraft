@@ -1,23 +1,46 @@
 <script setup lang="ts">
 /**
- * Toolbar draft picker (#245 placeholder for #243): one active draft until multi-draft ships.
+ * Toolbar draft picker (#243 / #245): new blank, import, and switch between stored drafts.
  */
-import { shallowRef } from 'vue';
+import { shallowRef, watch } from 'vue';
 import AppIcon from '../icons/AppIcon.vue';
 import { useToolbarMenu } from './menu';
 
-defineProps<{
+export interface DraftPickerRow {
+  id: string;
+  title: string;
+}
+
+const props = defineProps<{
   label: string;
+  currentId?: string;
+  drafts?: DraftPickerRow[];
 }>();
 
 const emit = defineEmits<{
   'new-blank': [];
   import: [];
+  select: [id: string];
+  'menu-open': [];
 }>();
 
 const trigger = shallowRef<HTMLButtonElement | null>(null);
 const menuEl = shallowRef<HTMLElement | null>(null);
 const { open, wrapEl, close, toggle, onMenuKey } = useToolbarMenu(menuEl, trigger);
+
+watch(open, (isOpen) => {
+  if (isOpen) emit('menu-open');
+});
+
+function draftMenuLabel(row: DraftPickerRow) {
+  const t = row.title?.trim();
+  return t || 'Untitled draft';
+}
+
+function pickDraft(id: string) {
+  close();
+  if (id !== props.currentId) emit('select', id);
+}
 
 const btn =
   'inline-flex h-7.5 max-w-48 items-center gap-1.5 rounded-sm border-0 bg-transparent px-2 font-ui text-[13px] font-medium text-text cursor-pointer hover:bg-selected focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ct-focus-ring-color)]';
@@ -81,17 +104,20 @@ const btn =
       </button>
       <div class="my-1 h-px bg-border" role="separator" />
       <button
+        v-for="row in drafts"
+        :key="row.id"
         type="button"
         role="menuitemradio"
         tabindex="-1"
-        class="tb-menu-item tb-menu-item--on"
+        class="tb-menu-item"
+        :class="{ 'tb-menu-item--on': row.id === currentId }"
         data-test="draft-item"
-        :data-draft="label"
-        aria-checked="true"
-        aria-current="true"
-        @click="close()"
+        :data-draft-id="row.id"
+        :aria-checked="row.id === currentId ? 'true' : 'false'"
+        :aria-current="row.id === currentId ? 'true' : undefined"
+        @click="pickDraft(row.id)"
       >
-        {{ label }}
+        {{ draftMenuLabel(row) }}
       </button>
     </div>
   </div>

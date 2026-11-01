@@ -45,4 +45,5 @@ export function openingTitleAfterImport(manuscriptTitle: string, fileName: strin
 export type OpeningRetry =
   | { kind: 'reopen-latest'; title: string }
   | { kind: 'open-manuscript'; id: string; title: string }
+  | { kind: 'create-blank'; title: string }
   | { kind: 'import'; name: string; bytes: Uint8Array };

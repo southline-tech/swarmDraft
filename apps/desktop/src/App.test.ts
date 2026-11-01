@@ -1061,6 +1061,7 @@ vi.mock('./backend', async (orig) => ({
   persistImport: vi.fn(async () => storedFixture()),
   openLatestManuscript: vi.fn(async () => null),
   listManuscripts: vi.fn(async () => []),
+  createBlankManuscript: vi.fn(async () => null),
   loadManuscript: vi.fn(async () => null),
   saveSectionUpdate: vi.fn(async () => {}),
   saveOutline: vi.fn(async () => {}),

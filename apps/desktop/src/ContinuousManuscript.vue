@@ -69,6 +69,9 @@ const props = defineProps<{
   decisionRecordsBySection?: Readonly<Record<string, DecisionRecord[]>>;
   manuscriptId?: string;
   draftLabel?: string;
+  /** Stored drafts for the toolbar picker (#243). */
+  draftRows?: { id: string; title: string }[];
+  currentDraftId?: string;
 }>();
 
 const commentRows = shallowRef<readonly CommentRow[]>([]);
@@ -117,6 +120,8 @@ const emit = defineEmits<{
   'open-agents': [];
   'draft-new': [];
   'draft-import': [];
+  'draft-select': [id: string];
+  'draft-menu-open': [];
 }>();
 
 const suggestionsBySection = shallowRef(new Map<string, SuggestionItem[]>());
@@ -460,6 +465,8 @@ onBeforeUnmount(() => {
             :decision-records="decisionRecordsBySection?.[sec.id] ?? []"
             :manuscript-id="manuscriptId"
             :draft-label="draftLabel"
+            :draft-rows="sec.id === selectedId ? draftRows : undefined"
+            :current-draft-id="sec.id === selectedId ? currentDraftId : undefined"
             @update:author-filter="authorFilter = $event"
             @reload="emit('reload')"
             @toggle-navigator="emit('toggle-navigator')"
@@ -467,6 +474,8 @@ onBeforeUnmount(() => {
             @open-agents="emit('open-agents')"
             @draft-new="emit('draft-new')"
             @draft-import="emit('draft-import')"
+            @draft-select="emit('draft-select', $event)"
+            @draft-menu-open="emit('draft-menu-open')"
             @decisions="(records) => emit('decisions', sec.id, records)"
             @focus-mode="emit('focus-mode', $event)"
             @load-error="(msg) => sec.id === selectedId && emit('load-error', msg)"

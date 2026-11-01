@@ -203,6 +203,9 @@ const props = defineProps<{
   manuscriptId?: string;
   /** Toolbar draft picker label (#245). */
   draftLabel?: string;
+  /** Stored drafts for the toolbar picker (#243). */
+  draftRows?: { id: string; title: string }[];
+  currentDraftId?: string;
   /** Parent-hosted review column (outside the scroll area). */
   reviewTarget?: string;
   /** Parent-hosted status bar (outside the scroll area). */
@@ -247,6 +250,8 @@ const emit = defineEmits<{
   'open-agents': [];
   'draft-new': [];
   'draft-import': [];
+  'draft-select': [id: string];
+  'draft-menu-open': [];
   /** Words before the caret in this section doc (lead editor → parent book page estimate). */
   'caret-words': [count: number];
   /** Writer placed the caret (click or key); scroll-based page estimate stops (#216). */
@@ -1530,6 +1535,8 @@ onBeforeUnmount(() => {
           "
           :find-enabled="true"
           :draft-label="props.draftLabel ?? 'Untitled draft'"
+          :current-draft-id="props.currentDraftId"
+          :draft-rows="props.draftRows"
           :manuscript-id="props.manuscriptId"
           :book-title="props.chapterTitle"
           :tracking="tracking"
@@ -1540,6 +1547,8 @@ onBeforeUnmount(() => {
           @open-agents="emit('open-agents')"
           @draft-new="emit('draft-new')"
           @draft-import="emit('draft-import')"
+          @draft-select="emit('draft-select', $event)"
+          @draft-menu-open="emit('draft-menu-open')"
           @find="findOpen = true"
         >
           <template #menu>
