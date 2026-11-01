@@ -301,6 +301,13 @@ function activateChangeRow(key: string, e: Event) {
 
 const commentDrafts = ref<Record<string, string>>({});
 
+function onCommentReply(threadId: string, body: string) {
+  const next = { ...commentDrafts.value };
+  delete next[threadId];
+  commentDrafts.value = next;
+  emit('comment-reply', threadId, body);
+}
+
 onMounted(() => {
   if (props.follow && props.activeScrollKey) scrollListToActive(props.activeScrollKey);
 });
@@ -506,7 +513,7 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
       ref="listEl"
       class="cards-scroll"
       role="listbox"
-      aria-label="Tracked changes"
+      aria-label="Review changes and comments"
       data-test="review-list"
       @wheel="pauseFollowFromUser"
       @scroll="onListScroll"
@@ -536,7 +543,7 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
               @activate="activateChangeRow"
               @decide-one="(k, d) => emit('decide-one', k, d)"
               @dismiss-one="(k) => emit('dismiss-one', k)"
-              @comment-reply="(id, body) => emit('comment-reply', id, body)"
+              @comment-reply="onCommentReply"
               @comment-resolve="(id, r) => emit('comment-resolve', id, r)"
               @update:draft="(id, v) => (commentDrafts[id] = v)"
             />
@@ -557,7 +564,7 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
           @activate="activateChangeRow"
           @decide-one="(k, d) => emit('decide-one', k, d)"
           @dismiss-one="(k) => emit('dismiss-one', k)"
-          @comment-reply="(id, body) => emit('comment-reply', id, body)"
+          @comment-reply="onCommentReply"
           @comment-resolve="(id, r) => emit('comment-resolve', id, r)"
           @update:draft="(id, v) => (commentDrafts[id] = v)"
         />

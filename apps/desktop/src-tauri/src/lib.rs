@@ -7,6 +7,7 @@
 //! - `migrate`: first-run copy of the pre-rename data folders (#43).
 //! - `mcp`: in-app MCP server bound to 127.0.0.1 with per-agent bearer tokens (RAD-205/209/210).
 
+pub mod agent_access;
 pub mod agents;
 pub mod anchor;
 pub mod backup;
@@ -140,12 +141,84 @@ fn approve_pairing(
     app: tauri::AppHandle,
     pairing_id: String,
     scopes: Option<Vec<String>>,
+    context_manuscript_id: Option<String>,
 ) -> Result<agents::Agent, String> {
     let (agent, _token) = store
-        .approve_pairing(&pairing_id, scopes.as_deref())
+        .approve_pairing(
+            &pairing_id,
+            scopes.as_deref(),
+            context_manuscript_id.as_deref(),
+        )
         .map_err(err)?;
     let _ = app.emit("agents-changed", ());
     Ok(agent)
+}
+
+#[tauri::command]
+fn agents_draft_access_list(
+    store: tauri::State<'_, storage::Store>,
+) -> Result<Vec<agent_access::AgentDraftAccess>, String> {
+    store.list_agents_draft_access().map_err(err)
+}
+
+#[tauri::command]
+fn agent_set_draft_access_mode(
+    store: tauri::State<'_, storage::Store>,
+    agent_id: String,
+    mode: String,
+) -> Result<(), String> {
+    store
+        .set_agent_manuscript_access_mode(&agent_id, &mode)
+        .map_err(err)
+}
+
+#[tauri::command]
+fn agent_grant_draft(
+    store: tauri::State<'_, storage::Store>,
+    agent_id: String,
+    manuscript_id: String,
+) -> Result<(), String> {
+    store
+        .grant_agent_manuscript(&agent_id, &manuscript_id)
+        .map_err(err)
+}
+
+#[tauri::command]
+fn agent_revoke_draft(
+    store: tauri::State<'_, storage::Store>,
+    agent_id: String,
+    manuscript_id: String,
+) -> Result<(), String> {
+    store
+        .revoke_agent_manuscript(&agent_id, &manuscript_id)
+        .map_err(err)
+}
+
+#[tauri::command]
+fn agents_bulk_grant_current_draft(
+    store: tauri::State<'_, storage::Store>,
+    agent_ids: Vec<String>,
+    manuscript_id: String,
+) -> Result<(), String> {
+    store
+        .bulk_grant_manuscript(&agent_ids, &manuscript_id)
+        .map_err(err)
+}
+
+#[tauri::command]
+fn agents_bulk_grant_all_drafts(
+    store: tauri::State<'_, storage::Store>,
+    agent_ids: Vec<String>,
+) -> Result<(), String> {
+    store.bulk_grant_all_manuscripts(&agent_ids).map_err(err)
+}
+
+#[tauri::command]
+fn agents_bulk_revoke_all_drafts(
+    store: tauri::State<'_, storage::Store>,
+    agent_ids: Vec<String>,
+) -> Result<(), String> {
+    store.bulk_revoke_all_draft_access(&agent_ids).map_err(err)
 }
 
 #[tauri::command]
@@ -610,6 +683,7 @@ struct ReviewCommentRow {
     author_id: String,
     author_name: String,
     created_at: String,
+    resolved_at: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -629,6 +703,7 @@ fn review_comment_row(c: manuscripts::Comment) -> ReviewCommentRow {
         author_id: c.author.id,
         author_name: c.author.name,
         created_at: c.created_at,
+        resolved_at: c.resolved_at,
     }
 }
 
@@ -674,7 +749,7 @@ async fn section_review_meta(
     section_id: String,
 ) -> Result<SectionReviewMeta, String> {
     blocking(&store, move |s| {
-        let comments = s.open_comments(&section_id)?;
+        let comments = s.section_review_comments(&section_id)?;
         let suggestions = s.open_suggestions(&section_id)?;
         let mut author_saved_names = std::collections::HashMap::new();
         for sug in &suggestions {
@@ -719,6 +794,45 @@ async fn manuscript_review_decisions(
         Ok(ManuscriptReviewDecisions {
             by_section: s.review_decisions_for_manuscript(&manuscript_id)?,
         })
+    })
+    .await
+}
+
+/// Human reply on an existing comment thread (#255).
+#[tauri::command]
+async fn section_comment_reply(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+    section_id: String,
+    thread_id: String,
+    body: String,
+    author_name: String,
+    author_id: String,
+) -> Result<ReviewCommentRow, String> {
+    blocking(&store, move |s| {
+        Ok(review_comment_row(s.human_comment_reply(
+            &manuscript_id,
+            &section_id,
+            &thread_id,
+            &body,
+            &author_name,
+            &author_id,
+        )?))
+    })
+    .await
+}
+
+/// Resolve or reopen a comment thread (#255).
+#[tauri::command]
+async fn section_comment_resolve(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+    section_id: String,
+    thread_id: String,
+    resolved: bool,
+) -> Result<(), String> {
+    blocking(&store, move |s| {
+        s.set_comment_thread_resolved(&manuscript_id, &section_id, &thread_id, resolved)
     })
     .await
 }
@@ -887,6 +1001,13 @@ pub fn run() {
             list_pending_pairings,
             approve_pairing,
             deny_pairing,
+            agents_draft_access_list,
+            agent_set_draft_access_mode,
+            agent_grant_draft,
+            agent_revoke_draft,
+            agents_bulk_grant_current_draft,
+            agents_bulk_grant_all_drafts,
+            agents_bulk_revoke_all_drafts,
             create_backup,
             recovery_notices,
             dismiss_recovery_notices,
@@ -905,6 +1026,8 @@ pub fn run() {
             notes_load,
             notes_apply_update,
             section_review_meta,
+            section_comment_reply,
+            section_comment_resolve,
             manuscript_review_decisions,
             section_save_review_decisions,
             section_mark_suggestions_outdated,

@@ -6,6 +6,7 @@ import { isTauri } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { errorLine, rawErrorText } from './errors/map-error';
+import type { Agent } from './backend';
 import { pairingApi, type PairingApi, type PairingSummary } from './pairing-client';
 import { pairingAccessChips } from './pairing-copy';
 import { trapTab } from './settings/focus-trap';
@@ -14,11 +15,17 @@ import './settings/settings.css';
 const props = withDefaults(
   defineProps<{
     api?: PairingApi;
+    /** Active draft when pairing is approved (#244); grants that draft only. */
+    contextManuscriptId?: string | null;
     /** Test hook: subscribe to pairing-requested instead of Tauri events. */
     subscribePairingRequested?: (cb: (pairingId: string) => void) => () => void;
   }>(),
-  { api: () => pairingApi, subscribePairingRequested: undefined },
+  { api: () => pairingApi, contextManuscriptId: null, subscribePairingRequested: undefined },
 );
+
+const emit = defineEmits<{
+  approved: [agent: Agent];
+}>();
 
 const queue = ref<PairingSummary[]>([]);
 const busy = ref(false);
@@ -96,7 +103,8 @@ async function onAllowed() {
   busy.value = true;
   inlineError.value = '';
   try {
-    await props.api.approve(cur.id, cur.requestedScopes);
+    const agent = await props.api.approve(cur.id, cur.requestedScopes, props.contextManuscriptId);
+    emit('approved', agent);
     await afterResolved();
   } catch (e) {
     console.error('Approve pairing failed', e);

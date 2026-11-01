@@ -108,6 +108,7 @@ pub struct Comment {
     pub thread_id: Option<String>,
     pub author: Author,
     pub created_at: String,
+    pub resolved_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -228,10 +229,11 @@ fn row_comment(r: &rusqlite::Row) -> rusqlite::Result<Comment> {
             name: r.get(8)?,
         },
         created_at: r.get(9)?,
+        resolved_at: r.get(10)?,
     })
 }
 const COMMENT_COLS: &str =
-    "id, section_id, block_id, quote, body, thread_id, author_kind, author_id, author_name, created_at";
+    "id, section_id, block_id, quote, body, thread_id, author_kind, author_id, author_name, created_at, resolved_at";
 
 pub(crate) fn row_suggestion(r: &rusqlite::Row<'_>) -> rusqlite::Result<Suggestion> {
     Ok(Suggestion {
@@ -863,6 +865,115 @@ impl Store {
         })
     }
 
+    /// Every comment row in a section for the review sidebar (#255), including resolved threads.
+    pub fn section_review_comments(&self, section_id: &str) -> Result<Vec<Comment>, StorageError> {
+        self.with_conn(|c| {
+            let mut st = c.prepare(&format!(
+                "SELECT {COMMENT_COLS} FROM comments WHERE section_id = ?1
+                 ORDER BY created_at, id"
+            ))?;
+            let rows = st
+                .query_map([section_id], row_comment)?
+                .collect::<Result<_, _>>()?;
+            Ok(rows)
+        })
+    }
+
+    pub fn human_comment_reply(
+        &self,
+        manuscript_id: &str,
+        section_id: &str,
+        thread_id: &str,
+        body: &str,
+        author_name: &str,
+        author_id: &str,
+    ) -> Result<Comment, StorageError> {
+        let body = body.trim();
+        if body.is_empty() {
+            return Err(StorageError::Invalid(
+                "comment body must not be empty".into(),
+            ));
+        }
+        self.get_section(manuscript_id, section_id)?;
+        let anchor = self
+            .with_conn(|c| {
+                c.query_row(
+                    &format!(
+                        "SELECT {COMMENT_COLS} FROM comments
+                     WHERE section_id = ?1 AND manuscript_id = ?2
+                       AND (thread_id = ?3 OR (thread_id IS NULL AND id = ?3))
+                     ORDER BY created_at, id LIMIT 1"
+                    ),
+                    params![section_id, manuscript_id, thread_id],
+                    row_comment,
+                )
+                .optional()
+                .map_err(StorageError::from)
+            })?
+            .ok_or_else(|| StorageError::NotFound(format!("comment thread {thread_id}")))?;
+        let c = Comment {
+            id: format!("c{}", new_id()),
+            section_id: section_id.to_string(),
+            block_id: anchor.block_id.clone(),
+            quote: anchor.quote.clone(),
+            body: body.to_string(),
+            thread_id: Some(thread_id.to_string()),
+            author: Author {
+                kind: "human".into(),
+                id: author_id.to_string(),
+                name: author_name.to_string(),
+            },
+            created_at: self.now()?,
+            resolved_at: None,
+        };
+        self.insert_comment(manuscript_id, &c)?;
+        // Human reply reopens a resolved thread for MCP/open_comments (#255).
+        self.set_comment_thread_resolved(manuscript_id, section_id, thread_id, false)?;
+        Ok(c)
+    }
+
+    pub fn set_comment_thread_resolved(
+        &self,
+        manuscript_id: &str,
+        section_id: &str,
+        thread_id: &str,
+        resolved: bool,
+    ) -> Result<(), StorageError> {
+        self.get_section(manuscript_id, section_id)?;
+        self.with_conn(|c| {
+            let n: i64 = c.query_row(
+                "SELECT COUNT(*) FROM comments
+                 WHERE manuscript_id = ?1 AND section_id = ?2
+                   AND (thread_id = ?3 OR (thread_id IS NULL AND id = ?3))",
+                params![manuscript_id, section_id, thread_id],
+                |r| r.get(0),
+            )?;
+            if n == 0 {
+                return Err(StorageError::NotFound(format!(
+                    "comment thread {thread_id}"
+                )));
+            }
+            if resolved {
+                c.execute(
+                    &format!(
+                        "UPDATE comments SET resolved_at = {NOW}
+                         WHERE manuscript_id = ?1 AND section_id = ?2
+                           AND (thread_id = ?3 OR (thread_id IS NULL AND id = ?3))"
+                    ),
+                    params![manuscript_id, section_id, thread_id],
+                )?;
+            } else {
+                c.execute(
+                    "UPDATE comments SET resolved_at = NULL
+                     WHERE manuscript_id = ?1 AND section_id = ?2
+                       AND (thread_id = ?3 OR (thread_id IS NULL AND id = ?3))",
+                    params![manuscript_id, section_id, thread_id],
+                )?;
+            }
+            Ok(())
+        })
+    }
+
     /// Every unresolved comment in a manuscript, for building a .docx copy (#74).
     pub fn open_comments_for_manuscript(
         &self,
@@ -1484,6 +1595,7 @@ mod tests {
                 thread_id: None,
                 author: author.clone(),
                 created_at: "2026-01-01T00:00:00Z".into(),
+                resolved_at: None,
             },
         )
         .unwrap();
@@ -1498,6 +1610,7 @@ mod tests {
                 thread_id: Some("c1".into()),
                 author,
                 created_at: "2026-01-02T00:00:00Z".into(),
+                resolved_at: None,
             },
         )
         .unwrap();
@@ -1505,6 +1618,59 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].body, "First");
         assert_eq!(rows[1].thread_id.as_deref(), Some("c1"));
+    }
+
+    #[test]
+    fn human_reply_and_resolve_persist_in_section_review() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = Store::open(tmp.path()).unwrap();
+        let m = s.create_manuscript("Book").unwrap();
+        let sec = s.import_section_json(
+            &m.id,
+            "chapter",
+            "One",
+            &json!({"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Hi."}]}]}),
+        ).unwrap();
+        s.insert_comment(
+            &m.id,
+            &Comment {
+                id: "thread1".into(),
+                section_id: sec.id.clone(),
+                block_id: None,
+                quote: Some("Hi.".into()),
+                body: "Root".into(),
+                thread_id: None,
+                author: Author {
+                    kind: "agent".into(),
+                    id: "a1".into(),
+                    name: "Bot".into(),
+                },
+                created_at: "2026-01-01T00:00:00Z".into(),
+                resolved_at: None,
+            },
+        )
+        .unwrap();
+        let reply = s
+            .human_comment_reply(&m.id, &sec.id, "thread1", "  Thanks  ", "Mara", "local")
+            .unwrap();
+        assert_eq!(reply.body, "Thanks");
+        assert_eq!(reply.thread_id.as_deref(), Some("thread1"));
+        let rows = s.section_review_comments(&sec.id).unwrap();
+        assert_eq!(rows.len(), 2);
+        s.set_comment_thread_resolved(&m.id, &sec.id, "thread1", true)
+            .unwrap();
+        assert!(s
+            .section_review_comments(&sec.id)
+            .unwrap()
+            .iter()
+            .all(|r| r.resolved_at.is_some()));
+        assert!(s.open_comments(&sec.id).unwrap().is_empty());
+        s.human_comment_reply(&m.id, &sec.id, "thread1", "Reopen", "Mara", "local")
+            .unwrap();
+        assert_eq!(s.open_comments(&sec.id).unwrap().len(), 3);
+        s.set_comment_thread_resolved(&m.id, &sec.id, "thread1", false)
+            .unwrap();
+        assert_eq!(s.open_comments(&sec.id).unwrap().len(), 3);
     }
 
     #[test]

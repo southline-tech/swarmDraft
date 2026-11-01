@@ -23,6 +23,8 @@ import {
   listenOpeningProgress,
   manuscriptReviewDecisions,
   saveSectionReviewDecisions,
+  sectionCommentReply,
+  sectionCommentResolve,
   type AppInfo,
   type OpeningProgressEvent,
   type RecoveryNotice,
@@ -31,7 +33,8 @@ import {
 } from './backend';
 import SettingsScreen from './settings/SettingsScreen.vue';
 import AgentsWindow from './agents/AgentsWindow.vue';
-import { markAuthorLabel, refreshAgents, reloadOnFocus } from './agent-names';
+import { agentDirectory, markAuthorLabel, refreshAgents, reloadOnFocus } from './agent-names';
+import type { Agent } from './backend';
 import ContinuousManuscript from './ContinuousManuscript.vue';
 import SectionNav from './SectionNav.vue';
 import OutlineRail from './desk/OutlineRail.vue';
@@ -275,6 +278,8 @@ const saveCopyOfOpen = () =>
  * editor was read-only after a content error was ever accepted, so there is nothing else to lose.
  */
 const reloads = ref(0);
+/** Refetch review comment rows without remounting section editors (#255). */
+const commentMetaVersion = ref(0);
 /** Persisted accept/reject records per section (#51). */
 const decisionRecordsBySection = shallowRef<Record<string, DecisionRecord[]>>({});
 let decisionLoadGeneration = 0;
@@ -308,6 +313,27 @@ function onSectionDecisions(sectionId: string, records: DecisionRecord[]) {
     console.error('Review decision save failed; next change will retry', err);
     saveFailure.value = saveFailed(saveFailure.value, err);
   });
+}
+async function onCommentReply(sectionId: string, threadId: string, body: string) {
+  if (!session.value) return;
+  const profile = loadProfile();
+  try {
+    await sectionCommentReply(session.value.id, sectionId, threadId, body, profile.name, 'local');
+    commentMetaVersion.value++;
+  } catch (err) {
+    console.error('Comment reply save failed', err);
+    saveFailure.value = saveFailed(saveFailure.value, err);
+  }
+}
+async function onCommentResolve(sectionId: string, threadId: string, resolved: boolean) {
+  if (!session.value) return;
+  try {
+    await sectionCommentResolve(session.value.id, sectionId, threadId, resolved);
+    commentMetaVersion.value++;
+  } catch (err) {
+    console.error('Comment resolve save failed', err);
+    saveFailure.value = saveFailed(saveFailure.value, err);
+  }
 }
 /** The open section's load error, shown in a live region that stays mounted (#79). */
 const editorLoadError = ref('');
@@ -401,6 +427,20 @@ async function getStarted() {
 const choosingBook = ref(false);
 const settingsOpen = ref(false);
 const agentsOpen = ref(false);
+const newlyPairedAgentIds = ref<string[]>([]);
+const agentsBatchBanner = computed(() => newlyPairedAgentIds.value.length >= 5);
+const agentsForWindow = computed(() => {
+  const dir = agentDirectory.value;
+  if (!dir) return [] as Agent[];
+  return [...dir.values()];
+});
+function onPairingApproved(agent: Agent) {
+  newlyPairedAgentIds.value = [...newlyPairedAgentIds.value, agent.id].slice(-5);
+  void refreshAgents();
+}
+function dismissAgentsBatch() {
+  newlyPairedAgentIds.value = [];
+}
 const draftPickerLabel = computed(() => session.value?.title?.trim() || 'Untitled draft');
 function openToolbarSettings() {
   settingsFocusReturn.value =
@@ -410,6 +450,8 @@ function openToolbarSettings() {
 function openToolbarAgents() {
   agentsFocusReturn.value =
     document.querySelector<HTMLElement>('[data-test="toolbar-agents"]') ?? null;
+  void refreshAgents();
+  void refreshDraftRows();
   agentsOpen.value = true;
 }
 function closeAgentsWindow() {
@@ -1087,7 +1129,11 @@ defineExpose({ open, closeSession });
   <ShellsPreview v-else-if="preview" class="shell" :initial="preview" @close="preview = null" />
   <main v-else class="shell" :class="{ 'shell--focus-mode': focusMode }">
     <div class="shell__main">
-      <PairingPrompt v-if="info && isTauri()" />
+      <PairingPrompt
+        v-if="info && isTauri()"
+        :context-manuscript-id="session?.id ?? null"
+        @approved="onPairingApproved"
+      />
       <div v-show="!focusMode" class="shell__chrome" data-test="shell-chrome">
         <header class="topbar">
           <details
@@ -1278,8 +1324,15 @@ defineExpose({ open, closeSession });
       />
       <AgentsWindow
         v-if="agentsOpen"
+        :batch-banner="agentsBatchBanner"
+        :initial-selected-agent-ids="newlyPairedAgentIds"
+        :agents="agentsForWindow"
+        :manuscripts="draftRows"
+        :current-manuscript-id="session?.id ?? null"
+        :current-draft-title="draftPickerLabel"
         @close="closeAgentsWindow"
         @open-settings="openAgentsSettingsFromWindow"
+        @dismiss-batch="dismissAgentsBatch"
       />
       <p v-if="askBotRequested" class="visually-hidden" data-test="ask-bot-requested" role="status">
         Ask bot requested
@@ -1461,11 +1514,14 @@ defineExpose({ open, closeSession });
               :draft-label="draftPickerLabel"
               :draft-rows="draftRows"
               :current-draft-id="session.id"
+              :comment-meta-version="commentMetaVersion"
               @update:selected-id="selectedId = $event"
               @load-error="editorLoadError = $event"
               @reload="reloadSection"
               @toggle-navigator="outlineAuto.toggleByHand()"
               @decisions="onSectionDecisions"
+              @comment-reply="onCommentReply"
+              @comment-resolve="onCommentResolve"
               @layout="onEditorLayout"
               @focus-mode="focusMode = $event"
               @ask-bot="onAskBotFromEditor"

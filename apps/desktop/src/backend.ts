@@ -48,6 +48,15 @@ export interface NewToken {
   info: TokenInfo;
 }
 
+/** Per-agent draft access (#244). */
+export type AgentDraftAccessMode = 'selected' | 'all';
+
+export interface AgentDraftAccess {
+  agentId: string;
+  mode: AgentDraftAccessMode;
+  manuscriptIds: string[];
+}
+
 export const agentsApi = {
   /** Active agents plus revoked agents that still have open comments or suggestions (#192). */
   list: () => invoke<Agent[]>('agents_list'),
@@ -61,6 +70,19 @@ export const agentsApi = {
   createToken: (agentId: string, scopes?: AgentScope[]) =>
     invoke<NewToken>('agent_token_create', { agentId, scopes }),
   revokeToken: (tokenId: string) => invoke<void>('agent_token_revoke', { tokenId }),
+  draftAccessList: () => invoke<AgentDraftAccess[]>('agents_draft_access_list'),
+  setDraftAccessMode: (agentId: string, mode: AgentDraftAccessMode) =>
+    invoke<void>('agent_set_draft_access_mode', { agentId, mode }),
+  grantDraft: (agentId: string, manuscriptId: string) =>
+    invoke<void>('agent_grant_draft', { agentId, manuscriptId }),
+  revokeDraft: (agentId: string, manuscriptId: string) =>
+    invoke<void>('agent_revoke_draft', { agentId, manuscriptId }),
+  bulkGrantCurrentDraft: (agentIds: string[], manuscriptId: string) =>
+    invoke<void>('agents_bulk_grant_current_draft', { agentIds, manuscriptId }),
+  bulkGrantAllDrafts: (agentIds: string[]) =>
+    invoke<void>('agents_bulk_grant_all_drafts', { agentIds }),
+  bulkRevokeAllDrafts: (agentIds: string[]) =>
+    invoke<void>('agents_bulk_revoke_all_drafts', { agentIds }),
 };
 export type AgentsApi = typeof agentsApi;
 
@@ -357,6 +379,39 @@ export async function manuscriptReviewDecisions(
     out[sectionId] = parseDecisionRecords(rows);
   }
   return out;
+}
+
+/** Persist a human reply on a comment thread (#255). */
+export async function sectionCommentReply(
+  manuscriptId: string,
+  sectionId: string,
+  threadId: string,
+  body: string,
+  authorName: string,
+  authorId: string,
+): Promise<import('@swarmdraft/editor').CommentRow> {
+  if (!isTauri()) {
+    return Promise.reject(new Error('Comment reply requires the desktop app'));
+  }
+  return invoke('section_comment_reply', {
+    manuscriptId,
+    sectionId,
+    threadId,
+    body,
+    authorName,
+    authorId,
+  });
+}
+
+/** Resolve or reopen a comment thread (#255). */
+export async function sectionCommentResolve(
+  manuscriptId: string,
+  sectionId: string,
+  threadId: string,
+  resolved: boolean,
+): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('section_comment_resolve', { manuscriptId, sectionId, threadId, resolved });
 }
 
 export async function saveSectionReviewDecisions(

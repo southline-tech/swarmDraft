@@ -107,7 +107,7 @@ async fn pairing_request_poll_and_approve_over_mcp() {
     .await;
     assert_eq!(pending["structuredContent"]["status"], "pending");
 
-    s.store.approve_pairing(&pairing_id, None).unwrap();
+    s.store.approve_pairing(&pairing_id, None, None).unwrap();
 
     let ok = tool_call(
         &s.url,

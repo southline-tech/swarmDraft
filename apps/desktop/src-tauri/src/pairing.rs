@@ -320,6 +320,7 @@ impl Store {
         &self,
         pairing_id: &str,
         scopes: Option<&[String]>,
+        grant_manuscript_id: Option<&str>,
     ) -> Result<(Agent, NewToken), StorageError> {
         let mut approved = normalize_scopes(scopes)?;
         self.with_conn_mut_storage(|c| {
@@ -354,6 +355,9 @@ impl Store {
                 }
             }
             let agent = insert_agent(&tx, &name, &color)?;
+            if let Some(mid) = grant_manuscript_id {
+                Store::grant_agent_manuscript_on_conn(&tx, &agent.id, mid)?;
+            }
             let token = insert_token(&tx, &agent.id, Some(&approved))?;
             let n = tx.execute(
                 &format!(
@@ -424,12 +428,23 @@ mod tests {
     }
 
     #[test]
+    fn approve_grants_active_manuscript_when_requested() {
+        let (_t, s) = store();
+        let m = s.create_manuscript("Active draft").unwrap();
+        let r = s.request_pairing("Scoped Bot", None, None).unwrap();
+        let (agent, _) = s.approve_pairing(&r.pairing_id, None, Some(&m.id)).unwrap();
+        assert!(s.agent_can_access_manuscript(&agent.id, &m.id).unwrap());
+        let other = s.create_manuscript("Other").unwrap();
+        assert!(!s.agent_can_access_manuscript(&agent.id, &other.id).unwrap());
+    }
+
+    #[test]
     fn approve_gives_token_exactly_once() {
         let (_t, s) = store();
         let r = s
             .request_pairing(DEFAULT_AGENT_NAME, Some("#112233"), None)
             .unwrap();
-        s.approve_pairing(&r.pairing_id, None).unwrap();
+        s.approve_pairing(&r.pairing_id, None, None).unwrap();
         let p1 = s.poll_pairing(&r.pairing_id, &r.pairing_secret).unwrap();
         assert_eq!(p1.status, "approved");
         let token = p1.token.expect("token");
@@ -444,7 +459,7 @@ mod tests {
     fn reserved_name_rejected_at_approve() {
         let (_t, s) = store();
         let r = s.request_pairing("You", None, None).unwrap();
-        assert!(s.approve_pairing(&r.pairing_id, None).is_err());
+        assert!(s.approve_pairing(&r.pairing_id, None, None).is_err());
     }
 
     #[test]
@@ -506,7 +521,7 @@ mod tests {
         }
         assert_eq!(pending.len(), 5);
         for r in &pending {
-            let (agent, token) = s.approve_pairing(&r.pairing_id, None).unwrap();
+            let (agent, token) = s.approve_pairing(&r.pairing_id, None, None).unwrap();
             assert!(token.token.starts_with("cat_"));
             assert!(agent.revoked_at.is_none());
         }
@@ -525,7 +540,7 @@ mod tests {
         let (_t, s) = store();
         s.set_user_display_name("Writer").unwrap();
         let r = s.request_pairing("Writer", None, None).unwrap();
-        assert!(s.approve_pairing(&r.pairing_id, None).is_err());
+        assert!(s.approve_pairing(&r.pairing_id, None, None).is_err());
         assert_eq!(s.list_agents().unwrap().len(), 0);
         assert_eq!(
             s.poll_pairing(&r.pairing_id, &r.pairing_secret)
@@ -543,8 +558,8 @@ mod tests {
         let id2 = r.pairing_id;
         let s1 = s.clone();
         let s2 = s.clone();
-        let h1 = std::thread::spawn(move || s1.approve_pairing(&id1, None));
-        let h2 = std::thread::spawn(move || s2.approve_pairing(&id2, None));
+        let h1 = std::thread::spawn(move || s1.approve_pairing(&id1, None, None));
+        let h2 = std::thread::spawn(move || s2.approve_pairing(&id2, None, None));
         let r1 = h1.join().unwrap();
         let r2 = h2.join().unwrap();
         assert_ne!(r1.is_ok(), r2.is_ok());
