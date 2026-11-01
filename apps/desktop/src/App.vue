@@ -472,6 +472,14 @@ async function onToolbarDraftNew() {
     open(next);
     showOpenToast(next);
     await refreshDraftRows();
+    const titleSec =
+      next.outline.value.find((s) => s.kind === 'front_matter' && s.title === 'Title page') ??
+      next.outline.value[0];
+    if (titleSec) {
+      selectedId.value = titleSec.id;
+      await nextTick();
+      editorPane.value?.focusSection(titleSec.id);
+    }
   } catch (e) {
     console.error('New blank draft failed', e);
     failOpening(e, 'open');
