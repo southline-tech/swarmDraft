@@ -927,6 +927,8 @@ impl Store {
             resolved_at: None,
         };
         self.insert_comment(manuscript_id, &c)?;
+        // Human reply reopens a resolved thread for MCP/open_comments (#255).
+        self.set_comment_thread_resolved(manuscript_id, section_id, thread_id, false)?;
         Ok(c)
     }
 
@@ -1663,9 +1665,12 @@ mod tests {
             .iter()
             .all(|r| r.resolved_at.is_some()));
         assert!(s.open_comments(&sec.id).unwrap().is_empty());
+        s.human_comment_reply(&m.id, &sec.id, "thread1", "Reopen", "Mara", "local")
+            .unwrap();
+        assert_eq!(s.open_comments(&sec.id).unwrap().len(), 3);
         s.set_comment_thread_resolved(&m.id, &sec.id, "thread1", false)
             .unwrap();
-        assert_eq!(s.open_comments(&sec.id).unwrap().len(), 2);
+        assert_eq!(s.open_comments(&sec.id).unwrap().len(), 3);
     }
 
     #[test]

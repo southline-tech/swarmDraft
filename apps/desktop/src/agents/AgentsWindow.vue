@@ -9,8 +9,7 @@ import {
   type AgentDraftAccess,
   type AgentDraftAccessMode,
   type StoredManuscriptRow,
-} from '../backend';
-import { trapTab } from '../settings/focus-trap';
+import { errorLine } from '../errors/map-error';
 
 const props = defineProps<{
   batchBanner?: boolean;
@@ -80,6 +79,7 @@ async function setMode(agentId: string, mode: AgentDraftAccessMode) {
     await reloadAccess();
   } catch (e) {
     console.error('Set draft access mode failed', e);
+    loadError.value = errorLine(e, 'save');
   } finally {
     busy.value = false;
   }
@@ -94,6 +94,7 @@ async function toggleDraft(agentId: string, manuscriptId: string, on: boolean) {
     await reloadAccess();
   } catch (e) {
     console.error('Toggle draft access failed', e);
+    loadError.value = errorLine(e, 'save');
   } finally {
     busy.value = false;
   }
@@ -109,6 +110,7 @@ async function bulkGrantCurrent() {
     emit('dismiss-batch');
   } catch (e) {
     console.error('Bulk grant current draft failed', e);
+    loadError.value = errorLine(e, 'save');
   } finally {
     busy.value = false;
   }
@@ -123,6 +125,7 @@ async function bulkGrantAll() {
     emit('dismiss-batch');
   } catch (e) {
     console.error('Bulk grant all drafts failed', e);
+    loadError.value = errorLine(e, 'save');
   } finally {
     busy.value = false;
   }
@@ -136,6 +139,7 @@ async function bulkRevokeAll() {
     await reloadAccess();
   } catch (e) {
     console.error('Bulk revoke all drafts failed', e);
+    loadError.value = errorLine(e, 'save');
   } finally {
     busy.value = false;
   }

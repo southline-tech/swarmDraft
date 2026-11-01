@@ -318,14 +318,7 @@ async function onCommentReply(sectionId: string, threadId: string, body: string)
   if (!session.value) return;
   const profile = loadProfile();
   try {
-    await sectionCommentReply(
-      session.value.id,
-      sectionId,
-      threadId,
-      body,
-      profile.name,
-      'local',
-    );
+    await sectionCommentReply(session.value.id, sectionId, threadId, body, profile.name, 'local');
     commentMetaVersion.value++;
   } catch (err) {
     console.error('Comment reply save failed', err);
@@ -442,7 +435,7 @@ const agentsForWindow = computed(() => {
   return [...dir.values()];
 });
 function onPairingApproved(agent: Agent) {
-  newlyPairedAgentIds.value = [...newlyPairedAgentIds.value, agent.id];
+  newlyPairedAgentIds.value = [...newlyPairedAgentIds.value, agent.id].slice(-5);
   void refreshAgents();
 }
 function dismissAgentsBatch() {
