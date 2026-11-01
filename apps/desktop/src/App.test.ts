@@ -157,6 +157,17 @@ describe('App', () => {
     w.unmount();
   });
 
+  it('shows toolbar Settings gear after import and opens Settings (#245 / #232)', async () => {
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await chooseFile(w);
+    await settle();
+    expect(w.find('[data-test="toolbar-settings"]').exists()).toBe(true);
+    await w.get('[data-test="toolbar-settings"]').trigger('click');
+    expect(w.find('[data-test="settings"]').exists()).toBe(true);
+    w.unmount();
+  });
+
   it('disables the file input while an import is running', async () => {
     const backend = await import('./backend');
     let release!: (v: ReturnType<typeof storedFixture>) => void;
@@ -2069,11 +2080,11 @@ describe('full-width toolbar (#84)', () => {
   it('keeps the toolbar in the row when the outline and review panels are toggled', async () => {
     const { w } = await withManuscript();
     await w.get('[data-test="tb-navigator"]').trigger('click');
-    await w.get('[data-test="tb-review"]').trigger('click');
+    await w.get('[data-test="review-panel-toggle"]').trigger('click');
     await settle();
     expect(toolbarIn(w, '[data-test="toolbar-row"]')).toBe(true);
     await w.get('[data-test="tb-navigator"]').trigger('click');
-    await w.get('[data-test="tb-review"]').trigger('click');
+    await w.get('[data-test="review-panel-toggle"]').trigger('click');
     await settle();
     expect(toolbarIn(w, '[data-test="toolbar-row"]')).toBe(true);
     expect(toolbarIn(w, '[data-test="workspace"]')).toBe(false);
@@ -2142,7 +2153,7 @@ describe('shell layout after import and review burst (#232)', () => {
     expect(notesToggle.isVisible()).toBe(true);
     expect(notesToggle.attributes('aria-pressed')).toBe('false');
     for (let i = 0; i < 80; i++) {
-      await w.get('[data-test="tb-review"]').trigger('click');
+      await w.get('[data-test="review-panel-toggle"]').trigger('click');
     }
     await settle();
     expect(w.find('[data-test="tb-navigator"]').exists()).toBe(true);
@@ -2689,7 +2700,7 @@ describe('App outline auto-collapse on a narrow desk (#92)', () => {
     expect(sidebar().isVisible()).toBe(false);
     expect(w.find('[data-test="tb-navigator"]').attributes('aria-pressed')).toBe('false');
     // Real toggle: the toolbar's review button closes the panel, and the editor reports it.
-    await w.find('[data-test="tb-review"]').trigger('click');
+    await w.find('[data-test="review-panel-toggle"]').trigger('click');
     await settle();
     expect(sidebar().isVisible()).toBe(true);
     w.unmount();
@@ -2950,9 +2961,9 @@ describe('App outline vs margin notes (#98)', () => {
     expect(w.find('[data-test="margin-notes"]').exists()).toBe(false);
     const layouts = ed().emitted('layout')!;
     expect((layouts[layouts.length - 1]![0] as { marginNotes: boolean }).marginNotes).toBe(false);
-    await w.find('[data-test="tb-review"]').trigger('click'); // close the panel
+    await w.find('[data-test="review-panel-toggle"]').trigger('click'); // close the panel
     await settle();
-    await w.find('[data-test="tb-review"]').trigger('click'); // and open it again
+    await w.find('[data-test="review-panel-toggle"]').trigger('click'); // and open it again
     await settle();
     expect(w.find('[data-test="margin-notes"]').exists()).toBe(true);
     w.unmount();

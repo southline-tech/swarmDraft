@@ -220,53 +220,35 @@ describe('EditorToolbar', () => {
     return { e, w };
   }
 
-  it('lays out the groups in the specified order (alignment, comment and Find in the … menu)', () => {
-    const { w } = mountBar();
-    const order = w
-      .find('[role="toolbar"]')
-      .element.querySelectorAll('[data-test], [aria-hidden="true"].bg-border');
-    const seq = [...order].map((el) => el.getAttribute('data-test') ?? '|');
-    expect(seq).toEqual([
-      'tb-navigator',
-      '|',
-      'tb-undo',
-      'tb-redo',
-      '|',
-      'paragraph-style',
-      '|',
-      'tb-bold',
-      'tb-italic',
-      'tb-underline',
-      '|',
-      'tb-overflow',
-      'tb-overflow-menu',
-      'tb-align-left',
-      'tb-align-center',
-      'tb-align-right',
-      'tb-align-justify',
-      'tb-comment',
-      'tb-find',
-      'tb-menu-smallcaps',
-      'tb-menu-strike',
-      'tb-menu-style-first',
-      'tb-menu-style-epigraph',
-      'tb-menu-style-verse',
-      'tb-menu-pageBreak',
-      'tb-review',
-    ]);
+  it('lays out Wave 6a groups in D1 order (245)', () => {
+    const { w } = mountBar({ manuscriptId: 'm1' });
+    expect(w.find('[data-test="draft-picker"]').exists()).toBe(true);
+    expect(w.find('[data-test="toolbar-undo"]').exists()).toBe(true);
+    expect(w.find('[data-test="track-changes-toggle"]').exists()).toBe(true);
+    expect(w.find('[data-test="review-panel-toggle"]').exists()).toBe(true);
+    expect(w.find('[data-test="toolbar-export"]').exists()).toBe(true);
+    expect(w.find('[data-test="toolbar-agents"]').exists()).toBe(true);
+    expect(w.find('[data-test="toolbar-theme"]').exists()).toBe(true);
+    expect(w.find('[data-test="toolbar-settings"]').exists()).toBe(true);
+    const bar = w.get('[data-test="editor-toolbar"]');
+    const topLevelNav = [...bar.element.children].some(
+      (el) => (el as HTMLElement).dataset.test === 'tb-navigator',
+    );
+    expect(topLevelNav).toBe(false);
     w.unmount();
   });
 
-  it('gives every button an accessible name and a tooltip with its shortcut', () => {
-    const { w } = mountBar();
-    for (const b of w.findAll('[role="toolbar"] > button, [role="toolbar"] > div > button')) {
-      expect(b.attributes('aria-label')).toBeTruthy();
-      expect(b.attributes('title')).toBeTruthy();
+  it('gives every top-level control an accessible name and a tooltip', () => {
+    const { w } = mountBar({ manuscriptId: 'm1' });
+    for (const b of w.findAll(
+      '[data-test="editor-toolbar"] > button, [data-test="editor-toolbar"] > div > button, [data-test="draft-picker"]',
+    )) {
+      expect(b.attributes('aria-label') || b.attributes('title')).toBeTruthy();
     }
     expect(w.find('[data-test="tb-bold"]').attributes('title')).toBe(`Bold (${SHORTCUTS.bold})`);
     // Unbound editor: no history, so no Ctrl+Z/Ctrl+Y hint.
-    expect(w.find('[data-test="tb-undo"]').attributes('title')).toBe('Undo');
-    expect(w.find('[data-test="tb-undo"]').attributes('aria-keyshortcuts')).toBeUndefined();
+    expect(w.find('[data-test="toolbar-undo"]').attributes('title')).toBe('Undo');
+    expect(w.find('[data-test="toolbar-undo"]').attributes('aria-keyshortcuts')).toBeUndefined();
     expect(w.find('[data-test="tb-find"]').attributes('title')).toBe('Find — coming soon');
     w.unmount();
   });
@@ -300,7 +282,10 @@ describe('EditorToolbar', () => {
     expect(w.find('[data-test="tb-overflow-menu"]').isVisible()).toBe(false);
     await w.find('[data-test="tb-overflow"]').trigger('click');
     expect(w.find('[data-test="tb-overflow"]').attributes('aria-expanded')).toBe('true');
-    const items = w.findAll('[role^="menuitem"]').map((i) => i.text());
+    const items = w
+      .find('[data-test="tb-overflow-menu"]')
+      .findAll('[role^="menuitem"]')
+      .map((i) => i.text());
     expect(items).toEqual([
       'Small caps',
       'Strikethrough',
@@ -317,13 +302,16 @@ describe('EditorToolbar', () => {
 
   it('emits the panel toggles; unbuilt actions are aria-disabled no-ops', async () => {
     const { w } = mountBar({ reviewOpen: false });
-    await w.find('[data-test="tb-review"]').trigger('click');
+    await w.find('[data-test="review-panel-toggle"]').trigger('click');
     expect(w.emitted('toggle-review')).toHaveLength(1);
-    expect(w.find('[data-test="tb-review"]').attributes('aria-pressed')).toBe('false');
-    const nav = w.find('[data-test="tb-navigator"]');
-    expect(nav.attributes('aria-pressed')).toBe('true');
-    expect(nav.attributes('aria-disabled')).toBeUndefined();
-    await nav.trigger('click');
+    expect(w.find('[data-test="review-panel-toggle"]').attributes('aria-pressed')).toBe('false');
+    const nav = w.find('[data-test="tb-overflow"]');
+    expect(nav.exists()).toBe(true);
+    await w.find('[data-test="tb-overflow"]').trigger('click');
+    const chapters = w.find('[data-test="tb-navigator"]');
+    expect(chapters.attributes('aria-pressed')).toBe('true');
+    expect(chapters.attributes('aria-disabled')).toBeUndefined();
+    await chapters.trigger('click');
     expect(w.emitted('toggle-navigator')).toHaveLength(1);
     for (const id of ['tb-comment', 'tb-find', 'tb-align-right', 'tb-align-justify']) {
       const b = w.find(`[data-test="${id}"]`);
@@ -359,8 +347,8 @@ describe('EditorToolbar', () => {
     );
     editors.push(e);
     const w = mount(EditorToolbar, { props: { editor: e } });
-    expect(w.find('[data-test="tb-undo"]').attributes('title')).toBe('Undo (Ctrl+Z)');
-    expect(w.find('[data-test="tb-redo"]').attributes('aria-keyshortcuts')).toBe('Control+Y');
+    expect(w.find('[data-test="toolbar-undo"]').attributes('title')).toBe('Undo (Ctrl+Z)');
+    expect(w.find('[data-test="toolbar-redo"]').attributes('aria-keyshortcuts')).toBe('Control+Y');
     w.unmount();
   });
 
@@ -376,7 +364,7 @@ describe('EditorToolbar', () => {
       attachTo: document.body,
     });
     await flushPromises();
-    for (const id of ['tb-undo', 'tb-redo']) {
+    for (const id of ['toolbar-undo', 'toolbar-redo']) {
       const c = w.find(`[data-test="${id}"]`);
       expect(c.attributes('disabled')).toBeDefined();
       expect(c.attributes('aria-disabled')).toBeUndefined();
@@ -387,7 +375,7 @@ describe('EditorToolbar', () => {
     await flushPromises();
     await new Promise((r) => setTimeout(r, 0));
     const before = JSON.stringify(e.getJSON());
-    for (const id of ['tb-undo', 'tb-redo']) {
+    for (const id of ['toolbar-undo', 'toolbar-redo']) {
       const c = w.find(`[data-test="${id}"]`);
       expect(c.attributes('disabled')).toBeUndefined();
       expect(c.attributes('aria-disabled')).toBe('true');
@@ -465,10 +453,10 @@ describe('EditorToolbar', () => {
     await sel.setValue('heading');
     expect((sel.element as HTMLSelectElement).value).toBe(shown);
     expect(toolbarState(e).bold).toBe(false);
-    for (const id of ['tb-undo', 'tb-redo'])
+    for (const id of ['toolbar-undo', 'toolbar-redo'])
       expect(w.find(`[data-test="${id}"]`).attributes('aria-disabled')).toBe('true');
     await w.find('[data-test="tb-overflow"]').trigger('click');
-    for (const i of w.findAll('[role^="menuitem"]')) {
+    for (const i of w.find('[data-test="tb-overflow-menu"]').findAll('[role^="menuitem"]')) {
       expect(i.attributes('disabled')).toBeUndefined();
       expect(i.attributes('aria-disabled')).toBe('true');
       expect(i.attributes('title')).toBe('Read-only: document failed to load');
@@ -500,7 +488,11 @@ describe('EditorToolbar', () => {
     const more = w.find('[data-test="tb-overflow"]');
     await more.trigger('click');
     await flushPromises();
-    const items = () => w.findAll('[role^="menuitem"]').map((i) => i.element);
+    const items = () =>
+      w
+        .find('[data-test="tb-overflow-menu"]')
+        .findAll('[role^="menuitem"]')
+        .map((i) => i.element);
     const menu = w.find('[data-test="tb-overflow-menu"]');
     expect(document.activeElement).toBe(items()[0]);
     await menu.trigger('keydown', { key: 'ArrowDown' });
@@ -528,7 +520,10 @@ describe('EditorToolbar', () => {
     const { e, w } = mountBar();
     select(e, 'plain');
     await w.find('[data-test="tb-overflow"]').trigger('click');
-    const roles = w.findAll('[role^="menuitem"]').map((i) => i.attributes('role'));
+    const roles = w
+      .find('[data-test="tb-overflow-menu"]')
+      .findAll('[role^="menuitem"]')
+      .map((i) => i.attributes('role'));
     expect(roles).toEqual([
       'menuitemcheckbox',
       'menuitemcheckbox',

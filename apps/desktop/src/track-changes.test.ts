@@ -52,7 +52,7 @@ describe('Track changes toggle (#57)', () => {
   it('persists off/on (tc1/tc2) and shows status when on', async () => {
     const s = store();
     const { w } = await mountedEditor({ storage: s });
-    const t = w.get('[data-test="track-changes"]');
+    const t = w.get('[data-test="track-changes-toggle"]');
     expect(t.attributes('aria-pressed')).toBe('false');
     expect(t.text()).toBe('Track changes');
     expect(w.find('[data-test="status-track-changes"]').text()).toBe('Track changes: Off');
@@ -63,14 +63,16 @@ describe('Track changes toggle (#57)', () => {
     expect(loadTracking(s)).toBe(true);
     w.unmount();
     const again = await mountedEditor({ storage: s });
-    expect(again.w.get('[data-test="track-changes"]').attributes('aria-pressed')).toBe('true');
+    expect(again.w.get('[data-test="track-changes-toggle"]').attributes('aria-pressed')).toBe(
+      'true',
+    );
     again.w.unmount();
   });
 
   it('shows the tc3 name prompt once, seeds profile, and saves dismissal', async () => {
     const s = store();
     const { w } = await mountedEditor({ storage: s, computerName: 'Rowan Vale' });
-    await w.get('[data-test="track-changes"]').trigger('click');
+    await w.get('[data-test="track-changes-toggle"]').trigger('click');
     expect(w.find('[data-test="name-prompt"]').exists()).toBe(true);
     expect(w.get('[data-test="name-prompt"]').attributes('role')).toBe('status');
     expect(w.text()).toContain("We used your computer's name");
@@ -78,8 +80,8 @@ describe('Track changes toggle (#57)', () => {
     await w.get('[data-test="name-prompt-ok"]').trigger('click');
     expect(w.find('[data-test="name-prompt"]').exists()).toBe(false);
     expect(loadTrackPromptSeen(s)).toBe(true);
-    await w.get('[data-test="track-changes"]').trigger('click');
-    await w.get('[data-test="track-changes"]').trigger('click');
+    await w.get('[data-test="track-changes-toggle"]').trigger('click');
+    await w.get('[data-test="track-changes-toggle"]').trigger('click');
     expect(w.find('[data-test="name-prompt"]').exists()).toBe(false);
     w.unmount();
   });
@@ -87,7 +89,7 @@ describe('Track changes toggle (#57)', () => {
   it('opens inline name & color from the prompt change action', async () => {
     const s = store();
     const { w } = await mountedEditor({ storage: s, computerName: 'Writer' });
-    await w.get('[data-test="track-changes"]').trigger('click');
+    await w.get('[data-test="track-changes-toggle"]').trigger('click');
     await w.get('[data-test="name-prompt-change"]').trigger('click');
     expect(w.find('[data-test="settings-name-color"]').exists()).toBe(true);
     await w.get('[data-test="settings-cancel"]').trigger('click');
@@ -99,7 +101,7 @@ describe('Track changes toggle (#57)', () => {
   it('uses neutral copy when no computer name is available', async () => {
     const s = store();
     const { w } = await mountedEditor({ storage: s });
-    await w.get('[data-test="track-changes"]').trigger('click');
+    await w.get('[data-test="track-changes-toggle"]').trigger('click');
     expect(w.text()).not.toContain("We used your computer's name");
     expect(w.text()).toContain('change your name and color');
     w.unmount();
@@ -109,7 +111,7 @@ describe('Track changes toggle (#57)', () => {
     for (const theme of ['light', 'dark'] as const) {
       document.documentElement.dataset.theme = theme;
       const { w } = await mountedEditor({ storage: store() });
-      const t = w.get('[data-test="track-changes"]');
+      const t = w.get('[data-test="track-changes-toggle"]');
       expect(t.classes()).toContain('sh-track');
       await t.trigger('click');
       expect(t.attributes('aria-pressed')).toBe('true');
@@ -126,7 +128,7 @@ describe('Track changes toggle (#57)', () => {
   it('tc3 name prompt closes on Esc and returns focus to the track toggle', async () => {
     const s = store();
     const { w } = await mountedEditor({ storage: s, computerName: 'Ada' });
-    const toggle = w.get('[data-test="track-changes"]');
+    const toggle = w.get('[data-test="track-changes-toggle"]');
     await toggle.trigger('click');
     const prompt = w.get('[data-test="name-prompt"]');
     expect(document.activeElement?.getAttribute('data-test')).toBe('name-prompt-ok');
@@ -143,7 +145,7 @@ describe('Track changes toggle (#57)', () => {
       [PROFILE_KEY]: JSON.stringify({ name: 'Saved', color: 2 }),
     });
     const { w } = await mountedEditor({ storage: s });
-    expect(w.get('[data-test="track-changes"]').attributes('aria-pressed')).toBe('true');
+    expect(w.get('[data-test="track-changes-toggle"]').attributes('aria-pressed')).toBe('true');
     expect(w.find('[data-test="name-prompt"]').exists()).toBe(false);
     w.unmount();
   });

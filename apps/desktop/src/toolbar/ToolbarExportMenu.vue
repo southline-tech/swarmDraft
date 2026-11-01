@@ -1,0 +1,143 @@
+<script setup lang="ts">
+/** Toolbar export menu (#245): docx / PDF / Markdown entry points. */
+import { ref, shallowRef } from 'vue';
+import { isTauri } from '@tauri-apps/api/core';
+import { exportApi } from '../export/api';
+import { errorLine } from '../errors/map-error';
+import { loadPandocPath } from '../settings/prefs';
+import AppIcon from '../icons/AppIcon.vue';
+import { useToolbarMenu } from './menu';
+
+const props = defineProps<{
+  manuscriptId?: string;
+  bookTitle?: string;
+}>();
+
+const trigger = shallowRef<HTMLButtonElement | null>(null);
+const menuEl = shallowRef<HTMLElement | null>(null);
+const { open, wrapEl, close, toggle, onMenuKey } = useToolbarMenu(menuEl, trigger);
+
+const busy = ref(false);
+const status = ref('');
+
+async function run(format: 'docx' | 'pdf' | 'md') {
+  if (!props.manuscriptId || busy.value) return;
+  if (format === 'md') {
+    status.value = 'Markdown export is coming in a later update.';
+    close(false);
+    return;
+  }
+  if (!isTauri()) {
+    status.value = 'Export is only available in the desktop app.';
+    close(false);
+    return;
+  }
+  busy.value = true;
+  status.value = '';
+  close(false);
+  try {
+    const job = await exportApi.trigger(props.manuscriptId, format, {
+      pandocPath: loadPandocPath(),
+    });
+    if (!job) {
+      status.value = 'Export is only available in the desktop app.';
+      return;
+    }
+    status.value = 'Export started…';
+    const done = await exportApi.wait(job.id, { deadlineMs: 600_000 });
+    status.value = done ? exportApi.statusLabel(done) : 'Still working… check again in a moment.';
+  } catch (e) {
+    status.value = errorLine(e, 'export');
+  } finally {
+    busy.value = false;
+  }
+}
+
+const btn =
+  'inline-flex h-7.5 min-w-7.5 items-center justify-center gap-1.5 rounded-sm border-0 bg-transparent px-2 font-ui text-[13px] font-medium text-text cursor-pointer hover:bg-selected disabled:cursor-default disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ct-focus-ring-color)]';
+</script>
+
+<template>
+  <div ref="wrapEl" class="relative" @keydown.esc="close()">
+    <button
+      ref="trigger"
+      type="button"
+      :class="btn"
+      data-test="toolbar-export"
+      aria-label="Export"
+      aria-haspopup="menu"
+      :aria-expanded="open"
+      title="Export manuscript"
+      :disabled="!manuscriptId || busy"
+      @click="toggle()"
+    >
+      Export
+      <AppIcon name="chevron-down" class="h-4 w-4 opacity-70" aria-hidden="true" />
+    </button>
+    <div
+      v-show="open"
+      ref="menuEl"
+      role="menu"
+      aria-label="Export formats"
+      data-test="export-menu"
+      class="absolute top-9 right-0 z-20 min-w-44 rounded-md border border-border bg-surface p-1.5 shadow-3"
+      @keydown="onMenuKey"
+    >
+      <button
+        type="button"
+        role="menuitem"
+        tabindex="-1"
+        class="tb-menu-item"
+        data-test="export-docx"
+        @click="run('docx')"
+      >
+        Word (.docx)
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        tabindex="-1"
+        class="tb-menu-item"
+        data-test="export-pdf"
+        @click="run('pdf')"
+      >
+        PDF
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        tabindex="-1"
+        class="tb-menu-item"
+        data-test="export-md"
+        @click="run('md')"
+      >
+        Markdown
+      </button>
+    </div>
+    <p v-if="status" class="sr-only" role="status">{{ status }}</p>
+  </div>
+</template>
+
+<style scoped>
+.tb-menu-item {
+  display: flex;
+  width: 100%;
+  min-height: var(--ct-space-8);
+  align-items: center;
+  padding: 0 var(--ct-space-2);
+  border: 0;
+  border-radius: var(--ct-radius-sm);
+  background: transparent;
+  color: var(--ct-text);
+  font-family: var(--ct-font-ui);
+  font-size: var(--ct-text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.tb-menu-item:hover,
+.tb-menu-item:focus-visible {
+  background: var(--ct-selected-bg);
+  color: var(--ct-accent);
+  outline: none;
+}
+</style>

@@ -22,7 +22,7 @@ export interface PandocDownloadStatus {
   message: string | null;
 }
 
-export type ExportFormat = 'epub' | 'docx';
+export type ExportFormat = 'epub' | 'docx' | 'pdf';
 
 export async function triggerExport(
   manuscriptId: string,

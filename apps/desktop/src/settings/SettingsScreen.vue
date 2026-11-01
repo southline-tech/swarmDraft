@@ -12,7 +12,6 @@ import type { AppInfo } from '../backend';
 import AppLogo from '../AppLogo.vue';
 import { PRODUCT_NAME } from '../lib/brand';
 import BackupsSection from './BackupsSection.vue';
-import ExportSection from '../export/ExportSection.vue';
 import NameColorSection from './NameColorSection.vue';
 import DictionarySection from '../spellcheck/DictionarySection.vue';
 import { trapTab } from './focus-trap';
@@ -46,7 +45,6 @@ const SECTIONS = [
   { id: 'name', label: 'Your name & color' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'spelling', label: 'Spelling & grammar' },
-  { id: 'export', label: 'Export' },
   { id: 'backups', label: 'Backups' },
   { id: 'agents', label: 'Agents' },
 ] as const;
@@ -235,9 +233,6 @@ onMounted(() => root.value?.focus());
           </div>
           <div v-show="section === 'spelling'">
             <DictionarySection :manuscript-id="manuscriptId" :backend-available="!!info" />
-          </div>
-          <div v-show="section === 'export'" data-test="settings-export">
-            <ExportSection :manuscript-id="manuscriptId" :book-title="bookTitle" />
           </div>
           <div v-show="section === 'backups'" data-test="settings-backups">
             <BackupsSection
