@@ -3,15 +3,18 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   DEFAULT_PROFILE,
+  PANDOC_PATH_KEY,
   PROFILE_KEY,
   THEME_KEY,
   TRACKING_KEY,
   TRACK_PROMPT_SEEN_KEY,
   bootTheme,
+  loadPandocPath,
   loadProfile,
   loadTracking,
   normalizeProfile,
   profileNameSaveError,
+  savePandocPath,
   saveProfile,
   seedProfileForTracking,
 } from './prefs';
@@ -87,5 +90,16 @@ describe('track changes prefs (#57)', () => {
     expect(s.getItem(TRACK_PROMPT_SEEN_KEY)).toBeNull();
     s.setItem(TRACK_PROMPT_SEEN_KEY, '1');
     expect(s.getItem(TRACK_PROMPT_SEEN_KEY)).toBe('1');
+  });
+});
+
+describe('pandoc path override (#186)', () => {
+  it('loads and saves a trimmed path', () => {
+    const s = store();
+    expect(loadPandocPath(s)).toBe('');
+    expect(savePandocPath('  C:\\pandoc.exe  ', s)).toBe('C:\\pandoc.exe');
+    expect(s.getItem(PANDOC_PATH_KEY)).toBe('C:\\pandoc.exe');
+    expect(savePandocPath('', s)).toBe('');
+    expect(s.getItem(PANDOC_PATH_KEY)).toBe('');
   });
 });

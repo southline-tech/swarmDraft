@@ -19,6 +19,8 @@ export type ErrorCode =
   | 'not-found'
   | 'save-failed'
   | 'export-failed'
+  | 'pandoc-offline'
+  | 'pandoc-checksum'
   | 'unknown';
 
 /** What the single button on the error card does. The UI decides how to perform it. */
@@ -102,6 +104,22 @@ const COPY: Record<ErrorCode, Omit<MappedError, 'code'>> = {
     actionLabel: 'Try again',
     tone: 'danger',
   },
+  'pandoc-offline': {
+    title: "Couldn't download Pandoc",
+    message:
+      'Export needs a one-time Pandoc download. Connect to the internet and try again, or choose an existing Pandoc program in Export settings.',
+    action: 'try-again',
+    actionLabel: 'Try again',
+    tone: 'warning',
+  },
+  'pandoc-checksum': {
+    title: "Pandoc download didn't verify",
+    message:
+      'The download may have been interrupted. Try again, or choose an existing Pandoc program in Export settings.',
+    action: 'try-again',
+    actionLabel: 'Try again',
+    tone: 'warning',
+  },
   unknown: {
     title: 'Something went wrong',
     message: 'Your writing is safe. Try again in a moment.',
@@ -159,7 +177,12 @@ const RULES: [ErrorCode, RegExp][] = [
     /corrupt|truncated|checksum mismatch|unsupported zip|has no body|has no root element|DOCTYPE|malformed|database disk image is malformed|file is not a database/i,
   ],
   ['not-found', /^not found:|os error (2|3)\b|ENOENT|cannot find the (file|path)|no such file/i],
-  ['export-failed', /pandoc is not installed|pdf export is not in this build|export failed/i],
+  ['pandoc-offline', /pandoc: offline:/i],
+  ['pandoc-checksum', /pandoc: checksum:/i],
+  [
+    'export-failed',
+    /pandoc is not available|pandoc is not installed|pandoc: extract:|pandoc: override:|pdf export is not in this build|export failed/i,
+  ],
 ];
 
 export function mapError(err: unknown, context: ErrorContext = 'other'): MappedError {
