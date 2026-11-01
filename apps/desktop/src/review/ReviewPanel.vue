@@ -15,10 +15,11 @@ import type { Decision, SuggestionItem } from '@swarmdraft/editor';
 import {
   authorKind,
   authorsOf,
-  authorVisibleInFilter,
-  filterSummary,
+  bulkActionLabel,
   groupChanges,
+  outdatedCountForAuthor,
   REVIEW_SHORTCUTS,
+  REVIEW_VIEW_CYCLE,
   visibleItems,
   type AuthorFilter,
   type ReviewChange,
@@ -27,9 +28,7 @@ import type { BookChapterGroup } from './review-book';
 import { scrollListRowToTop } from './review-scroll';
 import { authorName, type AgentName } from '../agent-names';
 import { collabColor } from '../author-colors';
-import { REVIEW_CHANGES_REGION_ID } from './review-panel-a11y';
-
-const FILTER_MENU_ID = 'review-author-filter-menu';
+import { REVIEW_CHANGES_REGION_ID, roveViewRadio } from './review-panel-a11y';
 
 const props = withDefaults(
   defineProps<{
@@ -72,8 +71,8 @@ const emit = defineEmits<{
   /** Keys are locked when the confirmation opens, so later arrivals are not included. */
   'decide-visible': [decision: Decision, keys: string[]];
   'toggle-collapsed': [];
-  /** wp8 (#67): multi-author filter toggles (raw id). */
-  'toggle-author': [author: string];
+  /** Single-select author view (#177); null is All. */
+  'select-view': [author: string | null];
   'update:follow': [on: boolean];
 }>();
 
@@ -90,24 +89,26 @@ const name = (a: string) => {
   return n.note ? `${n.name} ${n.note}` : n.name;
 };
 const initial = (a: string) => (parts(a).name[0] ?? '?').toUpperCase();
-
-/** "Show changes from" popover (multi-author checkbox picker, #67). */
-const menuOpen = ref(false);
-const root = ref<HTMLElement | null>(null);
-const filterToggle = ref<HTMLButtonElement | null>(null);
-function closeFilterMenu(refocus = false) {
-  if (!menuOpen.value) return;
-  menuOpen.value = false;
-  if (refocus) void nextTick(() => filterToggle.value?.focus());
+const outdatedOf = (a: string) => outdatedCountForAuthor(props.items, a);
+const authorCountLabel = (a: string) => {
+  const pending = countOf(a);
+  const outdated = outdatedOf(a);
+  if (!outdated) return String(pending);
+  return `${pending}, ${outdated} outdated`;
+};
+const viewSwitcher = ref<HTMLElement | null>(null);
+function onViewRadioKeydown(e: KeyboardEvent) {
+  if (viewSwitcher.value) roveViewRadio(e, viewSwitcher.value);
 }
-function onDocDown(e: MouseEvent) {
-  if (root.value && !root.value.contains(e.target as Node)) closeFilterMenu(false);
+function pickView(author: string | null) {
+  emit('select-view', author);
 }
-watch(menuOpen, (open) => {
-  if (open) document.addEventListener('mousedown', onDocDown);
-  else document.removeEventListener('mousedown', onDocDown);
-});
-onBeforeUnmount(() => document.removeEventListener('mousedown', onDocDown));
+const acceptAllLabel = computed(() =>
+  bulkActionLabel('accept', props.filter, props.filter ? name(props.filter) : ''),
+);
+const rejectAllLabel = computed(() =>
+  bulkActionLabel('reject', props.filter, props.filter ? name(props.filter) : ''),
+);
 /** Theme-aware author color: a --ct-collab-N token keyed by the raw author id, never the name. */
 const hue = (a: string) => ({ '--ct-suggester': collabColor(a) });
 
@@ -133,13 +134,8 @@ function confirm() {
   if (c) emit('decide-visible', c.decision, c.keys);
   confirming.value = null;
 }
-function onAuthorFilterChange(e: Event) {
-  const t = e.target;
-  if (!(t instanceof HTMLInputElement) || t.type !== 'checkbox') return;
-  const author = t.dataset.author;
-  if (author) emit('toggle-author', author);
-}
 const tip = (text: string, keys: string) => `${text} (${keys})`;
+const viewCycleTip = `${REVIEW_VIEW_CYCLE.prev} / ${REVIEW_VIEW_CYCLE.next}`;
 
 const changeByKey = computed(() => new Map(visible.value.map((c) => [c.key, c])));
 
@@ -323,51 +319,50 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
 
     <div
       v-if="authors.length > 1"
-      ref="root"
-      class="filter"
-      @keydown.escape.stop="closeFilterMenu(true)"
+      ref="viewSwitcher"
+      class="view-switcher"
+      role="radiogroup"
+      aria-labelledby="show-from"
+      data-test="view-switcher"
+      :title="viewCycleTip"
+      @keydown="onViewRadioKeydown"
     >
       <div id="show-from" class="lbl">Show changes from</div>
       <button
-        ref="filterToggle"
         type="button"
-        class="dd"
-        data-test="filter-toggle"
-        aria-haspopup="true"
-        aria-labelledby="show-from filter-current"
-        :aria-expanded="menuOpen"
-        :aria-controls="FILTER_MENU_ID"
-        @click="menuOpen = !menuOpen"
+        role="radio"
+        data-view-option
+        data-test="view-all"
+        class="view-opt"
+        :class="{ sel: !filter }"
+        :aria-checked="!filter ? 'true' : 'false'"
+        tabindex="0"
+        @click="pickView(null)"
       >
-        <span id="filter-current" class="cur name" data-test="filter-current">{{
-          filterSummary(authors, filter)
-        }}</span>
-        <span class="caret" aria-hidden="true">▾</span>
+        <span class="view-opt__label">All</span>
+        <span class="cnt" data-test="view-count">({{ changes.length }})</span>
       </button>
-      <fieldset
-        v-if="menuOpen"
-        :id="FILTER_MENU_ID"
-        class="menu author-filter"
-        data-test="step-authors"
-        @change="onAuthorFilterChange"
+      <button
+        v-for="a in authors"
+        :key="`view-${a}`"
+        type="button"
+        role="radio"
+        data-view-option
+        data-test="view-author"
+        :data-author="a"
+        class="view-opt"
+        :class="{ sel: filter === a }"
+        :aria-checked="filter === a ? 'true' : 'false'"
+        :tabindex="filter === a ? 0 : -1"
+        @click="pickView(a)"
       >
-        <legend class="visually-hidden">Show changes from</legend>
-        <label v-for="a in authors" :key="`af-${a}`" class="author-filter__row">
-          <input
-            type="checkbox"
-            data-test="author-filter"
-            :data-author="a"
-            :checked="authorVisibleInFilter(filter, a)"
-          />
-          <span class="av sm" :style="hue(a)" aria-hidden="true">{{ initial(a) }}</span>
-          <bdi class="name" dir="auto" data-test="agent-name" :title="name(a)">{{
-            parts(a).name
-          }}</bdi>
-          <span v-if="parts(a).note" class="note" data-test="agent-note">{{ parts(a).note }}</span>
-          <span class="pill">{{ authorKind(a) }}</span>
-          <span class="cnt">{{ countOf(a) }}</span>
-        </label>
-      </fieldset>
+        <span class="av sm" :style="hue(a)" aria-hidden="true">{{ initial(a) }}</span>
+        <bdi class="name view-opt__label" dir="auto" data-test="agent-name" :title="name(a)">{{
+          parts(a).name
+        }}</bdi>
+        <span v-if="parts(a).note" class="note" data-test="agent-note">{{ parts(a).note }}</span>
+        <span class="cnt" data-test="view-count">({{ authorCountLabel(a) }})</span>
+      </button>
     </div>
 
     <p v-if="!changes.length && loadFailed" class="muted" data-test="empty-load-failed">
@@ -553,10 +548,10 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
 
     <footer v-if="visible.length" class="bulk">
       <button type="button" data-test="accept-all" :disabled="busy" @click="openConfirm('accept')">
-        Accept all
+        {{ acceptAllLabel }}
       </button>
       <button type="button" data-test="reject-all" :disabled="busy" @click="openConfirm('reject')">
-        Reject all
+        {{ rejectAllLabel }}
       </button>
     </footer>
     <div
@@ -704,6 +699,43 @@ button.secondary {
   letter-spacing: 0.05em;
   color: var(--ct-text-muted);
   margin-bottom: var(--ct-space-1);
+}
+.view-switcher {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-space-1);
+}
+.view-opt {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-space-2);
+  width: 100%;
+  min-height: var(--ct-space-12);
+  padding: 0 var(--ct-space-2);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-md);
+  background: var(--ct-surface);
+  color: var(--ct-text);
+  font-size: var(--ct-text-md);
+  text-align: left;
+}
+.view-opt:hover,
+.view-opt:focus-visible {
+  background: var(--ct-selected-bg);
+}
+.view-opt.sel {
+  background: var(--ct-selected-bg);
+  font-weight: var(--ct-weight-semibold);
+  border-color: var(--ct-border-strong);
+}
+.view-opt__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.view-opt .cnt {
+  margin-left: auto;
 }
 .filter {
   position: relative;

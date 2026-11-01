@@ -130,7 +130,7 @@ describe('UI shells (Part of #36)', () => {
     expect(pos()).toBe('3 of 12');
     await w.find('[aria-label="Next change"]').trigger('click');
     expect(pos()).toBe('4 of 12');
-    await w.findAll('.pw__authors input').at(0)!.setValue(false);
+    await w.findAll('[data-test="view-switcher"] [role="radio"]').at(2)!.trigger('click');
     expect(pos()).toBe('3 of 3');
     w.unmount();
   });

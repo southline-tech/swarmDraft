@@ -189,10 +189,8 @@ describe('agent display names (RAD-263)', () => {
     expect(revoked.text()).toBe('(revoked)');
     setAgents([agent('a1', 'Draft Helper')]);
     await flushPromises();
-    await p.find('[data-test=filter-toggle]').trigger('click');
-    expect(p.text()).not.toContain('agent:');
-    await p.findAll('[data-test=author-filter]')[1]!.setValue(false);
-    expect(p.emitted('toggle-author')![0]).toEqual(['agent:gone']);
+    await p.findAll('[data-test=view-author]')[1]!.trigger('click');
+    expect(p.emitted('select-view')![0]).toEqual(['agent:gone']);
 
     const row = (
       id: string,
