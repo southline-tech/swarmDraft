@@ -22,7 +22,8 @@ Only edit files in your area unless the issue says otherwise. Shared files: conf
 ```sh
 pnpm install
 pnpm lint            # eslint
-pnpm format:check    # prettier
+pnpm format          # prettier --write (fix locally)
+pnpm format:check    # prettier --check (same step as CI)
 pnpm typecheck       # vue-tsc (desktop) / tsc (packages)
 pnpm test            # vitest in every package
 pnpm build

@@ -24,7 +24,7 @@ importers:
         specifier: ^15.14.0
         version: 15.15.0
       prettier:
-        specifier: ^3.4.2
+        specifier: 3.9.10
         version: 3.9.10
       typescript:
         specifier: ~5.7.2
@@ -38,6 +38,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@floating-ui/dom':
+        specifier: ^1.8.0
+        version: 1.8.0
       '@swarmdraft/docx':
         specifier: workspace:*
         version: link:../../packages/docx
@@ -47,9 +50,6 @@ importers:
       '@swarmdraft/schema':
         specifier: workspace:*
         version: link:../../packages/schema
-      '@floating-ui/dom':
-        specifier: ^1.8.0
-        version: 1.8.0
       '@tauri-apps/api':
         specifier: ^2.1.1
         version: 2.12.4
