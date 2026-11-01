@@ -39,6 +39,7 @@ import {
   DecisionLog,
   keyOf,
   groupChanges,
+  changeTypeLabel,
   inForeignInput,
   loadCollapsed,
   resolveCurrent,
@@ -777,6 +778,7 @@ function overlapEntries(cluster: OverlapCluster): OverlapEntry[] {
     del: c.del,
     ins: c.ins,
     format: c.format?.label,
+    changeType: changeTypeLabel(c),
     ts: suggestions.value.find((s) => s.id === c.id)?.ts ?? '',
   }));
 }

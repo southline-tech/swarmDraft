@@ -1,5 +1,5 @@
 # Issue 179 — overlap gutter, All-view badge, popover, outdated card
 
-Static HTML reproduces mockup states **ov2** (gutter dot), **ov3** (All-view overlap + popover), and **ov4** (outdated card). Open `evidence.html` in light and toggle `data-theme="dark"` on `<html>` for dark.
+Static HTML reproduces mockup states **ov2** (gutter ring + hint), **ov3** (All-view overlap + filled badge + popover), and **ov4** (outdated pill + explanation). Open `evidence.html` in light and toggle `data-theme="dark"` on `<html>` for dark.
 
-Screens checked: gutter dot, overlap badge, overlap popover, outdated dismiss card.
+Screens checked: gutter hint, overlap badge on inline decoration, overlap popover title/sort/rows, outdated dismiss card.

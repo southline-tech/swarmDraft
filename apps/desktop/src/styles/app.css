@@ -88,7 +88,7 @@
   line-height: 1;
 }
 
-/* Tracked-change overlap (#179): All-view neutral underline, count badge, gutter dot. */
+/* Tracked-change overlap (#179): All-view neutral underline, count badge, gutter hint. */
 .manuscript-editor .tiptap .suggest-overlap [data-suggester] {
   --ct-suggester: var(--ct-suggest-overlap);
 }
@@ -98,35 +98,51 @@
   justify-content: center;
   min-width: 1.125rem;
   height: 1.125rem;
-  margin-left: 2px;
+  margin-left: var(--ct-space-1);
   padding: 0 var(--ct-space-1);
   border-radius: var(--ct-radius-full);
-  border: 1px solid var(--ct-border-strong);
-  background: var(--ct-surface-raised);
-  color: var(--ct-text);
+  border: none;
+  background: var(--ct-suggest-overlap);
+  color: var(--ct-accent-contrast);
   font-family: var(--ct-font-ui);
   font-size: var(--ct-text-xs);
   font-weight: var(--ct-weight-semibold);
+  line-height: 1;
   vertical-align: text-top;
   cursor: pointer;
 }
-.manuscript-editor .tiptap .suggest-overlap-badge:focus-visible {
-  outline: var(--ct-focus-outline);
-  outline-offset: var(--ct-focus-offset);
-}
 .manuscript-editor .tiptap .suggest-overlap-gutter {
   position: absolute;
-  left: -1.25rem;
-  width: 0.625rem;
-  height: 0.625rem;
-  border-radius: var(--ct-radius-full);
-  border: 1px solid var(--ct-border-strong);
-  background: var(--ct-warning);
-  box-shadow: var(--ct-elevation-1);
-  cursor: pointer;
+  left: calc(-1 * var(--ct-space-16));
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ct-space-2);
+  max-width: 11rem;
+  margin: 0;
   padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ct-text-muted);
+  font-family: var(--ct-font-ui);
+  font-size: var(--ct-text-xs);
+  line-height: var(--ct-leading-ui);
+  text-align: left;
+  cursor: pointer;
 }
-.manuscript-editor .tiptap .suggest-overlap-gutter:focus-visible {
+.manuscript-editor .tiptap .suggest-overlap-gutter-ring {
+  flex-shrink: 0;
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: var(--ct-radius-full);
+  border: 2px solid var(--ct-border-strong);
+  background: var(--ct-surface-raised);
+  box-shadow: var(--ct-elevation-1);
+}
+.manuscript-editor .tiptap .suggest-overlap-gutter-hint {
+  color: var(--ct-text-muted);
+}
+.manuscript-editor .tiptap .suggest-overlap-gutter:focus-visible,
+.manuscript-editor .tiptap .suggest-overlap [data-suggest-overlap]:focus-visible {
   outline: var(--ct-focus-outline);
   outline-offset: var(--ct-focus-offset);
 }

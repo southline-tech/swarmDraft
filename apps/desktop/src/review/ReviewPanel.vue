@@ -17,7 +17,9 @@ import {
   authorsOf,
   bulkActionLabel,
   groupChanges,
+  outdatedCardAriaLabel,
   outdatedCountForAuthor,
+  OUTDATED_CARD_EXPLANATION,
   pendingCountForAuthor,
   REVIEW_SHORTCUTS,
   REVIEW_VIEW_CYCLE,
@@ -494,6 +496,7 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
               role="option"
               :aria-selected="c.key === currentKey ? 'true' : 'false'"
               :aria-current="c.key === props.activeScrollKey ? 'true' : undefined"
+              :aria-label="c.outdated ? outdatedCardAriaLabel(name(c.author), c) : undefined"
               tabindex="-1"
               @click="activateChangeRow(c.key, $event)"
             >
@@ -513,6 +516,12 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
                 }}</span>
                 <span class="pill">{{ authorKind(c.author) }}</span>
               </div>
+              <p v-if="c.outdated" class="outdated-head">
+                <span class="pill outdated-badge" data-test="outdated-pill">Outdated</span>
+              </p>
+              <p v-if="c.outdated" class="outdated-note" data-test="outdated-note">
+                {{ OUTDATED_CARD_EXPLANATION }}
+              </p>
               <p v-if="c.format" class="format" data-test="format">{{ c.format.label }}</p>
               <p v-else class="q">
                 <span v-if="c.del" class="del" data-test="del">{{ c.del }}</span
@@ -573,6 +582,7 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
           role="option"
           :aria-selected="c.key === currentKey ? 'true' : 'false'"
           :aria-current="c.key === props.activeScrollKey ? 'true' : undefined"
+          :aria-label="c.outdated ? outdatedCardAriaLabel(name(c.author), c) : undefined"
           tabindex="-1"
           @click="activateChangeRow(c.key, $event)"
         >
@@ -592,6 +602,12 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
             }}</span>
             <span class="pill">{{ authorKind(c.author) }}</span>
           </div>
+          <p v-if="c.outdated" class="outdated-head">
+            <span class="pill outdated-badge" data-test="outdated-pill">Outdated</span>
+          </p>
+          <p v-if="c.outdated" class="outdated-note" data-test="outdated-note">
+            {{ OUTDATED_CARD_EXPLANATION }}
+          </p>
           <p v-if="c.format" class="format" data-test="format">{{ c.format.label }}</p>
           <p v-else class="q">
             <span v-if="c.del" class="del" data-test="del">{{ c.del }}</span
@@ -1108,6 +1124,24 @@ button.secondary {
 .card.outdated .who,
 .card.outdated .q,
 .card.outdated .format {
+  color: var(--ct-text-muted);
+}
+.outdated-head {
+  margin: var(--ct-space-2) 0 0;
+}
+.outdated-badge {
+  font-size: var(--ct-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px var(--ct-space-2);
+  border-radius: var(--ct-radius-full);
+  border: 1px solid var(--ct-border-strong);
+  background: var(--ct-warning-bg);
+  color: var(--ct-warning);
+}
+.outdated-note {
+  margin: var(--ct-space-1) 0 var(--ct-space-2);
+  font-size: var(--ct-text-sm);
   color: var(--ct-text-muted);
 }
 .card.outdated.current {

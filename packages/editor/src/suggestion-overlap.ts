@@ -1,5 +1,5 @@
 /**
- * Overlap decorations (#179): gutter dots when a single-author view hides other pending
+ * Overlap decorations (#179): gutter hint when a single-author view hides other pending
  * suggestions on the same range, and neutral All-view overlap underline + count badge.
  */
 import { Extension } from '@tiptap/core';
@@ -114,7 +114,16 @@ export function gutterDotAriaLabel(
   author: string,
 ): string {
   const who = nameOf(author);
-  return `${hiddenCount} more suggestion${hiddenCount === 1 ? '' : 's'} from ${who}`;
+  return `${hiddenCount} more from ${who} · Show`;
+}
+
+/** Visible gutter control copy (ov2). */
+export function gutterHintText(
+  hiddenCount: number,
+  nameOf: (author: string) => string,
+  author: string,
+): string {
+  return gutterDotAriaLabel(hiddenCount, nameOf, author);
 }
 
 export type OverlapAuthorVisible = (author: string) => boolean;
@@ -142,6 +151,7 @@ function decorate(
     )) {
       const targetAuthor = hiddenAuthors[0]!;
       const label = gutterDotAriaLabel(hiddenCount, handlers.labelAuthor, targetAuthor);
+      const hint = gutterHintText(hiddenCount, handlers.labelAuthor, targetAuthor);
       decos.push(
         Decoration.widget(
           cluster.from,
@@ -153,6 +163,13 @@ function decorate(
             btn.dataset.test = 'overlap-gutter';
             btn.setAttribute('aria-label', label);
             btn.title = label;
+            const ring = document.createElement('span');
+            ring.className = 'suggest-overlap-gutter-ring';
+            ring.setAttribute('aria-hidden', 'true');
+            const text = document.createElement('span');
+            text.className = 'suggest-overlap-gutter-hint';
+            text.textContent = hint;
+            btn.append(ring, text);
             return btn;
           },
           { side: -1, key: `gutter:${cluster.from}:${targetAuthor}` },
@@ -163,15 +180,18 @@ function decorate(
   }
 
   for (const cluster of clusters) {
+    const aria = overlapBadgeAriaLabel(cluster, handlers.labelAuthor);
     decos.push(
       Decoration.inline(cluster.from, cluster.to, {
         class: 'suggest-overlap',
         'data-suggest-overlap': '',
         'data-overlap-from': String(cluster.from),
         'data-overlap-to': String(cluster.to),
+        'aria-label': aria,
+        role: 'button',
+        tabindex: '0',
       }),
     );
-    const aria = overlapBadgeAriaLabel(cluster, handlers.labelAuthor);
     decos.push(
       Decoration.widget(
         cluster.to,
@@ -183,7 +203,8 @@ function decorate(
           btn.dataset.overlapFrom = String(cluster.from);
           btn.dataset.overlapTo = String(cluster.to);
           btn.dataset.test = 'overlap-badge';
-          btn.setAttribute('aria-label', aria);
+          btn.setAttribute('aria-hidden', 'true');
+          btn.tabIndex = -1;
           btn.textContent = String(cluster.spans.length);
           return btn;
         },

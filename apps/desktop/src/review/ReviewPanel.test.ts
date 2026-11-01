@@ -370,6 +370,9 @@ describe('ReviewPanel (RAD-258)', () => {
     const w = mount(ReviewPanel, { props: { items: outdatedItems, labels } });
     const card = w.get('[data-test=item]');
     expect(card.classes()).toContain('outdated');
+    expect(card.find('[data-test=outdated-pill]').text()).toBe('Outdated');
+    expect(card.find('[data-test=outdated-note]').exists()).toBe(true);
+    expect(card.attributes('aria-label')).toContain('Outdated Insert');
     expect(card.find('[data-test=accept]').exists()).toBe(false);
     await card.find('[data-test=dismiss]').trigger('click');
     expect(w.emitted('dismiss-one')).toEqual([[key(outdatedItems[0]!)]]);

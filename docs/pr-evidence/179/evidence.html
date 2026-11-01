@@ -41,48 +41,91 @@
       .sample {
         position: relative;
         font-family: var(--ct-font-manuscript);
-        padding-left: 1.5rem;
+        padding-left: var(--ct-space-16);
       }
       .sample [data-suggester] {
         --ct-suggester: var(--ct-suggest-overlap);
         text-decoration: underline 2px var(--ct-suggest-overlap);
+      }
+      .overlap-row {
+        display: flex;
+        gap: var(--ct-space-2);
+        margin-top: var(--ct-space-2);
+      }
+      .overlap-row .bar {
+        width: 4px;
+        border-radius: var(--ct-radius-full);
+        background: var(--ct-collab-3);
       }
     </style>
   </head>
   <body>
     <h1>Tracked-change overlap (#179)</h1>
     <section>
-      <h2>ov2 — gutter dot (single-author view)</h2>
+      <h2>ov2 — gutter hint (single-author view)</h2>
       <div class="sample">
         <button
           type="button"
           class="suggest-overlap-gutter"
-          aria-label="1 more suggestion from Continuity"
-        ></button>
+          aria-label="2 more from Continuity · Show"
+        >
+          <span class="suggest-overlap-gutter-ring" aria-hidden="true"></span>
+          <span class="suggest-overlap-gutter-hint">2 more from Continuity · Show</span>
+        </button>
         <span data-suggester style="--ct-suggester: var(--ct-collab-1)">word</span>
       </div>
     </section>
     <section>
       <h2>ov3 — All-view overlap + badge</h2>
       <div class="sample" style="padding-left: 0">
-        <span class="suggest-overlap" data-suggest-overlap><span data-suggester>word</span></span
-        ><button
-          type="button"
-          class="suggest-overlap-badge"
+        <span
+          class="suggest-overlap"
+          data-suggest-overlap
+          role="button"
+          tabindex="0"
           aria-label="2 suggestions, by Mara and Continuity"
-        >
+          ><span data-suggester>word</span></span
+        ><button type="button" class="suggest-overlap-badge" aria-hidden="true" tabindex="-1">
           2
         </button>
       </div>
-      <div class="sh-menu overlap-popover panel" role="dialog" aria-label="Overlapping suggestions">
-        <p><strong>Continuity</strong> · dimmed</p>
-        <p><strong>Mara</strong> · guttered</p>
+      <div
+        class="sh-menu overlap-popover panel"
+        role="dialog"
+        aria-labelledby="ov3-title"
+        tabindex="0"
+      >
+        <h2 id="ov3-title">Overlapping suggestions</h2>
+        <p style="font-size: var(--ct-text-xs); color: var(--ct-text-muted)">Newest first</p>
+        <div class="overlap-row">
+          <span class="bar"></span>
+          <p><strong>Continuity</strong> · Insert · dimmed</p>
+        </div>
+        <div class="overlap-row">
+          <span class="bar" style="background: var(--ct-collab-1)"></span>
+          <p><strong>Mara</strong> · Insert · guttered</p>
+        </div>
       </div>
     </section>
     <section>
       <h2>ov4 — outdated card</h2>
       <div class="panel card">
-        <p><strong>Continuity</strong> · outdated suggestion</p>
+        <p><strong>Continuity</strong></p>
+        <p>
+          <span
+            style="
+              font-size: var(--ct-text-xs);
+              padding: 2px var(--ct-space-2);
+              border-radius: var(--ct-radius-full);
+              background: var(--ct-warning-bg);
+              color: var(--ct-warning);
+            "
+            >Outdated</span
+          >
+        </p>
+        <p style="font-size: var(--ct-text-sm)">
+          This suggestion no longer applies after another change was accepted.
+        </p>
         <button type="button" class="sh-btn">Dismiss</button>
       </div>
     </section>

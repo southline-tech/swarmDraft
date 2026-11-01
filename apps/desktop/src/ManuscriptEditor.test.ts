@@ -687,7 +687,7 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     w.unmount();
   });
 
-  it('shows a gutter dot for hidden overlap and opens All-view popover (#179)', async () => {
+  it('shows a gutter hint for hidden overlap and opens All-view popover (#179)', async () => {
     const doc = {
       type: 'doc',
       content: [
@@ -710,12 +710,14 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     const w = mount(ManuscriptEditor, { props: { content: doc }, attachTo: document.body });
     await flushPromises();
     expect(w.find('.tiptap [data-test=overlap-badge]').exists()).toBe(true);
+    expect(w.find('.tiptap [data-test=overlap-badge]').attributes('aria-hidden')).toBe('true');
     await w.find('.tiptap [data-test=overlap-badge]').trigger('click');
     expect(w.find('[data-test=overlap-popover]').exists()).toBe(true);
     await w.find('[data-test=context-dismiss]').trigger('click');
     await pickReviewViewAuthor(w, 0);
     const gutter = w.find('.tiptap [data-test=overlap-gutter]');
     expect(gutter.exists()).toBe(true);
+    expect(gutter.find('.suggest-overlap-gutter-hint').text()).toContain('Show');
     await gutter.trigger('click');
     await flushPromises();
     await w.find('[data-test="filter-toggle"]').trigger('click');

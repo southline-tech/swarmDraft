@@ -154,6 +154,31 @@ export function groupChanges(items: readonly SuggestionItem[]): ReviewChange[] {
 export const authorKind = (author: string): 'Bot' | 'Person' =>
   author.startsWith('agent:') ? 'Bot' : 'Person';
 
+export type ChangeTypeLabel = 'Insert' | 'Delete' | 'Format';
+
+/** Visible change-type label for overlap popover and review cards (#179). */
+export function changeTypeLabel(
+  c: Pick<ReviewChange, 'format' | 'del' | 'ins' | 'targets'>,
+): ChangeTypeLabel {
+  if (c.format) return 'Format';
+  const kinds = new Set(c.targets.map((t) => t.kind));
+  if (kinds.has('format_change')) return 'Format';
+  if (kinds.has('suggestion_delete') && !kinds.has('suggestion_insert')) return 'Delete';
+  return 'Insert';
+}
+
+export const OUTDATED_CARD_EXPLANATION =
+  'This suggestion no longer applies after another change was accepted.';
+
+export function outdatedCardAriaLabel(
+  authorName: string,
+  c: Pick<ReviewChange, 'format' | 'del' | 'ins' | 'targets'>,
+): string {
+  const kind = changeTypeLabel(c);
+  const summary = (c.format?.label ?? c.ins ?? c.del ?? '').trim();
+  return `Outdated ${kind} from ${authorName}. ${OUTDATED_CARD_EXPLANATION}${summary ? ` ${summary}` : ''}`;
+}
+
 /** Attach bot rationales from section review meta, keyed by suggestion id (#60). */
 export function withSuggestionReasons(
   items: readonly SuggestionItem[],

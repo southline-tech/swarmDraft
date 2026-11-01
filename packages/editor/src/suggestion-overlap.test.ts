@@ -42,7 +42,7 @@ describe('suggestion overlap (#179)', () => {
     expect(gutters).toHaveLength(1);
     expect(gutters[0]!.hiddenAuthors).toEqual(['agent:b']);
     expect(gutterDotAriaLabel(1, (a) => (a === 'agent:b' ? 'Continuity' : a), 'agent:b')).toBe(
-      '1 more suggestion from Continuity',
+      '1 more from Continuity · Show',
     );
   });
 
