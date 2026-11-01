@@ -41,9 +41,7 @@ const overlapTitle = computed(() => {
   return `${n} overlapping suggestion${n === 1 ? '' : 's'}`;
 });
 
-const sortHint = computed(
-  () => 'Newest first · ↑↓ to move between suggestions',
-);
+const sortHint = computed(() => 'Newest first · ↑↓ to move between suggestions');
 
 const parts = (a: string) =>
   (props.labels ?? ((id) => ({ name: id, agent: id.startsWith('agent:') })))(a);
