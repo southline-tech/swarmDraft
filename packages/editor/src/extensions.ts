@@ -314,7 +314,12 @@ export const CommentAnchor = Mark.create({
   parseHTML: () => [{ tag: 'span[data-comment]' }],
   renderHTML: ({ HTMLAttributes }) => [
     'span',
-    mergeAttributes(HTMLAttributes, { 'data-comment': '', class: 'comment-anchor' }),
+    mergeAttributes(HTMLAttributes, {
+      'data-comment': '',
+      class: 'comment-anchor',
+      'data-test': 'comment-anchor',
+      'data-comment-id': HTMLAttributes['data-id'] ?? '',
+    }),
     0,
   ],
 });
