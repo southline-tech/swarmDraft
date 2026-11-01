@@ -489,6 +489,6 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 .continuous-section + .continuous-section {
-  border-top: 1px solid var(--ct-border-subtle);
+  border-top: 1px solid var(--ct-border);
 }
 </style>

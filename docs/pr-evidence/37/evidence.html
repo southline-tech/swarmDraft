@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <title>#37 token swap evidence</title>
+    <link rel="stylesheet" href="../../../apps/desktop/src/styles/tokens.css" />
+    <style>
+      body {
+        font-family: var(--ct-font-ui);
+        background: var(--ct-bg);
+        color: var(--ct-text);
+        padding: var(--ct-space-6);
+        display: flex;
+        flex-direction: column;
+        gap: var(--ct-space-8);
+        max-width: 28rem;
+      }
+      h1 {
+        font-size: var(--ct-text-lg);
+        margin: 0;
+      }
+      h2 {
+        font-size: var(--ct-text-sm);
+        color: var(--ct-text-muted);
+        margin: 0 0 var(--ct-space-2);
+        font-weight: var(--ct-weight-medium);
+      }
+      .panel {
+        background: var(--ct-surface);
+        border: 1px solid var(--ct-border);
+        border-radius: var(--ct-radius-md);
+        padding: var(--ct-space-3);
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: var(--ct-space-2);
+        padding: var(--ct-space-2) var(--ct-space-3);
+        border-radius: var(--ct-radius-sm);
+        color: var(--ct-text);
+      }
+      .row.selected {
+        background: var(--ct-selected-bg);
+        box-shadow: inset 3px 0 0 var(--ct-accent);
+      }
+      .row.focused {
+        outline: var(--ct-focus-outline);
+        outline-offset: calc(var(--ct-focus-offset) * -1);
+      }
+      .warn {
+        color: var(--ct-warning);
+        font-size: 0.85em;
+        margin: var(--ct-space-2) 0 0;
+      }
+      blockquote {
+        margin: 0;
+        font-style: italic;
+        padding: var(--ct-space-2);
+        border-radius: var(--ct-radius-sm);
+        background: var(--ct-comment-bg);
+        cursor: pointer;
+      }
+      .btn:focus-visible {
+        outline: var(--ct-focus-outline);
+        outline-offset: var(--ct-focus-offset);
+      }
+      .btn {
+        font: inherit;
+        padding: var(--ct-space-1) var(--ct-space-3);
+        border: 1px solid var(--ct-border);
+        border-radius: var(--ct-radius-sm);
+        background: var(--ct-surface);
+        color: var(--ct-text);
+      }
+    </style>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const theme = params.get('theme');
+      if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+      const scene = params.get('scene') || 'outline';
+      window.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('[data-scene]').forEach((el) => {
+          el.hidden = el.getAttribute('data-scene') !== scene;
+        });
+      });
+    </script>
+  </head>
+  <body>
+    <h1>#37 — semantic tokens (light/dark)</h1>
+    <section data-scene="outline" class="panel">
+      <h2>SectionNav — selected row</h2>
+      <div class="row">Chapter 2 · Draft</div>
+      <div class="row selected">Chapter 3 · selected</div>
+      <div class="row focused">Chapter 4 · focus-visible</div>
+    </section>
+    <section data-scene="comments" class="panel">
+      <h2>CommentsPanel — quote + warn</h2>
+      <blockquote>old lamp on the desk</blockquote>
+      <p class="warn">The text this comment pointed to was removed.</p>
+    </section>
+    <section data-scene="focus" class="panel">
+      <h2>Focus ring</h2>
+      <button type="button" class="btn focused">Focused control</button>
+    </section>
+  </body>
+</html>

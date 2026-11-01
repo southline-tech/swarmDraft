@@ -1068,7 +1068,7 @@ button.secondary {
   letter-spacing: 0.04em;
   color: var(--ct-text-muted);
   background: var(--ct-surface);
-  border-bottom: 1px solid var(--ct-border-subtle);
+  border-bottom: 1px solid var(--ct-border);
 }
 .card.active::before {
   content: '';
