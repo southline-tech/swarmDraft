@@ -1441,6 +1441,7 @@ const rovingTabKey = computed(() => {
 .row.selected {
   background: var(--ct-selected-bg);
   color: var(--ct-text);
+  box-shadow: inset 3px 0 0 var(--ct-accent);
 }
 .row.selected .count {
   color: var(--ct-text-muted);

@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { mount } from '@vue/test-utils';
 import type { CommentThread } from '@swarmdraft/editor';
 import CommentsPanel from './CommentsPanel.vue';
+
+const panelStyles = () =>
+  [
+    ...readFileSync(resolve(process.cwd(), 'src/comments/CommentsPanel.vue'), 'utf8').matchAll(
+      /<style[^>]*>([\s\S]*?)<\/style>/g,
+    ),
+  ]
+    .map((m) => m[1])
+    .join('\n');
 
 const c = (id: string, authorKind: 'human' | 'agent' = 'agent') => ({
   id,
@@ -83,6 +94,14 @@ describe('CommentsPanel', () => {
       ['c2', false],
     ]);
     expect(w.emitted('focus')).toEqual([['c1']]);
+  });
+});
+
+describe('CommentsPanel tokens (#37)', () => {
+  it('styles orphan warnings and quote anchors with theme tokens', () => {
+    const css = panelStyles();
+    expect(css.match(/\.warn\s*\{([^}]*)\}/)?.[1] ?? '').toContain('var(--ct-warning)');
+    expect(css.match(/blockquote\s*\{([^}]*)\}/)?.[1] ?? '').toContain('var(--ct-comment-bg)');
   });
 });
 

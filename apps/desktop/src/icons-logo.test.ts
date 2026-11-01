@@ -46,10 +46,17 @@ describe('design tokens only', () => {
     expect(used.filter((v) => !v.startsWith('--ct-') || !defined.has(v))).toEqual([]);
   });
 
-  it('selected outline row uses the theme selection token (readable in dark)', () => {
+  it('selected outline row uses selection and accent tokens (#37 Designer)', () => {
     const rule = styles(read('./SectionNav.vue')).match(/\.row\.selected\s*\{([^}]*)\}/)?.[1] ?? '';
     expect(rule).toContain('var(--ct-selected-bg)');
     expect(rule).toContain('var(--ct-text)');
+    expect(rule).toContain('var(--ct-accent)');
+  });
+
+  it('CommentsPanel warn and quote use semantic tokens (#37 Designer)', () => {
+    const css = styles(read('./comments/CommentsPanel.vue'));
+    expect(css.match(/\.warn\s*\{([^}]*)\}/)?.[1] ?? '').toContain('var(--ct-warning)');
+    expect(css.match(/blockquote\s*\{([^}]*)\}/)?.[1] ?? '').toContain('var(--ct-comment-bg)');
   });
 
   it('outline hover uses a subtler token than the selected row (#47)', () => {

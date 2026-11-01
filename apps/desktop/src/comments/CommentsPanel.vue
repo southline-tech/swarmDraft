@@ -129,5 +129,8 @@ blockquote {
   cursor: pointer;
   margin: 0;
   font-style: italic;
+  padding: var(--ct-space-2);
+  border-radius: var(--ct-radius-sm);
+  background: var(--ct-comment-bg);
 }
 </style>
