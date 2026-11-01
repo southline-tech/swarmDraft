@@ -20,6 +20,7 @@ import {
   outdatedCountForAuthor,
   REVIEW_SHORTCUTS,
   REVIEW_VIEW_CYCLE,
+  viewScopeAnnouncement,
   visibleItems,
   type AuthorFilter,
   type ReviewChange,
@@ -28,7 +29,14 @@ import type { BookChapterGroup } from './review-book';
 import { scrollListRowToTop } from './review-scroll';
 import { authorName, type AgentName } from '../agent-names';
 import { collabColor } from '../author-colors';
-import { REVIEW_CHANGES_REGION_ID, roveViewRadio } from './review-panel-a11y';
+import {
+  REVIEW_CHANGES_REGION_ID,
+  focusCheckedViewOption,
+  roveViewRadio,
+  viewMenuTabIndex,
+} from './review-panel-a11y';
+
+const VIEW_MENU_ID = 'review-view-menu';
 
 const props = withDefaults(
   defineProps<{
@@ -90,18 +98,50 @@ const name = (a: string) => {
 };
 const initial = (a: string) => (parts(a).name[0] ?? '?').toUpperCase();
 const outdatedOf = (a: string) => outdatedCountForAuthor(props.items, a);
-const authorCountLabel = (a: string) => {
-  const pending = countOf(a);
-  const outdated = outdatedOf(a);
-  if (!outdated) return String(pending);
-  return `${pending}, ${outdated} outdated`;
-};
-const viewSwitcher = ref<HTMLElement | null>(null);
-function onViewRadioKeydown(e: KeyboardEvent) {
-  if (viewSwitcher.value) roveViewRadio(e, viewSwitcher.value);
+const pendingOf = (a: string) => countOf(a);
+const scopeStatus = computed(() =>
+  viewScopeAnnouncement(
+    props.filter,
+    props.filter ? name(props.filter) : 'everyone',
+    visible.value.length,
+  ),
+);
+const triggerLabel = computed(() => {
+  if (!props.filter) return 'All';
+  return parts(props.filter).name;
+});
+const menuOpen = ref(false);
+const viewFilterRoot = ref<HTMLElement | null>(null);
+const viewToggle = ref<HTMLButtonElement | null>(null);
+function closeViewMenu(refocus = false) {
+  if (!menuOpen.value) return;
+  menuOpen.value = false;
+  if (refocus) void nextTick(() => viewToggle.value?.focus());
+}
+function onDocDown(e: MouseEvent) {
+  if (viewFilterRoot.value && !viewFilterRoot.value.contains(e.target as Node))
+    closeViewMenu(false);
+}
+watch(menuOpen, (open) => {
+  if (open) {
+    document.addEventListener('mousedown', onDocDown);
+    void nextTick(() => {
+      if (viewFilterRoot.value) focusCheckedViewOption(viewFilterRoot.value);
+    });
+  } else document.removeEventListener('mousedown', onDocDown);
+});
+onBeforeUnmount(() => document.removeEventListener('mousedown', onDocDown));
+function onViewMenuKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    e.stopPropagation();
+    closeViewMenu(true);
+    return;
+  }
+  if (viewFilterRoot.value) roveViewRadio(e, viewFilterRoot.value);
 }
 function pickView(author: string | null) {
   emit('select-view', author);
+  closeViewMenu(true);
 }
 const acceptAllLabel = computed(() =>
   bulkActionLabel('accept', props.filter, props.filter ? name(props.filter) : ''),
@@ -135,7 +175,6 @@ function confirm() {
   confirming.value = null;
 }
 const tip = (text: string, keys: string) => `${text} (${keys})`;
-const viewCycleTip = `${REVIEW_VIEW_CYCLE.prev} / ${REVIEW_VIEW_CYCLE.next}`;
 
 const changeByKey = computed(() => new Map(visible.value.map((c) => [c.key, c])));
 
@@ -319,50 +358,87 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
 
     <div
       v-if="authors.length > 1"
-      ref="viewSwitcher"
-      class="view-switcher"
-      role="radiogroup"
-      aria-labelledby="show-from"
+      ref="viewFilterRoot"
+      class="view-filter"
       data-test="view-switcher"
-      :title="viewCycleTip"
-      @keydown="onViewRadioKeydown"
     >
       <div id="show-from" class="lbl">Show changes from</div>
       <button
+        ref="viewToggle"
         type="button"
-        role="radio"
-        data-view-option
-        data-test="view-all"
-        class="view-opt"
-        :class="{ sel: !filter }"
-        :aria-checked="!filter ? 'true' : 'false'"
-        tabindex="0"
-        @click="pickView(null)"
+        class="dd"
+        data-test="filter-toggle"
+        aria-haspopup="true"
+        aria-labelledby="show-from view-trigger-label"
+        :aria-expanded="menuOpen"
+        :aria-controls="VIEW_MENU_ID"
+        @click="menuOpen = !menuOpen"
       >
-        <span class="view-opt__label">All</span>
-        <span class="cnt" data-test="view-count">({{ changes.length }})</span>
+        <span id="view-trigger-label" class="cur name" data-test="filter-current">{{
+          triggerLabel
+        }}</span>
+        <span v-if="!filter" class="cnt pill" data-test="view-count">{{ changes.length }}</span>
+        <span v-else class="av sm" :style="hue(filter)" aria-hidden="true">{{
+          initial(filter)
+        }}</span>
+        <span class="caret" aria-hidden="true">▾</span>
       </button>
-      <button
-        v-for="a in authors"
-        :key="`view-${a}`"
-        type="button"
-        role="radio"
-        data-view-option
-        data-test="view-author"
-        :data-author="a"
-        class="view-opt"
-        :class="{ sel: filter === a }"
-        :aria-checked="filter === a ? 'true' : 'false'"
-        :tabindex="filter === a ? 0 : -1"
-        @click="pickView(a)"
+      <div
+        v-if="menuOpen"
+        :id="VIEW_MENU_ID"
+        class="sh-menu view-menu"
+        role="radiogroup"
+        aria-labelledby="show-from"
+        data-test="view-menu"
+        @keydown="onViewMenuKeydown"
       >
-        <span class="av sm" :style="hue(a)" aria-hidden="true">{{ initial(a) }}</span>
-        <bdi class="name view-opt__label" dir="auto" data-test="agent-name" :title="name(a)">{{
-          parts(a).name
-        }}</bdi>
-        <span v-if="parts(a).note" class="note" data-test="agent-note">{{ parts(a).note }}</span>
-        <span class="cnt" data-test="view-count">({{ authorCountLabel(a) }})</span>
-      </button>
+        <button
+          type="button"
+          role="radio"
+          data-view-option
+          data-test="view-all"
+          class="view-menu__opt"
+          :class="{ sel: !filter }"
+          :aria-checked="!filter ? 'true' : 'false'"
+          :tabindex="viewMenuTabIndex(!filter)"
+          @click="pickView(null)"
+        >
+          <span class="check" aria-hidden="true">{{ !filter ? '✓' : '' }}</span>
+          <span class="view-menu__label">All</span>
+          <span class="pill cnt">{{ changes.length }}</span>
+        </button>
+        <button
+          v-for="a in authors"
+          :key="`view-${a}`"
+          type="button"
+          role="radio"
+          data-view-option
+          data-test="view-author"
+          :data-author="a"
+          class="view-menu__opt"
+          :class="{ sel: filter === a }"
+          :aria-checked="filter === a ? 'true' : 'false'"
+          :tabindex="viewMenuTabIndex(filter === a)"
+          @click="pickView(a)"
+        >
+          <span class="check" aria-hidden="true">{{ filter === a ? '✓' : '' }}</span>
+          <span class="av sm" :style="hue(a)" aria-hidden="true">{{ initial(a) }}</span>
+          <bdi class="name view-menu__label" dir="auto" data-test="agent-name" :title="name(a)">{{
+            parts(a).name
+          }}</bdi>
+          <span v-if="parts(a).note" class="note" data-test="agent-note">{{ parts(a).note }}</span>
+          <span class="pill">{{ authorKind(a) }}</span>
+          <span class="pill cnt">{{ pendingOf(a) }}</span>
+          <span v-if="outdatedOf(a)" class="pill outdated" data-test="view-outdated"
+            >{{ outdatedOf(a) }} outdated</span
+          >
+        </button>
+      </div>
+      <p class="view-scope" role="status" data-test="view-scope-status">{{ scopeStatus }}</p>
+      <p class="view-cycle-hint muted" data-test="view-cycle-hint">
+        Cycle authors <kbd>{{ REVIEW_VIEW_CYCLE.prev }}</kbd> /
+        <kbd>{{ REVIEW_VIEW_CYCLE.next }}</kbd>
+      </p>
     </div>
 
     <p v-if="!changes.length && loadFailed" class="muted" data-test="empty-load-failed">
@@ -700,12 +776,10 @@ button.secondary {
   color: var(--ct-text-muted);
   margin-bottom: var(--ct-space-1);
 }
-.view-switcher {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ct-space-1);
+.view-filter {
+  position: relative;
 }
-.view-opt {
+.view-filter .dd {
   display: flex;
   align-items: center;
   gap: var(--ct-space-2);
@@ -719,23 +793,89 @@ button.secondary {
   font-size: var(--ct-text-md);
   text-align: left;
 }
-.view-opt:hover,
-.view-opt:focus-visible {
+.view-filter .dd .cur {
+  flex: 1;
+  min-width: 0;
+}
+.view-filter .caret {
+  color: var(--ct-text-muted);
+}
+.view-filter .view-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  margin: 2px 0 0;
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.view-menu__opt {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-space-2);
+  width: 100%;
+  min-height: var(--ct-space-12);
+  padding: 0 var(--ct-space-2);
+  border: none;
+  border-radius: var(--ct-radius-md);
+  background: none;
+  color: var(--ct-text);
+  font-size: var(--ct-text-md);
+  text-align: left;
+  cursor: pointer;
+}
+.view-menu__opt:hover,
+.view-menu__opt:focus-visible {
   background: var(--ct-selected-bg);
 }
-.view-opt.sel {
+.view-menu__opt.sel {
   background: var(--ct-selected-bg);
   font-weight: var(--ct-weight-semibold);
-  border-color: var(--ct-border-strong);
 }
-.view-opt__label {
+.view-menu__opt .check {
+  width: 1.25rem;
+  flex: none;
+  text-align: center;
+  color: var(--ct-accent);
+  font-weight: var(--ct-weight-semibold);
+}
+.view-menu__label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.view-opt .cnt {
+.view-menu__opt .pill.cnt {
   margin-left: auto;
+}
+.view-menu__opt .pill.outdated {
+  color: var(--ct-warning);
+  background: var(--ct-warning-bg);
+  border: 1px solid color-mix(in srgb, var(--ct-warning) 35%, transparent);
+}
+.view-scope {
+  margin: var(--ct-space-2) 0 0;
+  font-size: var(--ct-text-sm);
+  color: var(--ct-text);
+}
+.view-cycle-hint {
+  margin: var(--ct-space-1) 0 0;
+  font-size: var(--ct-text-xs);
+}
+.view-cycle-hint kbd {
+  font: inherit;
+  padding: 0 var(--ct-space-1);
+  border-radius: var(--ct-radius-sm);
+  border: 1px solid var(--ct-border);
+  background: var(--ct-surface-raised);
+}
+.view-switcher {
+  display: none;
+}
+.view-opt {
+  display: none;
 }
 .filter {
   position: relative;

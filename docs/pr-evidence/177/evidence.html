@@ -4,18 +4,13 @@
     <meta charset="utf-8" />
     <title>#177 view switcher evidence</title>
     <link rel="stylesheet" href="../../apps/desktop/src/styles/tokens.css" />
+    <link rel="stylesheet" href="../../apps/desktop/src/shells/shells.css" />
     <style>
       body {
         font-family: var(--ct-font-ui);
         background: var(--ct-bg);
         color: var(--ct-text);
         padding: var(--ct-space-6);
-      }
-      .view-switcher {
-        display: flex;
-        flex-direction: column;
-        gap: var(--ct-space-1);
-        max-width: 22rem;
       }
       .lbl {
         font-size: var(--ct-text-xs);
@@ -24,19 +19,40 @@
         letter-spacing: 0.05em;
         color: var(--ct-text-muted);
       }
-      .view-opt {
+      .dd {
+        display: flex;
+        align-items: center;
+        gap: var(--ct-space-2);
+        width: 100%;
+        max-width: 22rem;
+        min-height: var(--ct-space-12);
+        padding: 0 var(--ct-space-2);
+        margin-top: var(--ct-space-1);
+        border: 1px solid var(--ct-border);
+        border-radius: var(--ct-radius-md);
+        background: var(--ct-surface);
+      }
+      .sh-menu {
+        max-width: 22rem;
+        margin-top: 2px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .opt {
         display: flex;
         align-items: center;
         gap: var(--ct-space-2);
         min-height: var(--ct-space-12);
         padding: 0 var(--ct-space-2);
-        border: 1px solid var(--ct-border);
         border-radius: var(--ct-radius-md);
-        background: var(--ct-surface);
-      }
-      .view-opt.sel {
         background: var(--ct-selected-bg);
         font-weight: var(--ct-weight-semibold);
+      }
+      .check {
+        width: 1.25rem;
+        text-align: center;
+        color: var(--ct-accent);
       }
       .av {
         width: 24px;
@@ -48,36 +64,47 @@
         place-items: center;
         font-size: var(--ct-text-sm);
       }
-      .cnt {
-        margin-left: auto;
+      .pill {
+        font-size: var(--ct-text-xs);
+        padding: 2px var(--ct-space-2);
+        border-radius: var(--ct-radius-full);
+        border: 1px solid var(--ct-border-strong);
+        color: var(--ct-text-muted);
+      }
+      .pill.outdated {
+        color: var(--ct-warning);
+        background: var(--ct-warning-bg);
+      }
+      .scope {
+        margin-top: var(--ct-space-2);
+        font-size: var(--ct-text-sm);
+      }
+      .hint {
+        margin-top: var(--ct-space-1);
+        font-size: var(--ct-text-xs);
         color: var(--ct-text-muted);
       }
     </style>
   </head>
   <body>
-    <h1>Per-author view switcher (sample)</h1>
-    <div class="view-switcher" role="radiogroup" aria-label="Show changes from">
-      <div class="lbl">Show changes from</div>
-      <div class="view-opt sel" role="radio" aria-checked="true">
-        <span>All</span><span class="cnt">(5)</span>
+    <h1>Per-author view switcher (ov1 dropdown)</h1>
+    <div class="lbl">Show changes from</div>
+    <div class="dd">All <span class="pill">5</span> ▾</div>
+    <div class="sh-menu" role="radiogroup" aria-label="Show changes from">
+      <div class="opt" role="radio" aria-checked="false">
+        <span class="check"></span><span>All</span><span class="pill">5</span>
       </div>
-      <div
-        class="view-opt"
-        role="radio"
-        aria-checked="false"
-        style="--ct-suggester: var(--ct-collab-1)"
-      >
-        <span class="av">L</span><span>Line Editor</span><span class="cnt">(3)</span>
+      <div class="opt" role="radio" aria-checked="true" style="--ct-suggester: var(--ct-collab-1)">
+        <span class="check">✓</span><span class="av">L</span><span>Line Editor</span
+        ><span class="pill">Bot</span><span class="pill">3</span>
       </div>
-      <div
-        class="view-opt"
-        role="radio"
-        aria-checked="false"
-        style="--ct-suggester: var(--ct-collab-2)"
-      >
-        <span class="av">C</span><span>Continuity</span><span class="cnt">(2, 1 outdated)</span>
+      <div class="opt" role="radio" aria-checked="false" style="--ct-suggester: var(--ct-collab-2)">
+        <span class="check"></span><span class="av">C</span><span>Continuity</span
+        ><span class="pill">Person</span><span class="pill">2</span
+        ><span class="pill outdated">1 outdated</span>
       </div>
     </div>
-    <p>Use devtools to toggle <code>data-theme</code> on <code>html</code> for dark captures.</p>
+    <p class="scope" role="status">Showing 3 changes from Line Editor</p>
+    <p class="hint">Cycle authors <kbd>Alt+[</kbd> / <kbd>Alt+]</kbd></p>
   </body>
 </html>

@@ -77,11 +77,20 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(w.emitted('decide-one')).toEqual([[key(repl[0]!), 'accept']]);
   });
 
-  it('single-select view switcher defaults to All (#177)', async () => {
+  it('single-select view switcher uses compact dropdown (#177)', async () => {
     const w = mount(ReviewPanel, { props: { items, labels }, attachTo: document.body });
     expect(w.find('[data-test=view-switcher]').exists()).toBe(true);
+    expect(w.find('[data-test=view-menu]').exists()).toBe(false);
+    expect(w.find('[data-test=view-scope-status]').text()).toContain('Showing 3 changes');
+    expect(w.find('[data-test=view-cycle-hint]').text()).toContain('Alt+]');
+    await w.find('[data-test=filter-toggle]').trigger('click');
     expect(w.find('[data-test=view-all]').attributes('aria-checked')).toBe('true');
     expect(w.findAll('[data-test=view-author]')).toHaveLength(2);
+    const tabStops = w
+      .findAll('[data-view-option]')
+      .filter((el) => (el.element as HTMLElement).tabIndex === 0);
+    expect(tabStops).toHaveLength(1);
+    expect(tabStops[0]!.attributes('data-test')).toBe('view-all');
     await w.findAll('[data-test=view-author]')[0]!.trigger('click');
     expect(w.emitted('select-view')).toEqual([['agent:a']]);
     await w.setProps({ filter: 'brett' });
@@ -89,6 +98,7 @@ describe('ReviewPanel (RAD-258)', () => {
       expect.stringContaining('Mara'),
     ]);
     expect(w.find('[data-test=accept-all]').text()).toBe('Accept all from Mara');
+    await w.find('[data-test=filter-toggle]').trigger('click');
     await w.find('[data-test=view-all]').trigger('click');
     expect(w.emitted('select-view')!.slice(-1)).toEqual([[null]]);
     w.unmount();
@@ -106,6 +116,7 @@ describe('ReviewPanel (RAD-258)', () => {
     const w = mount(ReviewPanel, {
       props: { items: many, labels: (a: string) => ({ name: names[a] ?? a }) },
     });
+    await w.find('[data-test=filter-toggle]').trigger('click');
     const vars = w
       .findAll('[data-test=view-author]')
       .map((el) => (el.element as HTMLElement).querySelector('.av') as HTMLElement | null)

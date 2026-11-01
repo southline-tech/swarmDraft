@@ -4,6 +4,12 @@ import { flushPromises, mount } from '@vue/test-utils';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import { SAMPLE_DOC } from './fixtures/sample';
 
+async function pickReviewViewAuthor(w: ReturnType<typeof mount>, authorIndex: number) {
+  await w.find('[data-test="filter-toggle"]').trigger('click');
+  await w.findAll('[data-test="view-author"]')[authorIndex]!.trigger('click');
+  await flushPromises();
+}
+
 describe('ManuscriptEditor', () => {
   it('accept/reject shortcuts do nothing while focus mode hides the review panel (#44)', async () => {
     const w = mount(ManuscriptEditor, { props: { content: SAMPLE_DOC }, attachTo: document.body });
@@ -504,8 +510,7 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     };
     const w = mount(ManuscriptEditor, { props: { content: doc }, attachTo: document.body });
     await flushPromises();
-    await w.findAll('[data-test="view-author"]')[1]!.trigger('click');
-    await flushPromises();
+    await pickReviewViewAuthor(w, 1);
     const hiddenDel = w.find('.tiptap .suggestion-filter-hidden-delete');
     expect(hiddenDel.exists()).toBe(true);
     expect(w.find('.tiptap .suggestion-filter-hidden-insert').exists()).toBe(false);
@@ -565,8 +570,7 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     expect(suggesters()).toHaveLength(2);
     expect(hidden()).toHaveLength(0);
 
-    await w.findAll('[data-test="view-author"]')[0]!.trigger('click');
-    await flushPromises();
+    await pickReviewViewAuthor(w, 0);
     expect(editor.state.doc.eq(before)).toBe(true);
     expect(pmUndoDepth(editor.state)).toBe(undoBefore);
     expect(w.emitted('change')).toBeUndefined();
@@ -575,6 +579,7 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     expect(hidden()).toHaveLength(1);
     expect(w.find('.tiptap .suggestion-filter-hidden-insert').exists()).toBe(true);
 
+    await w.find('[data-test="filter-toggle"]').trigger('click');
     await w.find('[data-test="view-all"]').trigger('click');
     await flushPromises();
     expect(suggesters()).toHaveLength(2);
@@ -618,8 +623,7 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     await flushPromises();
     expect(w.find('[data-test="counter"]').text()).toBe('1 of 2');
 
-    await w.findAll('[data-test="view-author"]')[1]!.trigger('click');
-    await flushPromises();
+    await pickReviewViewAuthor(w, 1);
     expect(w.find('[data-test="counter"]').text()).toBe('1 of 1');
     expect(w.findAll('[data-test="item"]')[0]!.text()).toContain('second');
 
@@ -678,8 +682,7 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     const w = mount(ManuscriptEditor, { props: { content: doc }, attachTo: document.body });
     await flushPromises();
     expect(w.find('[data-test="counter"]').text()).toBe('1 of 3');
-    await w.findAll('[data-test="view-author"]')[0]!.trigger('click');
-    await flushPromises();
+    await pickReviewViewAuthor(w, 0);
     expect(w.find('[data-test="counter"]').text()).toBe('1 of 2');
     w.unmount();
   });
@@ -715,6 +718,7 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     await w.find('.manuscript-editor').trigger('keydown', { key: ']', altKey: true });
     await flushPromises();
     expect(w.find('[data-test="view-scope-live"]').text()).toMatch(/Showing 1 change from/);
+    expect(w.find('[data-test="view-scope-status"]').text()).toMatch(/Showing 1 change from/);
     await w.find('.manuscript-editor').trigger('keydown', { key: ']', altKey: true });
     await flushPromises();
     expect(w.find('[data-test="view-scope-live"]').text()).toMatch(/1 change from/);
