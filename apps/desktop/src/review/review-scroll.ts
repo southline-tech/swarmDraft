@@ -3,7 +3,9 @@ import { parseBookChangeKey, scopeBookChangeKey, BOOK_SCOPE } from './review-boo
 const MARK_SELECTOR =
   'ins[data-suggestion][data-id], del[data-suggestion][data-id], span[data-format-change][data-id], span.comment-anchor[data-id]';
 
-const COMMENT_KEY_PREFIX = 'comment_anchor\u0000';
+import { COMMENT_REVIEW_PREFIX, commentReviewKey } from './review-inline';
+
+export { commentReviewKey };
 
 export interface ManuscriptMarkAnchor {
   scopedKey: string;
@@ -14,7 +16,7 @@ export interface ManuscriptMarkAnchor {
 function changeKeyFromMark(el: Element): string | null {
   if (el.classList.contains('comment-anchor')) {
     const id = el.getAttribute('data-id');
-    return id ? `${COMMENT_KEY_PREFIX}${id}` : null;
+    return id ? commentReviewKey(id) : null;
   }
   const id = el.getAttribute('data-id');
   const author = el.getAttribute('data-author');
@@ -111,8 +113,8 @@ export function findMarkElement(root: HTMLElement, scopedKey: string): Element |
   if (!parsed) return null;
   const section = root.querySelector(`[data-section-anchor="${CSS.escape(parsed.sectionId)}"]`);
   if (!section) return null;
-  if (parsed.changeKey.startsWith(COMMENT_KEY_PREFIX)) {
-    const id = parsed.changeKey.slice(COMMENT_KEY_PREFIX.length);
+  if (parsed.changeKey.startsWith(COMMENT_REVIEW_PREFIX)) {
+    const id = parsed.changeKey.slice(COMMENT_REVIEW_PREFIX.length);
     return section.querySelector(`span.comment-anchor[data-id="${CSS.escape(id)}"]`);
   }
   const [author, id] = parsed.changeKey.split('\u0000');

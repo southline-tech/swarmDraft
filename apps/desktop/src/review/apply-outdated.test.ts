@@ -5,6 +5,7 @@ import type { JSONContent } from '@tiptap/core';
 import { createManuscriptEditor } from '@swarmdraft/editor';
 import ManuscriptEditor from '../ManuscriptEditor.vue';
 import * as backend from '../backend';
+import { scopeBookChangeKey } from './review-book';
 import { applyHumanReviewDecision, persistOutdatedAfterAccept } from './apply';
 
 const byA = { author: 'agent:a', ts: '2026-10-25T00:00:00Z' };
@@ -71,7 +72,9 @@ describe('applyHumanReviewDecision wiring (#178)', () => {
       attachTo: document.body,
     });
     await flushPromises();
-    const row = w.find(`[data-review-row-key="${byB.author}\u0000y1"]`);
+    const row = w.find(
+      `[data-review-row-key="${scopeBookChangeKey('s1', `${byB.author}\u0000y1`)}"]`,
+    );
     await row.find('[data-test="accept"]').trigger('click');
     await flushPromises();
     expect(backend.markSectionSuggestionsOutdated).toHaveBeenCalledWith('m1', 's1', ['x1']);

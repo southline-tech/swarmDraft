@@ -8,7 +8,6 @@
  * one id) is one change.
  */
 import EmptyState from '../shells/EmptyState.vue';
-import ReasonLine from '../shells/ReasonLine.vue';
 import PanelRail from '../desk/PanelRail.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { Decision, SuggestionItem } from '@swarmdraft/editor';
@@ -17,9 +16,7 @@ import {
   authorsOf,
   bulkActionLabel,
   groupChanges,
-  outdatedCardAriaLabel,
   outdatedCountForAuthor,
-  OUTDATED_CARD_EXPLANATION,
   pendingCountForAuthor,
   REVIEW_SHORTCUTS,
   REVIEW_VIEW_CYCLE,
@@ -30,6 +27,7 @@ import {
 } from './review-state';
 import type { BookChapterGroup } from './review-book';
 import { scrollListRowToTop } from './review-scroll';
+import { groupReviewListByChapter, suggestionItems, type ReviewListItem } from './review-inline';
 import { authorName, type AgentName } from '../agent-names';
 import { collabColor } from '../author-colors';
 import {
@@ -38,6 +36,7 @@ import {
   roveViewRadio,
   viewMenuTabIndex,
 } from './review-panel-a11y';
+import ReviewMixedCard from './ReviewMixedCard.vue';
 
 const VIEW_MENU_ID = 'review-view-menu';
 
@@ -60,6 +59,11 @@ const props = withDefaults(
     activeScrollKey?: string | null;
     /** When true, list follows manuscript scroll position. */
     follow?: boolean;
+    /** Document-ordered suggestions + comments (#239). */
+    listItems?: readonly ReviewListItem[];
+    /** Suggestion count for rail badge and view menu (filter applies). */
+    suggestionCount?: number;
+    showResolved?: boolean;
   }>(),
   {
     filter: null,
@@ -72,6 +76,9 @@ const props = withDefaults(
     chapterGroups: null,
     activeScrollKey: null,
     follow: true,
+    listItems: () => [],
+    suggestionCount: undefined,
+    showResolved: false,
   },
 );
 const emit = defineEmits<{
@@ -87,13 +94,28 @@ const emit = defineEmits<{
   'update:follow': [on: boolean];
   /** Clear an outdated index row without applying its text (#179). */
   'dismiss-one': [key: string];
+  'update:showResolved': [on: boolean];
+  'comment-reply': [threadId: string, body: string];
+  'comment-resolve': [threadId: string, resolved: boolean];
 }>();
 
 const changes = computed(() =>
   props.bookChanges != null ? [...props.bookChanges] : groupChanges(props.items),
 );
 const authors = computed(() => authorsOf(changes.value));
-const visible = computed(() => visibleItems(changes.value, props.filter));
+const listRows = computed(() =>
+  props.listItems.length
+    ? [...props.listItems]
+    : visibleItems(changes.value, props.filter).map((change) => ({
+        kind: 'suggestion' as const,
+        key: change.key,
+        from: 0,
+        change,
+      })),
+);
+const visibleSuggestions = computed(() => visibleItems(changes.value, props.filter));
+const badgeCount = computed(() => props.suggestionCount ?? visibleSuggestions.value.length);
+const visible = computed(() => listRows.value);
 const index = computed(() => visible.value.findIndex((v) => v.key === props.currentKey));
 const parts = (a: string) => props.labels(a);
 const name = (a: string) => {
@@ -103,12 +125,14 @@ const name = (a: string) => {
 const initial = (a: string) => (parts(a).name[0] ?? '?').toUpperCase();
 const outdatedOf = (a: string) => outdatedCountForAuthor(props.items, a);
 const pendingOf = (a: string) => pendingCountForAuthor(changes.value, a);
-const actionableVisible = computed(() => visible.value.filter((c) => !c.outdated));
+const actionableVisible = computed(() =>
+  suggestionItems(visible.value).filter((c) => !c.change.outdated),
+);
 const scopeStatus = computed(() =>
   viewScopeAnnouncement(
     props.filter,
     props.filter ? name(props.filter) : 'everyone',
-    visible.value.length,
+    visibleSuggestions.value.length,
   ),
 );
 const triggerLabel = computed(() => {
@@ -163,7 +187,7 @@ function openConfirm(decision: Decision) {
   confirming.value = {
     decision,
     keys: actionableVisible.value.map((v) => v.key),
-    authors: [...new Set(actionableVisible.value.map((v) => name(v.author)))],
+    authors: [...new Set(actionableVisible.value.map((v) => name(v.change.author)))],
   };
 }
 const confirmText = computed(() => {
@@ -181,19 +205,9 @@ function confirm() {
 }
 const tip = (text: string, keys: string) => `${text} (${keys})`;
 
-const changeByKey = computed(() => new Map(visible.value.map((c) => [c.key, c])));
-
 const groupedVisible = computed(() => {
   if (!props.chapterGroups?.length) return null;
-  const vis = changeByKey.value;
-  return props.chapterGroups
-    .map((g) => ({
-      ...g,
-      changes: g.changeKeys
-        .map((k) => vis.get(k))
-        .filter((c): c is (typeof visible.value)[0] => !!c),
-    }))
-    .filter((g) => g.changes.length);
+  return groupReviewListByChapter(visible.value, props.chapterGroups);
 });
 
 const listEl = ref<HTMLElement | null>(null);
@@ -203,6 +217,10 @@ function setRowRef(key: string, el: unknown) {
   else rowRefs.delete(key);
 }
 
+function setMixedCardRef(key: string, el: unknown) {
+  const node = el && typeof el === 'object' && '$el' in el ? (el as { $el: unknown }).$el : el;
+  setRowRef(key, node);
+}
 let programmaticListScroll = false;
 let followResumeTimer: ReturnType<typeof setTimeout> | undefined;
 let pointerOverList = false;
@@ -281,13 +299,7 @@ function activateChangeRow(key: string, e: Event) {
   if (el instanceof HTMLElement) void nextTick(() => el.focus());
 }
 
-function cardClasses(c: { key: string; outdated?: boolean }) {
-  return {
-    current: c.key === props.currentKey,
-    active: c.key === props.activeScrollKey,
-    outdated: !!c.outdated,
-  };
-}
+const commentDrafts = ref<Record<string, string>>({});
 
 onMounted(() => {
   if (props.follow && props.activeScrollKey) scrollListToActive(props.activeScrollKey);
@@ -301,7 +313,7 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
     side="right"
     expand-label="Show review panel"
     :expand-title="tip('Show review panel', REVIEW_SHORTCUTS.toggle)"
-    :badge="visible.length"
+    :badge="badgeCount"
     :controls-id="REVIEW_CHANGES_REGION_ID"
     :panel-expanded="false"
     data-test="review-rail"
@@ -447,22 +459,50 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
       </p>
     </div>
 
-    <p v-if="!changes.length && loadFailed" class="muted" data-test="empty-load-failed">
+    <label
+      v-if="changes.length || listRows.some((r) => r.kind === 'comment')"
+      class="show-resolved"
+    >
+      <input
+        type="checkbox"
+        data-test="show-resolved"
+        :checked="showResolved"
+        @change="emit('update:showResolved', ($event.target as HTMLInputElement).checked)"
+      />
+      Show resolved
+    </label>
+
+    <p
+      v-if="!changes.length && !listRows.length && loadFailed"
+      class="muted"
+      data-test="empty-load-failed"
+    >
       Suggestions couldn't be loaded for this section.
     </p>
     <EmptyState
-      v-else-if="!changes.length"
+      v-else-if="!changes.length && !listRows.length"
       data-test="empty"
       icon="sparkle"
       tone="success"
       title="Nothing to review"
       text="When your writing assistant suggests a change, it will show up here for you to keep or skip."
     />
-    <p v-else-if="!visible.length" class="muted" data-test="empty-filtered">
+    <p
+      v-if="filter && !visibleSuggestions.length && !listRows.some((r) => r.kind === 'comment')"
+      class="muted"
+      data-test="empty-filtered"
+    >
       No suggestions from this author. Choose All to see the rest.
     </p>
+    <p
+      v-if="filter && !visibleSuggestions.length && listRows.some((r) => r.kind === 'comment')"
+      class="muted"
+      data-test="empty-filtered"
+    >
+      No suggestions from this author. Comments below are still shown.
+    </p>
     <div
-      v-else
+      v-if="listRows.length"
       ref="listEl"
       class="cards-scroll"
       role="listbox"
@@ -483,174 +523,44 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
         >
           <h3 class="chapter-head">{{ g.label }}</h3>
           <ul class="cards">
-            <li
-              v-for="c in g.changes"
-              :key="c.key"
-              :ref="(el) => setRowRef(c.key, el)"
-              class="card"
-              :class="cardClasses(c)"
-              :style="hue(c.author)"
-              data-suggester
-              data-test="item"
-              :data-review-row-key="c.key"
-              role="option"
-              :aria-selected="c.key === currentKey ? 'true' : 'false'"
-              :aria-current="c.key === props.activeScrollKey ? 'true' : undefined"
-              :aria-label="c.outdated ? outdatedCardAriaLabel(name(c.author), c) : undefined"
-              tabindex="-1"
-              @click="activateChangeRow(c.key, $event)"
-            >
-              <span
-                v-if="c.key === props.activeScrollKey"
-                class="visually-hidden"
-                data-test="review-row-active"
-                aria-hidden="true"
-              />
-              <div class="who">
-                <span class="av" aria-hidden="true">{{ initial(c.author) }}</span>
-                <bdi class="name" dir="auto" data-test="agent-name" :title="name(c.author)">{{
-                  parts(c.author).name
-                }}</bdi>
-                <span v-if="parts(c.author).note" class="note" data-test="agent-note">{{
-                  parts(c.author).note
-                }}</span>
-                <span class="pill">{{ authorKind(c.author) }}</span>
-              </div>
-              <p v-if="c.outdated" class="outdated-head">
-                <span class="pill outdated-badge" data-test="outdated-pill">Outdated</span>
-              </p>
-              <p v-if="c.outdated" class="outdated-note" data-test="outdated-note">
-                {{ OUTDATED_CARD_EXPLANATION }}
-              </p>
-              <p v-if="c.format" class="format" data-test="format">{{ c.format.label }}</p>
-              <p v-else class="q">
-                <span v-if="c.del" class="del" data-test="del">{{ c.del }}</span
-                ><template v-if="c.del && c.ins">{{ ' ' }}</template
-                ><span v-if="c.ins" class="ins" data-test="ins">{{ c.ins }}</span>
-              </p>
-              <div v-if="authorKind(c.author) === 'Bot' && c.reason" class="reason" @click.stop>
-                <ReasonLine :reason="c.reason" />
-              </div>
-              <div v-if="c.outdated" class="actions">
-                <button
-                  type="button"
-                  class="secondary"
-                  data-test="dismiss"
-                  :disabled="busy"
-                  @click.stop="emit('dismiss-one', c.key)"
-                >
-                  Dismiss
-                </button>
-              </div>
-              <div v-else class="actions">
-                <button
-                  type="button"
-                  class="primary"
-                  data-test="accept"
-                  :disabled="busy"
-                  :title="tip('Accept change', REVIEW_SHORTCUTS.accept)"
-                  @click.stop="emit('decide-one', c.key, 'accept')"
-                >
-                  Accept
-                </button>
-                <button
-                  type="button"
-                  class="secondary"
-                  data-test="reject"
-                  :disabled="busy"
-                  :title="tip('Reject change', REVIEW_SHORTCUTS.reject)"
-                  @click.stop="emit('decide-one', c.key, 'reject')"
-                >
-                  Reject
-                </button>
-              </div>
-            </li>
+            <ReviewMixedCard
+              v-for="item in g.items"
+              :key="item.key"
+              :ref="(el) => setMixedCardRef(item.key, el)"
+              :item="item"
+              :current-key="currentKey"
+              :active-scroll-key="props.activeScrollKey"
+              :busy="busy"
+              :labels="labels"
+              :draft="commentDrafts[item.kind === 'comment' ? item.thread.id : '']"
+              @activate="activateChangeRow"
+              @decide-one="(k, d) => emit('decide-one', k, d)"
+              @dismiss-one="(k) => emit('dismiss-one', k)"
+              @comment-reply="(id, body) => emit('comment-reply', id, body)"
+              @comment-resolve="(id, r) => emit('comment-resolve', id, r)"
+              @update:draft="(id, v) => (commentDrafts[id] = v)"
+            />
           </ul>
         </section>
       </template>
       <ul v-else class="cards">
-        <li
-          v-for="c in visible"
-          :key="c.key"
-          :ref="(el) => setRowRef(c.key, el)"
-          class="card"
-          :class="cardClasses(c)"
-          :style="hue(c.author)"
-          data-suggester
-          data-test="item"
-          :data-review-row-key="c.key"
-          role="option"
-          :aria-selected="c.key === currentKey ? 'true' : 'false'"
-          :aria-current="c.key === props.activeScrollKey ? 'true' : undefined"
-          :aria-label="c.outdated ? outdatedCardAriaLabel(name(c.author), c) : undefined"
-          tabindex="-1"
-          @click="activateChangeRow(c.key, $event)"
-        >
-          <span
-            v-if="c.key === props.activeScrollKey"
-            class="visually-hidden"
-            data-test="review-row-active"
-            aria-hidden="true"
-          />
-          <div class="who">
-            <span class="av" aria-hidden="true">{{ initial(c.author) }}</span>
-            <bdi class="name" dir="auto" data-test="agent-name" :title="name(c.author)">{{
-              parts(c.author).name
-            }}</bdi>
-            <span v-if="parts(c.author).note" class="note" data-test="agent-note">{{
-              parts(c.author).note
-            }}</span>
-            <span class="pill">{{ authorKind(c.author) }}</span>
-          </div>
-          <p v-if="c.outdated" class="outdated-head">
-            <span class="pill outdated-badge" data-test="outdated-pill">Outdated</span>
-          </p>
-          <p v-if="c.outdated" class="outdated-note" data-test="outdated-note">
-            {{ OUTDATED_CARD_EXPLANATION }}
-          </p>
-          <p v-if="c.format" class="format" data-test="format">{{ c.format.label }}</p>
-          <p v-else class="q">
-            <span v-if="c.del" class="del" data-test="del">{{ c.del }}</span
-            ><template v-if="c.del && c.ins">{{ ' ' }}</template
-            ><span v-if="c.ins" class="ins" data-test="ins">{{ c.ins }}</span>
-          </p>
-          <div v-if="authorKind(c.author) === 'Bot' && c.reason" class="reason" @click.stop>
-            <ReasonLine :reason="c.reason" />
-          </div>
-          <div v-if="c.outdated" class="actions">
-            <button
-              type="button"
-              class="secondary"
-              data-test="dismiss"
-              :disabled="busy"
-              @click.stop="emit('dismiss-one', c.key)"
-            >
-              Dismiss
-            </button>
-          </div>
-          <div v-else class="actions">
-            <button
-              type="button"
-              class="primary"
-              data-test="accept"
-              :disabled="busy"
-              :title="tip('Accept change', REVIEW_SHORTCUTS.accept)"
-              @click.stop="emit('decide-one', c.key, 'accept')"
-            >
-              Accept
-            </button>
-            <button
-              type="button"
-              class="secondary"
-              data-test="reject"
-              :disabled="busy"
-              :title="tip('Reject change', REVIEW_SHORTCUTS.reject)"
-              @click.stop="emit('decide-one', c.key, 'reject')"
-            >
-              Reject
-            </button>
-          </div>
-        </li>
+        <ReviewMixedCard
+          v-for="item in visible"
+          :key="item.key"
+          :ref="(el) => setMixedCardRef(item.key, el)"
+          :item="item"
+          :current-key="currentKey"
+          :active-scroll-key="props.activeScrollKey"
+          :busy="busy"
+          :labels="labels"
+          :draft="commentDrafts[item.kind === 'comment' ? item.thread.id : '']"
+          @activate="activateChangeRow"
+          @decide-one="(k, d) => emit('decide-one', k, d)"
+          @dismiss-one="(k) => emit('dismiss-one', k)"
+          @comment-reply="(id, body) => emit('comment-reply', id, body)"
+          @comment-resolve="(id, r) => emit('comment-resolve', id, r)"
+          @update:draft="(id, v) => (commentDrafts[id] = v)"
+        />
       </ul>
       <button
         v-if="!follow && props.activeScrollKey"
@@ -1215,6 +1125,16 @@ button.secondary {
   background: var(--ct-surface-raised);
   box-shadow: var(--ct-elevation-3);
   padding: var(--ct-space-3);
+}
+.show-resolved {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-space-2);
+  font-size: var(--ct-text-sm);
+  color: var(--ct-text-muted);
+}
+.card :deep(.card--comment) {
+  /* nested styles live on ReviewMixedCard root */
 }
 .confirm p {
   margin: 0 0 var(--ct-space-2);

@@ -57,7 +57,7 @@ describe('collectManuscriptMarkAnchors', () => {
 
     const anchors = collectManuscriptMarkAnchors(root);
     expect(anchors).toHaveLength(1);
-    expect(anchors[0]!.scopedKey).toBe(scopeBookChangeKey('ch1', 'comment_anchor\u0000c1'));
+    expect(anchors[0]!.scopedKey).toBe(scopeBookChangeKey('ch1', 'comment:c1'));
   });
 });
 

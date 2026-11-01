@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
 import { docToYDoc } from '@swarmdraft/docx';
-import { listSuggestions } from '@swarmdraft/editor';
+import { collectReviewItems, listSuggestions } from '@swarmdraft/editor';
 import ManuscriptEditor from '../ManuscriptEditor.vue';
 import ContextMenu from './ContextMenu.vue';
 import type { ContextMenuAction } from './context-menu';
@@ -182,7 +182,9 @@ describe('UI shells (Part of #36)', () => {
     await openContextMenu(w);
     await w.find('[data-test="ctx-comment"]').trigger('click');
     await flushPromises();
-    expect(w.find('[data-test="comment-row"]').exists()).toBe(true);
+    expect(collectReviewItems(editor.state.doc).some((r) => r.type === 'comment_anchor')).toBe(
+      true,
+    );
 
     await openContextMenu(w);
     await w.find('[data-test="ctx-ask-bot"]').trigger('click');

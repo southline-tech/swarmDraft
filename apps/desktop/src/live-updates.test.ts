@@ -65,6 +65,40 @@ function posOf(e: Editor, text: string): number {
 const typeAt = (e: Editor, pos: number, text: string) =>
   e.view.dispatch(e.state.tr.insertText(text, pos));
 
+const LIVE_AGENT = '11b2f0174afce459a04e5c3d5b74f34f';
+
+function commentAnchorThreadId(e: Editor): string | null {
+  let id: string | null = null;
+  e.state.doc.descendants((n) => {
+    if (id || !n.isText) return !id;
+    for (const m of n.marks) {
+      if (m.type.name === 'comment_anchor') id = String(m.attrs.id);
+    }
+    return !id;
+  });
+  return id;
+}
+
+/** Yjs carries anchors; comment bodies arrive like App reloading section comments (#239). */
+async function syncLiveCommentRows(w: ReturnType<typeof mount>) {
+  const threadId = commentAnchorThreadId(editorOf(w));
+  if (!threadId) return;
+  await w.setProps({
+    commentRows: [
+      {
+        id: 'live-comment-row',
+        threadId,
+        body: 'Which lantern?',
+        authorKind: 'agent',
+        authorId: LIVE_AGENT,
+        authorName: 'Unnamed agent',
+        createdAt: '2026-10-26T19:36:52.560Z',
+      },
+    ],
+  });
+  await flushPromises();
+}
+
 async function openLive(
   poll: ReturnType<typeof vi.fn>,
   save: (docId: string, update: Uint8Array) => Promise<void> = async () => {},
@@ -136,9 +170,10 @@ describe('live agent updates (RAD-264)', () => {
     expect(page().find('del.suggestion-delete').text()).toBe('flickered');
     expect(page().find('.comment-anchor').text()).toBe('lantern');
     expect(page().text()).toContain('Late. ');
+    await syncLiveCommentRows(w);
     const cards = w.findAll('[data-test="item"]').map((i) => i.text());
     expect(cards.some((t) => t.includes('guttered') && t.includes('Unnamed agent'))).toBe(true);
-    const items = w.findAll('[data-test="comment-row"]').map((i) => i.text());
+    const items = w.findAll('[data-test="review-item"][data-kind="comment"]').map((i) => i.text());
     expect(cards.some((t) => t.includes('agent:'))).toBe(false);
     expect(items.some((t) => t.includes('agent:'))).toBe(false);
     expect(items.some((t) => t.includes('Comment'))).toBe(true);
@@ -256,10 +291,11 @@ describe('live agent updates (RAD-264)', () => {
     await vi.advanceTimersByTimeAsync(100);
     await session.flush();
 
+    await syncLiveCommentRows(w);
     expect(w.findAll('[data-test="item"] [data-test=ins]')).toHaveLength(1);
     expect(w.findAll('[data-test="item"] [data-test=del]')).toHaveLength(1);
-    const items = w.findAll('[data-test="comment-row"]').map((i) => i.text());
-    expect(items.filter((t) => t.startsWith('Comment'))).toHaveLength(1);
+    const items = w.findAll('[data-test="review-item"][data-kind="comment"]').map((i) => i.text());
+    expect(items.filter((t) => t.includes('Comment'))).toHaveLength(1);
     expect(w.find('.tiptap').text()).toContain('flickeredguttered only twice.');
     // Everything from the poll came in as remote, and nothing it carried was saved back.
     // The echo and the repeats are no-ops for Yjs: only the two agent writes change the doc.

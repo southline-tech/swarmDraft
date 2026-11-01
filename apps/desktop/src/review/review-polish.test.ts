@@ -9,6 +9,8 @@ import { REMOVED_NOTE, markAuthorLabel, setAgents } from '../agent-names';
 import ReviewPanel from './ReviewPanel.vue';
 import type { Agent } from '../backend';
 import type { CommentRow, SuggestionItem } from '@swarmdraft/editor';
+import { buildReviewList, commentReviewKey } from './review-inline';
+import type { ReviewChange } from './review-state';
 
 const agent = (id: string, name: string): Agent => ({
   id,
@@ -23,34 +25,44 @@ const read = (p: string) =>
   readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', p), 'utf8');
 
 describe('review sidebar polish (#47)', () => {
-  it('review column scrolls as one unit (suggestions + comments)', () => {
+  it('review column scrolls as one unit through ReviewPanel only (#239)', () => {
     const css = read('ManuscriptEditor.vue');
     expect(css).toMatch(/\.manuscript-editor \.review\s*\{[^}]*overflow-y:\s*auto/s);
-    expect(css).toMatch(/\.manuscript-editor \.review > :first-child\s*\{[^}]*flex:\s*none/s);
-    expect(css).not.toMatch(/\.manuscript-editor \.review > :first-child\s*\{[^}]*flex:\s*1/s);
+    expect(css).not.toMatch(/class="comments"/);
   });
 
-  it('keeps comments below the review panel in one scrollable column', async () => {
+  it('interleaves comments with suggestions in document order in one list', async () => {
     const by = { author: 'agent:a1', ts: '2026-10-25T00:00:00Z' };
-    const chunks: JSONContent[] = Array.from({ length: 18 }, (_, i) => ({
-      type: 'text',
-      text: `change ${i}. `,
-      marks: [{ type: 'suggestion_insert', attrs: { id: `s${i}`, ...by } }],
-    }));
-    chunks.push({
-      type: 'text',
-      marks: [{ type: 'comment_anchor', attrs: { id: 'c-last' } }],
-      text: 'anchor',
-    });
     const content: JSONContent = {
       type: 'doc',
-      content: [{ type: 'paragraph', content: chunks }],
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              marks: [{ type: 'suggestion_insert', attrs: { id: 's0', ...by } }],
+              text: 'first ',
+            },
+            {
+              type: 'text',
+              marks: [{ type: 'comment_anchor', attrs: { id: 'c-mid' } }],
+              text: 'mid',
+            },
+            {
+              type: 'text',
+              marks: [{ type: 'suggestion_insert', attrs: { id: 's1', ...by } }],
+              text: ' last',
+            },
+          ],
+        },
+      ],
     };
     const commentRows: CommentRow[] = [
       {
         id: 'r1',
-        threadId: 'c-last',
-        body: 'Last comment body',
+        threadId: 'c-mid',
+        body: 'Middle note',
         authorKind: 'human',
         authorId: 'me',
         authorName: 'Mara',
@@ -63,16 +75,18 @@ describe('review sidebar polish (#47)', () => {
       attachTo: document.body,
     });
     await flushPromises();
-    const review = w.get('[data-test="review"]');
-    const el = review.element as HTMLElement;
-    const lastChild = el.lastElementChild;
-    expect(lastChild?.classList.contains('comments')).toBe(true);
-    expect(w.findAll('[data-test="comment-row"]').length).toBe(1);
-    expect(w.findAll('[data-test="item"]').length).toBe(18);
+    const rows = w.findAll('[data-kind]');
+    expect(rows).toHaveLength(3);
+    expect(rows.map((r) => r.attributes('data-kind'))).toEqual([
+      'suggestion',
+      'comment',
+      'suggestion',
+    ]);
+    expect(w.find('.comments').exists()).toBe(false);
     w.unmount();
   });
 
-  it('comment rows show the author and space before the quote', async () => {
+  it('comment cards show author, Comment pill, and quote on comment background', async () => {
     const content: JSONContent = {
       type: 'doc',
       content: [
@@ -105,11 +119,10 @@ describe('review sidebar polish (#47)', () => {
       attachTo: document.body,
     });
     await flushPromises();
-    const item = w.get('[data-test="comment-row"]');
-    expect(item.find('[data-test="review-author"]').text()).toContain('Line Editor');
-    expect(item.find('[data-test="agent-tag"]').text()).toBe('Bot');
-    expect(item.find('.review-comment-head').text()).toMatch(/Comment\s*·\s*Line Editor/);
-    expect(item.find('.review-comment-quote').text()).toBe('rain');
+    const item = w.get('[data-kind="comment"]');
+    expect(item.text()).toContain('Line Editor');
+    expect(item.text()).toContain('Comment');
+    expect(item.find('[data-test="comment-quote"]').text()).toBe('rain');
     w.unmount();
   });
 
@@ -129,18 +142,28 @@ describe('review sidebar polish (#47)', () => {
         },
       ],
     };
-    const w = mount(ManuscriptEditor, { props: { content }, attachTo: document.body });
+    const commentRows: CommentRow[] = [
+      {
+        id: 'r1',
+        threadId: 'c1',
+        body: 'Wet.',
+        authorKind: 'human',
+        authorId: 'u',
+        authorName: 'Mara',
+        createdAt: '2026-10-26T00:00:00Z',
+      },
+    ];
+    const w = mount(ManuscriptEditor, { props: { content, commentRows }, attachTo: document.body });
     await flushPromises();
-    const row = w.get('[data-test="comment-row"]');
+    const row = w.get('[data-kind="comment"]');
     await row.trigger('click');
     await flushPromises();
     expect(row.attributes('aria-selected')).toBe('true');
-    expect(row.classes()).toContain('selected');
-    expect(document.activeElement).toBe(row.element);
+    expect(row.classes()).toContain('current');
     w.unmount();
   });
 
-  it('omits the author line on comment rows until comment rows are supplied', async () => {
+  it('shows quote without author line when comment rows are not supplied yet', async () => {
     const content: JSONContent = {
       type: 'doc',
       content: [
@@ -158,10 +181,7 @@ describe('review sidebar polish (#47)', () => {
     };
     const w = mount(ManuscriptEditor, { props: { content }, attachTo: document.body });
     await flushPromises();
-    const item = w.get('[data-test="comment-row"]');
-    expect(item.find('[data-test="review-author"]').exists()).toBe(false);
-    expect(item.text()).not.toContain('Unknown');
-    expect(item.find('.review-comment-quote').text()).toBe('rain');
+    expect(w.find('[data-test="review-item"][data-kind="comment"]').exists()).toBe(false);
     w.unmount();
   });
 
@@ -173,6 +193,20 @@ describe('review sidebar polish (#47)', () => {
     const w = mount(ReviewPanel, {
       props: {
         items,
+        listItems: [
+          {
+            kind: 'suggestion',
+            key: 'agent:gone\u0000s1',
+            from: 0,
+            change: {
+              key: 'agent:gone\u0000s1',
+              id: 's1',
+              author: 'agent:gone',
+              ins: 'x',
+              targets: [{ kind: 'suggestion_insert', id: 's1' }],
+            },
+          },
+        ],
         labels: (a: string) => markAuthorLabel(a, { 'agent:gone': 'Old Name' }),
       },
     });
@@ -279,5 +313,48 @@ describe('review sidebar polish (#47)', () => {
     await flushPromises();
     expect(w.findAll('[data-test="margin-note"]')).toHaveLength(1);
     w.unmount();
+  });
+});
+
+describe('buildReviewList author filter (#239)', () => {
+  it('keeps comments visible when filtering suggestions', () => {
+    const list = buildReviewList({
+      changes: [
+        {
+          key: 'agent:a1\u0000s1',
+          id: 's1',
+          author: 'agent:a1',
+          ins: 'x',
+          targets: [{ kind: 'suggestion_insert', id: 's1' }],
+        } satisfies ReviewChange,
+      ],
+      threads: [
+        {
+          id: 'c1',
+          anchorText: 'q',
+          order: 0,
+          comments: [
+            {
+              id: 'r1',
+              threadId: 'c1',
+              body: 'b',
+              authorKind: 'human',
+              authorId: 'u',
+              authorName: 'M',
+              createdAt: '2026-01-01T00:00:00Z',
+            },
+          ],
+          resolved: false,
+          orphan: 'none',
+        },
+      ],
+      filter: 'agent:other',
+      showResolved: false,
+      fromOfChange: () => 0,
+      fromOfThread: () => 1,
+    });
+    expect(list).toHaveLength(1);
+    expect(list[0]!.kind).toBe('comment');
+    expect(list[0]!.key).toBe(commentReviewKey('c1'));
   });
 });
