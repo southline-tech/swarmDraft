@@ -687,6 +687,44 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     w.unmount();
   });
 
+  it('shows a gutter hint for hidden overlap and opens All-view popover (#179)', async () => {
+    const doc = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          attrs: { style: 'body' },
+          content: [
+            {
+              type: 'text',
+              text: 'word',
+              marks: [
+                { type: 'suggestion_insert', attrs: { id: 's1', author: 'agent:a', ts: '1' } },
+                { type: 'suggestion_insert', attrs: { id: 's2', author: 'agent:b', ts: '2' } },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const w = mount(ManuscriptEditor, { props: { content: doc }, attachTo: document.body });
+    await flushPromises();
+    expect(w.find('.tiptap [data-test=overlap-badge]').exists()).toBe(true);
+    expect(w.find('.tiptap [data-test=overlap-badge]').attributes('aria-hidden')).toBe('true');
+    await w.find('.tiptap [data-test=overlap-badge]').trigger('click');
+    expect(w.find('[data-test=overlap-popover]').exists()).toBe(true);
+    await w.find('[data-test=context-dismiss]').trigger('click');
+    await pickReviewViewAuthor(w, 0);
+    const gutter = w.find('.tiptap [data-test=overlap-gutter]');
+    expect(gutter.exists()).toBe(true);
+    expect(gutter.find('.suggest-overlap-gutter-hint').text()).toContain('Show');
+    await gutter.trigger('click');
+    await flushPromises();
+    await w.find('[data-test="filter-toggle"]').trigger('click');
+    expect(w.find('[data-test="view-author"][data-author="agent:b"]').classes()).toContain('sel');
+    w.unmount();
+  });
+
   it('cycles author views with Alt+[ / Alt+] and announces scope (#177)', async () => {
     const doc = {
       type: 'doc',

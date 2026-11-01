@@ -17,7 +17,10 @@ import {
   authorViewSequence,
   viewScopeAnnouncement,
   outdatedCountForAuthor,
+  pendingCountForAuthor,
   visibleItems,
+  changeTypeLabel,
+  outdatedCardAriaLabel,
 } from './review-state';
 
 const it3: SuggestionItem[] = ['a', 'b', 'a'].map((author, i) => ({
@@ -74,6 +77,19 @@ describe('review state (RAD-258)', () => {
       { id: 's2', kind: 'suggestion_insert' as const, author: 'a', ts: 't', text: 'y' },
     ];
     expect(outdatedCountForAuthor(outdated, 'a')).toBe(1);
+    expect(pendingCountForAuthor([{ author: 'a', outdated: true }, { author: 'a' }], 'a')).toBe(1);
+    expect(
+      changeTypeLabel({
+        targets: [{ kind: 'suggestion_delete', id: 'x' }],
+        del: 'gone',
+      }),
+    ).toBe('Delete');
+    expect(
+      outdatedCardAriaLabel('Mara', {
+        targets: [{ kind: 'suggestion_insert', id: 'x' }],
+        ins: 'hello',
+      }),
+    ).toContain('Outdated Insert from Mara');
   });
 
   it('steps with wraparound and auto-advances to the change at the old position', () => {

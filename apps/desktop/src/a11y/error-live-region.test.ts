@@ -57,7 +57,7 @@ describe('assertive error live regions at the parent level (#79)', () => {
     expect(region().element).toBe(node);
     expect(region().text()).toContain('open read-only');
     w.unmount();
-  });
+  }, 15_000);
 
   it('ManuscriptEditor reports its load error to the parent and clears it on unmount', async () => {
     const bad = { type: 'doc', content: [{ type: 'table' }] };

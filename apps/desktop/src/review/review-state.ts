@@ -56,6 +56,13 @@ export function cycleAuthorView(
   return seq[(at + dir + seq.length) % seq.length]!;
 }
 
+export function pendingCountForAuthor(
+  items: readonly { author: string; outdated?: boolean }[],
+  author: string,
+): number {
+  return items.filter((c) => c.author === author && !c.outdated).length;
+}
+
 type ItemWithOutdated = SuggestionItem & { outdated?: boolean };
 
 export function outdatedCountForAuthor(items: readonly ItemWithOutdated[], author: string): number {
@@ -106,6 +113,8 @@ export interface ReviewChange {
   format?: { target: string; before: string; after: string; label: string };
   /** Bot rationale shown on the review card (#60). */
   reason?: string;
+  /** Index-only outdated row (#179); Dismiss only in the panel. */
+  outdated?: boolean;
   targets: SuggestionTarget[];
 }
 
@@ -135,6 +144,7 @@ export function groupChanges(items: readonly SuggestionItem[]): ReviewChange[] {
       };
     } else if (i.kind === 'suggestion_delete') c.del = (c.del ?? '') + i.text;
     else if (i.kind === 'suggestion_insert') c.ins = (c.ins ?? '') + i.text;
+    if (i.outdated) c.outdated = true;
     c.reason = mergeReason(c.reason, i.reason);
   }
   return [...out.values()];
@@ -143,6 +153,31 @@ export function groupChanges(items: readonly SuggestionItem[]): ReviewChange[] {
 /** Raw ids from agents are prefixed `agent:`; everyone else is a person. */
 export const authorKind = (author: string): 'Bot' | 'Person' =>
   author.startsWith('agent:') ? 'Bot' : 'Person';
+
+export type ChangeTypeLabel = 'Insert' | 'Delete' | 'Format';
+
+/** Visible change-type label for overlap popover and review cards (#179). */
+export function changeTypeLabel(
+  c: Pick<ReviewChange, 'format' | 'del' | 'ins' | 'targets'>,
+): ChangeTypeLabel {
+  if (c.format) return 'Format';
+  const kinds = new Set(c.targets.map((t) => t.kind));
+  if (kinds.has('format_change')) return 'Format';
+  if (kinds.has('suggestion_delete') && !kinds.has('suggestion_insert')) return 'Delete';
+  return 'Insert';
+}
+
+export const OUTDATED_CARD_EXPLANATION =
+  'This suggestion no longer applies after another change was accepted.';
+
+export function outdatedCardAriaLabel(
+  authorName: string,
+  c: Pick<ReviewChange, 'format' | 'del' | 'ins' | 'targets'>,
+): string {
+  const kind = changeTypeLabel(c);
+  const summary = (c.format?.label ?? c.ins ?? c.del ?? '').trim();
+  return `Outdated ${kind} from ${authorName}. ${OUTDATED_CARD_EXPLANATION}${summary ? ` ${summary}` : ''}`;
+}
 
 /** Attach bot rationales from section review meta, keyed by suggestion id (#60). */
 export function withSuggestionReasons(
