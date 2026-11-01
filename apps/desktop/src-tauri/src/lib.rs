@@ -484,6 +484,21 @@ async fn manuscript_open_latest(
 }
 
 #[tauri::command]
+async fn manuscript_create_blank(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, storage::Store>,
+) -> Result<manuscripts::StoredManuscript, String> {
+    let app = app.clone();
+    blocking(&store, move |s| {
+        let mut emit = move |stage: &str, percent: u8, title: &str, chapters_found: u32| {
+            opening_progress::emit(&app, stage, percent, title, chapters_found);
+        };
+        s.create_blank_manuscript_with_progress(Some(&mut emit))
+    })
+    .await
+}
+
+#[tauri::command]
 async fn manuscript_load(
     app: tauri::AppHandle,
     store: tauri::State<'_, storage::Store>,
@@ -881,6 +896,7 @@ pub fn run() {
             manuscript_import_json,
             manuscripts_list,
             manuscript_open_latest,
+            manuscript_create_blank,
             manuscript_load,
             section_apply_update,
             manuscript_save_outline,

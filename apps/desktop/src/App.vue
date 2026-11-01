@@ -19,6 +19,7 @@ import {
   dismissMigrationNotices,
   listManuscripts,
   loadManuscript,
+  createBlankManuscript,
   listenOpeningProgress,
   manuscriptReviewDecisions,
   saveSectionReviewDecisions,
@@ -216,6 +217,10 @@ async function runOpeningRetry() {
   }
   if (retry.kind === 'open-manuscript') {
     await openRecentBook(retry.id);
+    return;
+  }
+  if (retry.kind === 'create-blank') {
+    await onToolbarDraftNew();
     return;
   }
   if (retry.kind === 'import') await importBytes(retry.name, retry.bytes);
@@ -421,8 +426,61 @@ function openAgentsSettingsFromWindow() {
 function onToolbarDraftImport() {
   chooseFile();
 }
-function onToolbarDraftNew() {
-  openBookPicker();
+function sortDraftsNewestFirst(rows: StoredManuscriptRow[]) {
+  return [...rows].sort((a, b) => {
+    const byTime = b.createdAt.localeCompare(a.createdAt);
+    return byTime !== 0 ? byTime : b.id.localeCompare(a.id);
+  });
+}
+const draftRows = ref<StoredManuscriptRow[]>([]);
+async function refreshDraftRows() {
+  try {
+    const books = await listManuscripts();
+    recentBooks.value = books;
+    draftRows.value = sortDraftsNewestFirst(books);
+  } catch (e) {
+    console.error('List manuscripts failed', e);
+    recentBooks.value = [];
+    draftRows.value = [];
+  }
+}
+function onToolbarDraftMenuOpen() {
+  void refreshDraftRows();
+}
+async function onToolbarDraftNew() {
+  if (creatingBlankDraft.value) return;
+  creatingBlankDraft.value = true;
+  openingRetry.value = { kind: 'create-blank', title: 'Untitled draft' };
+  startOpening('Untitled draft');
+  try {
+    try {
+      await session.value?.flush();
+    } catch (e) {
+      console.error('Flush before new draft failed', e);
+      finishOpening();
+      openError.value = `Couldn't save the open draft: ${errorLine(e, 'save')}`;
+      return;
+    }
+    openError.value = '';
+    const stored = await createBlankManuscript();
+    if (!stored) {
+      failOpening('create blank draft failed', 'open');
+      return;
+    }
+    const next = openStored(stored, null, persistHooks);
+    finishOpening();
+    open(next);
+    showOpenToast(next);
+    await refreshDraftRows();
+  } catch (e) {
+    console.error('New blank draft failed', e);
+    failOpening(e, 'open');
+  } finally {
+    creatingBlankDraft.value = false;
+  }
+}
+function onToolbarDraftSelect(id: string) {
+  void openRecentBook(id);
 }
 // UI-shell previews (Part of #36): `?preview=<id|all>`, or Settings → Preview new screens.
 applyThemeParam(window.location.search, document.documentElement);
@@ -437,13 +495,9 @@ const settingsFocusReturn = shallowRef<HTMLElement | null>(null);
 const agentsFocusReturn = shallowRef<HTMLElement | null>(null);
 const recentOpen = ref(false);
 const recentBooks = ref<StoredManuscriptRow[]>([]);
+const creatingBlankDraft = ref(false);
 async function refreshRecentBooks() {
-  try {
-    recentBooks.value = await listManuscripts();
-  } catch (e) {
-    console.error('List manuscripts failed', e);
-    recentBooks.value = [];
-  }
+  await refreshDraftRows();
 }
 const appMenu = ref<HTMLDetailsElement | null>(null);
 function closeBookMenu() {
@@ -486,6 +540,7 @@ async function openRecentBook(id: string) {
     open(next);
     showOpenToast(next);
     closeBookMenu();
+    await refreshDraftRows();
   } catch (e) {
     console.error('Open recent failed', e);
     failOpening(e, 'open');
@@ -740,6 +795,7 @@ function open(next: ManuscriptSession) {
   syncWindowTitle(next.title || PRODUCT_NAME);
   const rows = next.outline.value;
   selectedId.value = rows.find((s) => s.kind === 'chapter')?.id;
+  void refreshDraftRows();
 }
 
 /**
@@ -1395,6 +1451,8 @@ defineExpose({ open, closeSession });
               :decision-records-by-section="decisionRecordsBySection"
               :manuscript-id="session.id"
               :draft-label="draftPickerLabel"
+              :draft-rows="draftRows"
+              :current-draft-id="session.id"
               @update:selected-id="selectedId = $event"
               @load-error="editorLoadError = $event"
               @reload="reloadSection"
@@ -1411,6 +1469,8 @@ defineExpose({ open, closeSession });
               @open-agents="openToolbarAgents"
               @draft-new="onToolbarDraftNew"
               @draft-import="onToolbarDraftImport"
+              @draft-select="onToolbarDraftSelect"
+              @draft-menu-open="onToolbarDraftMenuOpen"
             />
           </div>
           <div

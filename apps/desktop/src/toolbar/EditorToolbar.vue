@@ -6,7 +6,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, toRaw, watch } from 'vue';
 import type { Editor } from '@tiptap/core';
 import AppIcon from '../icons/AppIcon.vue';
-import DraftPicker from './DraftPicker.vue';
+import DraftPicker, { type DraftPickerRow } from './DraftPicker.vue';
 import ToolbarExportMenu from './ToolbarExportMenu.vue';
 import { applyTheme, loadTheme, saveTheme, type Theme } from '../settings/prefs';
 import {
@@ -33,8 +33,10 @@ const props = withDefaults(
     /** Why the editor is read-only (e.g. 'document failed to load', 'restore in progress'). */
     readOnlyReason?: string;
     findEnabled?: boolean;
-    /** Active draft label for the picker (Wave 6a placeholder). */
+    /** Active draft label for the picker (issue 243). */
     draftLabel?: string;
+    currentDraftId?: string;
+    draftRows?: DraftPickerRow[];
     manuscriptId?: string;
     bookTitle?: string;
     tracking?: boolean;
@@ -47,6 +49,8 @@ const props = withDefaults(
     commentEnabled: false,
     findEnabled: false,
     draftLabel: 'Untitled draft',
+    currentDraftId: undefined,
+    draftRows: () => [],
     manuscriptId: undefined,
     bookTitle: undefined,
     tracking: false,
@@ -63,6 +67,8 @@ const emit = defineEmits<{
   'open-agents': [];
   'draft-new': [];
   'draft-import': [];
+  'draft-select': [id: string];
+  'draft-menu-open': [];
 }>();
 
 /** The live editor, unwrapped from Vue's reactive proxy (Tiptap's view getter throws through it). */
@@ -248,8 +254,12 @@ const themeLabel = computed(() =>
   >
     <DraftPicker
       :label="props.draftLabel"
+      :current-id="props.currentDraftId"
+      :drafts="props.draftRows"
       @new-blank="emit('draft-new')"
       @import="emit('draft-import')"
+      @select="emit('draft-select', $event)"
+      @menu-open="emit('draft-menu-open')"
     />
     <span class="mx-1.5 h-5 w-px bg-border" aria-hidden="true" />
 

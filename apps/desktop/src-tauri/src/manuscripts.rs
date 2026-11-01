@@ -273,6 +273,22 @@ impl Store {
             )?)
         })
     }
+    /// Blank in-app draft (#243): #109 title-page row plus one empty chapter ready to type.
+    pub const BLANK_DRAFT_TITLE: &str = "Untitled draft";
+
+    pub fn create_blank_manuscript_with_progress(
+        &self,
+        progress: Option<&mut crate::opening_progress::Callback<'_>>,
+    ) -> Result<StoredManuscript, StorageError> {
+        let m = self.create_manuscript(Self::BLANK_DRAFT_TITLE)?;
+        self.add_section(&m.id, "front_matter", "Title page", None)?;
+        self.add_section(&m.id, "chapter", "New chapter", None)?;
+        self.load_manuscript_with_progress(&m.id, progress)
+    }
+
+    pub fn create_blank_manuscript(&self) -> Result<StoredManuscript, StorageError> {
+        self.create_blank_manuscript_with_progress(None)
+    }
 
     pub fn list_manuscripts(&self) -> Result<Vec<Manuscript>, StorageError> {
         self.with_conn(|c| {
@@ -1489,6 +1505,20 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].body, "First");
         assert_eq!(rows[1].thread_id.as_deref(), Some("c1"));
+    }
+
+    #[test]
+    fn create_blank_manuscript_has_title_page_and_chapter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = Store::open(tmp.path()).unwrap();
+        let loaded = s.create_blank_manuscript().unwrap();
+        assert_eq!(loaded.manuscript.title, Store::BLANK_DRAFT_TITLE);
+        let sections = s.list_sections(&loaded.manuscript.id).unwrap();
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].kind, "front_matter");
+        assert_eq!(sections[0].title, "Title page");
+        assert_eq!(sections[1].kind, "chapter");
+        assert_eq!(sections[1].title, "New chapter");
     }
 
     #[test]
