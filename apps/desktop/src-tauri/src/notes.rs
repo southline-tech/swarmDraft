@@ -166,13 +166,11 @@ pub fn write_agent_note(
     }
     content::validate_doc(&body_to_pm(body)).map_err(StorageError::Invalid)?;
     let doc = store.load_notes_doc(manuscript_id)?;
-    let since = {
-        let txn = doc.transact();
-        txn.state_vector()
-    };
+    let since = doc.transact().state_vector();
     let id = new_note_id();
     let now = store.now()?;
     let body_name = body_field(&id);
+    let body_pm = body_to_pm(body);
     {
         let mut txn = doc.transact_mut();
         let entry = MapPrelim::from([
@@ -190,8 +188,7 @@ pub fn write_agent_note(
             .push_back(&mut txn, id.as_str());
         txn.get_or_insert_xml_fragment(body_name.as_str());
     }
-    content::encode_fragment(&doc, body_name.as_str(), &body_to_pm(body))
-        .map_err(StorageError::Invalid)?;
+    content::encode_fragment(&doc, body_name.as_str(), &body_pm).map_err(StorageError::Invalid)?;
     store.agent_notes_write(token_id, manuscript_id, &doc, &since)?;
     Ok(NoteEntry {
         id,
@@ -224,13 +221,7 @@ impl Store {
     /// Load the notes Y.Doc for a manuscript (empty when never written).
     pub fn load_notes_doc(&self, manuscript_id: &str) -> Result<Doc, StorageError> {
         self.ensure_manuscript_exists(manuscript_id)?;
-        let doc = self.load_doc(&notes_doc_id(manuscript_id))?;
-        {
-            let mut txn = doc.transact_mut();
-            txn.get_or_insert_array(ORDER_KEY);
-            txn.get_or_insert_map(ENTRIES_KEY);
-        }
-        Ok(doc)
+        self.load_doc(&notes_doc_id(manuscript_id))
     }
 
     /// Append one editor update to the notes doc (validated as Yjs v1).
