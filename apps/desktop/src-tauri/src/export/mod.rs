@@ -1,4 +1,4 @@
-//! Export orchestration: AST → Pandoc → files under app data (#39).
+//! Export orchestration: AST → Pandoc → files under app data (#39, #186).
 
 mod ast;
 mod jobs;
@@ -7,9 +7,12 @@ mod pandoc;
 
 pub use ast::{build_manuscript_ast, is_book_manuscript, ManuscriptAst};
 pub use jobs::{ExportJob, EXPORT_FORMATS};
-pub use pandoc::{locate_pandoc, PANDOC_MISSING, PDF_NOT_IN_BUILD};
+pub use pandoc::{
+    locate_pandoc, managed_pandoc_exe, resolve_pandoc, PandocDownloadState, PandocDownloadStatus,
+    PANDOC_MISSING, PDF_NOT_IN_BUILD,
+};
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::storage::{StorageError, Store};
 
@@ -30,26 +33,43 @@ pub fn trigger_export(
     manuscript_id: &str,
     format: &str,
     trim: Option<&str>,
+    pandoc_override: Option<&str>,
+    download: Option<&PandocDownloadState>,
 ) -> Result<ExportJob, StorageError> {
     validate_export_format(format)?;
     let job = store.create_export_job(manuscript_id, format, trim)?;
     let store = store.clone();
     let job_id = job.id.clone();
+    let pandoc_override = pandoc_override.map(|s| s.to_string());
+    let download = download.cloned();
     std::thread::spawn(move || {
-        if let Err(e) = run_export_job(&store, &job_id) {
+        if let Err(e) = run_export_job(
+            &store,
+            &job_id,
+            pandoc_override.as_deref(),
+            download.as_ref(),
+        ) {
             eprintln!("export job {job_id} failed: {e}");
         }
     });
     Ok(job)
 }
 
-fn run_export_job(store: &Store, job_id: &str) -> Result<(), StorageError> {
+fn run_export_job(
+    store: &Store,
+    job_id: &str,
+    pandoc_override: Option<&str>,
+    download: Option<&PandocDownloadState>,
+) -> Result<(), StorageError> {
     let job = store.get_export_job(job_id)?;
     if job.status != "queued" {
         return Ok(());
     }
     store.set_export_job_running(job_id)?;
-    let result = execute_export(store, &job);
+    let result = execute_export(store, &job, pandoc_override, download);
+    if let Some(d) = download {
+        d.clear();
+    }
     match result {
         Ok((path, log)) => {
             store.finish_export_job(job_id, Some(&path.display().to_string()), None, Some(&log))?
@@ -59,11 +79,20 @@ fn run_export_job(store: &Store, job_id: &str) -> Result<(), StorageError> {
     Ok(())
 }
 
-fn execute_export(store: &Store, job: &ExportJob) -> Result<(PathBuf, String), String> {
+fn execute_export(
+    store: &Store,
+    job: &ExportJob,
+    pandoc_override: Option<&str>,
+    download: Option<&PandocDownloadState>,
+) -> Result<(PathBuf, String), String> {
     if job.format == "pdf" {
         return Err(PDF_NOT_IN_BUILD.into());
     }
-    let pandoc = pandoc::locate_pandoc()?;
+    let override_path = pandoc_override
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(Path::new);
+    let pandoc = resolve_pandoc(store.data_dir(), override_path, download)?;
     let ast = build_manuscript_ast(store, &job.manuscript_id).map_err(|e| e.to_string())?;
     let md = markdown::manuscript_to_markdown(&ast);
     let job_dir = store.exports_dir().join(&job.id);
@@ -125,12 +154,12 @@ mod tests {
                 &serde_json::json!({"type":"doc","content":[{"type":"paragraph","attrs":{"style":"body"},"content":[{"type":"text","text":"Export line."}]}]}),
             )
             .unwrap();
-        if pandoc::locate_pandoc().is_err() {
-            eprintln!("skipping end_to_end_export_with_pandoc: pandoc not installed");
+        if resolve_pandoc(dir.path(), None, None).is_err() {
+            eprintln!("skipping end_to_end_export_with_pandoc: pandoc not available");
             return;
         }
         let job = store.create_export_job(&m.id, "epub", None).unwrap();
-        run_export_job(&store, &job.id).unwrap();
+        run_export_job(&store, &job.id, None, None).unwrap();
         let done = store.get_export_job(&job.id).unwrap();
         assert_eq!(done.status, "succeeded", "{:?}", done.error_message);
         assert!(done.file_path.as_ref().unwrap().ends_with(".epub"));
@@ -149,17 +178,25 @@ mod tests {
                 &serde_json::json!({"type":"doc","content":[{"type":"paragraph","attrs":{"style":"body"},"content":[{"type":"text","text":"x"}]}]}),
             )
             .unwrap();
-        let job = store.create_export_job(&m.id, "docx", None).unwrap();
-        if pandoc::locate_pandoc().is_ok() {
+        if resolve_pandoc(dir.path(), None, None).is_ok() {
             return;
         }
-        run_export_job(&store, &job.id).unwrap();
+        let job = store.create_export_job(&m.id, "docx", None).unwrap();
+        run_export_job(&store, &job.id, None, None).unwrap();
         let done = store.get_export_job(&job.id).unwrap();
         assert_eq!(done.status, "failed");
         assert!(done
             .error_message
             .as_deref()
             .unwrap_or("")
-            .contains("Pandoc"));
+            .to_lowercase()
+            .contains("pandoc"));
+    }
+
+    #[test]
+    fn pandoc_root_dir_is_under_data_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        assert_eq!(store.pandoc_root_dir(), dir.path().join("pandoc"));
     }
 }

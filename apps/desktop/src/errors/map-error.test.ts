@@ -25,6 +25,8 @@ describe('mapError', () => {
     [new Error('File too large (99 bytes; limit 10)'), 'import', 'file-too-large'],
     ['not found: manuscript abc', 'open', 'not-found'],
     ['io: The system cannot find the file specified. (os error 2)', 'open', 'not-found'],
+    ['pandoc: offline: could not download Pandoc', 'export', 'pandoc-offline'],
+    ['pandoc: checksum: bad zip', 'export', 'pandoc-checksum'],
     ['weird failure', 'save', 'save-failed'],
     ['weird failure', 'export', 'export-failed'],
     ['weird failure', 'import', 'file-damaged'],

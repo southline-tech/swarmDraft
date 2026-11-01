@@ -227,6 +227,11 @@ impl Store {
         &self.dir
     }
 
+    /// Root for a pinned Pandoc install downloaded on first export (#186). Not bundled in the installer.
+    pub fn pandoc_root_dir(&self) -> std::path::PathBuf {
+        self.data_dir().join("pandoc")
+    }
+
     /// Run `f` with the locked connection (used by sibling modules such as `agents`).
     pub(crate) fn with_conn<T>(
         &self,

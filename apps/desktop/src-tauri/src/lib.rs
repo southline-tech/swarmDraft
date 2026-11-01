@@ -258,11 +258,28 @@ async fn save_manuscript_copy(
 #[tauri::command]
 fn export_trigger(
     store: tauri::State<'_, storage::Store>,
+    download: tauri::State<'_, export::PandocDownloadState>,
     manuscript_id: String,
     format: String,
     trim: Option<String>,
+    pandoc_path: Option<String>,
 ) -> Result<export::ExportJob, String> {
-    export::trigger_export(&store, &manuscript_id, &format, trim.as_deref()).map_err(err)
+    export::trigger_export(
+        &store,
+        &manuscript_id,
+        &format,
+        trim.as_deref(),
+        pandoc_path.as_deref(),
+        Some(&download),
+    )
+    .map_err(err)
+}
+
+#[tauri::command]
+fn pandoc_download_status(
+    download: tauri::State<'_, export::PandocDownloadState>,
+) -> export::PandocDownloadStatus {
+    download.snapshot()
 }
 
 #[tauri::command]
@@ -711,6 +728,7 @@ pub fn run() {
             )));
             let store = storage::Store::open(&dir)?;
             app.manage(store.clone());
+            app.manage(export::PandocDownloadState::default());
             app.manage(backup::OpLock::default());
             app.manage(std::sync::Mutex::new(McpStatus {
                 url: None,
@@ -784,6 +802,7 @@ pub fn run() {
             mcp_status,
             save_manuscript_copy,
             export_trigger,
+            pandoc_download_status,
             export_get,
             export_list
         ])

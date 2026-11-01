@@ -171,6 +171,26 @@ export function seedProfileForTracking(
 }
 
 export const SPELL_PREFS_KEY = 'swarmdraft.spellPrefs';
+export const PANDOC_PATH_KEY = 'swarmdraft.pandocPath';
+
+export function loadPandocPath(storage: Store = globalThis.localStorage): string {
+  try {
+    const raw = storage?.getItem(PANDOC_PATH_KEY);
+    return typeof raw === 'string' ? raw.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
+export function savePandocPath(path: string, storage: Store = globalThis.localStorage): string {
+  const kept = path.trim().slice(0, 512);
+  try {
+    storage?.setItem(PANDOC_PATH_KEY, kept);
+  } catch {
+    // Session-only when storage is unavailable.
+  }
+  return kept;
+}
 
 export interface SpellPrefs {
   spelling: boolean;

@@ -14,5 +14,6 @@ describe('ExportSection', () => {
     });
     expect(w.find('[data-test="export-epub"]').exists()).toBe(true);
     expect(w.find('[data-test="export-docx"]').exists()).toBe(true);
+    expect(w.find('[data-test="export-pandoc-path"]').exists()).toBe(true);
   });
 });

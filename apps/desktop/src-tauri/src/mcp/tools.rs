@@ -517,6 +517,8 @@ impl CoauthorMcp {
                     &a.manuscript_id,
                     format,
                     a.trim.as_deref(),
+                    None,
+                    None,
                 )
                 .map_err(ToolErr::from)?;
                 Ok(Output::Json(json!({
