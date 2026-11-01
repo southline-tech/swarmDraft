@@ -1682,19 +1682,22 @@ const LABELS: Record<ReviewItem['type'], string> = {
   margin: var(--ct-space-2) 0 0;
   quotes: none;
 }
-.manuscript-editor .comments ul {
+.manuscript-editor .comments ul,
+.continuous-review-rail .comments ul {
   padding-left: var(--ct-space-4);
   list-style: none;
   margin: 0;
 }
-.manuscript-editor .comments li {
+.manuscript-editor .comments li,
+.continuous-review-rail .comments li {
   margin-bottom: var(--ct-space-2);
   padding: var(--ct-space-2) var(--ct-space-3);
   border-radius: var(--ct-radius-md);
   border: 1px solid var(--ct-border);
   cursor: pointer;
 }
-.manuscript-editor .comments li.selected {
+.manuscript-editor .comments li.selected,
+.continuous-review-rail .comments li.selected {
   background: color-mix(in srgb, var(--ct-comment-bg) 45%, var(--ct-selected-bg));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ct-accent) 35%, transparent);
 }
