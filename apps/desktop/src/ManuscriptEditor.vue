@@ -44,11 +44,14 @@ import {
   reviewActionFor,
   saveCollapsed,
   step,
-  toggleAuthor,
   visibleItems,
   withSuggestionReasons,
   authorVisibleInFilter,
   authorsOf,
+  cycleAuthorView,
+  selectAuthorView,
+  viewScopeAnnouncement,
+  reviewViewCycleFor,
   type AuthorFilter,
 } from './review/review-state';
 import FindPanel from './shells/FindPanel.vue';
@@ -486,6 +489,7 @@ const commentAuthor = (item: ReviewItem): AgentName | null => {
 /** Review step-through (RAD-258). Suggestions in document order, keyed on raw author id. */
 const suggestions = shallowRef<SuggestionItem[]>([]);
 const filter = shallowRef<AuthorFilter>(null);
+const viewScopeLive = shallowRef('');
 const currentKey = shallowRef<string | null>(null);
 let currentIndex = -1;
 const collapsed = shallowRef(loadCollapsed());
@@ -496,7 +500,7 @@ const changes = computed(() =>
     : groupChanges(suggestions.value),
 );
 /** Margin callouts align to marks in this section's doc only (#212); the rail may stay book-wide. */
-const marginChanges = computed(() => groupChanges(suggestions.value));
+const marginChanges = computed(() => visibleItems(groupChanges(suggestions.value), filter.value));
 
 function marginSelectedKey(): string | null {
   const key = currentKey.value;
@@ -529,6 +533,15 @@ function refreshReview(e: Editor) {
   currentIndex = i;
   currentKey.value = i >= 0 ? visible.value[i]!.key : null;
   emit('open-suggestions', suggestions.value);
+  announceViewScope();
+}
+function announceViewScope() {
+  const display = filter.value ? labelAuthor(filter.value).name : 'everyone';
+  viewScopeLive.value = viewScopeAnnouncement(
+    filter.value,
+    display,
+    visibleItems(changes.value, filter.value).length,
+  );
 }
 function refreshAuthorFilterDecorations() {
   const e = editor.value;
@@ -540,6 +553,7 @@ function refreshAuthorFilterDecorations() {
 watch(filter, () => {
   refreshAuthorFilterDecorations();
   if (editor.value) refreshReview(editor.value);
+  else announceViewScope();
 });
 watch(
   () => props.suggestionReasons,
@@ -732,13 +746,25 @@ const decideVisible = (d: Decision, keys: readonly string[]) =>
     d,
   );
 
-function onToggleAuthor(author: string) {
-  filter.value = toggleAuthor(authorsOf(changes.value), filter.value, author);
+function onSelectView(author: string | null) {
+  filter.value = selectAuthorView(filter.value, author);
   if (editor.value) refreshReview(editor.value);
 }
 
 function onKeydown(ev: KeyboardEvent) {
   if (shortcutsOpen.value) return;
+  const cycle = reviewViewCycleFor(ev);
+  if (
+    cycle &&
+    reviewOpen.value &&
+    !collapsed.value &&
+    !focusMode.value &&
+    !inForeignInput(ev.target, editor.value?.view.dom ?? null)
+  ) {
+    ev.preventDefault();
+    filter.value = cycleAuthorView(authorsOf(changes.value), filter.value, cycle);
+    return;
+  }
   const action = reviewActionFor(ev);
   if (!action) return;
   if (action !== 'toggle') {
@@ -1422,9 +1448,12 @@ const LABELS: Record<ReviewItem['type'], string> = {
             @decide-one="decideOne"
             @decide-visible="decideVisible"
             @toggle-collapsed="collapsed = !collapsed"
-            @toggle-author="onToggleAuthor"
+            @select-view="onSelectView"
             @update:follow="emit('update:reviewFollow', $event)"
           />
+          <div class="visually-hidden" aria-live="polite" data-test="view-scope-live">
+            {{ viewScopeLive }}
+          </div>
           <EmptyState
             v-if="!collapsed && !comments.length && !loadError"
             class="comments-empty"
@@ -1677,7 +1706,10 @@ const LABELS: Record<ReviewItem['type'], string> = {
 .smallcaps {
   font-variant: small-caps;
 }
-/* Filtered-out authors: display-only; marks stay in the doc (#50). */
+/* Filtered-out authors: display-only; marks stay in the doc (branch view). */
+.tiptap ins.suggestion-insert:has(.suggestion-filter-hidden-insert) {
+  display: none;
+}
 .tiptap ins.suggestion-insert:has(.suggestion-filter-hidden-insert),
 .tiptap del.suggestion-delete:has(.suggestion-filter-hidden-delete) {
   text-decoration: none;
@@ -1693,7 +1725,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
   color: inherit;
 }
 .tiptap .suggestion-filter-hidden-delete {
-  color: var(--ct-text-muted);
+  color: inherit;
 }
 /* Paint on the decoration node: --ct-suggest-* resolve from its --ct-suggester, not the page. */
 .tiptap ins.suggestion-insert [data-suggester] {
@@ -1717,7 +1749,7 @@ const LABELS: Record<ReviewItem['type'], string> = {
   color: inherit;
 }
 .tiptap del.suggestion-delete:has(.suggestion-filter-hidden-delete) [data-suggester] {
-  color: var(--ct-text-muted);
+  color: inherit;
 }
 .tiptap span.format-change [data-suggester] {
   background: var(--ct-suggest-format-bg);

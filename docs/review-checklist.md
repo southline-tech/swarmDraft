@@ -280,3 +280,5 @@ Implementor: add one line here for every review, design or QA finding, in the sa
 - 2026-10-31 · #221 · review 6552710860 · `syncCommentAnchorClasses` classList broke copy→cut (#54) · `CommentAnchorUi` PM decorations + `refreshCommentAnchorUi`; never mutate anchor DOM during live edits
 - 2026-10-31 · #221 · review 6552710860 · margin laid out from book-wide `changes` · `marginChanges` from local `suggestions` only; skip unmeasurable foreign keys
 - 2026-10-31 · #221 · review 6552710860 · comment list rows missing hover wash · `:not(.selected):hover` comment-bg mix; selected anchor/row beats hover
+- 2026-11-01 · #177 · QA comment · branch view must hide other authors, not dim · single-select radiogroup; hidden inserts `display:none`; filtered deletes render as body text; margin cards scoped to view
+- 2026-11-01 · #177 · Designer review (#227) · stacked switcher vs ov1 · compact `sh-menu` dropdown; one `tabindex=0` in menu; visible scope + cycle hint; checkmark, Bot/Person pills, warning outdated pill

@@ -157,6 +157,33 @@ describe('AuthorSuggestionColors (#48)', () => {
     root.remove();
   });
 
+  it('hides filtered-out insert marks entirely in branch view (#177)', () => {
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    let filter: string | null = 'agent:b';
+    const editor = createManuscriptEditor({
+      element: root,
+      content: docWithSuggestions([
+        { id: 's1', author: 'agent:a', del: 'old', ins: 'new' },
+        { id: 's2', author: 'agent:b', del: 'x', ins: 'y' },
+      ]),
+      extensions: [
+        AuthorSuggestionColors.configure({
+          colorFor: () => 'var(--ct-collab-1)',
+          authorVisible: (a) => (filter ? a === filter : true),
+        }),
+      ],
+    });
+    const hiddenIns = () =>
+      root!.querySelectorAll('ins.suggestion-insert .suggestion-filter-hidden-insert').length;
+    expect(hiddenIns()).toBeGreaterThan(0);
+    filter = null;
+    refreshSuggestionColors(editor.view);
+    expect(hiddenIns()).toBe(0);
+    editor.destroy();
+    root.remove();
+  });
+
   it('shows mixed-author text when any author is visible (#50)', () => {
     root = document.createElement('div');
     document.body.appendChild(root);

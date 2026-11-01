@@ -1,7 +1,7 @@
 /**
  * Review step-through state (RAD-258, board WP 8). Pure helpers: the "Show changes from"
- * filter, Previous/Next over visible changes in document order, and a decision log that stays
- * consistent with the document across undo/redo.
+ * single-select view, Previous/Next over visible changes in document order, and a decision log
+ * that stays consistent with the document across undo/redo.
  *
  * Everything is keyed on the raw author id from the suggestion mark (never a display name), so
  * two collaborators with the same label are still filtered and decided separately.
@@ -19,38 +19,75 @@ export function authorsOf(items: readonly { author: string }[]): string[] {
   return [...new Set(items.map((i) => i.author))];
 }
 
-/** `null` selection means All (the default). */
-export type AuthorFilter = ReadonlySet<string> | null;
+/** `null` means All (the default); otherwise the single selected author id (#177). */
+export type AuthorFilter = string | null;
 
 export function visibleItems<T extends { author: string }>(
   items: readonly T[],
   filter: AuthorFilter,
 ): T[] {
-  return filter ? items.filter((i) => filter.has(i.author)) : [...items];
+  return filter ? items.filter((i) => i.author === filter) : [...items];
 }
 
-/** True when inline suggestion marks for this author should show (matches panel filter). */
+/** True when inline suggestion marks for this author should show (matches panel view). */
 export function authorVisibleInFilter(filter: AuthorFilter, author: string): boolean {
-  return filter ? filter.has(author) : true;
+  return filter ? author === filter : true;
 }
 
-/** Trigger label: "All", or "2 of 3". */
-export function filterSummary(authors: readonly string[], filter: AuthorFilter): string {
-  if (!filter) return 'All';
-  const n = authors.filter((a) => filter.has(a)).length;
-  return n === authors.length ? 'All' : `${n} of ${authors.length}`;
+/** Select All (`null`) or one author; clicking the active author again returns to All. */
+export function selectAuthorView(current: AuthorFilter, author: string | null): AuthorFilter {
+  if (author === null || author === current) return null;
+  return author;
 }
 
-/** Toggle one author; selecting everyone collapses back to All. */
-export function toggleAuthor(
+/** View order for cycling: All, then each author in document order. */
+export function authorViewSequence(authors: readonly string[]): readonly (string | null)[] {
+  return [null, ...authors];
+}
+
+export function cycleAuthorView(
   authors: readonly string[],
-  filter: AuthorFilter,
-  author: string,
+  current: AuthorFilter,
+  dir: 1 | -1,
 ): AuthorFilter {
-  const next = new Set(filter ?? authors);
-  if (next.has(author)) next.delete(author);
-  else next.add(author);
-  return authors.every((a) => next.has(a)) ? null : next;
+  const seq = authorViewSequence(authors);
+  const i = seq.indexOf(current);
+  const at = i >= 0 ? i : 0;
+  return seq[(at + dir + seq.length) % seq.length]!;
+}
+
+type ItemWithOutdated = SuggestionItem & { outdated?: boolean };
+
+export function outdatedCountForAuthor(items: readonly ItemWithOutdated[], author: string): number {
+  return items.filter((i) => i.author === author && i.outdated).length;
+}
+
+/** Polite live-region copy when the scoped view changes (#177). */
+export function viewScopeAnnouncement(
+  filter: AuthorFilter,
+  displayName: string,
+  count: number,
+): string {
+  if (!filter) return `Showing ${count} change${count === 1 ? '' : 's'} from everyone`;
+  return `Showing ${count} change${count === 1 ? '' : 's'} from ${displayName}`;
+}
+
+export function bulkActionLabel(
+  decision: 'accept' | 'reject',
+  filter: AuthorFilter,
+  displayName: string,
+): string {
+  const verb = decision === 'accept' ? 'Accept all' : 'Reject all';
+  return filter ? `${verb} from ${displayName}` : verb;
+}
+
+export const REVIEW_VIEW_CYCLE = { next: 'Alt+]', prev: 'Alt+[' } as const;
+
+export function reviewViewCycleFor(e: KeyboardEvent): 1 | -1 | null {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return null;
+  if (e.key === ']') return 1;
+  if (e.key === '[') return -1;
+  return null;
 }
 
 export const keyOf = (t: SuggestionTarget) => targetKey(t);
@@ -198,17 +235,10 @@ export class DecisionLog {
 }
 
 /** Collapsed state of the panel persists per device. */
-export const REVIEW_COLLAPSED_KEY = 'swarmdraft.review.collapsed';
-const LEGACY_REVIEW_COLLAPSED_KEY = 'coauthor.review.collapsed';
+export const REVIEW_COLLAPSED_KEY = 'coauthor.review.collapsed';
 export function loadCollapsed(): boolean {
   try {
-    const ls = globalThis.localStorage;
-    if (ls?.getItem(REVIEW_COLLAPSED_KEY) === '1') return true;
-    if (ls?.getItem(LEGACY_REVIEW_COLLAPSED_KEY) === '1') {
-      ls?.setItem(REVIEW_COLLAPSED_KEY, '1');
-      return true;
-    }
-    return false;
+    return globalThis.localStorage?.getItem(REVIEW_COLLAPSED_KEY) === '1';
   } catch {
     return false;
   }

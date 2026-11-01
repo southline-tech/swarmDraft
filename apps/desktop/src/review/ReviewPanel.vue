@@ -15,10 +15,12 @@ import type { Decision, SuggestionItem } from '@swarmdraft/editor';
 import {
   authorKind,
   authorsOf,
-  authorVisibleInFilter,
-  filterSummary,
+  bulkActionLabel,
   groupChanges,
+  outdatedCountForAuthor,
   REVIEW_SHORTCUTS,
+  REVIEW_VIEW_CYCLE,
+  viewScopeAnnouncement,
   visibleItems,
   type AuthorFilter,
   type ReviewChange,
@@ -27,9 +29,14 @@ import type { BookChapterGroup } from './review-book';
 import { scrollListRowToTop } from './review-scroll';
 import { authorName, type AgentName } from '../agent-names';
 import { collabColor } from '../author-colors';
-import { REVIEW_CHANGES_REGION_ID } from './review-panel-a11y';
+import {
+  REVIEW_CHANGES_REGION_ID,
+  focusCheckedViewOption,
+  roveViewRadio,
+  viewMenuTabIndex,
+} from './review-panel-a11y';
 
-const FILTER_MENU_ID = 'review-author-filter-menu';
+const VIEW_MENU_ID = 'review-view-menu';
 
 const props = withDefaults(
   defineProps<{
@@ -72,8 +79,8 @@ const emit = defineEmits<{
   /** Keys are locked when the confirmation opens, so later arrivals are not included. */
   'decide-visible': [decision: Decision, keys: string[]];
   'toggle-collapsed': [];
-  /** wp8 (#67): multi-author filter toggles (raw id). */
-  'toggle-author': [author: string];
+  /** Single-select author view (#177); null is All. */
+  'select-view': [author: string | null];
   'update:follow': [on: boolean];
 }>();
 
@@ -90,24 +97,58 @@ const name = (a: string) => {
   return n.note ? `${n.name} ${n.note}` : n.name;
 };
 const initial = (a: string) => (parts(a).name[0] ?? '?').toUpperCase();
-
-/** "Show changes from" popover (multi-author checkbox picker, #67). */
+const outdatedOf = (a: string) => outdatedCountForAuthor(props.items, a);
+const pendingOf = (a: string) => countOf(a);
+const scopeStatus = computed(() =>
+  viewScopeAnnouncement(
+    props.filter,
+    props.filter ? name(props.filter) : 'everyone',
+    visible.value.length,
+  ),
+);
+const triggerLabel = computed(() => {
+  if (!props.filter) return 'All';
+  return parts(props.filter).name;
+});
 const menuOpen = ref(false);
-const root = ref<HTMLElement | null>(null);
-const filterToggle = ref<HTMLButtonElement | null>(null);
-function closeFilterMenu(refocus = false) {
+const viewFilterRoot = ref<HTMLElement | null>(null);
+const viewToggle = ref<HTMLButtonElement | null>(null);
+function closeViewMenu(refocus = false) {
   if (!menuOpen.value) return;
   menuOpen.value = false;
-  if (refocus) void nextTick(() => filterToggle.value?.focus());
+  if (refocus) void nextTick(() => viewToggle.value?.focus());
 }
 function onDocDown(e: MouseEvent) {
-  if (root.value && !root.value.contains(e.target as Node)) closeFilterMenu(false);
+  if (viewFilterRoot.value && !viewFilterRoot.value.contains(e.target as Node))
+    closeViewMenu(false);
 }
 watch(menuOpen, (open) => {
-  if (open) document.addEventListener('mousedown', onDocDown);
-  else document.removeEventListener('mousedown', onDocDown);
+  if (open) {
+    document.addEventListener('mousedown', onDocDown);
+    void nextTick(() => {
+      if (viewFilterRoot.value) focusCheckedViewOption(viewFilterRoot.value);
+    });
+  } else document.removeEventListener('mousedown', onDocDown);
 });
 onBeforeUnmount(() => document.removeEventListener('mousedown', onDocDown));
+function onViewMenuKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    e.stopPropagation();
+    closeViewMenu(true);
+    return;
+  }
+  if (viewFilterRoot.value) roveViewRadio(e, viewFilterRoot.value);
+}
+function pickView(author: string | null) {
+  emit('select-view', author);
+  closeViewMenu(true);
+}
+const acceptAllLabel = computed(() =>
+  bulkActionLabel('accept', props.filter, props.filter ? name(props.filter) : ''),
+);
+const rejectAllLabel = computed(() =>
+  bulkActionLabel('reject', props.filter, props.filter ? name(props.filter) : ''),
+);
 /** Theme-aware author color: a --ct-collab-N token keyed by the raw author id, never the name. */
 const hue = (a: string) => ({ '--ct-suggester': collabColor(a) });
 
@@ -132,12 +173,6 @@ function confirm() {
   const c = confirming.value;
   if (c) emit('decide-visible', c.decision, c.keys);
   confirming.value = null;
-}
-function onAuthorFilterChange(e: Event) {
-  const t = e.target;
-  if (!(t instanceof HTMLInputElement) || t.type !== 'checkbox') return;
-  const author = t.dataset.author;
-  if (author) emit('toggle-author', author);
 }
 const tip = (text: string, keys: string) => `${text} (${keys})`;
 
@@ -323,51 +358,87 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
 
     <div
       v-if="authors.length > 1"
-      ref="root"
-      class="filter"
-      @keydown.escape.stop="closeFilterMenu(true)"
+      ref="viewFilterRoot"
+      class="view-filter"
+      data-test="view-switcher"
     >
       <div id="show-from" class="lbl">Show changes from</div>
       <button
-        ref="filterToggle"
+        ref="viewToggle"
         type="button"
         class="dd"
         data-test="filter-toggle"
         aria-haspopup="true"
-        aria-labelledby="show-from filter-current"
+        aria-labelledby="show-from view-trigger-label"
         :aria-expanded="menuOpen"
-        :aria-controls="FILTER_MENU_ID"
+        :aria-controls="VIEW_MENU_ID"
         @click="menuOpen = !menuOpen"
       >
-        <span id="filter-current" class="cur name" data-test="filter-current">{{
-          filterSummary(authors, filter)
+        <span id="view-trigger-label" class="cur name" data-test="filter-current">{{
+          triggerLabel
+        }}</span>
+        <span v-if="!filter" class="cnt pill" data-test="view-count">{{ changes.length }}</span>
+        <span v-else class="av sm" :style="hue(filter)" aria-hidden="true">{{
+          initial(filter)
         }}</span>
         <span class="caret" aria-hidden="true">▾</span>
       </button>
-      <fieldset
+      <div
         v-if="menuOpen"
-        :id="FILTER_MENU_ID"
-        class="menu author-filter"
-        data-test="step-authors"
-        @change="onAuthorFilterChange"
+        :id="VIEW_MENU_ID"
+        class="sh-menu view-menu"
+        role="radiogroup"
+        aria-labelledby="show-from"
+        data-test="view-menu"
+        @keydown="onViewMenuKeydown"
       >
-        <legend class="visually-hidden">Show changes from</legend>
-        <label v-for="a in authors" :key="`af-${a}`" class="author-filter__row">
-          <input
-            type="checkbox"
-            data-test="author-filter"
-            :data-author="a"
-            :checked="authorVisibleInFilter(filter, a)"
-          />
+        <button
+          type="button"
+          role="radio"
+          data-view-option
+          data-test="view-all"
+          class="view-menu__opt"
+          :class="{ sel: !filter }"
+          :aria-checked="!filter ? 'true' : 'false'"
+          :tabindex="viewMenuTabIndex(!filter)"
+          @click="pickView(null)"
+        >
+          <span class="check" aria-hidden="true">{{ !filter ? '✓' : '' }}</span>
+          <span class="view-menu__label">All</span>
+          <span class="pill cnt">{{ changes.length }}</span>
+        </button>
+        <button
+          v-for="a in authors"
+          :key="`view-${a}`"
+          type="button"
+          role="radio"
+          data-view-option
+          data-test="view-author"
+          :data-author="a"
+          class="view-menu__opt"
+          :class="{ sel: filter === a }"
+          :aria-checked="filter === a ? 'true' : 'false'"
+          :tabindex="viewMenuTabIndex(filter === a)"
+          @click="pickView(a)"
+        >
+          <span class="check" aria-hidden="true">{{ filter === a ? '✓' : '' }}</span>
           <span class="av sm" :style="hue(a)" aria-hidden="true">{{ initial(a) }}</span>
-          <bdi class="name" dir="auto" data-test="agent-name" :title="name(a)">{{
+          <bdi class="name view-menu__label" dir="auto" data-test="agent-name" :title="name(a)">{{
             parts(a).name
           }}</bdi>
           <span v-if="parts(a).note" class="note" data-test="agent-note">{{ parts(a).note }}</span>
           <span class="pill">{{ authorKind(a) }}</span>
-          <span class="cnt">{{ countOf(a) }}</span>
-        </label>
-      </fieldset>
+          <span class="pill cnt">{{ pendingOf(a) }}</span>
+          <span v-if="outdatedOf(a)" class="pill outdated" data-test="view-outdated"
+            >{{ outdatedOf(a) }} outdated</span
+          >
+        </button>
+      </div>
+      <p class="view-scope" role="status" data-test="view-scope-status">{{ scopeStatus }}</p>
+      <p class="view-cycle-hint muted" data-test="view-cycle-hint">
+        Cycle authors <kbd>{{ REVIEW_VIEW_CYCLE.prev }}</kbd> /
+        <kbd>{{ REVIEW_VIEW_CYCLE.next }}</kbd>
+      </p>
     </div>
 
     <p v-if="!changes.length && loadFailed" class="muted" data-test="empty-load-failed">
@@ -553,10 +624,10 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
 
     <footer v-if="visible.length" class="bulk">
       <button type="button" data-test="accept-all" :disabled="busy" @click="openConfirm('accept')">
-        Accept all
+        {{ acceptAllLabel }}
       </button>
       <button type="button" data-test="reject-all" :disabled="busy" @click="openConfirm('reject')">
-        Reject all
+        {{ rejectAllLabel }}
       </button>
     </footer>
     <div
@@ -704,6 +775,107 @@ button.secondary {
   letter-spacing: 0.05em;
   color: var(--ct-text-muted);
   margin-bottom: var(--ct-space-1);
+}
+.view-filter {
+  position: relative;
+}
+.view-filter .dd {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-space-2);
+  width: 100%;
+  min-height: var(--ct-space-12);
+  padding: 0 var(--ct-space-2);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-md);
+  background: var(--ct-surface);
+  color: var(--ct-text);
+  font-size: var(--ct-text-md);
+  text-align: left;
+}
+.view-filter .dd .cur {
+  flex: 1;
+  min-width: 0;
+}
+.view-filter .caret {
+  color: var(--ct-text-muted);
+}
+.view-filter .view-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  margin: 2px 0 0;
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.view-menu__opt {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-space-2);
+  width: 100%;
+  min-height: var(--ct-space-12);
+  padding: 0 var(--ct-space-2);
+  border: none;
+  border-radius: var(--ct-radius-md);
+  background: none;
+  color: var(--ct-text);
+  font-size: var(--ct-text-md);
+  text-align: left;
+  cursor: pointer;
+}
+.view-menu__opt:hover,
+.view-menu__opt:focus-visible {
+  background: var(--ct-selected-bg);
+}
+.view-menu__opt.sel {
+  background: var(--ct-selected-bg);
+  font-weight: var(--ct-weight-semibold);
+}
+.view-menu__opt .check {
+  width: 1.25rem;
+  flex: none;
+  text-align: center;
+  color: var(--ct-accent);
+  font-weight: var(--ct-weight-semibold);
+}
+.view-menu__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.view-menu__opt .pill.cnt {
+  margin-left: auto;
+}
+.view-menu__opt .pill.outdated {
+  color: var(--ct-warning);
+  background: var(--ct-warning-bg);
+  border: 1px solid color-mix(in srgb, var(--ct-warning) 35%, transparent);
+}
+.view-scope {
+  margin: var(--ct-space-2) 0 0;
+  font-size: var(--ct-text-sm);
+  color: var(--ct-text);
+}
+.view-cycle-hint {
+  margin: var(--ct-space-1) 0 0;
+  font-size: var(--ct-text-xs);
+}
+.view-cycle-hint kbd {
+  font: inherit;
+  padding: 0 var(--ct-space-1);
+  border-radius: var(--ct-radius-sm);
+  border: 1px solid var(--ct-border);
+  background: var(--ct-surface-raised);
+}
+.view-switcher {
+  display: none;
+}
+.view-opt {
+  display: none;
 }
 .filter {
   position: relative;

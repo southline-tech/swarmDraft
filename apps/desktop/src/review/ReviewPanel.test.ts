@@ -77,33 +77,30 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(w.emitted('decide-one')).toEqual([[key(repl[0]!), 'accept']]);
   });
 
-  it('filters with a checkbox popover defaulting to All (#67 wp8)', async () => {
-    const all = mount(ReviewPanel, { props: { items, labels }, attachTo: document.body });
-    expect(all.find('[data-test=filter-current]').text()).toBe('All');
-    expect(all.find('[data-test=step-authors]').exists()).toBe(false);
-    await all.find('[data-test=filter-toggle]').trigger('click');
-    expect(all.find('[data-test=filter-toggle]').attributes('aria-expanded')).toBe('true');
-    expect(all.find('[data-test=filter-toggle]').attributes('aria-controls')).toBe(
-      'review-author-filter-menu',
-    );
-    const boxes = all.findAll('[data-test=author-filter]');
-    expect(boxes).toHaveLength(2);
-    expect(boxes.every((b) => (b.element as HTMLInputElement).checked)).toBe(true);
-    await boxes[0]!.setValue(false);
-    expect(all.emitted('toggle-author')).toEqual([['agent:a']]);
-    await all.setProps({ filter: new Set(['brett']) });
-    expect(all.find('[data-test=filter-current]').text()).toBe('1 of 2');
-    expect(all.find('[data-test=step-authors]').exists()).toBe(true);
-    await all.find('.filter').trigger('keydown', { key: 'Escape' });
-    expect(all.find('[data-test=step-authors]').exists()).toBe(false);
-    expect(document.activeElement).toBe(all.find('[data-test=filter-toggle]').element);
-    all.unmount();
-
-    const w = mount(ReviewPanel, { props: { items, labels, filter: new Set(['brett']) } });
+  it('single-select view switcher uses compact dropdown (#177)', async () => {
+    const w = mount(ReviewPanel, { props: { items, labels }, attachTo: document.body });
+    expect(w.find('[data-test=view-switcher]').exists()).toBe(true);
+    expect(w.find('[data-test=view-menu]').exists()).toBe(false);
+    expect(w.find('[data-test=view-scope-status]').text()).toContain('Showing 3 changes');
+    expect(w.find('[data-test=view-cycle-hint]').text()).toContain('Alt+]');
+    await w.find('[data-test=filter-toggle]').trigger('click');
+    expect(w.find('[data-test=view-all]').attributes('aria-checked')).toBe('true');
+    expect(w.findAll('[data-test=view-author]')).toHaveLength(2);
+    const tabStops = w
+      .findAll('[data-view-option]')
+      .filter((el) => (el.element as HTMLElement).tabIndex === 0);
+    expect(tabStops).toHaveLength(1);
+    expect(tabStops[0]!.attributes('data-test')).toBe('view-all');
+    await w.findAll('[data-test=view-author]')[0]!.trigger('click');
+    expect(w.emitted('select-view')).toEqual([['agent:a']]);
+    await w.setProps({ filter: 'brett' });
     expect(w.findAll('[data-test=item]').map((i) => i.text())).toEqual([
       expect.stringContaining('Mara'),
     ]);
-    expect(w.find('[data-test=filter-current]').text()).toBe('1 of 2');
+    expect(w.find('[data-test=accept-all]').text()).toBe('Accept all from Mara');
+    await w.find('[data-test=filter-toggle]').trigger('click');
+    await w.find('[data-test=view-all]').trigger('click');
+    expect(w.emitted('select-view')!.slice(-1)).toEqual([[null]]);
     w.unmount();
   });
 
@@ -121,11 +118,8 @@ describe('ReviewPanel (RAD-258)', () => {
     });
     await w.find('[data-test=filter-toggle]').trigger('click');
     const vars = w
-      .findAll('[data-test=author-filter]')
-      .map(
-        (el) =>
-          (el.element as HTMLElement).closest('label')?.querySelector('.av') as HTMLElement | null,
-      )
+      .findAll('[data-test=view-author]')
+      .map((el) => (el.element as HTMLElement).querySelector('.av') as HTMLElement | null)
       .filter(Boolean)
       .map((e) => e!.style.getPropertyValue('--ct-suggester'));
     expect(vars).toEqual([
@@ -201,7 +195,7 @@ describe('ReviewPanel (RAD-258)', () => {
   });
 
   it('Accept all locks only visible changes when an author filter is active (#50)', async () => {
-    const w = mount(ReviewPanel, { props: { items, labels, filter: new Set(['brett']) } });
+    const w = mount(ReviewPanel, { props: { items, labels, filter: 'brett' } });
     await w.find('[data-test=accept-all]').trigger('click');
     expect(w.find('[data-test=confirm]').text()).toMatch(/Accept 1 change from Mara/);
     await w.find('[data-test=confirm-yes]').trigger('click');
@@ -210,7 +204,7 @@ describe('ReviewPanel (RAD-258)', () => {
   });
 
   it('keeps a short line, not the empty card, when the author filter hides every change', () => {
-    const w = mount(ReviewPanel, { props: { items, filter: new Set(['nobody']) } });
+    const w = mount(ReviewPanel, { props: { items, filter: 'nobody' } });
     expect(w.find('.es').exists()).toBe(false);
     expect(w.find('[data-test=empty-filtered]').exists()).toBe(true);
   });

@@ -42,15 +42,26 @@ const shown = computed(() =>
   changes.filter((c) => filter.value === 'all' || (filter.value === 'bot') === c.bot),
 );
 const step = ref(3);
-const authors = ref([
-  { who: 'Writing assistant', n: 9, on: true, color: 1 },
-  { who: 'Sample Person', n: 3, on: true, color: 2 },
-  { who: 'Sample Reader', n: 2, on: false, color: 3 },
-]);
-const visible = computed(() => authors.value.filter((a) => a.on).reduce((t, a) => t + a.n, 0));
-const onCount = computed(() => authors.value.filter((a) => a.on).length);
+const wp8Authors = [
+  { id: 'assistant', who: 'Writing assistant', n: 9, color: 1 },
+  { id: 'person', who: 'Sample Person', n: 3, color: 2 },
+  { id: 'reader', who: 'Sample Reader', n: 2, color: 3 },
+] as const;
+const wp8View = ref<'all' | (typeof wp8Authors)[number]['id']>('all');
+const wp8Counts: Record<'all' | (typeof wp8Authors)[number]['id'], number> = {
+  all: 12,
+  assistant: 9,
+  person: 3,
+  reader: 2,
+};
+const wp8Visible = computed(() => wp8Counts[wp8View.value]);
+const pickWp8View = (id: typeof wp8View.value) => {
+  wp8View.value = id;
+  go(0);
+};
 const go = (d: number) => {
-  step.value = Math.min(Math.max(1, step.value + d), Math.max(1, visible.value));
+  const len = props.mode === 'wp8' ? wp8Visible.value : shown.value.length;
+  step.value = Math.min(Math.max(1, step.value + d), Math.max(1, len));
 };
 const count = (bot: boolean) => changes.filter((c) => c.bot === bot).length;
 </script>
@@ -134,22 +145,41 @@ const count = (bot: boolean) => changes.filter((c) => c.bot === bot).length;
     <aside v-else class="pw__review" aria-label="Review (sample)">
       <template v-if="props.mode === 'wp8'">
         <p class="pw__cap">Review</p>
-        <p class="pw__sel pw__drop">Show changes from {{ onCount }} of {{ authors.length }}</p>
-        <fieldset class="pw__authors">
-          <legend class="pw__muted">Show changes from</legend>
-          <label v-for="a in authors" :key="a.who">
-            <input v-model="a.on" type="checkbox" @change="go(0)" />
+        <div
+          role="radiogroup"
+          aria-label="Show changes from"
+          class="pw__filter"
+          data-test="view-switcher"
+        >
+          <button
+            type="button"
+            role="radio"
+            :aria-checked="wp8View === 'all'"
+            class="pw__view"
+            @click="pickWp8View('all')"
+          >
+            All <span class="pw__n">({{ wp8Counts.all }})</span>
+          </button>
+          <button
+            v-for="a in wp8Authors"
+            :key="a.id"
+            type="button"
+            role="radio"
+            :aria-checked="wp8View === a.id"
+            class="pw__view"
+            @click="pickWp8View(a.id)"
+          >
             <span class="pw__dot" :style="{ background: swatchVar(a.color) }"></span>
-            <bdi dir="auto">{{ a.who }}</bdi
-            ><span class="pw__n">{{ a.n }}</span>
-          </label>
-        </fieldset>
+            <bdi dir="auto">{{ a.who }}</bdi>
+            <span class="pw__n">({{ a.n }})</span>
+          </button>
+        </div>
         <article class="pw__card pw__step" :style="{ borderLeftColor: swatchVar(1) }">
           <div class="pw__nav2">
             <button type="button" class="sh-btn" aria-label="Previous change" @click="go(-1)">
               ‹
             </button>
-            <span data-test="step-pos">{{ Math.min(step, visible) }} of {{ visible }}</span>
+            <span data-test="step-pos">{{ Math.min(step, wp8Visible) }} of {{ wp8Visible }}</span>
             <button type="button" class="sh-btn" aria-label="Next change" @click="go(1)">›</button>
           </div>
           <b>Writing assistant</b> <span class="pw__muted">Replace</span>
@@ -163,10 +193,10 @@ const count = (bot: boolean) => changes.filter((c) => c.bot === bot).length;
         </article>
         <div class="pw__act">
           <button type="button" class="sh-btn" @click="emit('stub', 'Accept all')">
-            Accept all {{ visible }}
+            Accept all {{ wp8Visible }}
           </button>
           <button type="button" class="sh-btn" @click="emit('stub', 'Reject all')">
-            Reject all {{ visible }}
+            Reject all {{ wp8Visible }}
           </button>
         </div>
         <dl class="pw__keys pw__muted">
@@ -178,7 +208,7 @@ const count = (bot: boolean) => changes.filter((c) => c.bot === bot).length;
           <dd>reject</dd>
         </dl>
         <p class="pw__muted">
-          Accept and Reject move to the next change. Bulk actions apply only to the {{ visible }}
+          Accept and Reject move to the next change. Bulk actions apply only to the {{ wp8Visible }}
           visible changes.
         </p>
       </template>

@@ -2,15 +2,21 @@ import { describe, expect, it } from 'vitest';
 import type { DecisionRecord, SuggestionItem } from '@swarmdraft/editor';
 import {
   DecisionLog,
-  filterSummary,
+  bulkActionLabel,
   groupChanges,
   withSuggestionReasons,
   resolveCurrent,
   reviewActionFor,
+  reviewViewCycleFor,
   REVIEW_SHORTCUTS,
+  REVIEW_VIEW_CYCLE,
   step,
   authorVisibleInFilter,
-  toggleAuthor,
+  selectAuthorView,
+  cycleAuthorView,
+  authorViewSequence,
+  viewScopeAnnouncement,
+  outdatedCountForAuthor,
   visibleItems,
 } from './review-state';
 
@@ -23,20 +29,51 @@ const it3: SuggestionItem[] = ['a', 'b', 'a'].map((author, i) => ({
 }));
 
 describe('review state (RAD-258)', () => {
-  it('filters by raw id; selecting everyone collapses back to All', () => {
-    const authors = ['a', 'b'];
-    const onlyB = toggleAuthor(authors, null, 'a');
-    expect(visibleItems(it3, onlyB).map((i) => i.id)).toEqual(['s1']);
-    expect(filterSummary(authors, onlyB)).toBe('1 of 2');
-    expect(toggleAuthor(authors, onlyB, 'a')).toBeNull();
-    expect(filterSummary(authors, null)).toBe('All');
+  it('single-select view shows one author or All (#177)', () => {
+    expect(selectAuthorView(null, 'b')).toBe('b');
+    expect(selectAuthorView('b', 'b')).toBeNull();
+    expect(visibleItems(it3, 'b').map((i) => i.id)).toEqual(['s1']);
+    expect(visibleItems(it3, null)).toHaveLength(3);
+    expect(selectAuthorView('b', 'a')).toBe('a');
   });
 
-  it('authorVisibleInFilter matches visibleItems (#50)', () => {
-    const onlyB = new Set(['b']);
+  it('authorVisibleInFilter matches visibleItems (#50, #177)', () => {
     expect(authorVisibleInFilter(null, 'a')).toBe(true);
-    expect(authorVisibleInFilter(onlyB, 'a')).toBe(false);
-    expect(authorVisibleInFilter(onlyB, 'b')).toBe(true);
+    expect(authorVisibleInFilter('b', 'a')).toBe(false);
+    expect(authorVisibleInFilter('b', 'b')).toBe(true);
+  });
+
+  it('cycles views with Alt+[ and Alt+] (#177)', () => {
+    const authors = ['a', 'b'];
+    expect(authorViewSequence(authors)).toEqual([null, 'a', 'b']);
+    expect(cycleAuthorView(authors, null, 1)).toBe('a');
+    expect(cycleAuthorView(authors, 'b', 1)).toBeNull();
+    expect(cycleAuthorView(authors, null, -1)).toBe('b');
+    const next = new KeyboardEvent('keydown', { key: ']', altKey: true });
+    expect(reviewViewCycleFor(next)).toBe(1);
+    expect(reviewViewCycleFor(new KeyboardEvent('keydown', { key: '[', altKey: true }))).toBe(-1);
+    expect(Object.values(REVIEW_VIEW_CYCLE).join(' ')).toContain('Alt+');
+  });
+
+  it('announces scoped view and labels bulk actions (#177)', () => {
+    expect(viewScopeAnnouncement(null, 'everyone', 5)).toBe('Showing 5 changes from everyone');
+    expect(viewScopeAnnouncement('agent:x', 'Line Editor', 1)).toBe(
+      'Showing 1 change from Line Editor',
+    );
+    expect(bulkActionLabel('accept', null, '')).toBe('Accept all');
+    expect(bulkActionLabel('accept', 'agent:x', 'Line Editor')).toBe('Accept all from Line Editor');
+    const outdated = [
+      {
+        id: 's1',
+        kind: 'suggestion_insert' as const,
+        author: 'a',
+        ts: 't',
+        text: 'x',
+        outdated: true,
+      },
+      { id: 's2', kind: 'suggestion_insert' as const, author: 'a', ts: 't', text: 'y' },
+    ];
+    expect(outdatedCountForAuthor(outdated, 'a')).toBe(1);
   });
 
   it('steps with wraparound and auto-advances to the change at the old position', () => {
