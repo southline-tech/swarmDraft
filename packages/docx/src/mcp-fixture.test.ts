@@ -2,7 +2,7 @@
  * Cross-language fixture for the in-app MCP server (RAD-209): a synthetic section encoded with
  * docToYDoc (client id 1, so the update is deterministic), plus its readView and Yjs mark keys.
  * The Rust side (apps/desktop/src-tauri/src/content.rs) decodes the same bytes and must agree.
- * Regenerate with UPDATE_FIXTURES=1 pnpm --filter @coauthor/docx test.
+ * Regenerate with UPDATE_FIXTURES=1 pnpm --filter @swarmdraft/docx test.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -15,7 +15,7 @@ import {
   NON_EXCLUSIVE_MARKS,
   type DocNode,
   type Mark,
-} from '@coauthor/schema';
+} from '@swarmdraft/schema';
 import { docToYDoc, markKey, yDocToDoc } from './ydoc';
 import { readView } from './model';
 

@@ -4,11 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import type { Editor } from '@tiptap/core';
 import type { JSONContent } from '@tiptap/core';
-import type { DecisionRecord } from '@coauthor/editor';
+import type { DecisionRecord } from '@swarmdraft/editor';
 import ManuscriptEditor from '../ManuscriptEditor.vue';
 import { SAMPLE_DOC } from '../fixtures/sample';
 import * as backend from '../backend';
-import { docToYDoc } from '@coauthor/docx';
+import { docToYDoc } from '@swarmdraft/docx';
 
 let stored: DecisionRecord[] = [];
 

@@ -13,13 +13,13 @@ import {
   type NumberingStyle,
   isSectionKind,
   type Section,
-} from '@coauthor/schema';
+} from '@swarmdraft/schema';
 import type { ImportedManuscript } from './import';
 import { docToYDoc } from './ydoc';
 
 export const STRUCTURE_FIELD = 'structure';
 export const META_FIELD = 'meta';
-export const STRUCTURE_ORIGIN = 'coauthor:structure';
+export const STRUCTURE_ORIGIN = 'swarmdraft:structure';
 export const META_NUMBERING_STYLE = 'numberingStyle';
 
 export function readNumberingStyle(doc: Y.Doc): NumberingStyle {

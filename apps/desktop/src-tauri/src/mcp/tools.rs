@@ -88,7 +88,7 @@ pub(crate) enum Output {
 }
 
 #[derive(Clone)]
-pub struct CoauthorMcp {
+pub struct SwarmdraftMcp {
     pub(crate) store: Store,
     pairing_hook: Option<crate::mcp::PairingRequestedHook>,
     tool_router: ToolRouter<Self>,
@@ -242,7 +242,7 @@ fn pairing_access(parts: &Parts) -> Result<(), ErrorData> {
     }
 }
 
-impl CoauthorMcp {
+impl SwarmdraftMcp {
     pub fn new(store: Store, pairing_hook: Option<crate::mcp::PairingRequestedHook>) -> Self {
         Self {
             store,
@@ -307,7 +307,7 @@ impl CoauthorMcp {
 }
 
 #[tool_router]
-impl CoauthorMcp {
+impl SwarmdraftMcp {
     #[tool(description = "List the manuscripts in this workspace.")]
     async fn list_documents(
         &self,
@@ -1188,7 +1188,7 @@ fn check_schema(doc: &yrs::Doc) -> Result<(), ToolErr> {
 }
 
 #[tool_handler(router = self.tool_router)]
-impl ServerHandler for CoauthorMcp {
+impl ServerHandler for SwarmdraftMcp {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "swarmDraft manuscript tools. Read with list_documents, list_chapters, read_chapter, \
@@ -1435,7 +1435,7 @@ mod tests {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let mcp = CoauthorMcp::new(store.clone(), None);
+        let mcp = SwarmdraftMcp::new(store.clone(), None);
         let before = counts(&store);
         for tool in 0..3 {
             // A fresh, valid token for each call: auth passes and the tool runs its checks.
@@ -1537,7 +1537,7 @@ mod tests {
         let scopes = vec!["read".to_string(), "suggest".to_string()];
         let tok = store.create_token(&agent.id, Some(&scopes)).unwrap();
         let principal = store.authenticate(&tok.token).unwrap().unwrap();
-        let mcp = CoauthorMcp::new(store.clone(), None);
+        let mcp = SwarmdraftMcp::new(store.clone(), None);
         let edit = |quote: &str| {
             let (mut parts, ()) = axum::http::Request::new(()).into_parts();
             parts.extensions.insert(principal.clone());

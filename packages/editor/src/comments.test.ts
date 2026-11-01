@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { DocNode } from '@coauthor/schema';
+import type { DocNode } from '@swarmdraft/schema';
 import { buildThreads, listCommentAnchors, type CommentRow } from './comments';
 
 const anchor = (id: string) => ({ type: 'comment_anchor' as const, attrs: { id } });

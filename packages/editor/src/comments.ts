@@ -4,7 +4,7 @@
  * `CommentsSource` seam (backed by migration 3's `comments` table once it lands).
  * Anchor ids are always read from mark attrs, never from Yjs mark keys.
  */
-import type { DocNode, InlineNode, TextNode } from '@coauthor/schema';
+import type { DocNode, InlineNode, TextNode } from '@swarmdraft/schema';
 
 export type AuthorKind = 'human' | 'agent';
 

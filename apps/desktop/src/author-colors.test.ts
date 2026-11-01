@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
-import type { CommentRow, CommentThread, SuggestionItem } from '@coauthor/editor';
+import type { CommentRow, CommentThread, SuggestionItem } from '@swarmdraft/editor';
 import {
   collabSlotOf,
   collabColor,

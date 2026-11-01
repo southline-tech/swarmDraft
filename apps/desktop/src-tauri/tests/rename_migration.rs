@@ -1,14 +1,14 @@
 //! #43: an existing pre-rename install opens intact under the new app identifier, and the old
 //! data folder is left exactly as it was. Synthetic text only.
 
-use coauthor_lib::{
+use serde_json::json;
+use std::path::Path;
+use swarmdraft_lib::{
     content,
     manuscripts::ImportSection,
     migrate::{self, Outcome, OLD_IDENTIFIER},
     storage::Store,
 };
-use serde_json::json;
-use std::path::Path;
 
 fn sec(id: &str, kind: &str, title: &str, text: &str) -> ImportSection {
     ImportSection {
@@ -74,6 +74,7 @@ fn existing_install_opens_intact_under_new_identifier() {
 
     assert_eq!(migrate::migrate(&old, &new).unwrap(), Outcome::Copied);
     assert_eq!(files(&old), before, "old folder must be untouched");
+    assert!(new.join(swarmdraft_lib::storage::DB_FILENAME).is_file());
 
     let store = Store::open(&new).unwrap();
     let ms = store.list_manuscripts().unwrap();

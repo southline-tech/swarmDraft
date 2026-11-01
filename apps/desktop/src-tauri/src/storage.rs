@@ -1,4 +1,4 @@
-//! Local-first storage: one data directory holding `coauthor.db` (SQLite).
+//! Local-first storage: one data directory holding `swarmdraft.db` (SQLite).
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -198,6 +198,58 @@ const MIGRATIONS: &[&str] = &[
 /// How long a statement waits on a locked database before failing.
 pub const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
 
+/// Live database file name for new installs (#198).
+pub const DB_FILENAME: &str = "swarmdraft.db";
+
+/// Pre-rename database file name; still opened when present (#198).
+pub const LEGACY_DB_FILENAME: &str = "coauthor.db";
+
+/// Path to the database file in `dir`: prefers `swarmdraft.db`, then legacy `coauthor.db`, else
+/// `swarmdraft.db` for creation.
+pub fn db_path(dir: &Path) -> PathBuf {
+    let modern = dir.join(DB_FILENAME);
+    if modern.is_file() {
+        return modern;
+    }
+    let legacy = dir.join(LEGACY_DB_FILENAME);
+    if legacy.is_file() {
+        return legacy;
+    }
+    modern
+}
+
+/// Sidecar extensions for a database file at `db`.
+fn db_side_paths(db: &Path) -> [PathBuf; 3] {
+    let base = db.as_os_str().to_owned();
+    ["-wal", "-shm", "-journal"].map(|ext| {
+        let mut p = base.clone();
+        p.push(ext);
+        PathBuf::from(p)
+    })
+}
+
+/// After opening a legacy file, rename it (and sidecars) to [`DB_FILENAME`].
+fn promote_legacy_db(dir: &Path) -> Result<(), StorageError> {
+    let legacy = dir.join(LEGACY_DB_FILENAME);
+    if !legacy.is_file() {
+        return Ok(());
+    }
+    let modern = dir.join(DB_FILENAME);
+    if modern.exists() {
+        return Ok(());
+    }
+    std::fs::rename(&legacy, &modern)?;
+    for (from, to) in db_side_paths(&legacy)
+        .into_iter()
+        .zip(db_side_paths(&modern))
+    {
+        if from.is_file() {
+            let _ = std::fs::rename(from, to);
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct Store {
     dir: PathBuf,
@@ -210,12 +262,22 @@ pub struct Store {
 impl Store {
     pub fn open(dir: &Path) -> Result<Self, StorageError> {
         std::fs::create_dir_all(dir)?;
-        let mut conn = Connection::open(dir.join("coauthor.db"))?;
+        let mut path = db_path(dir);
+        let using_legacy = path.file_name().is_some_and(|n| n == LEGACY_DB_FILENAME);
+        let mut conn = Connection::open(&path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         // Fail fast when another process holds the database: a locked file used to stall each
         // call ~5 s (rusqlite's default) and the UI's retries added up to tens of seconds.
         conn.busy_timeout(BUSY_TIMEOUT)?;
         migrate(&mut conn)?;
+        if using_legacy {
+            conn.close().map_err(|(_, e)| StorageError::Sqlite(e))?;
+            promote_legacy_db(dir)?;
+            path = dir.join(DB_FILENAME);
+            conn = Connection::open(&path)?;
+            conn.pragma_update(None, "journal_mode", "WAL")?;
+            conn.busy_timeout(BUSY_TIMEOUT)?;
+        }
         Ok(Self {
             dir: dir.to_path_buf(),
             conn: std::sync::Arc::new(Mutex::new(conn)),
@@ -384,7 +446,18 @@ mod tests {
         drop(store);
         let store = Store::open(tmp.path()).unwrap();
         assert_eq!(store.schema_version().unwrap(), MIGRATIONS.len() as i64);
-        assert!(tmp.path().join("coauthor.db").exists());
+        assert!(tmp.path().join(DB_FILENAME).exists());
+    }
+
+    #[test]
+    fn opens_legacy_coauthor_db_and_promotes_to_swarmdraft() {
+        let tmp = tempfile::tempdir().unwrap();
+        let legacy = tmp.path().join(LEGACY_DB_FILENAME);
+        Connection::open(&legacy).unwrap();
+        let store = Store::open(tmp.path()).unwrap();
+        assert_eq!(store.schema_version().unwrap(), MIGRATIONS.len() as i64);
+        assert!(tmp.path().join(DB_FILENAME).is_file());
+        assert!(!legacy.is_file());
     }
 
     #[test]
@@ -416,7 +489,7 @@ mod tests {
         use crate::agents::DEFAULT_AGENT_NAME;
         let tmp = tempfile::tempdir().unwrap();
         {
-            let mut conn = Connection::open(tmp.path().join("coauthor.db")).unwrap();
+            let mut conn = Connection::open(tmp.path().join(LEGACY_DB_FILENAME)).unwrap();
             migrate_with(&mut conn, &MIGRATIONS[..5]).unwrap();
             conn.execute(
                 "INSERT INTO agents (id, name, color, created_at) VALUES (?1, ?2, ?3, ?4)",

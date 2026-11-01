@@ -1,5 +1,5 @@
 {
-  "name": "@coauthor/editor",
+  "name": "@swarmdraft/editor",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,7 +14,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@coauthor/schema": "workspace:*",
+    "@swarmdraft/schema": "workspace:*",
     "@tiptap/core": "3.32.0",
     "@tiptap/extension-collaboration": "3.32.0",
     "@tiptap/pm": "3.32.0",
@@ -22,7 +22,7 @@
     "yjs": "^13.6.33"
   },
   "devDependencies": {
-    "@coauthor/docx": "workspace:*",
+    "@swarmdraft/docx": "workspace:*",
     "happy-dom": "^15.11.7",
     "vitest": "^3.2.4"
   }

@@ -1,4 +1,4 @@
-import type { SpellLintResult } from '@coauthor/editor';
+import type { SpellLintResult } from '@swarmdraft/editor';
 import { spellLintParagraph } from '../backend';
 import { loadSpellPrefs, spellcheckEnabled } from '../settings/prefs';
 

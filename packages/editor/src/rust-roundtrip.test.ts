@@ -7,7 +7,7 @@
  * cargo test `roundtrip_fixture`). This test opens every Rust update in the real editor and
  * expects the original JSON back with no writes; the cargo test decodes the TS updates.
  *
- * Regenerate: UPDATE_FIXTURES=1 pnpm --filter @coauthor/editor test, then
+ * Regenerate: UPDATE_FIXTURES=1 pnpm --filter @swarmdraft/editor test, then
  * UPDATE_FIXTURES=1 cargo test roundtrip_fixture (in apps/desktop/src-tauri), then rerun both.
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -15,8 +15,8 @@ import { resolve } from 'node:path';
 import { Editor } from '@tiptap/core';
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { docToYDoc, importDocx } from '@coauthor/docx';
-import type { DocNode } from '@coauthor/schema';
+import { docToYDoc, importDocx } from '@swarmdraft/docx';
+import type { DocNode } from '@swarmdraft/schema';
 import { checkYDocContent, collaborativeEditorOptions, contentErrorOf } from './index';
 
 // Vitest runs with the package as cwd (happy-dom replaces import.meta.url's scheme).

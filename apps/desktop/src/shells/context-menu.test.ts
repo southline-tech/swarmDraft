@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Editor } from '@tiptap/core';
-import { manuscriptEditorOptions } from '@coauthor/editor';
-import { collectReviewItems } from '@coauthor/editor';
+import { manuscriptEditorOptions } from '@swarmdraft/editor';
+import { collectReviewItems } from '@swarmdraft/editor';
 import { SAMPLE_DOC } from '../fixtures/sample';
 import {
   contextMenuDisabled,

@@ -1,4 +1,4 @@
-import { NUMBERING_STYLES, type NumberingStyle } from '@coauthor/schema';
+import { NUMBERING_STYLES, type NumberingStyle } from '@swarmdraft/schema';
 
 /** Human labels for the book-wide numbering style picker (#111). */
 export const NUMBERING_STYLE_LABELS: Record<NumberingStyle, string> = {

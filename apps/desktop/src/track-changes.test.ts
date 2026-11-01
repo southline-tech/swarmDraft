@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
-import { docToYDoc, yDocToDoc } from '@coauthor/docx';
-import { listSuggestions } from '@coauthor/editor';
+import { docToYDoc, yDocToDoc } from '@swarmdraft/docx';
+import { listSuggestions } from '@swarmdraft/editor';
 import { applyReviewDecision } from './review/apply';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import { SAMPLE_DOC } from './fixtures/sample';

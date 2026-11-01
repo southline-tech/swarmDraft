@@ -3,7 +3,7 @@
  * Story notes under the draft (#38): ordered notes with title, rich body, optional chapter link.
  */
 import { computed, onUnmounted, ref, shallowRef, watch } from 'vue';
-import type { Section } from '@coauthor/schema';
+import type { Section } from '@swarmdraft/schema';
 import type * as Y from 'yjs';
 import EmptyState from '../shells/EmptyState.vue';
 import AppIcon from '../icons/AppIcon.vue';

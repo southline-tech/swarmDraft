@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
-import { docToYDoc } from '@coauthor/docx';
-import { listSuggestions } from '@coauthor/editor';
+import { docToYDoc } from '@swarmdraft/docx';
+import { listSuggestions } from '@swarmdraft/editor';
 import ManuscriptEditor from '../ManuscriptEditor.vue';
 import ContextMenu from './ContextMenu.vue';
 import type { ContextMenuAction } from './context-menu';

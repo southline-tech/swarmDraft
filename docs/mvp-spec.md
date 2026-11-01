@@ -109,7 +109,7 @@ preview exactly matches the print file.
   (footnote or endnote with rich paragraphs), `image(alt)` placeholder; marks: italic, bold,
   smallcaps, underline, strike, link, `comment_anchor(id)`, `suggestion_insert(id, author, ts)`,
   `suggestion_delete(id, author, ts)`, `format_change(id, author, attrs)`. Types live in
-  `@coauthor/schema` (`content.ts`). In Yjs, comment and suggestion marks are keyed `type--hash`
+  `@swarmdraft/schema` (`content.ts`). In Yjs, comment and suggestion marks are keyed `type--hash`
   so overlapping ranges don't clobber each other. Agent reads expose notes as `[^id]` markers
   plus a notes list (`readView`).
 - **Comment**(id, section_id, anchor, author principal, body, thread_id, resolved_at)
@@ -150,7 +150,7 @@ exposed over MCP.
 | `list_notes` / `write_note(manuscript_id, title, body)`                    | Planning/working notes                                         | read / comment |
 | `list_story_bible` / `suggest_story_bible_entry(kind, name, fields, body)` | Story bible entries; agent entries are suggestions             | read / suggest |
 
-Resources: `coauthor://manuscript/{id}/section/{sid}` (read-only text). Anchors use quoted text +
+Resources: `swarmdraft://manuscript/{id}/section/{sid}` (read-only text). Anchors use quoted text +
 block id so they survive concurrent edits; the server resolves them to Yjs relative positions and
 errors if ambiguous or stale. Every call is written to AuditEvent. All positions over MCP
 (`search_text` offsets and lengths, anchor offsets) are UTF-16 code units, the same as JavaScript

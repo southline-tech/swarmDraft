@@ -9,7 +9,7 @@ Windows-first Tauri desktop manuscript editor: Vue 3 + Tiptap + Yjs frontend, Ru
 | `apps/desktop/src/`                                    | Vue app: editor, outline (`SectionNav`), `review/`, `comments/`, `toolbar/`, `desk/`, `status/`, `styles/` | Frontend            |
 | `apps/desktop/src/backend.ts`, `manuscript-session.ts` | IPC wrapper and session/save wiring (shared; owner set per issue)                                          | Frontend by default |
 | `apps/desktop/src-tauri/src/`                          | Rust: `storage.rs`, `manuscripts.rs`, `agents.rs`, `mcp/`, `backup.rs`, `content.rs`, `anchor.rs`          | Backend             |
-| `packages/editor`                                      | Tiptap extensions, review marks, trusted accept/reject (`@coauthor/editor/trusted`)                        | Frontend            |
+| `packages/editor`                                      | Tiptap extensions, review marks, trusted accept/reject (`@swarmdraft/editor/trusted`)                      | Frontend            |
 | `packages/schema`                                      | Shared document schema                                                                                     | Shared              |
 | `packages/docx`                                        | .docx import/export                                                                                        | Backend             |
 | `docs/design-system.md`                                | Tokens, components, themes (source of truth for UI)                                                        | Shared              |

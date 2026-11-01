@@ -3,7 +3,7 @@
  * Kept free of Vue so the state and the commands can be unit-tested against a real editor.
  */
 import type { Editor } from '@tiptap/core';
-import { PARAGRAPH_STYLE_LABELS, type ParagraphStyle } from '@coauthor/editor';
+import { PARAGRAPH_STYLE_LABELS, type ParagraphStyle } from '@swarmdraft/editor';
 
 /** The four styles in the toolbar dropdown (epic RAD-253, WP 1). */
 export const TOOLBAR_STYLES = ['body', 'heading', 'scene_break', 'block_quote'] as const;

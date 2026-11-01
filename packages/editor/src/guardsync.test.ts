@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { Editor, type JSONContent } from '@tiptap/core';
 import * as Y from 'yjs';
 import { ySyncPluginKey } from '@tiptap/y-tiptap';
-import { docToYDoc } from '@coauthor/docx';
+import { docToYDoc } from '@swarmdraft/docx';
 import { collaborativeEditorOptions, collectReviewItems } from './index';
 import { allowReviewEdits } from './trusted';
 

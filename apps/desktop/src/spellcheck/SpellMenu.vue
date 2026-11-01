@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Context menu for a spelling or grammar flag (#159 sc2/sc3). */
-import type { SpellIssue } from '@coauthor/editor';
+import type { SpellIssue } from '@swarmdraft/editor';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 
 const props = defineProps<{

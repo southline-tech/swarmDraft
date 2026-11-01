@@ -9,7 +9,7 @@ import { Plugin, PluginKey, type EditorState } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { Node as PMNode } from '@tiptap/pm/model';
 
-export const suggestionColorsKey = new PluginKey<DecorationSet>('coauthorSuggestionColors');
+export const suggestionColorsKey = new PluginKey<DecorationSet>('swarmdraftSuggestionColors');
 export type SuggestionColor = (author: string) => string;
 /** When false, suggestion marks render as plain text (display only; doc unchanged). */
 export type SuggestionAuthorVisible = (author: string) => boolean;

@@ -3,7 +3,7 @@ import {
   isNumberingStyle,
   type NumberingStyle,
   type Section,
-} from '@coauthor/schema';
+} from '@swarmdraft/schema';
 import { buildOutline, type OutlineNode } from './outline';
 
 const WORDS = [

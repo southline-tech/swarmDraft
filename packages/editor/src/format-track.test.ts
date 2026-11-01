@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { Editor, type JSONContent } from '@tiptap/core';
-import { docToYDoc, yDocToDoc } from '@coauthor/docx';
-import type { DocNode } from '@coauthor/schema';
+import { docToYDoc, yDocToDoc } from '@swarmdraft/docx';
+import type { DocNode } from '@swarmdraft/schema';
 import {
   FormatTrackChanges,
   HumanTrackChanges,

@@ -5,13 +5,13 @@
  */
 import { markRaw, shallowRef, type ShallowRef } from 'vue';
 import * as Y from 'yjs';
-import type { NumberingStyle, Section } from '@coauthor/schema';
+import type { NumberingStyle, Section } from '@swarmdraft/schema';
 import {
   coalesceLegacySceneSections,
   normalizeOutline,
   parseNumberingStyle,
   type OutlineIssue,
-} from '@coauthor/editor';
+} from '@swarmdraft/editor';
 import {
   docToYDoc,
   importDocx,
@@ -25,7 +25,7 @@ import {
   yDocToDoc,
   type ImportReport,
   type ImportedManuscript,
-} from '@coauthor/docx';
+} from '@swarmdraft/docx';
 import {
   openLatestManuscript,
   persistImport,
@@ -241,12 +241,12 @@ export class UnsavedEditsError extends Error {
 }
 
 /** Origin used when loading stored state, so loading is not echoed back as an edit. */
-export const LOAD_ORIGIN = 'coauthor:load';
+export const LOAD_ORIGIN = 'swarmdraft:load';
 /**
  * Origin used when applying updates someone else already stored (an agent's suggestions over
  * MCP), so they show in the editor without being saved back.
  */
-export const REMOTE_ORIGIN = 'coauthor:remote';
+export const REMOTE_ORIGIN = 'swarmdraft:remote';
 export const SAVE_DEBOUNCE_MS = 500;
 /** How often an open stored manuscript checks for writes made elsewhere (RAD-264). */
 export const LIVE_POLL_MS = 500;

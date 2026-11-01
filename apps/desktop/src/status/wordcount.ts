@@ -4,7 +4,7 @@
  * asterisks never count.
  */
 import * as Y from 'yjs';
-import type { Section } from '@coauthor/schema';
+import type { Section } from '@swarmdraft/schema';
 
 // Letters keep their combining marks (decomposed "naïve", Devanagari vowel signs); digits joined
 // by "." or "," inside a number ("3.5", "1,000") stay one word.

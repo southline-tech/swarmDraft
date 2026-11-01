@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { shallowRef } from 'vue';
 import * as Y from 'yjs';
-import { docToYDoc, exportDocx, importDocx, type DocNode } from '@coauthor/docx';
-import type { Section } from '@coauthor/schema';
+import { docToYDoc, exportDocx, importDocx, type DocNode } from '@swarmdraft/docx';
+import type { Section } from '@swarmdraft/schema';
 import {
   buildCopy,
   commentsForExport,

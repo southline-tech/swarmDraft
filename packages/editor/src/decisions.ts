@@ -3,7 +3,7 @@
  * nothing here is exposed to agents, and the MCP surface has no equivalent.
  *
  * A decision travels as a `DecisionOp` (target (kind, id) pairs plus accept/reject), never as a
- * replacement document. The editor's `ReviewTransactionPort` (in `@coauthor/editor/trusted`)
+ * replacement document. The editor's `ReviewTransactionPort` (in `@swarmdraft/editor/trusted`)
  * re-finds each target on the live document by `attrs.id` inside one `allowReviewEdits`
  * transaction, so concurrent edits elsewhere survive and the decision is one undo step.
  * `decideSuggestions` is the reference model of that transform over the shared content model.
@@ -18,7 +18,7 @@ import type {
   Mark,
   ParagraphNode,
   TextNode,
-} from '@coauthor/schema';
+} from '@swarmdraft/schema';
 import { inlineFormatOnBefore, PARAGRAPH_STYLE_TARGET } from './format-change';
 
 export type SuggestionKind = 'suggestion_insert' | 'suggestion_delete' | 'format_change';
@@ -113,7 +113,7 @@ export interface PortResult {
 }
 /**
  * Applies a decision op to the live document in one trusted transaction. The implementation
- * lives behind `@coauthor/editor/trusted`.
+ * lives behind `@swarmdraft/editor/trusted`.
  */
 export interface ReviewTransactionPort {
   applyReviewDecision(op: DecisionOp): PortResult | Promise<PortResult>;

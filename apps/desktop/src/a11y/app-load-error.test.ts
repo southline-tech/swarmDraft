@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
-import { FRAGMENT_NAME, readStructure } from '@coauthor/docx';
+import { FRAGMENT_NAME, readStructure } from '@swarmdraft/docx';
 import App from '../App.vue';
 import { sessionFromDocx } from '../manuscript-session';
 

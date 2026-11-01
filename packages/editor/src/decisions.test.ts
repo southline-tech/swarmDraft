@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { DocNode, Mark } from '@coauthor/schema';
+import type { DocNode, Mark } from '@swarmdraft/schema';
 import {
   decideSuggestions,
   listSuggestions,

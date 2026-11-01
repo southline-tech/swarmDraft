@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Editor } from '@tiptap/core';
-import { docToYDoc } from '@coauthor/docx';
+import { docToYDoc } from '@swarmdraft/docx';
 import { collaborativeEditorOptions } from '../collab';
 import { lintableBlockText, mapLintSpan } from './extract';
 import { Spellcheck, spellIssueAtPos, spellcheckKey } from './spellcheck';

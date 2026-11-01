@@ -1,10 +1,10 @@
-// Lives under review/ because the trusted accept needs @coauthor/editor/trusted.
+// Lives under review/ because the trusted accept needs @swarmdraft/editor/trusted.
 import { describe, expect, it } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
 import type { Editor } from '@tiptap/core';
-import { docToYDoc, markKey } from '@coauthor/docx';
-import { allowReviewEdits } from '@coauthor/editor/trusted';
+import { docToYDoc, markKey } from '@swarmdraft/docx';
+import { allowReviewEdits } from '@swarmdraft/editor/trusted';
 import ManuscriptEditor from '../ManuscriptEditor.vue';
 
 describe('ManuscriptEditor bound to a Y.Doc', () => {

@@ -11,7 +11,7 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { Mark, Node as PMNode } from '@tiptap/pm/model';
 import { formatChangeSummary, readFormatAttrs } from './format-change';
 
-export const authorLabelsKey = new PluginKey<DecorationSet>('coauthorAuthorLabels');
+export const authorLabelsKey = new PluginKey<DecorationSet>('swarmdraftAuthorLabels');
 export type AuthorLabel = (author: string) => string;
 export type AuthorLabelVisible = (author: string) => boolean;
 

@@ -1,5 +1,5 @@
-import type { Section } from '@coauthor/schema';
-import { addSection } from '@coauthor/editor';
+import type { Section } from '@swarmdraft/schema';
+import { addSection } from '@swarmdraft/editor';
 
 /** Synthetic starter outline shown until a manuscript is opened. */
 export const SAMPLE_MANUSCRIPT_ID = 'sample';

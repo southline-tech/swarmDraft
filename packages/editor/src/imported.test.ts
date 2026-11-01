@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { importDocx } from '@coauthor/docx';
+import { importDocx } from '@swarmdraft/docx';
 import { createManuscriptEditor, collectReviewItems } from './index';
 
 // Synthetic fixtures only (fixtures/manuscripts/docx-import); no real manuscript text.

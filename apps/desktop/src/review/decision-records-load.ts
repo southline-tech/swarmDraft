@@ -1,4 +1,4 @@
-import type { DecisionRecord } from '@coauthor/editor';
+import type { DecisionRecord } from '@swarmdraft/editor';
 
 function recordsEqual(a: readonly DecisionRecord[], b: readonly DecisionRecord[]): boolean {
   if (a.length !== b.length) return false;

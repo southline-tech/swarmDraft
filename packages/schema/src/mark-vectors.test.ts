@@ -1,7 +1,7 @@
 /**
  * Cross-language vectors for markIdHash / markKeys, shared with the Rust port
  * (apps/desktop/src-tauri/src/content.rs). Regenerate with
- * UPDATE_FIXTURES=1 pnpm --filter @coauthor/schema test, then review the diff.
+ * UPDATE_FIXTURES=1 pnpm --filter @swarmdraft/schema test, then review the diff.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

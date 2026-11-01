@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
-import type { SpellIssue } from '@coauthor/editor';
+import type { SpellIssue } from '@swarmdraft/editor';
 import SpellMenu from './SpellMenu.vue';
 
 enableAutoUnmount(afterEach);

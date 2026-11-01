@@ -1,6 +1,6 @@
 /** Human-authored comment anchors (trusted path only). */
 import type { EditorView } from '@tiptap/pm/view';
-import { allowReviewEdits } from '@coauthor/editor/trusted';
+import { allowReviewEdits } from '@swarmdraft/editor/trusted';
 
 export function applyCommentAnchor(
   view: EditorView,

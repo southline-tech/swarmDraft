@@ -6,8 +6,8 @@ import {
   importDocx,
   yDocToDoc,
   type ImportedManuscript,
-} from '@coauthor/docx';
-import type { DocNode } from '@coauthor/schema';
+} from '@swarmdraft/docx';
+import type { DocNode } from '@swarmdraft/schema';
 import {
   HumanTrackChanges,
   listSuggestions,

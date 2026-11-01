@@ -11,7 +11,7 @@ export type ContinuousReviewNav = {
   decideInSection: (
     sectionId: string,
     changeKey: string,
-    decision: import('@coauthor/editor').Decision,
+    decision: import('@swarmdraft/editor').Decision,
   ) => void;
 };
 

@@ -1,8 +1,8 @@
 //! MCP pairing (#188): unauthenticated request_pairing / poll_pairing only.
 
-use coauthor_lib::{mcp, storage::Store};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
+use swarmdraft_lib::{mcp, storage::Store};
 
 async fn post(url: &str, token: Option<&str>, body: Value) -> reqwest::Response {
     let mut req = reqwest::Client::new()

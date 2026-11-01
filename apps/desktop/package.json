@@ -1,5 +1,5 @@
 {
-  "name": "@coauthor/desktop",
+  "name": "@swarmdraft/desktop",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,9 +12,9 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@coauthor/docx": "workspace:*",
-    "@coauthor/editor": "workspace:*",
-    "@coauthor/schema": "workspace:*",
+    "@swarmdraft/docx": "workspace:*",
+    "@swarmdraft/editor": "workspace:*",
+    "@swarmdraft/schema": "workspace:*",
     "@floating-ui/dom": "^1.8.0",
     "@tauri-apps/api": "^2.1.1",
     "@tauri-apps/plugin-dialog": "^2",

@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { importDocx } from '@coauthor/docx';
-import type { BlockNode, DocNode, Section } from '@coauthor/schema';
+import { importDocx } from '@swarmdraft/docx';
+import type { BlockNode, DocNode, Section } from '@swarmdraft/schema';
 import { coalesceLegacySceneSections, docWordCount } from './legacy-scene-merge';
 
 const MOCK = resolve(process.cwd(), '../../fixtures/manuscripts/docx-import/mock-manuscript.docx');

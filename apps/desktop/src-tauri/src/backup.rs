@@ -3,7 +3,7 @@
 //! A backup is a `.zip` with:
 //! - `manifest.json`: format id/version, app + schema version, creation time, file list and
 //!   a SHA-256 for every other entry.
-//! - `db/coauthor.db`: a consistent snapshot of the WAL-mode database taken with
+//! - `db/swarmdraft.db`: a consistent snapshot of the WAL-mode database taken with
 //!   `VACUUM INTO` (every table: manuscripts, Yjs doc updates, comments, suggestions, ...).
 //!   Once agent identities are on main this includes agent token *hashes* (never plaintext
 //!   tokens); restoring a backup brings those agents back.
@@ -39,7 +39,8 @@ use crate::storage::{StorageError, Store};
 /// restore; only the default file name changed to `swarmdraft-backup-*` (#73).
 pub const FORMAT: &str = "coauthor-backup";
 pub const FORMAT_VERSION: u32 = 1;
-const DB_ENTRY: &str = "db/coauthor.db";
+const DB_ENTRY: &str = "db/swarmdraft.db";
+const LEGACY_DB_ENTRY: &str = "db/coauthor.db";
 const MANIFEST_ENTRY: &str = "manifest.json";
 const FILES_PREFIX: &str = "files/";
 const MAX_MANIFEST_BYTES: u64 = 16 << 20;
@@ -85,6 +86,16 @@ pub enum BackupError {
 
 fn invalid(msg: impl Into<String>) -> BackupError {
     BackupError::Invalid(msg.into())
+}
+
+fn archive_db_entry(manifest: &Manifest) -> Result<&'static str, BackupError> {
+    if manifest.sha256.contains_key(DB_ENTRY) {
+        Ok(DB_ENTRY)
+    } else if manifest.sha256.contains_key(LEGACY_DB_ENTRY) {
+        Ok(LEGACY_DB_ENTRY)
+    } else {
+        Err(invalid("missing database entry in backup"))
+    }
 }
 
 fn now_ms() -> u128 {
@@ -374,8 +385,8 @@ fn is_busy(e: &rusqlite::Error) -> bool {
 /// on (SQLite busy timeout plus a bounded retry) for up to `busy` before giving up.
 fn live_restore_id(data_dir: &Path, busy: Duration) -> Result<Option<String>, rusqlite::Error> {
     use rusqlite::OptionalExtension;
-    let db = data_dir.join("coauthor.db");
-    if !db.exists() {
+    let db = crate::storage::db_path(data_dir);
+    if !db.is_file() {
         return Ok(None);
     }
     let deadline = Instant::now() + busy;
@@ -1021,7 +1032,7 @@ fn stage(store: &Store, src: &Path) -> Result<Staged, BackupError> {
         .iter()
         .map(|f| format!("{FILES_PREFIX}{f}"))
         .collect();
-    expected.insert(DB_ENTRY.to_string());
+    expected.insert(archive_db_entry(&manifest)?.to_string());
     let hashed: HashSet<String> = manifest.sha256.keys().cloned().collect();
     let actual: HashSet<String> = names
         .iter()
@@ -1047,7 +1058,7 @@ fn stage(store: &Store, src: &Path) -> Result<Staged, BackupError> {
         if e.is_dir() || name == MANIFEST_ENTRY {
             continue;
         }
-        let target = if name == DB_ENTRY {
+        let target = if name == DB_ENTRY || name == LEGACY_DB_ENTRY {
             db.clone()
         } else if let Some(rel) = name.strip_prefix(FILES_PREFIX) {
             let t = files.join(safe_rel(rel)?);
@@ -2091,7 +2102,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let d = tmp.path();
         std::fs::write(
-            d.join("coauthor.db"),
+            d.join(crate::storage::DB_FILENAME),
             b"this is not a sqlite database at all....",
         )
         .unwrap();
@@ -2228,7 +2239,7 @@ mod tests {
 
     /// Hold an exclusive write lock on the live db, as another process might.
     fn lock_db(d: &Path) -> Connection {
-        let c = Connection::open(d.join("coauthor.db")).unwrap();
+        let c = Connection::open(d.join(crate::storage::DB_FILENAME)).unwrap();
         c.execute_batch(
             "PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE;
              CREATE TABLE IF NOT EXISTS lk(x); INSERT INTO lk VALUES(1);",
@@ -2654,7 +2665,7 @@ mod tests {
             .join("..")
             .join("..")
             .join(tmp.path().strip_prefix("/").unwrap_or(tmp.path()))
-            .join("coauthor.db.zip");
+            .join("swarmdraft.db.zip");
         assert!(check_backup_dest(&store, &[], &into_data).is_err());
     }
 

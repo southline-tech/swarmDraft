@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * Find & replace panel (wp3, #53). Search highlights are decoration-only; replace runs through
- * `@coauthor/editor` find-replace helpers (one undo step per replace operation).
+ * `@swarmdraft/editor` find-replace helpers (one undo step per replace operation).
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRaw, watch } from 'vue';
 import type { Editor } from '@tiptap/core';
@@ -11,7 +11,7 @@ import {
   scrollFindMatchIntoView,
   updateFindHighlight,
   type FindMatch,
-} from '@coauthor/editor';
+} from '@swarmdraft/editor';
 import AppIcon from '../icons/AppIcon.vue';
 
 const props = defineProps<{ editor?: Editor; focusReplace?: boolean }>();

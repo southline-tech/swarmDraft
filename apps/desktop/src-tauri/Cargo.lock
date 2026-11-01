@@ -1058,31 +1058,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
-name = "coauthor"
-version = "0.1.0"
-dependencies = [
- "axum",
- "base64 0.22.1",
- "getrandom 0.3.4",
- "harper-core",
- "reqwest 0.12.28",
- "rmcp",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "unicode-normalization",
- "yrs",
- "zip 2.6.1",
-]
-
-[[package]]
 name = "codespan-reporting"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6331,6 +6306,31 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "swarmdraft"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "getrandom 0.3.4",
+ "harper-core",
+ "reqwest 0.12.28",
+ "rmcp",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "unicode-normalization",
+ "yrs",
+ "zip 2.6.1",
+]
 
 [[package]]
 name = "swift-rs"

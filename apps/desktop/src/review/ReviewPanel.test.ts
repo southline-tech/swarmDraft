@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { flushPromises, mount } from '@vue/test-utils';
-import type { SuggestionItem } from '@coauthor/editor';
+import type { SuggestionItem } from '@swarmdraft/editor';
 import ReviewPanel from './ReviewPanel.vue';
 import { REVIEW_CHANGES_REGION_ID } from './review-panel-a11y';
 import { resetCollabSlots } from '../author-colors';

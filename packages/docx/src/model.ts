@@ -1,8 +1,8 @@
-/** Helpers over the shared content model in @coauthor/schema. */
-import type { DocNode, NoteKind, InlineNode, Mark, TextNode } from '@coauthor/schema';
-import { MARK_TYPES } from '@coauthor/schema';
+/** Helpers over the shared content model in @swarmdraft/schema. */
+import type { DocNode, NoteKind, InlineNode, Mark, TextNode } from '@swarmdraft/schema';
+import { MARK_TYPES } from '@swarmdraft/schema';
 
-export type * from '@coauthor/schema';
+export type * from '@swarmdraft/schema';
 
 export function sortMarks(marks: Mark[]): Mark[] {
   const rank = (m: Mark) => (MARK_TYPES as readonly string[]).indexOf(m.type);

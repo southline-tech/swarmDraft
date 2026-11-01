@@ -2,11 +2,11 @@
  * Review decision port (RAD-211 follow-up): turns an accept/reject decision into one ProseMirror
  * transaction on the live editor state. Targets are re-found on the live doc by
  * (mark type, attrs.id), never by Yjs mark keys or stored positions, so edits made since the
- * panel listed the suggestions are kept. Only reachable through `@coauthor/editor/trusted`.
+ * panel listed the suggestions are kept. Only reachable through `@swarmdraft/editor/trusted`.
  */
 import type { EditorState, Transaction } from '@tiptap/pm/state';
 import type { Mark as PMMark, Node as PMNode } from '@tiptap/pm/model';
-import type { ParagraphStyle } from '@coauthor/schema';
+import type { ParagraphStyle } from '@swarmdraft/schema';
 import { inlineFormatOnBefore, PARAGRAPH_STYLE_TARGET, readFormatAttrs } from './format-change';
 
 export type SuggestionMarkType = 'suggestion_insert' | 'suggestion_delete' | 'format_change';

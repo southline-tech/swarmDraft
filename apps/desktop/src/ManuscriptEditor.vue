@@ -101,7 +101,7 @@ import {
   type SuggestionTarget,
   type CommentRow,
   type SpellIssue,
-} from '@coauthor/editor';
+} from '@swarmdraft/editor';
 import { spellDictionaryAdd, spellDictionaryIgnore } from './backend';
 import { lintBlockText } from './spellcheck/lint';
 import SpellMenu from './spellcheck/SpellMenu.vue';
@@ -120,7 +120,7 @@ import {
 import { CONTINUOUS_REVIEW_NAV, CONTINUOUS_SCROLL_ROOT } from './continuous-review-nav';
 import type { ReviewChange } from './review/review-state';
 import { SECTION_LOAD_ERROR_COPY } from './errors/map-error';
-import type { DocNode } from '@coauthor/schema';
+import type { DocNode } from '@swarmdraft/schema';
 import { useDeferredValue } from './a11y/deferred';
 
 const props = defineProps<{

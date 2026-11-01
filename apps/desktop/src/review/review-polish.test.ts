@@ -8,7 +8,7 @@ import ManuscriptEditor from '../ManuscriptEditor.vue';
 import { REMOVED_NOTE, markAuthorLabel, setAgents } from '../agent-names';
 import ReviewPanel from './ReviewPanel.vue';
 import type { Agent } from '../backend';
-import type { CommentRow, SuggestionItem } from '@coauthor/editor';
+import type { CommentRow, SuggestionItem } from '@swarmdraft/editor';
 
 const agent = (id: string, name: string): Agent => ({
   id,

@@ -6,7 +6,7 @@ import {
   INLINE_NODE_TYPES,
   MARK_TYPES,
   NON_EXCLUSIVE_MARKS,
-} from '@coauthor/schema';
+} from '@swarmdraft/schema';
 import {
   REVIEW_MARKS,
   collectReviewItems,
@@ -233,7 +233,7 @@ describe('review marks are read-only', () => {
       editor.state.tr
         .addMark(from, from + 7, type.create({ id: 'c4' }))
         .setMeta('allowReviewEdits', true)
-        .setMeta(new PluginKey('coauthorReviewGuard'), true),
+        .setMeta(new PluginKey('swarmdraftReviewGuard'), true),
     );
     expect(collectReviewItems(editor.state.doc).some((r) => r.id === 'c4')).toBe(false);
   });

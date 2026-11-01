@@ -1,6 +1,6 @@
 // RAD-264, end to end: a live agent suggestion is accepted only by the author, through the
 // trusted review path on the mounted editor (under review/ because it needs
-// @coauthor/editor/trusted). The fixture comes from src-tauri/tests/live_updates.rs, which also
+// @swarmdraft/editor/trusted). The fixture comes from src-tauri/tests/live_updates.rs, which also
 // checks that MCP tools/list offers no accept or reject tool. Synthetic text.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import * as Y from 'yjs';
 import type { Editor } from '@tiptap/core';
-import { applyReviewDecision } from '@coauthor/editor/trusted';
+import { applyReviewDecision } from '@swarmdraft/editor/trusted';
 import ManuscriptEditor from '../ManuscriptEditor.vue';
 import { LIVE_POLL_MS, sessionFromStored } from '../manuscript-session';
 import type { StoredManuscript, UpdatesSince } from '../backend';

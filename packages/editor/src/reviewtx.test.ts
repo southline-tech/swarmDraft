@@ -251,11 +251,11 @@ function importsTrusted(src: string): boolean {
 
 describe('trusted import scanner', () => {
   const planted: Record<string, string> = {
-    'import from': "import { applyReviewDecision } from '@coauthor/editor/trusted';",
+    'import from': "import { applyReviewDecision } from '@swarmdraft/editor/trusted';",
     'multiline import': "import {\n  applyReviewDecision,\n} from '../editor/src/reviewtx';",
-    require: "const t = require('@coauthor/editor/trusted');",
-    'dynamic import': "const t = await import('@coauthor/editor/trusted');",
-    'bare import': "import '@coauthor/editor/trusted';",
+    require: "const t = require('@swarmdraft/editor/trusted');",
+    'dynamic import': "const t = await import('@swarmdraft/editor/trusted');",
+    'bare import': "import '@swarmdraft/editor/trusted';",
     'export from': "export { applyReviewDecision } from '../editor/src/trusted.ts';",
     'export star': "export * from '../../packages/editor/src/trusted';",
   };
@@ -263,11 +263,13 @@ describe('trusted import scanner', () => {
     it(`flags ${form}`, () => expect(importsTrusted(src)).toBe(true));
   it('ignores comments mentioning the path', () => {
     expect(
-      importsTrusted('/** import it from `@coauthor/editor/trusted` */\n// require("x/trusted")'),
+      importsTrusted('/** import it from `@swarmdraft/editor/trusted` */\n// require("x/trusted")'),
     ).toBe(false);
   });
   it('ignores unrelated imports', () => {
-    expect(importsTrusted("import { x } from '@coauthor/editor';\nconst trusted = 1;")).toBe(false);
+    expect(importsTrusted("import { x } from '@swarmdraft/editor';\nconst trusted = 1;")).toBe(
+      false,
+    );
   });
 });
 

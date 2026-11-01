@@ -5,7 +5,7 @@ import { Editor, Extension } from '@tiptap/core';
 import { Plugin, type EditorState } from '@tiptap/pm/state';
 import * as Y from 'yjs';
 import { ySyncPluginKey } from '@tiptap/y-tiptap';
-import { docToYDoc, importDocx, markKey, rekeyMarks, yDocToDoc } from '@coauthor/docx';
+import { docToYDoc, importDocx, markKey, rekeyMarks, yDocToDoc } from '@swarmdraft/docx';
 import {
   collectReviewItems,
   checkYDocContent,

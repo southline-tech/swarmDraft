@@ -33,7 +33,7 @@ use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, Stream
 
 use crate::storage::Store;
 use tokio::sync::Semaphore;
-pub use tools::CoauthorMcp;
+pub use tools::SwarmdraftMcp;
 
 /// Called when a bot opens an MCP pairing request (#188).
 pub type PairingRequestedHook = Arc<dyn Fn(String) + Send + Sync>;
@@ -157,7 +157,7 @@ fn forbidden() -> Response {
 fn unauthorized() -> Response {
     (
         StatusCode::UNAUTHORIZED,
-        [(header::WWW_AUTHENTICATE, "Bearer realm=\"coauthor\"")],
+        [(header::WWW_AUTHENTICATE, "Bearer realm=\"swarmdraft\"")],
         "unauthorized",
     )
         .into_response()
@@ -339,7 +339,7 @@ pub fn router_with_stats(
     let mcp_store = store.clone();
     let hook = pairing_hook.clone();
     let service = StreamableHttpService::new(
-        move || Ok(CoauthorMcp::new(mcp_store.clone(), hook.clone())),
+        move || Ok(SwarmdraftMcp::new(mcp_store.clone(), hook.clone())),
         Arc::new(NeverSessionManager::default()),
         StreamableHttpServerConfig::default()
             .with_legacy_session_mode(false)
