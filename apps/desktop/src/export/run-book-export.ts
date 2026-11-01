@@ -2,12 +2,7 @@
  * Shared export + Save dialog flow (#242), used by toolbar and Settings export UI.
  */
 import { isTauri } from '@tauri-apps/api/core';
-import {
-  exportApi,
-  exportStatusLabel,
-  pandocDownloadStatusLabel,
-  type ExportFormat,
-} from './api';
+import { exportApi, exportStatusLabel, pandocDownloadStatusLabel, type ExportFormat } from './api';
 import { errorLine } from '../errors/map-error';
 
 export type RunBookExportResult = {
@@ -23,13 +18,21 @@ export async function runBookExport(
   onStatus: (message: string) => void,
 ): Promise<RunBookExportResult> {
   if (!isTauri()) {
-    return { status: 'Export is only available in the desktop app.', savedPath: null, cancelled: false };
+    return {
+      status: 'Export is only available in the desktop app.',
+      savedPath: null,
+      cancelled: false,
+    };
   }
   onStatus('');
   try {
     const job = await exportApi.trigger(manuscriptId, format, { pandocPath });
     if (!job) {
-      return { status: 'Export is only available in the desktop app.', savedPath: null, cancelled: false };
+      return {
+        status: 'Export is only available in the desktop app.',
+        savedPath: null,
+        cancelled: false,
+      };
     }
     onStatus('Export started…');
     const done = await exportApi.wait(job.id, {
@@ -39,7 +42,11 @@ export async function runBookExport(
       },
     });
     if (!done) {
-      return { status: 'Still working… check again in a moment.', savedPath: null, cancelled: false };
+      return {
+        status: 'Still working… check again in a moment.',
+        savedPath: null,
+        cancelled: false,
+      };
     }
     if (done.status === 'failed') {
       return { status: exportStatusLabel(done), savedPath: null, cancelled: false };

@@ -510,11 +510,7 @@ const themeLabel = computed(() =>
       :title="themeLabel"
       @click="toggleTheme"
     >
-      <AppIcon
-        :name="themeMode === 'dark' ? 'sun' : 'moon'"
-        class="h-4 w-4"
-        aria-hidden="true"
-      />
+      <AppIcon :name="themeMode === 'dark' ? 'sun' : 'moon'" class="h-4 w-4" aria-hidden="true" />
     </button>
     <button
       type="button"

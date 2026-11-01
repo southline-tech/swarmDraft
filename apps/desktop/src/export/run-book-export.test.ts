@@ -32,7 +32,9 @@ describe('runBookExport (#242 toolbar path)', () => {
       createdAt: '',
       finishedAt: null,
     });
-    const save = vi.spyOn(exportApi, 'saveToDialog').mockResolvedValue('/home/writer/Documents/Book.docx');
+    const save = vi
+      .spyOn(exportApi, 'saveToDialog')
+      .mockResolvedValue('/home/writer/Documents/Book.docx');
 
     const lines: string[] = [];
     const result = await runBookExport('m1', 'docx', '', (s) => lines.push(s));

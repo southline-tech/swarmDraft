@@ -36,12 +36,7 @@ async function runDocx() {
   savedPath.value = null;
   close(false);
   try {
-    const result = await runBookExport(
-      props.manuscriptId,
-      'docx',
-      loadPandocPath(),
-      setStatus,
-    );
+    const result = await runBookExport(props.manuscriptId, 'docx', loadPandocPath(), setStatus);
     setStatus(result.status);
     savedPath.value = result.savedPath;
   } finally {
