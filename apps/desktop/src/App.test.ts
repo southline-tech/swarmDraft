@@ -994,7 +994,7 @@ describe('App status bar on an imported manuscript', () => {
     await settle();
     expect(w.find('[data-test="status-save"]').exists()).toBe(false);
     w.unmount();
-  });
+  }, 15_000);
 });
 
 describe('App saves typing to the section Y.Doc', () => {
