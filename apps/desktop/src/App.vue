@@ -1295,7 +1295,12 @@ defineExpose({ open, closeSession });
           </span>
         </header>
         <!-- #84 / #232: chrome row stays outside the scrolling desk; toolbar teleports here. -->
-        <div v-if="session && !choosingBook" id="toolbar-row" class="toolbar-row" data-test="toolbar-row">
+        <div
+          v-if="session && !choosingBook"
+          id="toolbar-row"
+          class="toolbar-row"
+          data-test="toolbar-row"
+        >
           <div id="toolbar-slot" class="toolbar-slot" data-test="toolbar-slot"></div>
         </div>
       </div>
