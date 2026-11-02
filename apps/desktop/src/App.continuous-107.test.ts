@@ -86,13 +86,14 @@ describe('continuous manuscript (#107)', () => {
     return { w, session };
   }
 
-  it('outline click scrolls the section anchor and focuses that section body', async () => {
+  it('outline click scrolls the section anchor within the manuscript column and focuses that section body', async () => {
     const { w, session } = await withManuscript();
     const chapters = readStructure(session.manuscript).filter((s) => s.kind === 'chapter');
-    const target = chapters[1] ?? chapters[0]!;
+    expect(chapters.length).toBeGreaterThan(1);
+    const target = chapters[chapters.length - 1]!;
     await w.get(`[data-test="section-${target.id}"]`).trigger('click');
     await settle();
-    expect(scrollIntoView).toHaveBeenCalled();
+    expect(scrollIntoView).not.toHaveBeenCalled();
     const pm = w.get(`[data-section-anchor="${target.id}"] .ProseMirror`);
     expect(pm.element.contains(document.activeElement)).toBe(true);
     w.unmount();

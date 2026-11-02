@@ -35,9 +35,11 @@ import {
   pickActiveManuscriptMark,
   scrollBehavior,
   scrollElementCenterInRoot,
+  scrollSectionAnchorToTop,
 } from './review/review-scroll';
 import { CONTINUOUS_REVIEW_NAV, CONTINUOUS_SCROLL_ROOT } from './continuous-review-nav';
 import type { AuthorFilter, ReviewChange } from './review/review-state';
+import { restoreWindowScroll } from './shell-chrome';
 
 const REVIEW_RAIL = '#continuous-review-rail';
 import { docWordCount } from './status/wordcount';
@@ -231,12 +233,46 @@ function onCaretPlaced() {
   caretPlaced.value = true;
 }
 
+/** Owns the shared toolbar Teleport until the next lead editor is ready (#261). */
+const toolbarSectionId = ref<string | undefined>(props.selectedId);
+
 watch(
   () => props.manuscriptId,
-  () => {
+  (id, prev) => {
     caretPlaced.value = false;
     scheduleScrollPageEstimate();
+    if (id !== prev) toolbarSectionId.value = props.selectedId;
   },
+);
+
+watch(
+  () => props.selectedId,
+  async (next, prev) => {
+    if (!next) {
+      toolbarSectionId.value = next;
+      return;
+    }
+    if (next === prev) return;
+    await nextTick();
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const lead = editors.value.get(next);
+      if (lead?.editorReady?.()) {
+        toolbarSectionId.value = next;
+        return;
+      }
+      await nextTick();
+    }
+    toolbarSectionId.value = next;
+  },
+  { flush: 'post' },
+);
+
+watch(
+  () => props.selectedId,
+  (next) => {
+    if (!toolbarSectionId.value && next) toolbarSectionId.value = next;
+  },
+  { immediate: true },
 );
 
 const ordered = computed(() => sectionsInReadingOrder(props.outline));
@@ -360,7 +396,9 @@ function scrollToSection(id: string) {
   const root = scrollRoot.value;
   if (!root) return;
   const el = root.querySelector(`[data-section-anchor="${id}"]`);
-  el?.scrollIntoView({ block: 'start', behavior: 'auto' });
+  if (!el) return;
+  scrollSectionAnchorToTop(root, el);
+  restoreWindowScroll();
 }
 
 function onLeadLayout(layout: EditorLayout) {
@@ -460,7 +498,7 @@ onBeforeUnmount(() => {
             :navigator-controls="navigatorControls"
             :slice-mode="sec.id !== selectedId"
             :section-id="sec.id"
-            :toolbar-target="sec.id === selectedId ? toolbarTarget : undefined"
+            :toolbar-target="sec.id === toolbarSectionId ? toolbarTarget : undefined"
             :review-target="sec.id === selectedId ? REVIEW_RAIL : undefined"
             :book-changes="sec.id === selectedId ? bookChanges : undefined"
             :book-chapter-groups="sec.id === selectedId ? bookChapterGroups : undefined"
@@ -497,7 +535,12 @@ onBeforeUnmount(() => {
             @draft-select="emit('draft-select', $event)"
             @draft-menu-open="emit('draft-menu-open')"
             @decisions="(records) => emit('decisions', sec.id, records)"
-            @focus-mode="emit('focus-mode', $event)"
+            @focus-mode="
+              (on) => {
+                if (on && sec.id !== selectedId) return;
+                emit('focus-mode', on);
+              }
+            "
             @load-error="(msg) => sec.id === selectedId && emit('load-error', msg)"
             @layout="(layout) => sec.id === selectedId && onLeadLayout(layout)"
             @ask-bot="emit('ask-bot')"
