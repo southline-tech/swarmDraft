@@ -2097,7 +2097,7 @@ describe('full-width toolbar (#84)', () => {
     await w.get('[data-test="focus-mode"]').trigger('click');
     await settle();
     expect(w.find('[data-test="tb-navigator"]').exists()).toBe(false);
-    expect(w.get('[data-test="toolbar-row"]').element.children).toHaveLength(0);
+    expect(w.get('[data-test="toolbar-slot"]').element.children).toHaveLength(0);
     await w.get('[data-test="focus-exit"]').trigger('click');
     await settle();
     expect(toolbarIn(w, '[data-test="toolbar-row"]')).toBe(true);

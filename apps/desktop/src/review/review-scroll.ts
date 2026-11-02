@@ -93,6 +93,19 @@ export function scrollBehavior(): ScrollBehavior {
   return prefersReducedMotion() ? 'auto' : 'smooth';
 }
 
+/** Align a section anchor with the top of the continuous scroller; never scroll the window (#261). */
+export function scrollSectionAnchorToTop(
+  root: HTMLElement,
+  sectionEl: Element,
+  padding = 0,
+): void {
+  const rootRect = root.getBoundingClientRect();
+  const elRect = sectionEl.getBoundingClientRect();
+  const delta = elRect.top - rootRect.top - padding;
+  if (Math.abs(delta) < 1) return;
+  root.scrollTop += delta;
+}
+
 /** Vertically center an element inside a scroll container (manuscript column). */
 export function scrollElementCenterInRoot(
   root: HTMLElement,

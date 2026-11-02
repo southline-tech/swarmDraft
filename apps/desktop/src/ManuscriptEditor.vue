@@ -1283,7 +1283,7 @@ function landInBody(e: Editor) {
   const sel = pos >= 0 ? Selection.near(doc.resolve(pos)) : Selection.atStart(doc);
   if (!sel.eq(e.state.selection))
     e.view.dispatch(e.state.tr.setSelection(sel).setMeta('addToHistory', false));
-  e.view.focus();
+  (e.view.dom as HTMLElement).focus({ preventScroll: true });
 }
 
 /** Set by `focusBody` before the editor exists; applied once it is created. */

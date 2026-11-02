@@ -35,10 +35,11 @@ import {
   pickActiveManuscriptMark,
   scrollBehavior,
   scrollElementCenterInRoot,
+  scrollSectionAnchorToTop,
 } from './review/review-scroll';
 import { CONTINUOUS_REVIEW_NAV, CONTINUOUS_SCROLL_ROOT } from './continuous-review-nav';
 import type { AuthorFilter, ReviewChange } from './review/review-state';
-import { devToolbarLog } from './dev-log';
+import { restoreWindowScroll } from './shell-chrome';
 
 const REVIEW_RAIL = '#continuous-review-rail';
 import { docWordCount } from './status/wordcount';
@@ -232,33 +233,15 @@ function onCaretPlaced() {
   caretPlaced.value = true;
 }
 
-/** Owns the teleported toolbar until the next section editor is ready (#261). */
+/** Owns the shared toolbar Teleport until the next lead editor is ready (#261). */
 const toolbarSectionId = ref<string | undefined>(props.selectedId);
-
-function debugToolbarHost(event: string, detail?: Record<string, unknown>) {
-  devToolbarLog(event, {
-    selectedId: props.selectedId,
-    toolbarSectionId: toolbarSectionId.value,
-    manuscriptId: props.manuscriptId,
-    ...detail,
-  });
-}
 
 watch(
   () => props.manuscriptId,
   (id, prev) => {
     caretPlaced.value = false;
     scheduleScrollPageEstimate();
-    if (id !== prev) {
-      toolbarSectionId.value = props.selectedId;
-      debugToolbarHost('manuscript change reset toolbar owner');
-      void nextTick().then(() =>
-        nextTick().then(() => {
-          toolbarSectionId.value = props.selectedId;
-          debugToolbarHost('manuscript change toolbar owner settled');
-        }),
-      );
-    }
+    if (id !== prev) toolbarSectionId.value = props.selectedId;
   },
 );
 
@@ -267,23 +250,19 @@ watch(
   async (next, prev) => {
     if (!next) {
       toolbarSectionId.value = next;
-      debugToolbarHost('cleared toolbar owner');
       return;
     }
     if (next === prev) return;
-    debugToolbarHost('section select defer toolbar handoff', { prev, next });
     await nextTick();
     for (let attempt = 0; attempt < 40; attempt++) {
       const lead = editors.value.get(next);
       if (lead?.editorReady?.()) {
         toolbarSectionId.value = next;
-        debugToolbarHost('toolbar owner updated', { next, attempt });
         return;
       }
       await nextTick();
     }
     toolbarSectionId.value = next;
-    debugToolbarHost('toolbar owner updated without ready editor', { next });
   },
   { flush: 'post' },
 );
@@ -291,10 +270,7 @@ watch(
 watch(
   () => props.selectedId,
   (next) => {
-    if (!toolbarSectionId.value && next) {
-      toolbarSectionId.value = next;
-      debugToolbarHost('initial toolbar owner', { next });
-    }
+    if (!toolbarSectionId.value && next) toolbarSectionId.value = next;
   },
   { immediate: true },
 );
@@ -420,7 +396,9 @@ function scrollToSection(id: string) {
   const root = scrollRoot.value;
   if (!root) return;
   const el = root.querySelector(`[data-section-anchor="${id}"]`);
-  el?.scrollIntoView({ block: 'start', behavior: 'auto' });
+  if (!el) return;
+  scrollSectionAnchorToTop(root, el);
+  restoreWindowScroll();
 }
 
 function onLeadLayout(layout: EditorLayout) {

@@ -52,13 +52,6 @@ fn os_user_display_name() -> String {
         .unwrap_or_else(|| "Author".to_string())
 }
 
-/// Dev-only: mirror frontend `[toolbar-host]` lines to the `pnpm dev` terminal (stderr).
-#[tauri::command]
-fn dev_front_log(line: String) {
-    #[cfg(debug_assertions)]
-    eprintln!("{line}");
-}
-
 #[tauri::command]
 fn app_info(
     app: tauri::AppHandle,
@@ -1000,7 +993,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            dev_front_log,
             app_info,
             agents_list,
             agents_primary_id,

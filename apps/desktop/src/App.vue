@@ -81,7 +81,6 @@ import {
 } from './errors/opening-flow';
 import './shells/shells.css';
 import { applyThemeParam, readPreview } from './shells/preview';
-import { devToolbarLog } from './dev-log';
 import { CLOSE_FLUSH_TIMEOUT_MS, confirmQuit, flushOnClose, flushWithTimeout } from './close-flush';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -666,7 +665,6 @@ function blockFileNavigation(e: DragEvent) {
 }
 // Agent display names (RAD-263): load once, and again when the window regains focus.
 const reloadAgents = () => void reloadOnFocus();
-let toolbarRowObs: MutationObserver | undefined;
 onMounted(() => {
   window.addEventListener('dragover', blockFileNavigation);
   window.addEventListener('drop', blockFileNavigation);
@@ -674,23 +672,8 @@ onMounted(() => {
   window.addEventListener('keydown', onAppMenuKey);
   void refreshAgents();
   stopAppMenuKeys = () => window.removeEventListener('keydown', onAppMenuKey);
-  if (import.meta.env.DEV) {
-    const row = document.getElementById('toolbar-row');
-    if (row) {
-      toolbarRowObs = new MutationObserver(() => {
-        if (row.children.length > 0) return;
-        if (focusMode.value || !session.value) return;
-        devToolbarLog('#toolbar-row empty', {
-          selectedId: selectedId.value,
-          sessionId: session.value?.id,
-        });
-      });
-      toolbarRowObs.observe(row, { childList: true });
-    }
-  }
 });
 onBeforeUnmount(() => {
-  toolbarRowObs?.disconnect();
   window.removeEventListener('dragover', blockFileNavigation);
   window.removeEventListener('drop', blockFileNavigation);
   window.removeEventListener('focus', reloadAgents);
@@ -1052,11 +1035,6 @@ const humanNotesAuthor = computed(() => {
 });
 /** Focus mode (#55 / wp5): hides the app chrome; local UI state only. */
 const focusMode = ref(false);
-watch(focusMode, (on, prev) => {
-  if (import.meta.env.DEV && on !== prev) {
-    devToolbarLog('app focusMode', { on, selectedId: selectedId.value });
-  }
-});
 /** Set when the writer chooses Ask bot from the editor menu (#54 wiring to App). */
 const askBotRequested = ref(false);
 function onAskBotFromEditor() {
@@ -1317,12 +1295,9 @@ defineExpose({ open, closeSession });
           </span>
         </header>
         <!-- #84 / #232: chrome row stays outside the scrolling desk; toolbar teleports here. -->
-        <div
-          v-if="session && !choosingBook"
-          id="toolbar-row"
-          class="toolbar-row"
-          data-test="toolbar-row"
-        />
+        <div v-if="session && !choosingBook" id="toolbar-row" class="toolbar-row" data-test="toolbar-row">
+          <div id="toolbar-slot" class="toolbar-slot" data-test="toolbar-slot"></div>
+        </div>
       </div>
       <MigrationNoticeBanner :notices="migrationNotices" @dismiss="dismissMigration" />
       <SettingsScreen
@@ -1526,7 +1501,7 @@ defineExpose({ open, closeSession });
               :story-notes-open="storyNotesOpen"
               story-notes-panel-id="story-notes-panel"
               :author-labels="markAuthorLabel"
-              toolbar-target="#toolbar-row"
+              toolbar-target="#toolbar-slot"
               external-load-error
               :outline-forced="outlineForced"
               :notes-hidden="notesHidden"
@@ -1623,8 +1598,9 @@ body {
   box-sizing: border-box;
   display: grid;
   grid-template-rows: minmax(0, 1fr) 26px;
-  height: 100dvh;
-  height: 100vh;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
   overflow: hidden;
 }
 .shell.shell--focus-mode {
@@ -1636,10 +1612,14 @@ body {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 .shell__chrome {
+  position: relative;
+  z-index: 40;
   flex: none;
   min-width: 0;
+  background: var(--ct-surface);
 }
 .shell__desk {
   min-width: 0;
@@ -1649,14 +1629,11 @@ body {
 }
 .toolbar-row {
   flex: none;
-  min-height: 2.75rem;
   background: var(--ct-surface);
 }
-.toolbar-row:not(:empty) {
-  min-height: 0;
-}
-.toolbar-row:empty {
-  visibility: hidden;
+.toolbar-slot {
+  width: 100%;
+  min-height: 2.75rem;
 }
 .editor-error-region .load-error {
   margin: var(--ct-space-2) var(--ct-space-4) 0;

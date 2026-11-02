@@ -11,6 +11,10 @@
     height: 100%;
     overflow: hidden;
   }
+  #app {
+    display: flex;
+    flex-direction: column;
+  }
 }
 
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));

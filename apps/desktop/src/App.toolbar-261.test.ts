@@ -1,15 +1,17 @@
 /**
- * #261 P0: toolbar must survive section select and draft switch (continuous mode).
+ * #261 P0: top chrome (topbar + toolbar) must survive section select and draft switch.
+ * Root cause was `scrollIntoView` scrolling the document and pushing chrome above the viewport.
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { readStructure } from '@swarmdraft/docx';
 import App from './App.vue';
 import type { StoredManuscript } from './backend';
 import { storedFixture } from './stored-fixture.test-helper';
 import { sessionFromDocx } from './manuscript-session';
+import { shellChromeViewportTop } from './shell-chrome';
 
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(async () => () => {}),
@@ -89,6 +91,11 @@ async function expectToolbarVisible(w: ReturnType<typeof mount>) {
   );
 }
 
+function expectShellChromeInViewport(w: ReturnType<typeof mount>) {
+  expect(w.find('[data-test="shell-chrome"]').exists()).toBe(true);
+  expect(shellChromeViewportTop()).toBeGreaterThanOrEqual(0);
+}
+
 async function withManuscript() {
   const w = mount(App, { attachTo: document.body });
   await flushPromises();
@@ -98,18 +105,31 @@ async function withManuscript() {
   return { w, session };
 }
 
-describe('toolbar survives navigation (#261)', () => {
+describe('top chrome survives navigation (#261)', () => {
   enableAutoUnmount(afterEach);
 
-  it('keeps the toolbar host populated when selecting chapters from the outline', async () => {
+  let scrollIntoView: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    scrollIntoView = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    scrollIntoView.mockRestore();
+  });
+
+  it('keeps toolbar and shell chrome in the viewport when selecting chapters', async () => {
     const { w, session } = await withManuscript();
     await expectToolbarVisible(w);
+    expectShellChromeInViewport(w);
     const chapters = readStructure(session.manuscript).filter((s) => s.kind === 'chapter');
     expect(chapters.length).toBeGreaterThan(1);
     for (const ch of chapters.slice(0, 5)) {
       await w.find(`[data-test="section-${ch.id}"]`).trigger('click');
       await settle();
+      expect(scrollIntoView).not.toHaveBeenCalled();
       await expectToolbarVisible(w);
+      expectShellChromeInViewport(w);
     }
     w.unmount();
   });
@@ -145,6 +165,7 @@ describe('toolbar survives navigation (#261)', () => {
       await w.find(`[data-test="draft-item"][data-draft="${id}"]`).trigger('click');
       await settle();
       await expectToolbarVisible(w);
+      expectShellChromeInViewport(w);
     }
 
     await pickDraft('m2');

@@ -4,6 +4,7 @@ import {
   pickActiveManuscriptMark,
   scrollBehavior,
   scrollListRowToTop,
+  scrollSectionAnchorToTop,
   type ManuscriptMarkAnchor,
 } from './review-scroll';
 import { scopeBookChangeKey } from './review-book';
@@ -58,6 +59,20 @@ describe('collectManuscriptMarkAnchors', () => {
     const anchors = collectManuscriptMarkAnchors(root);
     expect(anchors).toHaveLength(1);
     expect(anchors[0]!.scopedKey).toBe(scopeBookChangeKey('ch1', 'comment:c1'));
+  });
+});
+
+describe('scrollSectionAnchorToTop (#261)', () => {
+  it('adjusts only the scroll container, not the window', () => {
+    const root = document.createElement('div');
+    Object.defineProperty(root, 'scrollTop', { writable: true, value: 0 });
+    root.getBoundingClientRect = () =>
+      ({ top: 200, bottom: 800, left: 0, right: 400, width: 400, height: 600 }) as DOMRect;
+    const section = document.createElement('div');
+    section.getBoundingClientRect = () =>
+      ({ top: 350, bottom: 400, left: 0, right: 400, width: 400, height: 50 }) as DOMRect;
+    scrollSectionAnchorToTop(root, section);
+    expect(root.scrollTop).toBe(150);
   });
 });
 
