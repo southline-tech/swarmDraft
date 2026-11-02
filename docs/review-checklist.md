@@ -74,7 +74,7 @@ Built from review, design and QA findings on PRs #1–#46. Most common first. Ti
 
 Run this consolidated pass in order; do not hand off until every line that applies is checked.
 
-- [ ] Latest `main` merged or rebased; full command suite green on the commit you push.
+- [ ] Latest `main` merged or rebased; full command suite green on the commit you push (`pnpm lint`, **`pnpm format:check`**, `pnpm typecheck`, `pnpm test`, `pnpm build`, `cargo fmt --check`, `cargo clippy`, `cargo test`).
 - [ ] Linked issue body **and all issue comments** read; PM/Designer decisions copied into the PR (“Decisions applied”).
 - [ ] Each acceptance criterion ticked in the PR with evidence (test file/name, behavior asserted, or manual step).
 - [ ] Mockup links on the issue or comments opened and matched (frame ids listed), or “N/A”.
