@@ -927,6 +927,10 @@ pub fn run() {
                     if let Err(e) = window.set_icon(icon) {
                         eprintln!("Main window icon not set: {e}");
                     }
+                    #[cfg(all(debug_assertions, target_os = "linux"))]
+                    if std::env::var("SWARMDRAFT_DEVTOOLS").ok().as_deref() == Some("1") {
+                        window.open_devtools();
+                    }
                 }
             }
             let dir = app.path().app_data_dir()?;
