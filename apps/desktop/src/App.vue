@@ -1300,7 +1300,9 @@ defineExpose({ open, closeSession });
           id="toolbar-row"
           class="toolbar-row"
           data-test="toolbar-row"
-        />
+        >
+          <div id="toolbar-slot" class="toolbar-slot" data-test="toolbar-slot"></div>
+        </div>
       </div>
       <MigrationNoticeBanner :notices="migrationNotices" @dismiss="dismissMigration" />
       <SettingsScreen
@@ -1504,7 +1506,7 @@ defineExpose({ open, closeSession });
               :story-notes-open="storyNotesOpen"
               story-notes-panel-id="story-notes-panel"
               :author-labels="markAuthorLabel"
-              toolbar-target="#toolbar-row"
+              toolbar-target="#toolbar-slot"
               external-load-error
               :outline-forced="outlineForced"
               :notes-hidden="notesHidden"
@@ -1601,8 +1603,9 @@ body {
   box-sizing: border-box;
   display: grid;
   grid-template-rows: minmax(0, 1fr) 26px;
-  height: 100dvh;
-  height: 100vh;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
   overflow: hidden;
 }
 .shell.shell--focus-mode {
@@ -1614,10 +1617,14 @@ body {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 .shell__chrome {
+  position: relative;
+  z-index: 40;
   flex: none;
   min-width: 0;
+  background: var(--ct-surface);
 }
 .shell__desk {
   min-width: 0;
@@ -1627,14 +1634,11 @@ body {
 }
 .toolbar-row {
   flex: none;
-  min-height: 2.75rem;
   background: var(--ct-surface);
 }
-.toolbar-row:not(:empty) {
-  min-height: 0;
-}
-.toolbar-row:empty {
-  visibility: hidden;
+.toolbar-slot {
+  width: 100%;
+  min-height: 2.75rem;
 }
 .editor-error-region .load-error {
   margin: var(--ct-space-2) var(--ct-space-4) 0;

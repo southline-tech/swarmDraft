@@ -150,7 +150,7 @@ function noopSave() {}
         <span class="topbar__name">The Harbor Ledger</span>
       </div>
     </header>
-    <div id="toolbar-row" class="toolbar-row" data-test="toolbar-row" />
+    <div id="toolbar-row" class="toolbar-row" data-test="toolbar-row"></div>
     <div class="workspace grid gap-4 p-4" :class="workspaceGridClass" data-test="workspace">
       <SectionNav
         v-show="navigatorOpen"

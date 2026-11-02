@@ -322,7 +322,7 @@ function onNameColorPromptClose() {
 const focusModeLive = ref('');
 /** Polite SR cue when focus mode toggles (#55); chrome hides with no other feedback. */
 function syncFocusMode(on: boolean, announce = true) {
-  emit('focus-mode', on);
+  if (!props.sliceMode || !on) emit('focus-mode', on);
   if (on) window.addEventListener('keydown', onWindowKey);
   else window.removeEventListener('keydown', onWindowKey);
   if (announce) focusModeLive.value = on ? 'Focus mode on.' : 'Focus mode off.';
@@ -330,6 +330,12 @@ function syncFocusMode(on: boolean, announce = true) {
   void nextTick(() => editor.value?.view.focus());
 }
 watch(focusMode, (on) => syncFocusMode(on));
+watch(
+  () => props.sliceMode,
+  (isSlice) => {
+    if (isSlice && focusMode.value) focusMode.value = false;
+  },
+);
 onMounted(() => {
   if (focusMode.value) syncFocusMode(true, false);
 });
@@ -1277,7 +1283,7 @@ function landInBody(e: Editor) {
   const sel = pos >= 0 ? Selection.near(doc.resolve(pos)) : Selection.atStart(doc);
   if (!sel.eq(e.state.selection))
     e.view.dispatch(e.state.tr.setSelection(sel).setMeta('addToHistory', false));
-  e.view.focus();
+  (e.view.dom as HTMLElement).focus({ preventScroll: true });
 }
 
 /** Set by `focusBody` before the editor exists; applied once it is created. */
@@ -1309,6 +1315,7 @@ defineExpose({
   wordsBeforeClientY,
   selectLocalChange,
   decideLocalChange,
+  editorReady: () => !!editor.value && !editor.value.isDestroyed,
 });
 
 /** Set when the content does not fit the schema; the editor is then read-only and never emits. */
@@ -1486,7 +1493,7 @@ watch(agentDirectory, () => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown, true);
   window.removeEventListener('swarmdraft-spell-prefs', onSpellPrefs);
-  if (focusMode.value) emit('focus-mode', false);
+  if (focusMode.value && !props.sliceMode) emit('focus-mode', false);
   clearTimeout(countTimer);
   stopBook();
   stopChapter();
@@ -1518,10 +1525,11 @@ onBeforeUnmount(() => {
     <!-- #84: the toolbar moves to the parent's full-width row; its own keydown keeps the editor
          shortcuts (Ctrl+F, Ctrl+/) working from toolbar focus, since teleported DOM no longer
          sits inside .manuscript-editor. -->
-    <Teleport :to="props.toolbarTarget" :disabled="!props.toolbarTarget || sliceMode" defer>
+    <Teleport :to="props.toolbarTarget" :disabled="!props.toolbarTarget" defer>
       <div
-        v-if="editor && !focusMode && !sliceMode"
+        v-if="editor && !focusMode && (props.toolbarTarget || !sliceMode)"
         class="toolbar-host"
+        data-test="toolbar-host"
         @keydown="props.toolbarTarget ? onShellKey($event) : undefined"
       >
         <EditorToolbar
