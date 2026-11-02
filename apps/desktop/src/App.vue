@@ -665,6 +665,7 @@ function blockFileNavigation(e: DragEvent) {
 }
 // Agent display names (RAD-263): load once, and again when the window regains focus.
 const reloadAgents = () => void reloadOnFocus();
+let toolbarRowObs: MutationObserver | undefined;
 onMounted(() => {
   window.addEventListener('dragover', blockFileNavigation);
   window.addEventListener('drop', blockFileNavigation);
@@ -672,8 +673,23 @@ onMounted(() => {
   window.addEventListener('keydown', onAppMenuKey);
   void refreshAgents();
   stopAppMenuKeys = () => window.removeEventListener('keydown', onAppMenuKey);
+  if (import.meta.env.DEV) {
+    const row = document.getElementById('toolbar-row');
+    if (row) {
+      toolbarRowObs = new MutationObserver(() => {
+        if (row.children.length > 0) return;
+        if (focusMode.value || !session.value) return;
+        console.debug('[toolbar-host] #toolbar-row empty', {
+          selectedId: selectedId.value,
+          sessionId: session.value?.id,
+        });
+      });
+      toolbarRowObs.observe(row, { childList: true });
+    }
+  }
 });
 onBeforeUnmount(() => {
+  toolbarRowObs?.disconnect();
   window.removeEventListener('dragover', blockFileNavigation);
   window.removeEventListener('drop', blockFileNavigation);
   window.removeEventListener('focus', reloadAgents);

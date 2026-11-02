@@ -231,12 +231,64 @@ function onCaretPlaced() {
   caretPlaced.value = true;
 }
 
+/** Owns the teleported toolbar until the next section editor is ready (#261). */
+const toolbarSectionId = ref<string | undefined>(props.selectedId);
+
+function debugToolbarHost(event: string, detail?: Record<string, unknown>) {
+  if (!import.meta.env.DEV) return;
+  console.debug('[toolbar-host]', event, {
+    selectedId: props.selectedId,
+    toolbarSectionId: toolbarSectionId.value,
+    manuscriptId: props.manuscriptId,
+    ...detail,
+  });
+}
+
 watch(
   () => props.manuscriptId,
-  () => {
+  (id, prev) => {
     caretPlaced.value = false;
     scheduleScrollPageEstimate();
+    if (id !== prev) {
+      toolbarSectionId.value = props.selectedId;
+      debugToolbarHost('manuscript change reset toolbar owner');
+      void nextTick().then(() =>
+        nextTick().then(() => {
+          toolbarSectionId.value = props.selectedId;
+          debugToolbarHost('manuscript change toolbar owner settled');
+        }),
+      );
+    }
   },
+);
+
+watch(
+  () => props.selectedId,
+  async (next, prev) => {
+    if (!next) {
+      toolbarSectionId.value = next;
+      debugToolbarHost('cleared toolbar owner');
+      return;
+    }
+    if (next === prev) return;
+    debugToolbarHost('section select defer toolbar handoff', { prev, next });
+    await nextTick();
+    await nextTick();
+    toolbarSectionId.value = next;
+    debugToolbarHost('toolbar owner updated', { next });
+  },
+  { flush: 'post' },
+);
+
+watch(
+  () => props.selectedId,
+  (next) => {
+    if (!toolbarSectionId.value && next) {
+      toolbarSectionId.value = next;
+      debugToolbarHost('initial toolbar owner', { next });
+    }
+  },
+  { immediate: true },
 );
 
 const ordered = computed(() => sectionsInReadingOrder(props.outline));
@@ -460,7 +512,7 @@ onBeforeUnmount(() => {
             :navigator-controls="navigatorControls"
             :slice-mode="sec.id !== selectedId"
             :section-id="sec.id"
-            :toolbar-target="sec.id === selectedId ? toolbarTarget : undefined"
+            :toolbar-target="sec.id === toolbarSectionId ? toolbarTarget : undefined"
             :review-target="sec.id === selectedId ? REVIEW_RAIL : undefined"
             :book-changes="sec.id === selectedId ? bookChanges : undefined"
             :book-chapter-groups="sec.id === selectedId ? bookChapterGroups : undefined"

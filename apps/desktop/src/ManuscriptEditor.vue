@@ -1518,10 +1518,11 @@ onBeforeUnmount(() => {
     <!-- #84: the toolbar moves to the parent's full-width row; its own keydown keeps the editor
          shortcuts (Ctrl+F, Ctrl+/) working from toolbar focus, since teleported DOM no longer
          sits inside .manuscript-editor. -->
-    <Teleport :to="props.toolbarTarget" :disabled="!props.toolbarTarget || sliceMode" defer>
+    <Teleport :to="props.toolbarTarget" :disabled="!props.toolbarTarget" defer>
       <div
-        v-if="editor && !focusMode && !sliceMode"
+        v-if="editor && !focusMode && (props.toolbarTarget || !sliceMode)"
         class="toolbar-host"
+        data-test="toolbar-host"
         @keydown="props.toolbarTarget ? onShellKey($event) : undefined"
       >
         <EditorToolbar
