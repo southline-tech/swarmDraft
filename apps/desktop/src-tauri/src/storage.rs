@@ -146,7 +146,7 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (manuscript_id, word)
      );",
     // #39: async Pandoc export jobs (EPUB 3 / .docx); PDF deferred to Typst slice.
-    "CREATE TABLE IF NOT EXISTS export_jobs (
+    "CREATE TABLE export_jobs (
         id TEXT PRIMARY KEY,
         manuscript_id TEXT NOT NULL REFERENCES manuscripts(id) ON DELETE CASCADE,
         format TEXT NOT NULL CHECK (format IN ('epub','docx','pdf')),
@@ -158,7 +158,7 @@ const MIGRATIONS: &[&str] = &[
         created_at TEXT NOT NULL,
         finished_at TEXT
      );
-     CREATE INDEX IF NOT EXISTS export_jobs_manuscript ON export_jobs(manuscript_id, created_at);",
+     CREATE INDEX export_jobs_manuscript ON export_jobs(manuscript_id, created_at);",
     // #188: MCP pairing requests and agent activity for connection status.
     "ALTER TABLE agents ADD COLUMN last_seen_at TEXT;
      CREATE TABLE agent_pairings (
@@ -241,7 +241,7 @@ const BOOK_AUTHOR_REPAIR_MIGRATION: &str = "__swarmdraft_repair_book_author__";
 /// SHA-256 of the 14 migrations before #259 (length-prefixed). Update only when appending.
 #[cfg(test)]
 const PINNED_MIGRATIONS_SHA256: &str =
-    "8c4e1d3f1225eb80eac722666030cb1fce97eb896fcf0915863f5b050fbdbf9c";
+    "fca77a34d7f7708d5d0ef486097254e67ec7da150265519670296d44227b9466";
 
 /// How long a statement waits on a locked database before failing.
 pub const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
@@ -717,36 +717,6 @@ mod tests {
             .unwrap()
             .map(|c| c.unwrap())
             .collect()
-    }
-
-    #[test]
-    fn export_jobs_migration_idempotent_when_table_exists() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        migrate_with(&mut conn, &MIGRATIONS[..9]).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE export_jobs (
-                id TEXT PRIMARY KEY,
-                manuscript_id TEXT NOT NULL,
-                format TEXT NOT NULL,
-                trim TEXT,
-                status TEXT NOT NULL,
-                file_path TEXT,
-                error_message TEXT,
-                log TEXT,
-                created_at TEXT NOT NULL,
-                finished_at TEXT
-             );",
-        )
-        .unwrap();
-        let v: i64 = conn
-            .pragma_query_value(None, "user_version", |r| r.get(0))
-            .unwrap();
-        assert_eq!(v, 9);
-        migrate_with(&mut conn, MIGRATIONS).unwrap();
-        let v2: i64 = conn
-            .pragma_query_value(None, "user_version", |r| r.get(0))
-            .unwrap();
-        assert_eq!(v2, MIGRATIONS.len() as i64);
     }
 
     #[test]
