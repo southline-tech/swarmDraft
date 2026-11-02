@@ -38,6 +38,7 @@ import {
 } from './review/review-scroll';
 import { CONTINUOUS_REVIEW_NAV, CONTINUOUS_SCROLL_ROOT } from './continuous-review-nav';
 import type { AuthorFilter, ReviewChange } from './review/review-state';
+import { devToolbarLog } from './dev-log';
 
 const REVIEW_RAIL = '#continuous-review-rail';
 import { docWordCount } from './status/wordcount';
@@ -235,8 +236,7 @@ function onCaretPlaced() {
 const toolbarSectionId = ref<string | undefined>(props.selectedId);
 
 function debugToolbarHost(event: string, detail?: Record<string, unknown>) {
-  if (!import.meta.env.DEV) return;
-  console.debug('[toolbar-host]', event, {
+  devToolbarLog(event, {
     selectedId: props.selectedId,
     toolbarSectionId: toolbarSectionId.value,
     manuscriptId: props.manuscriptId,

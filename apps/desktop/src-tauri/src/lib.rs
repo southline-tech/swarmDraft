@@ -52,6 +52,13 @@ fn os_user_display_name() -> String {
         .unwrap_or_else(|| "Author".to_string())
 }
 
+/// Dev-only: mirror frontend `[toolbar-host]` lines to the `pnpm dev` terminal (stderr).
+#[tauri::command]
+fn dev_front_log(line: String) {
+    #[cfg(debug_assertions)]
+    eprintln!("{line}");
+}
+
 #[tauri::command]
 fn app_info(
     app: tauri::AppHandle,
@@ -927,6 +934,10 @@ pub fn run() {
                     if let Err(e) = window.set_icon(icon) {
                         eprintln!("Main window icon not set: {e}");
                     }
+                    #[cfg(all(debug_assertions, target_os = "linux"))]
+                    if std::env::var("SWARMDRAFT_DEVTOOLS").ok().as_deref() == Some("1") {
+                        window.open_devtools();
+                    }
                 }
             }
             let dir = app.path().app_data_dir()?;
@@ -989,6 +1000,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            dev_front_log,
             app_info,
             agents_list,
             agents_primary_id,

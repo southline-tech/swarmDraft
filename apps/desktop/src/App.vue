@@ -81,6 +81,7 @@ import {
 } from './errors/opening-flow';
 import './shells/shells.css';
 import { applyThemeParam, readPreview } from './shells/preview';
+import { devToolbarLog } from './dev-log';
 import { CLOSE_FLUSH_TIMEOUT_MS, confirmQuit, flushOnClose, flushWithTimeout } from './close-flush';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -679,7 +680,7 @@ onMounted(() => {
       toolbarRowObs = new MutationObserver(() => {
         if (row.children.length > 0) return;
         if (focusMode.value || !session.value) return;
-        console.debug('[toolbar-host] #toolbar-row empty', {
+        devToolbarLog('#toolbar-row empty', {
           selectedId: selectedId.value,
           sessionId: session.value?.id,
         });
