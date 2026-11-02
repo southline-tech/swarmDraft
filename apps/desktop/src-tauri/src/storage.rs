@@ -230,7 +230,18 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (agent_id, manuscript_id)
      );
      CREATE INDEX agent_manuscript_access_manuscript ON agent_manuscript_access(manuscript_id);",
+    // #259: repair book_author for DBs that skipped the mid-array #235 migration (#251).
+    // Sentinel — real work is `ensure_manuscripts_book_author` in `migrate_with`.
+    BOOK_AUTHOR_REPAIR_MIGRATION,
 ];
+
+/// Sentinel for the #259 trailing repair; not executed as SQL.
+const BOOK_AUTHOR_REPAIR_MIGRATION: &str = "__swarmdraft_repair_book_author__";
+
+/// SHA-256 of the 14 migrations before #259 (length-prefixed). Update only when appending.
+#[cfg(test)]
+const PINNED_MIGRATIONS_SHA256: &str =
+    "fca77a34d7f7708d5d0ef486097254e67ec7da150265519670296d44227b9466";
 
 /// How long a statement waits on a locked database before failing.
 pub const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
@@ -528,12 +539,30 @@ fn migrate_with(conn: &mut Connection, migrations: &[&str]) -> Result<(), Storag
     let tx = conn.transaction()?;
     let current: i64 = tx.pragma_query_value(None, "user_version", |r| r.get(0))?;
     for sql in migrations.iter().skip(current as usize) {
-        tx.execute_batch(sql)?;
+        if *sql == BOOK_AUTHOR_REPAIR_MIGRATION {
+            ensure_manuscripts_book_author(&tx)?;
+        } else {
+            tx.execute_batch(sql)?;
+        }
     }
     if (current as usize) < migrations.len() {
         tx.pragma_update(None, "user_version", migrations.len() as i64)?;
     }
     tx.commit()?;
+    Ok(())
+}
+
+/// #259: add `manuscripts.book_author` only when missing (upgraded DBs that skipped mid-array #235).
+fn ensure_manuscripts_book_author(tx: &rusqlite::Transaction<'_>) -> Result<(), StorageError> {
+    let mut stmt = tx.prepare("PRAGMA table_info(manuscripts)")?;
+    let has = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .filter_map(|c| c.ok())
+        .any(|name| name == "book_author");
+    drop(stmt);
+    if !has {
+        tx.execute_batch("ALTER TABLE manuscripts ADD COLUMN book_author TEXT;")?;
+    }
     Ok(())
 }
 
@@ -663,5 +692,202 @@ mod tests {
             .suggestions_with_status(&sec.id, "outdated")
             .unwrap()
             .is_empty());
+    }
+
+    /// Indices of migrations that existed before #251 inserted `book_author` mid-array.
+    /// Pre-#251 `user_version=12` == these 12 SQL entries (no book_author, no agent access, no #259).
+    fn pre_251_migrations() -> Vec<&'static str> {
+        MIGRATIONS
+            .iter()
+            .copied()
+            .take_while(|sql| *sql != BOOK_AUTHOR_REPAIR_MIGRATION)
+            .enumerate()
+            .filter(|(i, sql)| {
+                // Skip mid-array book_author (#235) and trailing agent-access (#244).
+                *i != 5 && !sql.contains("agent_manuscript_access")
+            })
+            .map(|(_, sql)| sql)
+            .collect()
+    }
+
+    fn manuscript_column_names(store: &Store) -> Vec<String> {
+        let conn = store.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare("PRAGMA table_info(manuscripts)").unwrap();
+        stmt.query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .map(|c| c.unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn existing_migrations_are_pinned() {
+        use sha2::{Digest, Sha256};
+        // First 14 entries (everything before the #259 repair sentinel) must not change.
+        let pinned: Vec<&str> = MIGRATIONS
+            .iter()
+            .copied()
+            .take_while(|sql| *sql != BOOK_AUTHOR_REPAIR_MIGRATION)
+            .collect();
+        assert_eq!(
+            pinned.len(),
+            14,
+            "expected 14 migrations before #259 repair"
+        );
+        let mut hasher = Sha256::new();
+        for sql in &pinned {
+            hasher.update((sql.len() as u64).to_le_bytes());
+            hasher.update(sql.as_bytes());
+            hasher.update([0xff]);
+        }
+        let digest = format!("{:x}", hasher.finalize());
+        // Update only when intentionally appending (never editing) prior migrations.
+        assert_eq!(
+            digest, PINNED_MIGRATIONS_SHA256,
+            "existing MIGRATIONS entries changed; append-only — do not edit or reorder"
+        );
+    }
+
+    #[test]
+    fn book_author_repair_from_pre_251_schema() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = tmp.path().join(DB_FILENAME);
+        {
+            let mut conn = Connection::open(&db).unwrap();
+            let pre = pre_251_migrations();
+            assert_eq!(pre.len(), 12, "pre-#251 had 12 migrations");
+            migrate_with(&mut conn, &pre).unwrap();
+            let v: i64 = conn
+                .pragma_query_value(None, "user_version", |r| r.get(0))
+                .unwrap();
+            assert_eq!(v, 12);
+            let cols: Vec<String> = {
+                let mut stmt = conn.prepare("PRAGMA table_info(manuscripts)").unwrap();
+                stmt.query_map([], |r| r.get::<_, String>(1))
+                    .unwrap()
+                    .map(|c| c.unwrap())
+                    .collect()
+            };
+            assert!(
+                !cols.iter().any(|c| c == "book_author"),
+                "fixture must lack book_author"
+            );
+            conn.execute(
+                "INSERT INTO manuscripts (id, title, created_at, numbering_style) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params!["m1", "Draft", "2026-01-01T00:00:00Z", "chapter_arabic"],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO sections (id, manuscript_id, kind, parent_id, position, title, doc_id)                  VALUES (?1, ?2, 'chapter', NULL, 0, 'One', 'd1')",
+                rusqlite::params!["s1", "m1"],
+            )
+            .unwrap();
+        }
+        let store = Store::open(tmp.path()).unwrap();
+        assert_eq!(store.schema_version().unwrap(), MIGRATIONS.len() as i64);
+        let cols = manuscript_column_names(&store);
+        for expected in [
+            "id",
+            "title",
+            "created_at",
+            "numbering_style",
+            "book_author",
+        ] {
+            assert!(
+                cols.iter().any(|c| c == expected),
+                "missing column {expected}"
+            );
+        }
+        let listed = store.list_manuscripts().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, "m1");
+        assert!(listed[0].book_author.is_none());
+        let got = store.get_manuscript("m1").unwrap();
+        assert_eq!(got.title, "Draft");
+        let loaded = store.load_manuscript("m1").unwrap();
+        assert_eq!(loaded.manuscript.id, "m1");
+        assert_eq!(loaded.sections.len(), 1);
+    }
+
+    #[test]
+    fn book_author_repair_fresh_install_has_column() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(tmp.path()).unwrap();
+        assert_eq!(store.schema_version().unwrap(), MIGRATIONS.len() as i64);
+        let cols = manuscript_column_names(&store);
+        assert!(cols.iter().any(|c| c == "book_author"));
+        let blank = store.create_blank_manuscript().unwrap();
+        let listed = store.list_manuscripts().unwrap();
+        assert!(listed.iter().any(|m| m.id == blank.manuscript.id));
+        let loaded = store.load_manuscript(&blank.manuscript.id).unwrap();
+        assert_eq!(loaded.manuscript.id, blank.manuscript.id);
+    }
+
+    #[test]
+    fn book_author_repair_already_has_column_is_idempotent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(tmp.path()).unwrap();
+        assert!(manuscript_column_names(&store)
+            .iter()
+            .any(|c| c == "book_author"));
+        // Simulate a DB that already applied mid-array #235 and is at the pre-repair version.
+        {
+            let conn = store.conn.lock().expect("store mutex poisoned");
+            conn.pragma_update(None, "user_version", MIGRATIONS.len() as i64 - 1)
+                .unwrap();
+        }
+        drop(store);
+        let store = Store::open(tmp.path()).unwrap();
+        assert_eq!(store.schema_version().unwrap(), MIGRATIONS.len() as i64);
+        assert!(manuscript_column_names(&store)
+            .iter()
+            .any(|c| c == "book_author"));
+        // Second open must stay stable.
+        drop(store);
+        let store = Store::open(tmp.path()).unwrap();
+        assert_eq!(store.schema_version().unwrap(), MIGRATIONS.len() as i64);
+        let m = store.create_manuscript("idem").unwrap();
+        assert!(store.get_manuscript(&m.id).unwrap().book_author.is_none());
+    }
+
+    #[test]
+    fn book_author_repair_from_v14_missing_column() {
+        // Arm-A-Rillo production shape: user_version=14, agent access present, no book_author.
+        let tmp = tempfile::tempdir().unwrap();
+        let db = tmp.path().join(DB_FILENAME);
+        {
+            let mut conn = Connection::open(&db).unwrap();
+            let without_ba: Vec<&str> = MIGRATIONS
+                .iter()
+                .copied()
+                .take_while(|sql| *sql != BOOK_AUTHOR_REPAIR_MIGRATION)
+                .enumerate()
+                .filter(|(i, _)| *i != 5)
+                .map(|(_, sql)| sql)
+                .collect();
+            assert_eq!(without_ba.len(), 13);
+            migrate_with(&mut conn, &without_ba).unwrap();
+            conn.pragma_update(None, "user_version", 14i64).unwrap();
+            let cols: Vec<String> = {
+                let mut stmt = conn.prepare("PRAGMA table_info(manuscripts)").unwrap();
+                stmt.query_map([], |r| r.get::<_, String>(1))
+                    .unwrap()
+                    .map(|c| c.unwrap())
+                    .collect()
+            };
+            assert!(!cols.iter().any(|c| c == "book_author"));
+            conn.execute(
+                "INSERT INTO manuscripts (id, title, created_at, numbering_style) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params!["m2", "Live", "2026-02-01T00:00:00Z", "chapter_arabic"],
+            )
+            .unwrap();
+        }
+        let store = Store::open(tmp.path()).unwrap();
+        assert_eq!(store.schema_version().unwrap(), MIGRATIONS.len() as i64);
+        assert!(manuscript_column_names(&store)
+            .iter()
+            .any(|c| c == "book_author"));
+        assert_eq!(store.list_manuscripts().unwrap()[0].id, "m2");
+        assert_eq!(store.get_manuscript("m2").unwrap().title, "Live");
+        assert_eq!(store.load_manuscript("m2").unwrap().manuscript.id, "m2");
     }
 }
