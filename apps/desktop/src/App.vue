@@ -1052,6 +1052,11 @@ const humanNotesAuthor = computed(() => {
 });
 /** Focus mode (#55 / wp5): hides the app chrome; local UI state only. */
 const focusMode = ref(false);
+watch(focusMode, (on, prev) => {
+  if (import.meta.env.DEV && on !== prev) {
+    devToolbarLog('app focusMode', { on, selectedId: selectedId.value });
+  }
+});
 /** Set when the writer chooses Ask bot from the editor menu (#54 wiring to App). */
 const askBotRequested = ref(false);
 function onAskBotFromEditor() {

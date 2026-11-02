@@ -273,9 +273,17 @@ watch(
     if (next === prev) return;
     debugToolbarHost('section select defer toolbar handoff', { prev, next });
     await nextTick();
-    await nextTick();
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const lead = editors.value.get(next);
+      if (lead?.editorReady?.()) {
+        toolbarSectionId.value = next;
+        debugToolbarHost('toolbar owner updated', { next, attempt });
+        return;
+      }
+      await nextTick();
+    }
     toolbarSectionId.value = next;
-    debugToolbarHost('toolbar owner updated', { next });
+    debugToolbarHost('toolbar owner updated without ready editor', { next });
   },
   { flush: 'post' },
 );
@@ -549,7 +557,12 @@ onBeforeUnmount(() => {
             @draft-select="emit('draft-select', $event)"
             @draft-menu-open="emit('draft-menu-open')"
             @decisions="(records) => emit('decisions', sec.id, records)"
-            @focus-mode="emit('focus-mode', $event)"
+            @focus-mode="
+              (on) => {
+                if (on && sec.id !== selectedId) return;
+                emit('focus-mode', on);
+              }
+            "
             @load-error="(msg) => sec.id === selectedId && emit('load-error', msg)"
             @layout="(layout) => sec.id === selectedId && onLeadLayout(layout)"
             @ask-bot="emit('ask-bot')"
