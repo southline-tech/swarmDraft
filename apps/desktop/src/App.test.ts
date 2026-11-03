@@ -408,41 +408,26 @@ describe('App', () => {
     expect(sidebar().isVisible()).toBe(false);
     expect(rail().isVisible()).toBe(true);
     const ws = w.find('[data-test="workspace"]');
-    expect(ws.classes()).toContain('grid-cols-[var(--ct-rail-w)_minmax(0,1fr)_minmax(0,0fr)]');
+    expect(ws.classes()).toContain('grid-cols-[var(--ct-rail-w)_minmax(0,1fr)]');
     expect(ws.classes()).not.toContain('grid-cols-[18rem_minmax(0,1fr)_minmax(0,0fr)]');
     expect(nav.attributes('aria-controls')).toBe('chapter-navigator-rail');
     await nav.trigger('click');
     expect(nav.attributes('aria-pressed')).toBe('true');
     expect(sidebar().isVisible()).toBe(true);
     expect(w.find('[data-test="workspace"]').classes()).toContain(
-      'grid-cols-[18rem_minmax(0,1fr)_minmax(0,0fr)]',
+      'grid-cols-[18rem_minmax(0,1fr)]',
     );
     w.unmount();
   });
 
-  it('drops workspace right padding so footer notes split aligns with Story notes (#219)', async () => {
+  it('drops workspace right padding and keeps footer tracks when Story notes use a sheet (#219 #277)', async () => {
     const { w } = await withManuscript();
     const ws = w.get('[data-test="workspace"]').element as HTMLElement;
     expect(ws.className).toContain('pr-0');
     expect(ws.className).not.toMatch(/\bp-4\b/);
-    const notesCol = w.get('[data-test="story-notes-col"]').element;
-    const rightSeg = w.get('[data-test="status-seg-right"]').element;
-    const sharedLeft = 640;
-    const rect = (left: number, width = 280) =>
-      ({
-        left,
-        right: left + width,
-        top: 0,
-        bottom: 26,
-        width,
-        height: 26,
-        x: left,
-        y: 0,
-        toJSON: () => ({}),
-      }) as DOMRect;
-    vi.spyOn(notesCol, 'getBoundingClientRect').mockReturnValue(rect(sharedLeft));
-    vi.spyOn(rightSeg, 'getBoundingClientRect').mockReturnValue(rect(sharedLeft));
-    expect(rightSeg.getBoundingClientRect().left).toBe(notesCol.getBoundingClientRect().left);
+    expect(w.find('[data-test="story-notes-col"]').exists()).toBe(false);
+    const bar = w.get('[data-test="status-bar"]').element as HTMLElement;
+    expect(bar.style.gridTemplateColumns).toContain('auto');
     await w.find('[data-test="tb-navigator"]').trigger('click');
     await settle();
     expect(w.find('[data-test="status-seg-left"]').exists()).toBe(false);
@@ -1083,6 +1068,9 @@ vi.mock('./backend', async (orig) => ({
     authorSavedNames: {},
     suggestionReasons: {},
   })),
+  loadNotesState: vi.fn(async () => null),
+  pollUpdates: vi.fn(async () => ({ updates: [], cursor: 0 })),
+  notesApplyUpdate: vi.fn(async () => {}),
 }));
 
 describe('save-failure banner', () => {
@@ -2149,7 +2137,7 @@ describe('shell layout after import and review burst (#232)', () => {
         .get('[data-test="shell-chrome"]')
         .element.contains(w.get('[data-test="toolbar-row"]').element),
     ).toBe(true);
-    expect(w.get('[data-test="workspace"]').classes().join(' ')).toContain('minmax(0,0fr)');
+    expect(w.find('[data-test="story-notes-col"]').exists()).toBe(false);
     expect(w.get('[data-test="continuous-root"]').classes()).toContain('min-w-0');
     expect(w.get('[data-test="continuous-manuscript"]').classes()).toContain('min-w-0');
     const bar = w.get('[data-test="status-bar"]').element as HTMLElement;

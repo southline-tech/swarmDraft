@@ -101,7 +101,7 @@ import {
   UnsavedEditsError,
   type ManuscriptSession,
 } from './manuscript-session';
-import StoryNotesPanel from './notes/StoryNotesPanel.vue';
+import StoryNotesSheet from './notes/StoryNotesSheet.vue';
 import { openNotesSession, type NotesSession } from './notes/useNotesSession';
 import { loadProfile } from './settings/prefs';
 
@@ -110,6 +110,8 @@ const session = shallowRef<ManuscriptSession | null>(null);
 const notesSession = shallowRef<NotesSession | null>(null);
 /** #38: story notes dock under the editor; off until the writer opens them from the book menu. */
 const storyNotesOpen = ref(false);
+const storyNotesSheetHeight = ref(0);
+let storyNotesOpener: HTMLElement | null = null;
 const selectedId = ref<string>();
 const editorPane = ref<InstanceType<typeof ContinuousManuscript> | null>(null);
 /** Outline row clicked (#36): scroll to the section and put the caret in its body (#107). */
@@ -1065,23 +1067,18 @@ function onAskBotFromEditor() {
 /** #96: the writer opened the outline by hand while the review panel shows. */
 const outlineForced = computed(() => outlineAuto.manual.value && navigatorOpen.value);
 /** wp2 (#67): full outline, collapsed rail, or hidden in focus mode. */
-const STORY_NOTES_TRACK = 'var(--ct-story-notes-w)';
-/** #232: no empty strip beside the review rail when Story notes is closed. */
-const STORY_NOTES_CLOSED_TRACK = 'minmax(0,0fr)';
 const workspaceGridClass = computed(() => {
   if (focusMode.value) return 'grid-cols-1';
-  const notes = storyNotesOpen.value ? STORY_NOTES_TRACK : STORY_NOTES_CLOSED_TRACK;
   return navigatorOpen.value
-    ? `grid-cols-[18rem_minmax(0,1fr)_${notes}]`
-    : `grid-cols-[var(--ct-rail-w)_minmax(0,1fr)_${notes}]`;
+    ? 'grid-cols-[18rem_minmax(0,1fr)]'
+    : 'grid-cols-[var(--ct-rail-w)_minmax(0,1fr)]';
 });
-/** Footer keeps a usable right column for Story notes toggle when the dock is closed (#204). */
+/** Footer keeps a usable right column for Story notes toggle (#204 / #207). */
 const FOOTER_NOTES_CLOSED_TRACK = 'auto';
 const footerColumnTracks = computed(() => {
   if (focusMode.value) return undefined;
   const left = navigatorOpen.value ? '18rem' : 'var(--ct-rail-w)';
-  const notes = storyNotesOpen.value ? STORY_NOTES_TRACK : FOOTER_NOTES_CLOSED_TRACK;
-  return `${left} minmax(0, 1fr) ${notes}`;
+  return `${left} minmax(0, 1fr) ${FOOTER_NOTES_CLOSED_TRACK}`;
 });
 const chapterCount = computed(
   () => session.value?.outline.value.filter((s) => s.kind === 'chapter').length ?? 0,
@@ -1114,17 +1111,64 @@ async function ensureNotesSession() {
   notesSession.value = await openNotesSession(id);
 }
 
+function statusNotesToggleEl(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('[data-test="status-notes-toggle"]');
+}
+
+function rememberStoryNotesOpener() {
+  const active = document.activeElement as HTMLElement | null;
+  const toggle = active?.closest?.('[data-test="status-notes-toggle"]') as HTMLElement | null;
+  if (toggle) {
+    storyNotesOpener = toggle;
+    return;
+  }
+  if (active && active !== document.body) {
+    storyNotesOpener = active;
+    return;
+  }
+  storyNotesOpener = statusNotesToggleEl();
+}
+
+function restoreStoryNotesOpenerFocus() {
+  const toggle = statusNotesToggleEl();
+  const opener =
+    storyNotesOpener && storyNotesOpener !== document.body && storyNotesOpener.isConnected
+      ? storyNotesOpener
+      : toggle;
+  storyNotesOpener = null;
+  (opener ?? toggle)?.focus?.();
+}
+
 async function toggleStoryNotes() {
   if (storyNotesOpen.value) {
     storyNotesOpen.value = false;
+    storyNotesSheetHeight.value = 0;
+    editorPane.value?.setScrollPaddingBottom(0);
+    await nextTick();
+    restoreStoryNotesOpenerFocus();
     return;
   }
+  rememberStoryNotesOpener();
   try {
     await ensureNotesSession();
     if (notesSession.value) storyNotesOpen.value = true;
   } catch (err) {
     console.error('Could not load story notes', err);
+    storyNotesOpener = null;
   }
+}
+
+function onStoryNotesSheetHeight(px: number) {
+  storyNotesSheetHeight.value = px;
+  editorPane.value?.setScrollPaddingBottom(px);
+}
+
+async function onStoryNotesClose() {
+  storyNotesOpen.value = false;
+  storyNotesSheetHeight.value = 0;
+  editorPane.value?.setScrollPaddingBottom(0);
+  await nextTick();
+  restoreStoryNotesOpenerFocus();
 }
 const chapterNavControls = computed(() =>
   navigatorOpen.value ? 'chapter-navigator' : 'chapter-navigator-rail',
@@ -1520,7 +1564,7 @@ defineExpose({ open, closeSession });
             @numbering-style="onNumberingStyle"
           />
           <OutlineRail v-show="!navigatorOpen && !focusMode" @expand="outlineAuto.toggleByHand()" />
-          <div class="editor-stack min-h-0 min-w-0">
+          <div class="editor-stack min-h-0 min-w-0" data-test="editor-stack">
             <ContinuousManuscript
               ref="editorPane"
               class="editor-stack__page min-h-0 min-w-0 flex-1"
@@ -1577,25 +1621,18 @@ defineExpose({ open, closeSession });
               @draft-menu-open="onToolbarDraftMenuOpen"
             />
           </div>
-          <div
-            v-if="!focusMode"
-            class="story-notes-col min-h-0 min-w-0 overflow-hidden"
-            data-test="story-notes-col"
-          >
-            <StoryNotesPanel
-              v-if="storyNotesOpen && notesSession"
-              id="story-notes-panel"
-              class="story-notes-col__panel"
-              :notes-doc="notesSession.doc"
-              :outline="session.outline.value"
-              :human-author="humanNotesAuthor"
-              :readonly="session.closed || restoreInProgress"
-              data-test="story-notes-panel"
-              @select-section="focusEditor"
-              @close="storyNotesOpen = false"
-            />
-          </div>
         </div>
+        <StoryNotesSheet
+          v-if="storyNotesOpen && notesSession && !focusMode"
+          :notes-doc="notesSession.doc"
+          :outline="session.outline.value"
+          :human-author="humanNotesAuthor"
+          :readonly="session.closed || restoreInProgress"
+          anchor-selector="[data-test='editor-stack']"
+          @select-section="focusEditor"
+          @close="onStoryNotesClose"
+          @sheet-height="onStoryNotesSheetHeight"
+        />
       </div>
     </div>
     <StatusBar
@@ -1697,20 +1734,6 @@ body {
 .editor-stack__page {
   flex: 1 1 auto;
   min-height: 0;
-}
-.story-notes-col {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.story-notes-col__panel {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-.story-notes-col__panel :deep(.story-notes) {
-  height: 100%;
-  min-height: 0;
-  border-radius: var(--ct-radius-md);
 }
 .topbar {
   display: flex;

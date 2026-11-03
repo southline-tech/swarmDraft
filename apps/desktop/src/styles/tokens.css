@@ -130,6 +130,7 @@
 
   /* Stacking (ascending): panel < chrome < dropdown/flyout < modal < toast */
   --ct-z-panel: 30;
+  --ct-z-sheet: 38;
   --ct-z-chrome: 40;
   --ct-z-dropdown: 45;
   --ct-z-flyout: 46;

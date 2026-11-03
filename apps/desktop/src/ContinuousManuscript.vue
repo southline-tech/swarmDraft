@@ -439,12 +439,19 @@ function setZoom(z: number) {
   if (id) editors.value.get(id)?.setZoom(z);
 }
 
+function setScrollPaddingBottom(px: number) {
+  const root = scrollRoot.value;
+  if (!root) return;
+  root.style.paddingBottom = px > 0 ? `${px}px` : '';
+}
+
 defineExpose({
   focusBody() {
     if (props.selectedId) focusSection(props.selectedId);
   },
   focusSection,
   setZoom,
+  setScrollPaddingBottom,
 });
 
 onMounted(async () => {
