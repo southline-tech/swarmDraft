@@ -582,7 +582,13 @@ mod tests {
         assert_eq!(agent.id, line.id);
         assert!(agent.revoked_at.is_none());
         let listed = s.list_agents().unwrap();
-        assert_eq!(listed.iter().filter(|a| a.name.eq_ignore_ascii_case("line")).count(), 1);
+        assert_eq!(
+            listed
+                .iter()
+                .filter(|a| a.name.eq_ignore_ascii_case("line"))
+                .count(),
+            1
+        );
         let comments = s.open_comments(&sid).unwrap();
         assert_eq!(comments[0].author.id, line.id);
     }

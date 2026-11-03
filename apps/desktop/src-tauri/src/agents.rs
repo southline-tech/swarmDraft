@@ -318,17 +318,16 @@ pub(crate) fn revive_or_insert_agent(
         #[cfg(debug_assertions)]
         eprintln!("[agents] pairing: revived agent id={id} name={name:?}");
         c.execute(
-            &format!(
-                "UPDATE agents SET revoked_at = NULL, name = ?2, color = ?3 WHERE id = ?1"
-            ),
+            &format!("UPDATE agents SET revoked_at = NULL, name = ?2, color = ?3 WHERE id = ?1"),
             params![id, name, color],
         )?;
-        return c.query_row(
-            &format!("SELECT {AGENT_COLS} FROM agents WHERE id = ?1"),
-            [&id],
-            row_agent,
-        )
-        .map_err(StorageError::from);
+        return c
+            .query_row(
+                &format!("SELECT {AGENT_COLS} FROM agents WHERE id = ?1"),
+                [&id],
+                row_agent,
+            )
+            .map_err(StorageError::from);
     }
     #[cfg(debug_assertions)]
     eprintln!("[agents] pairing: inserted new agent name={name:?}");
