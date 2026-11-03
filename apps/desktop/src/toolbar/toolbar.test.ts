@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { Editor, type JSONContent } from '@tiptap/core';
 import { NodeSelection, TextSelection } from '@tiptap/pm/state';
@@ -7,6 +7,83 @@ import { collaborativeEditorOptions, manuscriptEditorOptions } from '@swarmdraft
 import EditorToolbar from './EditorToolbar.vue';
 import { SHORTCUTS, caretStyle, runCommand, toolbarState } from './toolbar';
 import { overlayVisible, overlayWrap } from '../overlay/queries';
+import { TOOLBAR_SPILL_ORDER, type ToolbarOverflowItemId } from './toolbar-overflow';
+
+function domRect(width: number): DOMRect {
+  return {
+    width,
+    height: 30,
+    x: 0,
+    y: 0,
+    top: 0,
+    left: 0,
+    right: width,
+    bottom: 30,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+type ToolbarLayoutStub = {
+  toolbarWidth: number;
+  leftPinnedWidth: number;
+  rightPinnedWidth: number;
+  overflowBtnWidth: number;
+  itemWidths: Partial<Record<ToolbarOverflowItemId, number>>;
+};
+
+const DEFAULT_ITEM_WIDTH = 48;
+const crampedLayout = (): ToolbarLayoutStub => ({
+  toolbarWidth: 900,
+  leftPinnedWidth: 560,
+  rightPinnedWidth: 380,
+  overflowBtnWidth: 30,
+  itemWidths: Object.fromEntries(
+    TOOLBAR_SPILL_ORDER.map((id) => [id, DEFAULT_ITEM_WIDTH]),
+  ) as ToolbarLayoutStub['itemWidths'],
+});
+
+let restoreRect: (() => void) | undefined;
+
+function installToolbarLayoutStub(stub: ToolbarLayoutStub) {
+  const orig = Element.prototype.getBoundingClientRect;
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    const el = this as HTMLElement;
+    const measure = el.dataset.tbMeasure;
+    if (measure === 'overflow-btn') return domRect(stub.overflowBtnWidth);
+    if (measure && stub.itemWidths[measure as ToolbarOverflowItemId] != null) {
+      return domRect(stub.itemWidths[measure as ToolbarOverflowItemId]!);
+    }
+    switch (el.dataset.test) {
+      case 'editor-toolbar':
+        return domRect(stub.toolbarWidth);
+      case 'tb-pinned-left':
+        return domRect(stub.leftPinnedWidth);
+      case 'tb-pinned-right':
+        return domRect(stub.rightPinnedWidth);
+      default:
+        return orig.call(this);
+    }
+  };
+  restoreRect = () => {
+    Element.prototype.getBoundingClientRect = orig;
+  };
+}
+
+class MockResizeObserver {
+  static last: MockResizeObserver | undefined;
+  constructor(private cb: ResizeObserverCallback) {
+    MockResizeObserver.last = this;
+  }
+  observe() {
+    queueMicrotask(() => this.cb([], this as unknown as ResizeObserver));
+  }
+  disconnect() {}
+  unobserve() {}
+}
+
+function flushToolbarLayout() {
+  MockResizeObserver.last?.observe();
+}
 
 // Synthetic fixture text only.
 const DOC: JSONContent = {
@@ -215,14 +292,27 @@ describe('toolbar commands', () => {
 });
 
 describe('EditorToolbar', () => {
-  function mountBar(props: Record<string, unknown> = {}) {
+  beforeEach(() => {
+    vi.stubGlobal('ResizeObserver', MockResizeObserver);
+    installToolbarLayoutStub(crampedLayout());
+  });
+  afterEach(() => {
+    restoreRect?.();
+    restoreRect = undefined;
+    vi.unstubAllGlobals();
+  });
+
+  async function mountBar(props: Record<string, unknown> = {}) {
     const e = make();
     const w = mount(EditorToolbar, { props: { editor: e, ...props }, attachTo: document.body });
+    await flushPromises();
+    flushToolbarLayout();
+    await flushPromises();
     return { e, w };
   }
 
-  it('lays out Wave 6a groups in D1 order (245)', () => {
-    const { w } = mountBar({ manuscriptId: 'm1' });
+  it('lays out Wave 6a groups in D1 order (245)', async () => {
+    const { w } = await mountBar({ manuscriptId: 'm1' });
     expect(w.find('[data-test="draft-picker"]').exists()).toBe(true);
     expect(w.find('[data-test="toolbar-undo"]').exists()).toBe(true);
     expect(w.find('[data-test="track-changes-toggle"]').exists()).toBe(true);
@@ -239,11 +329,20 @@ describe('EditorToolbar', () => {
     w.unmount();
   });
 
-  it('gives every top-level control an accessible name and a tooltip', () => {
-    const { w } = mountBar({ manuscriptId: 'm1' });
-    for (const b of w.findAll(
-      '[data-test="editor-toolbar"] > button, [data-test="editor-toolbar"] > div > button, [data-test="draft-picker"]',
-    )) {
+  it('gives every top-level control an accessible name and a tooltip', async () => {
+    const { w } = await mountBar({ manuscriptId: 'm1' });
+    const barButtons = w
+      .findAll(
+        '[data-test="tb-pinned-left"] button[data-test], [data-test="tb-inline"] button[data-test], [data-test="tb-pinned-right"] button[data-test]',
+      )
+      .filter(
+        (b) =>
+          !b.element.closest(
+            '[data-test="draft-menu"], [data-test="export-menu"], [data-test="tb-overflow-menu"]',
+          ),
+      );
+    expect(w.find('[data-test="paragraph-style"]').attributes('aria-label')).toBeTruthy();
+    for (const b of barButtons) {
       expect(b.attributes('aria-label') || b.attributes('title')).toBeTruthy();
     }
     expect(w.find('[data-test="tb-bold"]').attributes('title')).toBe(`Bold (${SHORTCUTS.bold})`);
@@ -255,7 +354,7 @@ describe('EditorToolbar', () => {
   });
 
   it('shows the caret style and follows the caret', async () => {
-    const { e, w } = mountBar();
+    const { e, w } = await mountBar();
     caretIn(e, 'Alpha');
     await flushPromises();
     const sel = w.find('[data-test="paragraph-style"]').element as HTMLSelectElement;
@@ -267,7 +366,7 @@ describe('EditorToolbar', () => {
   });
 
   it('sets aria-pressed on Bold in bold text and runs commands on click', async () => {
-    const { e, w } = mountBar();
+    const { e, w } = await mountBar();
     caretIn(e, 'strong', 2);
     await flushPromises();
     expect(w.find('[data-test="tb-bold"]').attributes('aria-pressed')).toBe('true');
@@ -278,7 +377,7 @@ describe('EditorToolbar', () => {
   });
 
   it('puts less-common actions in the overflow menu', async () => {
-    const { e, w } = mountBar();
+    const { e, w } = await mountBar();
     select(e, 'plain');
     expect(overlayVisible('[data-test="tb-overflow-menu"]')).toBe(false);
     await w.find('[data-test="tb-overflow"]').trigger('click');
@@ -301,7 +400,7 @@ describe('EditorToolbar', () => {
   });
 
   it('emits the panel toggles; unbuilt actions are aria-disabled no-ops', async () => {
-    const { w } = mountBar({ reviewOpen: false });
+    const { w } = await mountBar({ reviewOpen: false });
     await w.find('[data-test="review-panel-toggle"]').trigger('click');
     expect(w.emitted('toggle-review')).toHaveLength(1);
     expect(w.find('[data-test="review-panel-toggle"]').attributes('aria-pressed')).toBe('false');
@@ -329,24 +428,28 @@ describe('EditorToolbar', () => {
     w.unmount();
   });
 
-  it('advertises only shortcuts that are really bound', () => {
-    const { w } = mountBar();
-    const titles = w.findAll('[title]').map((el) => el.attributes('title')!);
-    const keys = w.findAll('[aria-keyshortcuts]').map((el) => el.attributes('aria-keyshortcuts'));
+  it('advertises only shortcuts that are really bound', async () => {
+    const { w } = await mountBar();
+    const bar = w.get('[data-test="editor-toolbar"]');
+    const titles = bar.findAll('[title]').map((el) => el.attributes('title')!);
+    const keys = bar.findAll('[aria-keyshortcuts]').map((el) => el.attributes('aria-keyshortcuts'));
     expect(keys).toEqual(['Control+B', 'Control+I', 'Control+U']);
     for (const t of titles) expect(t).not.toMatch(/Ctrl\+(?:[LERJ\\FYZ]\b|Alt)/);
     expect(w.find('[data-test="tb-align-left"]').attributes('title')).toBe('Align left');
     w.unmount();
   });
 
-  it('shows Ctrl+Z/Ctrl+Y only when the editor has undo history', () => {
+  it('shows Ctrl+Z/Ctrl+Y only when the editor has undo history', async () => {
     const e = new Editor(
       collaborativeEditorOptions(docToYDoc(structuredClone(DOC) as never), {
         element: document.createElement('div'),
       }),
     );
     editors.push(e);
-    const w = mount(EditorToolbar, { props: { editor: e } });
+    const w = mount(EditorToolbar, { props: { editor: e }, attachTo: document.body });
+    await flushPromises();
+    flushToolbarLayout();
+    await flushPromises();
     expect(w.find('[data-test="toolbar-undo"]').attributes('title')).toBe('Undo (Ctrl+Z)');
     expect(w.find('[data-test="toolbar-redo"]').attributes('aria-keyshortcuts')).toBe('Control+Y');
     w.unmount();
@@ -363,6 +466,8 @@ describe('EditorToolbar', () => {
       props: { editor: e, readOnlyReason: 'document failed to load' },
       attachTo: document.body,
     });
+    await flushPromises();
+    flushToolbarLayout();
     await flushPromises();
     for (const id of ['toolbar-undo', 'toolbar-redo']) {
       const c = w.find(`[data-test="${id}"]`);
@@ -407,7 +512,7 @@ describe('EditorToolbar', () => {
   });
 
   it('enables wired comment and find', async () => {
-    const { w } = mountBar({ commentEnabled: true, findEnabled: true });
+    const { w } = await mountBar({ commentEnabled: true, findEnabled: true });
     await w.find('[data-test="tb-comment"]').trigger('click');
     await w.find('[data-test="tb-find"]').trigger('click');
     expect(w.emitted('comment')).toHaveLength(1);
@@ -426,7 +531,7 @@ describe('EditorToolbar', () => {
   ];
 
   it('read-only: formatting stays focusable, aria-disabled, inert, and says Read-only', async () => {
-    const { e, w } = mountBar({ readOnlyReason: 'document failed to load' });
+    const { e, w } = await mountBar({ readOnlyReason: 'document failed to load' });
     select(e, 'plain');
     await flushPromises();
     expect(w.find('[data-test="tb-bold"]').attributes('title')).toBe('Bold (Ctrl+B)');
@@ -473,7 +578,7 @@ describe('EditorToolbar', () => {
   });
 
   it('read-only without a reason says editing is turned off', async () => {
-    const { e, w } = mountBar();
+    const { e, w } = await mountBar();
     e.setEditable(false, false);
     await flushPromises();
     await new Promise((r) => setTimeout(r, 0));
@@ -484,7 +589,7 @@ describe('EditorToolbar', () => {
   });
 
   it('overflow: arrow/Home/End navigation, Esc refocuses the button, outside click closes', async () => {
-    const { w } = mountBar();
+    const { w } = await mountBar();
     const more = w.find('[data-test="tb-overflow"]');
     await more.trigger('click');
     await flushPromises();
@@ -516,7 +621,7 @@ describe('EditorToolbar', () => {
   });
 
   it('uses menuitemcheckbox with aria-checked for Small caps and Strikethrough', async () => {
-    const { e, w } = mountBar();
+    const { e, w } = await mountBar();
     select(e, 'plain');
     await w.find('[data-test="tb-overflow"]').trigger('click');
     const roles = overlayWrap('[data-test="tb-overflow-menu"]')
@@ -544,5 +649,66 @@ describe('EditorToolbar', () => {
     const src = (await import('./EditorToolbar.vue?raw')).default as string;
     expect(src).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(/);
     expect(src).not.toMatch(/\b(?:bg|text|border)-(?:white|black|gray|slate|blue|red)\b/);
+  });
+
+  it('responsive overflow (issue 268): wide bar shows underline inline and hides ⋯', async () => {
+    installToolbarLayoutStub({
+      toolbarWidth: 2400,
+      leftPinnedWidth: 520,
+      rightPinnedWidth: 320,
+      overflowBtnWidth: 30,
+      itemWidths: Object.fromEntries(
+        TOOLBAR_SPILL_ORDER.map((id) => [id, 40]),
+      ) as ToolbarLayoutStub['itemWidths'],
+    });
+    const { w } = await mountBar({ manuscriptId: 'm1' });
+    expect(w.find('[data-test="tb-inline"] [data-test="tb-underline"]').exists()).toBe(true);
+    expect(w.find('[data-test="tb-overflow"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('responsive overflow (issue 268): narrow bar moves underline into ⋯ only', async () => {
+    installToolbarLayoutStub({
+      toolbarWidth: 520,
+      leftPinnedWidth: 400,
+      rightPinnedWidth: 60,
+      overflowBtnWidth: 30,
+      itemWidths: {
+        navigator: 30,
+        underline: 36,
+        aligns: 120,
+        comment: 36,
+        find: 56,
+        smallcaps: 80,
+        strike: 80,
+        'style-first': 90,
+        epigraph: 70,
+        verse: 50,
+        pageBreak: 100,
+      },
+    });
+    const { w } = await mountBar();
+    expect(w.find('[data-test="tb-inline"] [data-test="tb-underline"]').exists()).toBe(false);
+    expect(w.find('[data-test="tb-overflow"]').exists()).toBe(true);
+    await w.find('[data-test="tb-overflow"]').trigger('click');
+    expect(overlayWrap('[data-test="tb-underline"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('responsive overflow (issue 268): hides ⋯ when every flexible item fits', async () => {
+    installToolbarLayoutStub({
+      toolbarWidth: 3000,
+      leftPinnedWidth: 500,
+      rightPinnedWidth: 300,
+      overflowBtnWidth: 30,
+      itemWidths: Object.fromEntries(
+        TOOLBAR_SPILL_ORDER.map((id) => [id, 36]),
+      ) as ToolbarLayoutStub['itemWidths'],
+    });
+    const { w } = await mountBar();
+    expect(w.find('[data-test="tb-overflow"]').exists()).toBe(false);
+    expect(w.find('[data-test="tb-inline"] [data-test="tb-navigator"]').exists()).toBe(true);
+    expect(w.find('[data-test="tb-inline"] [data-test="tb-menu-pageBreak"]').exists()).toBe(true);
+    w.unmount();
   });
 });

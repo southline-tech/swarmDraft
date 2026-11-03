@@ -3,17 +3,17 @@
  * Manuscript toolbar (Wave 6a): draft picker | undo/redo | style/B/I | track | review |
  * export | agents | theme | settings. Formatting uses Tiptap (./toolbar). --ct-* tokens only.
  */
-import { computed, nextTick, onBeforeUnmount, ref, shallowRef, toRaw, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, toRaw, watch } from 'vue';
 import type { Editor } from '@tiptap/core';
 import AppIcon from '../icons/AppIcon.vue';
 import DraftPicker, { type DraftPickerRow } from './DraftPicker.vue';
 import ToolbarExportMenu from './ToolbarExportMenu.vue';
+import ToolbarFlexCluster from './ToolbarFlexCluster.vue';
 import OverlayAnchoredMenu from '../overlay/OverlayAnchoredMenu.vue';
 import { applyTheme, loadTheme, saveTheme, type Theme } from '../settings/prefs';
 import {
   SHORTCUTS,
   STYLE_LABELS,
-  SUPPORTED_ALIGN,
   TOOLBAR_STYLES,
   runCommand,
   toolbarState,
@@ -21,6 +21,12 @@ import {
   type CaretStyle,
   type ToolbarCommand,
 } from './toolbar';
+import {
+  TOOLBAR_OVERFLOW_TEXT_ACTIONS,
+  TOOLBAR_SPILL_ORDER,
+  pickInlineOverflowItems,
+  type ToolbarOverflowItemId,
+} from './toolbar-overflow';
 
 const props = withDefaults(
   defineProps<{
@@ -112,9 +118,11 @@ watch(
   () => ed()?.isEditable,
   () => bump(),
 );
+let layoutObserver: ResizeObserver | undefined;
 onBeforeUnmount(() => {
   listen(ed(), false);
   observer?.disconnect();
+  layoutObserver?.disconnect();
 });
 const state = computed(() => (tick.value, toolbarState(ed())));
 /** False when the editor is read-only: every formatting control is then disabled. */
@@ -174,17 +182,69 @@ const ALIGNS: { id: Align; label: string; path: string }[] = [
   },
 ];
 
-// Overflow menu: the less-common actions.
+// Responsive overflow (issue 268): flexible items inline while they fit, else ⋯ only.
 const menuOpen = ref(false);
 const menuEl = shallowRef<HTMLElement | null>(null);
-const OVERFLOW: { cmd: ToolbarCommand; label: string; active?: 'smallcaps' | 'strike' }[] = [
-  { cmd: 'smallcaps', label: 'Small caps', active: 'smallcaps' },
-  { cmd: 'strike', label: 'Strikethrough', active: 'strike' },
-  { cmd: 'style:first', label: 'First paragraph' },
-  { cmd: 'style:epigraph', label: 'Epigraph' },
-  { cmd: 'style:verse', label: 'Verse' },
-  { cmd: 'pageBreak', label: 'Insert page break' },
-];
+const toolbarEl = shallowRef<HTMLElement | null>(null);
+const leftPinnedEl = shallowRef<HTMLElement | null>(null);
+const rightPinnedEl = shallowRef<HTMLElement | null>(null);
+const measureEl = shallowRef<HTMLElement | null>(null);
+const inlineSet = ref<Set<ToolbarOverflowItemId>>(new Set());
+const showInline = (id: ToolbarOverflowItemId) => inlineSet.value.has(id);
+const showOverflow = (id: ToolbarOverflowItemId) => !inlineSet.value.has(id);
+const hasOverflow = computed(() => TOOLBAR_SPILL_ORDER.some((id) => showOverflow(id)));
+const overflowIconGroup = computed(
+  () =>
+    showOverflow('navigator') ||
+    showOverflow('underline') ||
+    showOverflow('aligns') ||
+    showOverflow('comment') ||
+    showOverflow('find'),
+);
+const overflowTextActions = computed(() =>
+  TOOLBAR_OVERFLOW_TEXT_ACTIONS.filter((o) => showOverflow(o.id)),
+);
+
+function readWidth(el: Element | null | undefined): number {
+  return el?.getBoundingClientRect().width ?? 0;
+}
+
+function measureToolbarLayout() {
+  const bar = toolbarEl.value;
+  const probe = measureEl.value;
+  if (!bar || !probe) return;
+  const itemWidths: Partial<Record<ToolbarOverflowItemId, number>> = {};
+  for (const id of TOOLBAR_SPILL_ORDER) {
+    itemWidths[id] = readWidth(probe.querySelector(`[data-tb-measure="${id}"]`));
+  }
+  const overflowBtnWidth = readWidth(probe.querySelector('[data-tb-measure="overflow-btn"]'));
+  const available = readWidth(bar) - readWidth(leftPinnedEl.value) - readWidth(rightPinnedEl.value);
+  const { inline } = pickInlineOverflowItems(available, itemWidths, overflowBtnWidth);
+  inlineSet.value = new Set(inline);
+  if (!hasOverflow.value && menuOpen.value) closeMenu(false);
+  if (import.meta.env.DEV) {
+    console.debug('[toolbar overflow]', {
+      width: readWidth(bar),
+      available,
+      inline: [...inline],
+      overflow: TOOLBAR_SPILL_ORDER.filter((id) => showOverflow(id)),
+    });
+  }
+}
+
+onMounted(() => {
+  void nextTick(() => {
+    measureToolbarLayout();
+    if (typeof ResizeObserver === 'undefined') return;
+    layoutObserver = new ResizeObserver(() => measureToolbarLayout());
+    if (toolbarEl.value) layoutObserver.observe(toolbarEl.value);
+  });
+});
+watch(
+  () => [props.commentEnabled, props.findEnabled, props.navigatorOpen, props.tracking],
+  () => void nextTick(measureToolbarLayout),
+);
+
 const moreBtn = shallowRef<HTMLButtonElement | null>(null);
 const wrapEl = shallowRef<HTMLElement | null>(null);
 const items = () => [...(menuEl.value?.querySelectorAll<HTMLElement>('[role^="menuitem"]') ?? [])];
@@ -255,293 +315,321 @@ const themeLabel = computed(() =>
 </script>
 
 <template>
-  <div
-    role="toolbar"
-    aria-label="Manuscript"
-    data-test="editor-toolbar"
-    class="flex h-11 items-center gap-0.5 border-b border-border bg-surface px-2.5 font-ui text-text"
-  >
-    <DraftPicker
-      :label="props.draftLabel"
-      :current-id="props.currentDraftId"
-      :drafts="props.draftRows"
-      @new-blank="emit('draft-new')"
-      @import="emit('draft-import')"
-      @select="emit('draft-select', $event)"
-      @menu-open="emit('draft-menu-open')"
-    />
-    <span class="mx-1.5 h-5 w-px bg-border" aria-hidden="true" />
+  <div class="relative">
+    <div
+      ref="toolbarEl"
+      role="toolbar"
+      aria-label="Manuscript"
+      data-test="editor-toolbar"
+      class="flex h-11 items-center gap-0.5 border-b border-border bg-surface px-2.5 font-ui text-text"
+    >
+      <div ref="leftPinnedEl" data-test="tb-pinned-left" class="flex shrink-0 items-center gap-0.5">
+        <DraftPicker
+          :label="props.draftLabel"
+          :current-id="props.currentDraftId"
+          :drafts="props.draftRows"
+          @new-blank="emit('draft-new')"
+          @import="emit('draft-import')"
+          @select="emit('draft-select', $event)"
+          @menu-open="emit('draft-menu-open')"
+        />
+        <span class="mx-1.5 h-5 w-px bg-border" aria-hidden="true" />
 
-    <button
-      type="button"
-      data-test="toolbar-undo"
-      :class="btn"
-      aria-label="Undo"
-      :aria-keyshortcuts="editable && state.hasHistory ? 'Control+Z' : undefined"
-      :title="ftip('Undo', state.hasHistory ? SHORTCUTS.undo : undefined)"
-      :disabled="editable && !state.canUndo"
-      v-bind="ro"
-      @click="run('undo')"
-    >
-      <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M5 6.5H10a3 3 0 0 1 0 6H7" />
-        <path d="M7 4 4.5 6.5 7 9" />
-      </svg>
-    </button>
-    <button
-      type="button"
-      data-test="toolbar-redo"
-      :class="btn"
-      aria-label="Redo"
-      :aria-keyshortcuts="editable && state.hasHistory ? 'Control+Y' : undefined"
-      :title="ftip('Redo', state.hasHistory ? SHORTCUTS.redo : undefined)"
-      :disabled="editable && !state.canRedo"
-      v-bind="ro"
-      @click="run('redo')"
-    >
-      <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M11 6.5H6a3 3 0 0 0 0 6h3" />
-        <path d="M9 4l2.5 2.5L9 9" />
-      </svg>
-    </button>
-    <span class="mx-1.5 h-5 w-px bg-border" aria-hidden="true" />
+        <button
+          type="button"
+          data-test="toolbar-undo"
+          :class="btn"
+          aria-label="Undo"
+          :aria-keyshortcuts="editable && state.hasHistory ? 'Control+Z' : undefined"
+          :title="ftip('Undo', state.hasHistory ? SHORTCUTS.undo : undefined)"
+          :disabled="editable && !state.canUndo"
+          v-bind="ro"
+          @click="run('undo')"
+        >
+          <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M5 6.5H10a3 3 0 0 1 0 6H7" />
+            <path d="M7 4 4.5 6.5 7 9" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          data-test="toolbar-redo"
+          :class="btn"
+          aria-label="Redo"
+          :aria-keyshortcuts="editable && state.hasHistory ? 'Control+Y' : undefined"
+          :title="ftip('Redo', state.hasHistory ? SHORTCUTS.redo : undefined)"
+          :disabled="editable && !state.canRedo"
+          v-bind="ro"
+          @click="run('redo')"
+        >
+          <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M11 6.5H6a3 3 0 0 0 0 6h3" />
+            <path d="M9 4l2.5 2.5L9 9" />
+          </svg>
+        </button>
+        <span class="mx-1.5 h-5 w-px bg-border" aria-hidden="true" />
 
-    <select
-      data-test="paragraph-style"
-      aria-label="Paragraph style"
-      class="h-7.5 w-37 cursor-pointer rounded-sm border border-border bg-surface pr-2 pl-2.5 font-ui text-[13px] font-medium text-text disabled:opacity-40 aria-disabled:cursor-default aria-disabled:opacity-40"
-      :value="state.style"
-      :disabled="editable && !state.style"
-      v-bind="ro"
-      :title="editable ? 'Paragraph style' : readOnlyText"
-      @mousedown="!editable && $event.preventDefault()"
-      @keydown="!editable && !['Tab', 'Escape'].includes($event.key) && $event.preventDefault()"
-      @change="onStyle"
-    >
-      <option v-for="s in styleOptions" :key="s" :value="s">{{ STYLE_LABELS[s] }}</option>
-    </select>
-    <span class="mx-1.5 h-5 w-px bg-border" aria-hidden="true" />
+        <select
+          data-test="paragraph-style"
+          aria-label="Paragraph style"
+          class="h-7.5 w-37 cursor-pointer rounded-sm border border-border bg-surface pr-2 pl-2.5 font-ui text-[13px] font-medium text-text disabled:opacity-40 aria-disabled:cursor-default aria-disabled:opacity-40"
+          :value="state.style"
+          :disabled="editable && !state.style"
+          v-bind="ro"
+          :title="editable ? 'Paragraph style' : readOnlyText"
+          @mousedown="!editable && $event.preventDefault()"
+          @keydown="!editable && !['Tab', 'Escape'].includes($event.key) && $event.preventDefault()"
+          @change="onStyle"
+        >
+          <option v-for="s in styleOptions" :key="s" :value="s">{{ STYLE_LABELS[s] }}</option>
+        </select>
+        <span class="mx-1.5 h-5 w-px bg-border" aria-hidden="true" />
 
-    <button
-      type="button"
-      data-test="tb-bold"
-      :class="[btn, 'font-manuscript! font-bold']"
-      :aria-pressed="state.bold"
-      aria-label="Bold"
-      :aria-keyshortcuts="editable ? 'Control+B' : undefined"
-      :title="ftip('Bold', SHORTCUTS.bold)"
-      v-bind="ro"
-      @click="run('bold')"
-    >
-      B
-    </button>
-    <button
-      type="button"
-      data-test="tb-italic"
-      :class="[btn, 'font-manuscript! italic']"
-      :aria-pressed="state.italic"
-      aria-label="Italic"
-      :aria-keyshortcuts="editable ? 'Control+I' : undefined"
-      :title="ftip('Italic', SHORTCUTS.italic)"
-      v-bind="ro"
-      @click="run('italic')"
-    >
-      I
-    </button>
-    <span class="mx-1.5 h-5 w-px bg-border" aria-hidden="true" />
+        <button
+          type="button"
+          data-test="tb-bold"
+          :class="[btn, 'font-manuscript! font-bold']"
+          :aria-pressed="state.bold"
+          aria-label="Bold"
+          :aria-keyshortcuts="editable ? 'Control+B' : undefined"
+          :title="ftip('Bold', SHORTCUTS.bold)"
+          v-bind="ro"
+          @click="run('bold')"
+        >
+          B
+        </button>
+        <button
+          type="button"
+          data-test="tb-italic"
+          :class="[btn, 'font-manuscript! italic']"
+          :aria-pressed="state.italic"
+          aria-label="Italic"
+          :aria-keyshortcuts="editable ? 'Control+I' : undefined"
+          :title="ftip('Italic', SHORTCUTS.italic)"
+          v-bind="ro"
+          @click="run('italic')"
+        >
+          I
+        </button>
+        <span class="mx-1.5 h-5 w-px bg-border" aria-hidden="true" />
 
-    <button
-      type="button"
-      class="sh-track"
-      data-test="track-changes-toggle"
-      :aria-pressed="props.tracking"
-      :title="props.tracking ? 'Recording changes on' : 'Recording changes off'"
-      @click="emit('toggle-track')"
-    >
-      <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M3 13l1-3.5L11 2.5l2.5 2.5L6.5 12z" />
-      </svg>
-      Track changes<template v-if="props.tracking"> · On</template>
-    </button>
-    <button
-      type="button"
-      data-test="review-panel-toggle"
-      :class="btn"
-      :aria-pressed="props.reviewOpen"
-      aria-label="Review panel"
-      title="Review panel"
-      @click="emit('toggle-review')"
-    >
-      <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
-        <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
-        <path d="M10 3v10" />
-      </svg>
-      Review
-    </button>
+        <button
+          type="button"
+          class="sh-track"
+          data-test="track-changes-toggle"
+          :aria-pressed="props.tracking"
+          :title="props.tracking ? 'Recording changes on' : 'Recording changes off'"
+          @click="emit('toggle-track')"
+        >
+          <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M3 13l1-3.5L11 2.5l2.5 2.5L6.5 12z" />
+          </svg>
+          Track changes<template v-if="props.tracking"> · On</template>
+        </button>
+        <button
+          type="button"
+          data-test="review-panel-toggle"
+          :class="btn"
+          :aria-pressed="props.reviewOpen"
+          aria-label="Review panel"
+          title="Review panel"
+          @click="emit('toggle-review')"
+        >
+          <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
+            <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
+            <path d="M10 3v10" />
+          </svg>
+          Review
+        </button>
+      </div>
 
-    <div ref="wrapEl" class="relative ml-1" @keydown.esc="closeMenu()">
-      <button
-        ref="moreBtn"
-        type="button"
-        data-test="tb-overflow"
-        :class="btn"
-        aria-label="More formatting"
-        aria-haspopup="menu"
-        :aria-expanded="menuOpen"
-        title="More formatting"
-        @click="toggleMenu"
+      <div data-test="tb-inline" class="ml-1 flex shrink-0 flex-wrap items-center gap-0.5">
+        <ToolbarFlexCluster
+          surface="inline"
+          :show="showInline"
+          :btn="btn"
+          :ro="ro"
+          :editable="editable"
+          :read-only-text="readOnlyText"
+          :state="state"
+          :navigator-open="props.navigatorOpen"
+          :navigator-controls="props.navigatorControls"
+          :comment-enabled="props.commentEnabled"
+          :find-enabled="props.findEnabled"
+          :text-actions="TOOLBAR_OVERFLOW_TEXT_ACTIONS"
+          :aligns="ALIGNS"
+          :ftip="ftip"
+          :soon="soon"
+          :soon-attrs="SOON_ATTRS"
+          @toggle-navigator="emit('toggle-navigator')"
+          @comment="emit('comment')"
+          @find="emit('find')"
+          @run="run"
+        />
+      </div>
+
+      <div
+        v-if="hasOverflow"
+        ref="wrapEl"
+        class="relative ml-1 shrink-0"
+        @keydown.esc="closeMenu()"
       >
+        <button
+          ref="moreBtn"
+          type="button"
+          data-test="tb-overflow"
+          :class="btn"
+          aria-label="More formatting"
+          aria-haspopup="menu"
+          :aria-expanded="menuOpen"
+          title="More formatting"
+          @click="toggleMenu"
+        >
+          <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="4" cy="8" r=".6" />
+            <circle cx="8" cy="8" r=".6" />
+            <circle cx="12" cy="8" r=".6" />
+          </svg>
+        </button>
+        <OverlayAnchoredMenu :open="menuOpen" :trigger="moreBtn" placement="bottom-start">
+          <div
+            ref="menuEl"
+            role="menu"
+            aria-label="More formatting"
+            data-test="tb-overflow-menu"
+            class="w-64 rounded-md border border-border bg-surface p-1.5 shadow-3"
+            @keydown="onMenuKey"
+          >
+            <div
+              v-if="overflowIconGroup"
+              class="mb-1 flex flex-wrap items-center gap-0.5 border-b border-border pb-1"
+              role="group"
+              aria-label="Chapters and formatting"
+            >
+              <ToolbarFlexCluster
+                surface="overflow-icons"
+                :show="showOverflow"
+                :btn="btn"
+                :ro="ro"
+                :editable="editable"
+                :read-only-text="readOnlyText"
+                :state="state"
+                :navigator-open="props.navigatorOpen"
+                :navigator-controls="props.navigatorControls"
+                :comment-enabled="props.commentEnabled"
+                :find-enabled="props.findEnabled"
+                :text-actions="[]"
+                :aligns="ALIGNS"
+                :ftip="ftip"
+                :soon="soon"
+                :soon-attrs="SOON_ATTRS"
+                @toggle-navigator="emit('toggle-navigator')"
+                @comment="emit('comment')"
+                @find="emit('find')"
+                @run="run"
+              />
+              <slot name="menu" />
+            </div>
+            <ToolbarFlexCluster
+              surface="overflow-text"
+              :show="showOverflow"
+              :btn="btn"
+              :ro="ro"
+              :editable="editable"
+              :read-only-text="readOnlyText"
+              :state="state"
+              :navigator-open="props.navigatorOpen"
+              :navigator-controls="props.navigatorControls"
+              :comment-enabled="props.commentEnabled"
+              :find-enabled="props.findEnabled"
+              :text-actions="overflowTextActions"
+              :aligns="ALIGNS"
+              :ftip="ftip"
+              :soon="soon"
+              :soon-attrs="SOON_ATTRS"
+              @pick="pick"
+            />
+          </div>
+        </OverlayAnchoredMenu>
+      </div>
+
+      <span class="flex-1" aria-hidden="true" />
+
+      <div
+        ref="rightPinnedEl"
+        data-test="tb-pinned-right"
+        class="flex shrink-0 items-center gap-0.5"
+      >
+        <ToolbarExportMenu :manuscript-id="manuscriptId" :book-title="bookTitle" />
+        <button
+          type="button"
+          :class="btn"
+          data-test="toolbar-agents"
+          aria-label="Agents"
+          title="Agents"
+          @click="emit('open-agents')"
+        >
+          Agents
+        </button>
+        <button
+          type="button"
+          :class="btn"
+          data-test="toolbar-theme"
+          :aria-label="themeLabel"
+          :title="themeLabel"
+          @click="toggleTheme"
+        >
+          <AppIcon
+            :name="themeMode === 'dark' ? 'sun' : 'moon'"
+            class="h-4 w-4"
+            aria-hidden="true"
+          />
+        </button>
+        <button
+          type="button"
+          :class="btn"
+          data-test="toolbar-settings"
+          aria-label="Settings"
+          title="Settings"
+          @click="emit('open-settings')"
+        >
+          <AppIcon name="settings" class="h-4 w-4" aria-hidden="true" />
+        </button>
+      </div>
+    </div>
+
+    <div
+      ref="measureEl"
+      aria-hidden="true"
+      class="pointer-events-none fixed top-0 left-[-10000px] flex items-center gap-0.5"
+    >
+      <ToolbarFlexCluster
+        surface="measure"
+        :show="() => true"
+        :btn="btn"
+        :ro="ro"
+        :editable="editable"
+        :read-only-text="readOnlyText"
+        :state="state"
+        :navigator-open="props.navigatorOpen"
+        :navigator-controls="props.navigatorControls"
+        :comment-enabled="props.commentEnabled"
+        :find-enabled="props.findEnabled"
+        :text-actions="TOOLBAR_OVERFLOW_TEXT_ACTIONS"
+        :aligns="ALIGNS"
+        :ftip="ftip"
+        :soon="soon"
+        :soon-attrs="SOON_ATTRS"
+        @run="run"
+      />
+      <button type="button" :class="btn" data-tb-measure="overflow-btn" tabindex="-1">
         <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
           <circle cx="4" cy="8" r=".6" />
           <circle cx="8" cy="8" r=".6" />
           <circle cx="12" cy="8" r=".6" />
         </svg>
       </button>
-      <OverlayAnchoredMenu :open="menuOpen" :trigger="moreBtn" placement="bottom-start">
-        <div
-          ref="menuEl"
-          role="menu"
-          aria-label="More formatting"
-          data-test="tb-overflow-menu"
-          class="w-64 rounded-md border border-border bg-surface p-1.5 shadow-3"
-          @keydown="onMenuKey"
-        >
-          <div
-            class="mb-1 flex flex-wrap items-center gap-0.5 border-b border-border pb-1"
-            role="group"
-            aria-label="Chapters and formatting"
-          >
-            <button
-              type="button"
-              data-test="tb-navigator"
-              :class="btn"
-              aria-label="Chapters"
-              title="Chapters"
-              :aria-pressed="props.navigatorOpen"
-              :aria-expanded="props.navigatorOpen"
-              :aria-controls="props.navigatorControls"
-              @click="emit('toggle-navigator')"
-            >
-              <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
-                <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
-                <path d="M6 3v10" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              data-test="tb-underline"
-              :class="[btn, 'underline']"
-              :aria-pressed="state.underline"
-              aria-label="Underline"
-              :aria-keyshortcuts="editable ? 'Control+U' : undefined"
-              :title="ftip('Underline', SHORTCUTS.underline)"
-              v-bind="ro"
-              @click="run('underline')"
-            >
-              U
-            </button>
-            <button
-              v-for="a in ALIGNS"
-              :key="a.id"
-              type="button"
-              :data-test="`tb-align-${a.id}`"
-              :class="btn"
-              :aria-pressed="state.align === a.id"
-              :aria-label="a.label"
-              :title="SUPPORTED_ALIGN.includes(a.id) ? ftip(a.label) : soon(a.label)"
-              v-bind="SUPPORTED_ALIGN.includes(a.id) ? ro : SOON_ATTRS"
-              @click="SUPPORTED_ALIGN.includes(a.id) && run(`align:${a.id}`)"
-            >
-              <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true"><path :d="a.path" /></svg>
-            </button>
-
-            <button
-              type="button"
-              data-test="tb-comment"
-              :class="btn"
-              aria-label="Add comment"
-              :title="props.commentEnabled ? 'Add comment' : soon('Add comment')"
-              :aria-disabled="props.commentEnabled ? undefined : 'true'"
-              :aria-description="props.commentEnabled ? undefined : SOON"
-              @click="props.commentEnabled && emit('comment')"
-            >
-              <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
-                <path
-                  d="M3 4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v5A1.5 1.5 0 0 1 11.5 11H7l-3 2.5V11h0A1 1 0 0 1 3 10z"
-                />
-              </svg>
-            </button>
-            <button
-              type="button"
-              data-test="tb-find"
-              :class="[btn, 'px-2.5']"
-              aria-label="Find"
-              :title="props.findEnabled ? 'Find' : soon('Find')"
-              :aria-disabled="props.findEnabled ? undefined : 'true'"
-              :aria-description="props.findEnabled ? undefined : SOON"
-              @click="props.findEnabled && emit('find')"
-            >
-              <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
-                <circle cx="7" cy="7" r="3.8" />
-                <path d="m10 10 3 3" />
-              </svg>
-              Find
-            </button>
-            <slot name="menu" />
-          </div>
-          <button
-            v-for="o in OVERFLOW"
-            :key="o.cmd"
-            type="button"
-            :role="o.active ? 'menuitemcheckbox' : 'menuitem'"
-            tabindex="-1"
-            v-bind="ro"
-            :title="editable ? undefined : readOnlyText"
-            :data-test="`tb-menu-${o.cmd.replace(':', '-')}`"
-            :aria-checked="o.active ? state[o.active] : undefined"
-            class="flex h-7.5 w-full cursor-pointer items-center rounded-sm border-0 bg-transparent px-2.5 text-left font-ui text-[13px] text-text hover:bg-selected hover:text-accent focus:bg-selected aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent aria-disabled:hover:text-text"
-            :class="o.active && state[o.active] ? 'bg-selected text-accent' : ''"
-            @click="pick(o.cmd)"
-          >
-            {{ o.label }}
-          </button>
-        </div>
-      </OverlayAnchoredMenu>
     </div>
-
-    <span class="flex-1" aria-hidden="true" />
-
-    <ToolbarExportMenu :manuscript-id="manuscriptId" :book-title="bookTitle" />
-    <button
-      type="button"
-      :class="btn"
-      data-test="toolbar-agents"
-      aria-label="Agents"
-      title="Agents"
-      @click="emit('open-agents')"
-    >
-      Agents
-    </button>
-    <button
-      type="button"
-      :class="btn"
-      data-test="toolbar-theme"
-      :aria-label="themeLabel"
-      :title="themeLabel"
-      @click="toggleTheme"
-    >
-      <AppIcon :name="themeMode === 'dark' ? 'sun' : 'moon'" class="h-4 w-4" aria-hidden="true" />
-    </button>
-    <button
-      type="button"
-      :class="btn"
-      data-test="toolbar-settings"
-      aria-label="Settings"
-      title="Settings"
-      @click="emit('open-settings')"
-    >
-      <AppIcon name="settings" class="h-4 w-4" aria-hidden="true" />
-    </button>
   </div>
 </template>
 
