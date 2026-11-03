@@ -36,7 +36,7 @@ onBeforeUnmount(() => editor.value?.destroy());
 <style scoped>
 .story-note-body-wrap {
   flex: 1;
-  min-height: 6rem;
+  min-height: 11rem;
   border: 1px solid var(--ct-border);
   border-radius: var(--ct-radius-sm);
   background: var(--ct-paper);
@@ -44,7 +44,7 @@ onBeforeUnmount(() => editor.value?.destroy());
   overflow: auto;
 }
 .story-note-body-wrap :deep(.tiptap) {
-  min-height: 5rem;
+  min-height: 10rem;
   font-family: var(--ct-font-ui);
   font-size: var(--ct-text-sm);
   line-height: var(--ct-leading-body);

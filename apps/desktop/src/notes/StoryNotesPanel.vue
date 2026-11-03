@@ -132,7 +132,7 @@ function onCardDblclick(note: NoteMeta, el: EventTarget | null) {
             }}</span>
             <button
               type="button"
-              class="story-notes__edit sh-tbtn sh-icon"
+              class="story-notes__edit story-notes__edit--hidden sh-tbtn sh-icon"
               data-test="note-edit"
               aria-label="Edit note"
               :disabled="readonly"
@@ -248,6 +248,19 @@ function onCardDblclick(note: NoteMeta, el: EventTarget | null) {
   border-radius: var(--ct-radius-full);
   border: 1px solid var(--ct-border);
   color: var(--ct-text-muted);
+}
+.story-notes__edit.story-notes__edit--hidden {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.story-notes__card:hover .story-notes__edit.story-notes__edit--hidden,
+.story-notes__card:focus-within .story-notes__edit.story-notes__edit--hidden,
+.story-notes__edit:focus-visible {
+  opacity: 1;
+}
+.story-notes__edit:focus-visible {
+  outline: 2px solid var(--ct-focus-ring-color);
+  outline-offset: 2px;
 }
 .story-notes__card-title {
   margin: var(--ct-space-2) 0 var(--ct-space-1);

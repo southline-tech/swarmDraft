@@ -8,10 +8,13 @@ vi.mock('../backend', () => ({
 import { notesApplyUpdate } from '../backend';
 import {
   addNote,
+  copyNoteBodyBetween,
   createNotesDoc,
   deleteNote,
   listNotes,
+  noteBodySnapshot,
   readNoteMeta,
+  seedNoteBodyText,
   updateNoteSectionLink,
   updateNoteTags,
   updateNoteTitle,
@@ -85,6 +88,15 @@ describe('story notes doc', () => {
       noteType: 'other',
       tags: [],
     });
+  });
+
+  it('copyNoteBodyBetween copies body XmlFragment across docs', () => {
+    const src = createNotesDoc();
+    const dst = createNotesDoc();
+    const n = addNote(src, { kind: 'human', id: 'h', name: 'A' }, 'T');
+    seedNoteBodyText(src, n.id, 'Cross-doc');
+    copyNoteBodyBetween(src, n.id, dst, 'target');
+    expect(noteBodySnapshot(dst, 'target')).toContain('Cross-doc');
   });
 
   it('deleteNote removes order entry and metadata', () => {

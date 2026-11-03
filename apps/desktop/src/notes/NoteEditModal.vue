@@ -2,9 +2,9 @@
 /**
  * Create/edit story note in a centered modal (#278).
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import type { Section } from '@swarmdraft/schema';
-import type * as Y from 'yjs';
+import * as Y from 'yjs';
 import { APP_OVERLAY_LAYER, ensureOverlayLayer } from '../overlay/layer';
 import { trapTab } from '../settings/focus-trap';
 import '../settings/settings.css';
@@ -12,7 +12,7 @@ import NoteBodyEditor from './NoteBodyEditor.vue';
 import {
   addNote,
   bodyField,
-  copyNoteBody,
+  copyNoteBodyBetween,
   deleteNote,
   readNoteMeta,
   updateNoteSectionIds,
@@ -44,17 +44,29 @@ const confirmDiscard = ref(false);
 const title = ref('');
 const noteType = ref<NoteType>('other');
 const sectionIds = ref<string[]>([]);
-const tagsText = ref('');
-const draftBodyId = ref<string>(DRAFT_BODY_ID);
+const tags = ref<string[]>([]);
+const tagInput = ref('');
+
+const draftDoc = shallowRef<Y.Doc | null>(null);
+const bodyRevision = ref(0);
+let bodyObserverOff: (() => void) | undefined;
 
 const initialSnapshot = ref('');
 
+function bodyFingerprint(): string {
+  const doc = draftDoc.value;
+  if (!doc) return '';
+  return doc.getXmlFragment(bodyField(DRAFT_BODY_ID)).toString();
+}
+
 function snapshot(): string {
+  void bodyRevision.value;
   return JSON.stringify({
     title: title.value.trim(),
     noteType: noteType.value,
     sectionIds: [...sectionIds.value].sort(),
-    tags: tagsText.value.trim(),
+    tags: [...tags.value].sort(),
+    body: bodyFingerprint(),
   });
 }
 
@@ -67,46 +79,60 @@ const sectionOptions = computed(() =>
   props.outline.filter((s) => s.kind === 'chapter' || s.kind === 'front_matter'),
 );
 
-function parseTags(raw: string): string[] {
-  return raw
-    .split(',')
-    .map((t) => t.trim())
-    .filter(Boolean);
+function attachBodyObserver(doc: Y.Doc) {
+  bodyObserverOff?.();
+  const frag = doc.getXmlFragment(bodyField(DRAFT_BODY_ID));
+  const bump = () => {
+    bodyRevision.value += 1;
+  };
+  frag.observeDeep(bump);
+  bodyObserverOff = () => frag.unobserveDeep(bump);
 }
 
-function loadFromNote(id: string) {
+function destroyDraftDoc() {
+  bodyObserverOff?.();
+  bodyObserverOff = undefined;
+  draftDoc.value?.destroy();
+  draftDoc.value = null;
+}
+
+function initDraftDoc(noteId: string | null) {
+  destroyDraftDoc();
+  const doc = new Y.Doc();
+  if (noteId) {
+    copyNoteBodyBetween(props.notesDoc, noteId, doc, DRAFT_BODY_ID);
+  }
+  draftDoc.value = doc;
+  attachBodyObserver(doc);
+}
+
+function loadMetaFromNote(id: string) {
   const meta = readNoteMeta(props.notesDoc, id);
   if (!meta) return;
   title.value = meta.title;
   noteType.value = meta.noteType;
   sectionIds.value = [...meta.sectionIds];
-  tagsText.value = meta.tags.join(', ');
-  draftBodyId.value = id;
+  tags.value = [...meta.tags];
 }
 
-function resetDraftBody() {
-  const frag = props.notesDoc.getXmlFragment(bodyField(DRAFT_BODY_ID));
-  frag.delete(0, frag.length);
-  draftBodyId.value = DRAFT_BODY_ID;
-}
-
-function loadCreate() {
+function loadCreateMeta() {
   title.value = '';
   noteType.value = 'other';
   sectionIds.value = [];
-  tagsText.value = '';
-  resetDraftBody();
-  draftBodyId.value = DRAFT_BODY_ID;
-  props.notesDoc.getXmlFragment(bodyField(DRAFT_BODY_ID));
+  tags.value = [];
+  tagInput.value = '';
+}
+
+function syncForm(noteId: string | null) {
+  if (noteId) loadMetaFromNote(noteId);
+  else loadCreateMeta();
+  initDraftDoc(noteId);
+  initialSnapshot.value = snapshot();
 }
 
 watch(
   () => props.noteId,
-  (id) => {
-    if (id) loadFromNote(id);
-    else loadCreate();
-    initialSnapshot.value = snapshot();
-  },
+  (id) => syncForm(id),
   { immediate: true },
 );
 
@@ -115,6 +141,20 @@ function toggleSection(id: string) {
   if (set.has(id)) set.delete(id);
   else set.add(id);
   sectionIds.value = [...set];
+}
+
+function addTagFromInput() {
+  const t = tagInput.value.trim();
+  if (!t || tags.value.includes(t)) {
+    tagInput.value = '';
+    return;
+  }
+  tags.value = [...tags.value, t];
+  tagInput.value = '';
+}
+
+function removeTag(tag: string) {
+  tags.value = tags.value.filter((x) => x !== tag);
 }
 
 function requestClose() {
@@ -127,7 +167,6 @@ function requestClose() {
 
 function confirmDiscardYes() {
   confirmDiscard.value = false;
-  if (!isEdit.value) resetDraftBody();
   emit('close');
 }
 
@@ -153,28 +192,25 @@ function onDialogKeydown(e: KeyboardEvent) {
 }
 
 async function save() {
-  if (!canSave.value) return;
+  if (!canSave.value || !draftDoc.value) return;
   const trimmed = title.value.trim();
-  const tags = parseTags(tagsText.value);
+  const tagList = [...tags.value];
   if (isEdit.value && props.noteId) {
     updateNoteTitle(props.notesDoc, props.noteId, trimmed);
     updateNoteType(props.notesDoc, props.noteId, noteType.value);
     updateNoteSectionIds(props.notesDoc, props.noteId, sectionIds.value);
-    updateNoteTags(props.notesDoc, props.noteId, tags);
+    updateNoteTags(props.notesDoc, props.noteId, tagList);
+    copyNoteBodyBetween(draftDoc.value, DRAFT_BODY_ID, props.notesDoc, props.noteId);
     emit('saved');
     return;
   }
-  const draftId = draftBodyId.value;
   const meta = addNote(
     props.notesDoc,
     { kind: 'human', id: props.humanAuthor.id, name: props.humanAuthor.name },
     trimmed,
-    { noteType: noteType.value, tags, sectionIds: sectionIds.value },
+    { noteType: noteType.value, tags: tagList, sectionIds: sectionIds.value },
   );
-  if (draftId === DRAFT_BODY_ID) {
-    copyNoteBody(props.notesDoc, DRAFT_BODY_ID, meta.id);
-    resetDraftBody();
-  }
+  copyNoteBodyBetween(draftDoc.value, DRAFT_BODY_ID, props.notesDoc, meta.id);
   emit('saved');
 }
 
@@ -193,7 +229,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
-  if (!isEdit.value) resetDraftBody();
+  destroyDraftDoc();
 });
 </script>
 
@@ -233,14 +269,9 @@ onBeforeUnmount(() => {
           </select>
         </label>
 
-        <label class="note-edit-modal__field">
+        <label v-if="draftDoc" class="note-edit-modal__field">
           <span>Body</span>
-          <NoteBodyEditor
-            :key="draftBodyId"
-            :notes-doc="notesDoc"
-            :note-id="draftBodyId"
-            :readonly="readonly"
-          />
+          <NoteBodyEditor :notes-doc="draftDoc" :note-id="DRAFT_BODY_ID" :readonly="readonly" />
         </label>
 
         <fieldset class="note-edit-modal__field">
@@ -260,16 +291,45 @@ onBeforeUnmount(() => {
           </div>
         </fieldset>
 
-        <label class="note-edit-modal__field">
+        <div class="note-edit-modal__field">
           <span>Tags</span>
-          <input
-            v-model="tagsText"
-            class="st-inp"
-            data-test="note-edit-tags"
-            placeholder="Comma-separated"
-            :readonly="readonly"
-          />
-        </label>
+          <div class="note-edit-modal__chips" data-test="note-edit-tags">
+            <span
+              v-for="tag in tags"
+              :key="tag"
+              class="note-edit-modal__tag-chip"
+              data-test="note-edit-tag-chip"
+            >
+              {{ tag }}
+              <button
+                type="button"
+                class="note-edit-modal__tag-remove"
+                :aria-label="`Remove tag ${tag}`"
+                :disabled="readonly"
+                @click="removeTag(tag)"
+              >
+                ×
+              </button>
+            </span>
+            <input
+              v-model="tagInput"
+              class="st-inp note-edit-modal__tag-input"
+              data-test="note-edit-tag-add"
+              placeholder="Add tag"
+              :readonly="readonly"
+              @keydown.enter.prevent="addTagFromInput"
+            />
+            <button
+              type="button"
+              class="sh-btn note-edit-modal__tag-add-btn"
+              data-test="note-edit-tag-add-btn"
+              :disabled="readonly"
+              @click="addTagFromInput"
+            >
+              Add
+            </button>
+          </div>
+        </div>
 
         <footer class="note-edit-modal__foot">
           <button
@@ -360,6 +420,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   gap: var(--ct-space-1);
+  align-items: center;
 }
 .note-edit-modal__chip {
   font: inherit;
@@ -374,6 +435,33 @@ onBeforeUnmount(() => {
 .note-edit-modal__chip--on {
   border-color: var(--ct-accent);
   background: var(--ct-selected-bg);
+}
+.note-edit-modal__tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ct-space-1);
+  font-size: var(--ct-text-xs);
+  padding: var(--ct-space-1) var(--ct-space-2);
+  border-radius: var(--ct-radius-full);
+  border: 1px solid var(--ct-border);
+  background: var(--ct-surface);
+  color: var(--ct-text);
+}
+.note-edit-modal__tag-remove {
+  font: inherit;
+  line-height: 1;
+  border: 0;
+  background: none;
+  color: var(--ct-text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+.note-edit-modal__tag-input {
+  flex: 1;
+  min-width: 8rem;
+}
+.note-edit-modal__tag-add-btn {
+  flex: none;
 }
 .note-edit-modal__foot {
   display: flex;

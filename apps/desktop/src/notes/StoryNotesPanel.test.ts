@@ -65,6 +65,24 @@ describe('StoryNotesPanel', () => {
     w.unmount();
   });
 
+  it('hides the Edit control until the card or button is focused', async () => {
+    const notesDoc = createNotesDoc();
+    addNote(notesDoc, { kind: 'human', id: 'h', name: 'Author' }, 'Note');
+    const w = mount(StoryNotesPanel, {
+      attachTo: document.body,
+      props: {
+        notesDoc,
+        outline: [],
+        humanAuthor: { id: 'h', name: 'Author' },
+      },
+    });
+    const edit = w.get('[data-test="note-edit"]');
+    expect(edit.classes()).toContain('story-notes__edit--hidden');
+    await edit.trigger('focus');
+    expect(edit.classes()).toContain('story-notes__edit--hidden');
+    w.unmount();
+  });
+
   it('emits close when the header close control is activated', async () => {
     const notesDoc = createNotesDoc();
     const w = mount(StoryNotesPanel, {

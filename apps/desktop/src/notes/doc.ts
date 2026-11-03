@@ -190,13 +190,39 @@ export function updateNoteTags(doc: Y.Doc, id: string, tags: string[]): void {
 
 /** Copy collaborative body from one fragment field to another on the same doc. */
 export function copyNoteBody(doc: Y.Doc, fromNoteId: string, toNoteId: string): void {
-  const src = doc.getXmlFragment(bodyField(fromNoteId));
-  const dst = doc.getXmlFragment(bodyField(toNoteId));
+  copyNoteBodyBetween(doc, fromNoteId, doc, toNoteId);
+}
+
+/** Copy body XmlFragment between docs and note ids (#278 modal draft). */
+export function copyNoteBodyBetween(
+  srcDoc: Y.Doc,
+  srcNoteId: string,
+  dstDoc: Y.Doc,
+  dstNoteId: string,
+): void {
+  const src = srcDoc.getXmlFragment(bodyField(srcNoteId));
+  const dst = dstDoc.getXmlFragment(bodyField(dstNoteId));
   dst.delete(0, dst.length);
   for (let i = 0; i < src.length; i++) {
     const child = src.get(i);
     if (child instanceof Y.AbstractType) dst.insert(i, [child.clone()]);
   }
+}
+
+/** Stable fingerprint for dirty checks and tests. */
+export function noteBodySnapshot(doc: Y.Doc, noteId: string): string {
+  return doc.getXmlFragment(bodyField(noteId)).toString();
+}
+
+/** Seed a single paragraph of plain text in a note body (tests / fixtures). */
+export function seedNoteBodyText(doc: Y.Doc, noteId: string, text: string): void {
+  const frag = doc.getXmlFragment(bodyField(noteId));
+  frag.delete(0, frag.length);
+  const para = new Y.XmlElement('paragraph');
+  const txt = new Y.XmlText();
+  txt.insert(0, text);
+  para.insert(0, [txt]);
+  frag.insert(0, [para]);
 }
 
 export function deleteNote(doc: Y.Doc, id: string): void {
