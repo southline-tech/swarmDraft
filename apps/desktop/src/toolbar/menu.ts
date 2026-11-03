@@ -18,7 +18,10 @@ export function useToolbarMenu(
   }
 
   function onOutside(ev: PointerEvent) {
-    if (!wrapEl.value?.contains(ev.target as Node)) close(false);
+    const t = ev.target as Node;
+    if (wrapEl.value?.contains(t)) return;
+    if (menuEl.value?.contains(t)) return;
+    close(false);
   }
 
   function show() {
@@ -40,6 +43,12 @@ export function useToolbarMenu(
   }
 
   function onMenuKey(ev: KeyboardEvent) {
+    if (ev.key === 'Escape') {
+      ev.preventDefault();
+      ev.stopPropagation();
+      close();
+      return;
+    }
     const list = items();
     const i = list.indexOf(document.activeElement as HTMLElement);
     const to: Record<string, number> = { ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: -1 };

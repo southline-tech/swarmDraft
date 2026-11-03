@@ -9,5 +9,5 @@ export default defineConfig({
   server: { port: 1420, strictPort: true, watch: { ignored: ['**/src-tauri/**'] } },
   envPrefix: ['VITE_', 'TAURI_ENV_'],
   build: { target: 'es2022', outDir: 'dist' },
-  test: { environment: 'happy-dom' },
+  test: { environment: 'happy-dom', setupFiles: ['./vitest.setup.ts'] },
 });

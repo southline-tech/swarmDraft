@@ -4,6 +4,7 @@
  */
 import { shallowRef, watch } from 'vue';
 import AppIcon from '../icons/AppIcon.vue';
+import OverlayAnchoredMenu from '../overlay/OverlayAnchoredMenu.vue';
 import { useToolbarMenu } from './menu';
 
 export interface DraftPickerRow {
@@ -63,63 +64,64 @@ const btn =
       <span class="truncate">{{ label }}</span>
       <AppIcon name="chevron-down" class="h-4 w-4 shrink-0 opacity-70" aria-hidden="true" />
     </button>
-    <div
-      v-show="open"
-      ref="menuEl"
-      role="menu"
-      aria-label="Drafts"
-      data-test="draft-menu"
-      class="absolute top-9 left-0 z-20 min-w-56 rounded-md border border-border bg-surface p-1.5 shadow-3"
-      @keydown="onMenuKey"
-    >
-      <button
-        type="button"
-        role="menuitem"
-        tabindex="-1"
-        class="tb-menu-item"
-        data-test="draft-new"
-        @click="
-          () => {
-            close();
-            emit('new-blank');
-          }
-        "
+    <OverlayAnchoredMenu :open="open" :trigger="trigger" placement="bottom-start">
+      <div
+        ref="menuEl"
+        role="menu"
+        aria-label="Drafts"
+        data-test="draft-menu"
+        class="min-w-56 rounded-md border border-border bg-surface p-1.5 shadow-3"
+        @keydown="onMenuKey"
       >
-        New blank draft
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        tabindex="-1"
-        class="tb-menu-item"
-        data-test="draft-import"
-        @click="
-          () => {
-            close();
-            emit('import');
-          }
-        "
-      >
-        Import…
-      </button>
-      <div class="my-1 h-px bg-border" role="separator" />
-      <button
-        v-for="row in drafts"
-        :key="row.id"
-        type="button"
-        role="menuitemradio"
-        tabindex="-1"
-        class="tb-menu-item"
-        :class="{ 'tb-menu-item--on': row.id === currentId }"
-        data-test="draft-item"
-        :data-draft="row.id"
-        :aria-checked="row.id === currentId ? 'true' : 'false'"
-        :aria-current="row.id === currentId ? 'true' : undefined"
-        @click="pickDraft(row.id)"
-      >
-        {{ draftMenuLabel(row) }}
-      </button>
-    </div>
+        <button
+          type="button"
+          role="menuitem"
+          tabindex="-1"
+          class="tb-menu-item"
+          data-test="draft-new"
+          @click="
+            () => {
+              close();
+              emit('new-blank');
+            }
+          "
+        >
+          New blank draft
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          tabindex="-1"
+          class="tb-menu-item"
+          data-test="draft-import"
+          @click="
+            () => {
+              close();
+              emit('import');
+            }
+          "
+        >
+          Import…
+        </button>
+        <div class="my-1 h-px bg-border" role="separator" />
+        <button
+          v-for="row in drafts"
+          :key="row.id"
+          type="button"
+          role="menuitemradio"
+          tabindex="-1"
+          class="tb-menu-item"
+          :class="{ 'tb-menu-item--on': row.id === currentId }"
+          data-test="draft-item"
+          :data-draft="row.id"
+          :aria-checked="row.id === currentId ? 'true' : 'false'"
+          :aria-current="row.id === currentId ? 'true' : undefined"
+          @click="pickDraft(row.id)"
+        >
+          {{ draftMenuLabel(row) }}
+        </button>
+      </div>
+    </OverlayAnchoredMenu>
   </div>
 </template>
 

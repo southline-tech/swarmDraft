@@ -8,6 +8,7 @@ import type { Editor } from '@tiptap/core';
 import AppIcon from '../icons/AppIcon.vue';
 import DraftPicker, { type DraftPickerRow } from './DraftPicker.vue';
 import ToolbarExportMenu from './ToolbarExportMenu.vue';
+import OverlayAnchoredMenu from '../overlay/OverlayAnchoredMenu.vue';
 import { applyTheme, loadTheme, saveTheme, type Theme } from '../settings/prefs';
 import {
   SHORTCUTS,
@@ -192,7 +193,10 @@ function focusItem(i: number) {
   if (list.length) list[(i + list.length) % list.length]!.focus();
 }
 function onOutside(ev: PointerEvent) {
-  if (!wrapEl.value?.contains(ev.target as Node)) closeMenu(false);
+  const t = ev.target as Node;
+  if (wrapEl.value?.contains(t)) return;
+  if (menuEl.value?.contains(t)) return;
+  closeMenu(false);
 }
 function openMenu() {
   menuOpen.value = true;
@@ -210,6 +214,11 @@ function toggleMenu() {
   else openMenu();
 }
 function onMenuKey(ev: KeyboardEvent) {
+  if (ev.key === 'Escape') {
+    ev.preventDefault();
+    closeMenu();
+    return;
+  }
   const list = items();
   const i = list.indexOf(document.activeElement as HTMLElement);
   const to: Record<string, number> = { ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: -1 };
@@ -388,115 +397,116 @@ const themeLabel = computed(() =>
           <circle cx="12" cy="8" r=".6" />
         </svg>
       </button>
-      <div
-        v-show="menuOpen"
-        ref="menuEl"
-        role="menu"
-        aria-label="More formatting"
-        data-test="tb-overflow-menu"
-        class="absolute top-9 left-0 z-10 w-64 rounded-md border border-border bg-surface p-1.5 shadow-3"
-        @keydown="onMenuKey"
-      >
+      <OverlayAnchoredMenu :open="menuOpen" :trigger="moreBtn" placement="bottom-start">
         <div
-          class="mb-1 flex flex-wrap items-center gap-0.5 border-b border-border pb-1"
-          role="group"
-          aria-label="Chapters and formatting"
+          ref="menuEl"
+          role="menu"
+          aria-label="More formatting"
+          data-test="tb-overflow-menu"
+          class="w-64 rounded-md border border-border bg-surface p-1.5 shadow-3"
+          @keydown="onMenuKey"
         >
-          <button
-            type="button"
-            data-test="tb-navigator"
-            :class="btn"
-            aria-label="Chapters"
-            title="Chapters"
-            :aria-pressed="props.navigatorOpen"
-            :aria-expanded="props.navigatorOpen"
-            :aria-controls="props.navigatorControls"
-            @click="emit('toggle-navigator')"
+          <div
+            class="mb-1 flex flex-wrap items-center gap-0.5 border-b border-border pb-1"
+            role="group"
+            aria-label="Chapters and formatting"
           >
-            <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
-              <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
-              <path d="M6 3v10" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            data-test="tb-underline"
-            :class="[btn, 'underline']"
-            :aria-pressed="state.underline"
-            aria-label="Underline"
-            :aria-keyshortcuts="editable ? 'Control+U' : undefined"
-            :title="ftip('Underline', SHORTCUTS.underline)"
-            v-bind="ro"
-            @click="run('underline')"
-          >
-            U
-          </button>
-          <button
-            v-for="a in ALIGNS"
-            :key="a.id"
-            type="button"
-            :data-test="`tb-align-${a.id}`"
-            :class="btn"
-            :aria-pressed="state.align === a.id"
-            :aria-label="a.label"
-            :title="SUPPORTED_ALIGN.includes(a.id) ? ftip(a.label) : soon(a.label)"
-            v-bind="SUPPORTED_ALIGN.includes(a.id) ? ro : SOON_ATTRS"
-            @click="SUPPORTED_ALIGN.includes(a.id) && run(`align:${a.id}`)"
-          >
-            <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true"><path :d="a.path" /></svg>
-          </button>
+            <button
+              type="button"
+              data-test="tb-navigator"
+              :class="btn"
+              aria-label="Chapters"
+              title="Chapters"
+              :aria-pressed="props.navigatorOpen"
+              :aria-expanded="props.navigatorOpen"
+              :aria-controls="props.navigatorControls"
+              @click="emit('toggle-navigator')"
+            >
+              <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
+                <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
+                <path d="M6 3v10" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              data-test="tb-underline"
+              :class="[btn, 'underline']"
+              :aria-pressed="state.underline"
+              aria-label="Underline"
+              :aria-keyshortcuts="editable ? 'Control+U' : undefined"
+              :title="ftip('Underline', SHORTCUTS.underline)"
+              v-bind="ro"
+              @click="run('underline')"
+            >
+              U
+            </button>
+            <button
+              v-for="a in ALIGNS"
+              :key="a.id"
+              type="button"
+              :data-test="`tb-align-${a.id}`"
+              :class="btn"
+              :aria-pressed="state.align === a.id"
+              :aria-label="a.label"
+              :title="SUPPORTED_ALIGN.includes(a.id) ? ftip(a.label) : soon(a.label)"
+              v-bind="SUPPORTED_ALIGN.includes(a.id) ? ro : SOON_ATTRS"
+              @click="SUPPORTED_ALIGN.includes(a.id) && run(`align:${a.id}`)"
+            >
+              <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true"><path :d="a.path" /></svg>
+            </button>
 
+            <button
+              type="button"
+              data-test="tb-comment"
+              :class="btn"
+              aria-label="Add comment"
+              :title="props.commentEnabled ? 'Add comment' : soon('Add comment')"
+              :aria-disabled="props.commentEnabled ? undefined : 'true'"
+              :aria-description="props.commentEnabled ? undefined : SOON"
+              @click="props.commentEnabled && emit('comment')"
+            >
+              <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  d="M3 4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v5A1.5 1.5 0 0 1 11.5 11H7l-3 2.5V11h0A1 1 0 0 1 3 10z"
+                />
+              </svg>
+            </button>
+            <button
+              type="button"
+              data-test="tb-find"
+              :class="[btn, 'px-2.5']"
+              aria-label="Find"
+              :title="props.findEnabled ? 'Find' : soon('Find')"
+              :aria-disabled="props.findEnabled ? undefined : 'true'"
+              :aria-description="props.findEnabled ? undefined : SOON"
+              @click="props.findEnabled && emit('find')"
+            >
+              <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
+                <circle cx="7" cy="7" r="3.8" />
+                <path d="m10 10 3 3" />
+              </svg>
+              Find
+            </button>
+            <slot name="menu" />
+          </div>
           <button
+            v-for="o in OVERFLOW"
+            :key="o.cmd"
             type="button"
-            data-test="tb-comment"
-            :class="btn"
-            aria-label="Add comment"
-            :title="props.commentEnabled ? 'Add comment' : soon('Add comment')"
-            :aria-disabled="props.commentEnabled ? undefined : 'true'"
-            :aria-description="props.commentEnabled ? undefined : SOON"
-            @click="props.commentEnabled && emit('comment')"
+            :role="o.active ? 'menuitemcheckbox' : 'menuitem'"
+            tabindex="-1"
+            v-bind="ro"
+            :title="editable ? undefined : readOnlyText"
+            :data-test="`tb-menu-${o.cmd.replace(':', '-')}`"
+            :aria-checked="o.active ? state[o.active] : undefined"
+            class="flex h-7.5 w-full cursor-pointer items-center rounded-sm border-0 bg-transparent px-2.5 text-left font-ui text-[13px] text-text hover:bg-selected hover:text-accent focus:bg-selected aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent aria-disabled:hover:text-text"
+            :class="o.active && state[o.active] ? 'bg-selected text-accent' : ''"
+            @click="pick(o.cmd)"
           >
-            <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
-              <path
-                d="M3 4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v5A1.5 1.5 0 0 1 11.5 11H7l-3 2.5V11h0A1 1 0 0 1 3 10z"
-              />
-            </svg>
+            {{ o.label }}
           </button>
-          <button
-            type="button"
-            data-test="tb-find"
-            :class="[btn, 'px-2.5']"
-            aria-label="Find"
-            :title="props.findEnabled ? 'Find' : soon('Find')"
-            :aria-disabled="props.findEnabled ? undefined : 'true'"
-            :aria-description="props.findEnabled ? undefined : SOON"
-            @click="props.findEnabled && emit('find')"
-          >
-            <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">
-              <circle cx="7" cy="7" r="3.8" />
-              <path d="m10 10 3 3" />
-            </svg>
-            Find
-          </button>
-          <slot name="menu" />
         </div>
-        <button
-          v-for="o in OVERFLOW"
-          :key="o.cmd"
-          type="button"
-          :role="o.active ? 'menuitemcheckbox' : 'menuitem'"
-          tabindex="-1"
-          v-bind="ro"
-          :title="editable ? undefined : readOnlyText"
-          :data-test="`tb-menu-${o.cmd.replace(':', '-')}`"
-          :aria-checked="o.active ? state[o.active] : undefined"
-          class="flex h-7.5 w-full cursor-pointer items-center rounded-sm border-0 bg-transparent px-2.5 text-left font-ui text-[13px] text-text hover:bg-selected hover:text-accent focus:bg-selected aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent aria-disabled:hover:text-text"
-          :class="o.active && state[o.active] ? 'bg-selected text-accent' : ''"
-          @click="pick(o.cmd)"
-        >
-          {{ o.label }}
-        </button>
-      </div>
+      </OverlayAnchoredMenu>
     </div>
 
     <span class="flex-1" aria-hidden="true" />

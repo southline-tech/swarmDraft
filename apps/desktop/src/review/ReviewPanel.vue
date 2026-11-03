@@ -37,6 +37,8 @@ import {
   viewMenuTabIndex,
 } from './review-panel-a11y';
 import ReviewMixedCard from './ReviewMixedCard.vue';
+import OverlayAnchoredMenu from '../overlay/OverlayAnchoredMenu.vue';
+import { isReviewComposerTarget, reviewComposerHasFocus } from './review-focus-policy';
 
 const VIEW_MENU_ID = 'review-view-menu';
 
@@ -148,8 +150,11 @@ function closeViewMenu(refocus = false) {
   if (refocus) void nextTick(() => viewToggle.value?.focus());
 }
 function onDocDown(e: MouseEvent) {
-  if (viewFilterRoot.value && !viewFilterRoot.value.contains(e.target as Node))
-    closeViewMenu(false);
+  const t = e.target as Node;
+  if (viewFilterRoot.value?.contains(t)) return;
+  const menu = document.getElementById(VIEW_MENU_ID);
+  if (menu?.contains(t)) return;
+  closeViewMenu(false);
 }
 watch(menuOpen, (open) => {
   if (open) {
@@ -294,7 +299,9 @@ function onListKeydown(e: KeyboardEvent) {
 }
 
 function activateChangeRow(key: string, e: Event) {
+  if (isReviewComposerTarget(e.target)) return;
   emit('select', key);
+  if (reviewComposerHasFocus()) return;
   const el = e.currentTarget;
   if (el instanceof HTMLElement) void nextTick(() => el.focus());
 }
@@ -408,57 +415,61 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
         }}</span>
         <span class="caret" aria-hidden="true">▾</span>
       </button>
-      <div
-        v-if="menuOpen"
-        :id="VIEW_MENU_ID"
-        class="sh-menu view-menu"
-        role="radiogroup"
-        aria-labelledby="show-from"
-        data-test="view-menu"
-        @keydown="onViewMenuKeydown"
-      >
-        <button
-          type="button"
-          role="radio"
-          data-view-option
-          data-test="view-all"
-          class="view-menu__opt"
-          :class="{ sel: !filter }"
-          :aria-checked="!filter ? 'true' : 'false'"
-          :tabindex="viewMenuTabIndex(!filter)"
-          @click="pickView(null)"
+      <OverlayAnchoredMenu :open="menuOpen" :trigger="viewToggle" placement="bottom-start">
+        <div
+          v-if="menuOpen"
+          :id="VIEW_MENU_ID"
+          class="sh-menu view-menu"
+          role="radiogroup"
+          aria-labelledby="show-from"
+          data-test="view-menu"
+          @keydown="onViewMenuKeydown"
         >
-          <span class="check" aria-hidden="true">{{ !filter ? '✓' : '' }}</span>
-          <span class="view-menu__label">All</span>
-          <span class="pill cnt">{{ changes.length }}</span>
-        </button>
-        <button
-          v-for="a in authors"
-          :key="`view-${a}`"
-          type="button"
-          role="radio"
-          data-view-option
-          data-test="view-author"
-          :data-author="a"
-          class="view-menu__opt"
-          :class="{ sel: filter === a }"
-          :aria-checked="filter === a ? 'true' : 'false'"
-          :tabindex="viewMenuTabIndex(filter === a)"
-          @click="pickView(a)"
-        >
-          <span class="check" aria-hidden="true">{{ filter === a ? '✓' : '' }}</span>
-          <span class="av sm" :style="hue(a)" aria-hidden="true">{{ initial(a) }}</span>
-          <bdi class="name view-menu__label" dir="auto" data-test="agent-name" :title="name(a)">{{
-            parts(a).name
-          }}</bdi>
-          <span v-if="parts(a).note" class="note" data-test="agent-note">{{ parts(a).note }}</span>
-          <span class="pill">{{ authorKind(a) }}</span>
-          <span class="pill cnt">{{ pendingOf(a) }}</span>
-          <span v-if="outdatedOf(a)" class="pill outdated" data-test="view-outdated"
-            >{{ outdatedOf(a) }} outdated</span
+          <button
+            type="button"
+            role="radio"
+            data-view-option
+            data-test="view-all"
+            class="view-menu__opt"
+            :class="{ sel: !filter }"
+            :aria-checked="!filter ? 'true' : 'false'"
+            :tabindex="viewMenuTabIndex(!filter)"
+            @click="pickView(null)"
           >
-        </button>
-      </div>
+            <span class="check" aria-hidden="true">{{ !filter ? '✓' : '' }}</span>
+            <span class="view-menu__label">All</span>
+            <span class="pill cnt">{{ changes.length }}</span>
+          </button>
+          <button
+            v-for="a in authors"
+            :key="`view-${a}`"
+            type="button"
+            role="radio"
+            data-view-option
+            data-test="view-author"
+            :data-author="a"
+            class="view-menu__opt"
+            :class="{ sel: filter === a }"
+            :aria-checked="filter === a ? 'true' : 'false'"
+            :tabindex="viewMenuTabIndex(filter === a)"
+            @click="pickView(a)"
+          >
+            <span class="check" aria-hidden="true">{{ filter === a ? '✓' : '' }}</span>
+            <span class="av sm" :style="hue(a)" aria-hidden="true">{{ initial(a) }}</span>
+            <bdi class="name view-menu__label" dir="auto" data-test="agent-name" :title="name(a)">{{
+              parts(a).name
+            }}</bdi>
+            <span v-if="parts(a).note" class="note" data-test="agent-note">{{
+              parts(a).note
+            }}</span>
+            <span class="pill">{{ authorKind(a) }}</span>
+            <span class="pill cnt">{{ pendingOf(a) }}</span>
+            <span v-if="outdatedOf(a)" class="pill outdated" data-test="view-outdated"
+              >{{ outdatedOf(a) }} outdated</span
+            >
+          </button>
+        </div>
+      </OverlayAnchoredMenu>
       <p class="view-scope" role="status" data-test="view-scope-status">{{ scopeStatus }}</p>
       <p class="view-cycle-hint muted" data-test="view-cycle-hint">
         Cycle authors <kbd>{{ REVIEW_VIEW_CYCLE.prev }}</kbd> /

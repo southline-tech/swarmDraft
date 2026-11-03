@@ -6,6 +6,7 @@ import { docToYDoc } from '@swarmdraft/docx';
 import { collaborativeEditorOptions, manuscriptEditorOptions } from '@swarmdraft/editor';
 import EditorToolbar from './EditorToolbar.vue';
 import { SHORTCUTS, caretStyle, runCommand, toolbarState } from './toolbar';
+import { overlayVisible, overlayWrap } from '../overlay/queries';
 
 // Synthetic fixture text only.
 const DOC: JSONContent = {
@@ -279,11 +280,10 @@ describe('EditorToolbar', () => {
   it('puts less-common actions in the overflow menu', async () => {
     const { e, w } = mountBar();
     select(e, 'plain');
-    expect(w.find('[data-test="tb-overflow-menu"]').isVisible()).toBe(false);
+    expect(overlayVisible('[data-test="tb-overflow-menu"]')).toBe(false);
     await w.find('[data-test="tb-overflow"]').trigger('click');
     expect(w.find('[data-test="tb-overflow"]').attributes('aria-expanded')).toBe('true');
-    const items = w
-      .find('[data-test="tb-overflow-menu"]')
+    const items = overlayWrap('[data-test="tb-overflow-menu"]')
       .findAll('[role^="menuitem"]')
       .map((i) => i.text());
     expect(items).toEqual([
@@ -294,9 +294,9 @@ describe('EditorToolbar', () => {
       'Verse',
       'Insert page break',
     ]);
-    await w.find('[data-test="tb-menu-smallcaps"]').trigger('click');
+    await overlayWrap('[data-test="tb-menu-smallcaps"]').trigger('click');
     expect(toolbarState(e).smallcaps).toBe(true);
-    expect(w.find('[data-test="tb-overflow-menu"]').isVisible()).toBe(false);
+    expect(overlayVisible('[data-test="tb-overflow-menu"]')).toBe(false);
     w.unmount();
   });
 
@@ -308,20 +308,20 @@ describe('EditorToolbar', () => {
     const nav = w.find('[data-test="tb-overflow"]');
     expect(nav.exists()).toBe(true);
     await w.find('[data-test="tb-overflow"]').trigger('click');
-    const chapters = w.find('[data-test="tb-navigator"]');
+    const chapters = overlayWrap('[data-test="tb-navigator"]');
     expect(chapters.attributes('aria-pressed')).toBe('true');
     expect(chapters.attributes('aria-disabled')).toBeUndefined();
     await chapters.trigger('click');
     expect(w.emitted('toggle-navigator')).toHaveLength(1);
     for (const id of ['tb-comment', 'tb-find', 'tb-align-right', 'tb-align-justify']) {
-      const b = w.find(`[data-test="${id}"]`);
+      const b = overlayWrap(`[data-test="${id}"]`);
       expect(b.attributes('disabled')).toBeUndefined(); // stays in the Tab order
       expect(b.attributes('aria-disabled')).toBe('true');
       expect(b.attributes('aria-description')).toBe('coming soon');
       expect(b.attributes('title')).toMatch(/ — coming soon$/);
       await b.trigger('click');
     }
-    expect(w.find('[data-test="tb-comment"]').attributes('title')).toBe(
+    expect(overlayWrap('[data-test="tb-comment"]').attributes('title')).toBe(
       'Add comment — coming soon',
     );
     expect(w.emitted('comment')).toBeUndefined();
@@ -456,12 +456,12 @@ describe('EditorToolbar', () => {
     for (const id of ['toolbar-undo', 'toolbar-redo'])
       expect(w.find(`[data-test="${id}"]`).attributes('aria-disabled')).toBe('true');
     await w.find('[data-test="tb-overflow"]').trigger('click');
-    for (const i of w.find('[data-test="tb-overflow-menu"]').findAll('[role^="menuitem"]')) {
+    for (const i of overlayWrap('[data-test="tb-overflow-menu"]').findAll('[role^="menuitem"]')) {
       expect(i.attributes('disabled')).toBeUndefined();
       expect(i.attributes('aria-disabled')).toBe('true');
       expect(i.attributes('title')).toBe('Read-only: document failed to load');
     }
-    await w.find('[data-test="tb-menu-smallcaps"]').trigger('click');
+    await overlayWrap('[data-test="tb-menu-smallcaps"]').trigger('click');
     expect(JSON.stringify(e.getJSON())).toBe(before);
     e.setEditable(true);
     await flushPromises();
@@ -489,11 +489,10 @@ describe('EditorToolbar', () => {
     await more.trigger('click');
     await flushPromises();
     const items = () =>
-      w
-        .find('[data-test="tb-overflow-menu"]')
+      overlayWrap('[data-test="tb-overflow-menu"]')
         .findAll('[role^="menuitem"]')
         .map((i) => i.element);
-    const menu = w.find('[data-test="tb-overflow-menu"]');
+    const menu = overlayWrap('[data-test="tb-overflow-menu"]');
     expect(document.activeElement).toBe(items()[0]);
     await menu.trigger('keydown', { key: 'ArrowDown' });
     expect(document.activeElement).toBe(items()[1]);
@@ -506,13 +505,13 @@ describe('EditorToolbar', () => {
     await menu.trigger('keydown', { key: 'Home' });
     expect(document.activeElement).toBe(items()[0]);
     await menu.trigger('keydown', { key: 'Escape' });
-    expect(w.find('[data-test="tb-overflow-menu"]').isVisible()).toBe(false);
+    expect(overlayVisible('[data-test="tb-overflow-menu"]')).toBe(false);
     expect(document.activeElement).toBe(more.element);
     await more.trigger('click');
-    expect(w.find('[data-test="tb-overflow-menu"]').isVisible()).toBe(true);
+    expect(overlayVisible('[data-test="tb-overflow-menu"]')).toBe(true);
     document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
     await flushPromises();
-    expect(w.find('[data-test="tb-overflow-menu"]').isVisible()).toBe(false);
+    expect(overlayVisible('[data-test="tb-overflow-menu"]')).toBe(false);
     w.unmount();
   });
 
@@ -520,8 +519,7 @@ describe('EditorToolbar', () => {
     const { e, w } = mountBar();
     select(e, 'plain');
     await w.find('[data-test="tb-overflow"]').trigger('click');
-    const roles = w
-      .find('[data-test="tb-overflow-menu"]')
+    const roles = overlayWrap('[data-test="tb-overflow-menu"]')
       .findAll('[role^="menuitem"]')
       .map((i) => i.attributes('role'));
     expect(roles).toEqual([
@@ -532,11 +530,13 @@ describe('EditorToolbar', () => {
       'menuitem',
       'menuitem',
     ]);
-    expect(w.find('[data-test="tb-menu-smallcaps"]').attributes('aria-checked')).toBe('false');
-    expect(w.find('[data-test="tb-menu-style-first"]').attributes('aria-checked')).toBeUndefined();
-    await w.find('[data-test="tb-menu-smallcaps"]').trigger('click');
+    expect(overlayWrap('[data-test="tb-menu-smallcaps"]').attributes('aria-checked')).toBe('false');
+    expect(
+      overlayWrap('[data-test="tb-menu-style-first"]').attributes('aria-checked'),
+    ).toBeUndefined();
+    await overlayWrap('[data-test="tb-menu-smallcaps"]').trigger('click');
     await w.find('[data-test="tb-overflow"]').trigger('click');
-    expect(w.find('[data-test="tb-menu-smallcaps"]').attributes('aria-checked')).toBe('true');
+    expect(overlayWrap('[data-test="tb-menu-smallcaps"]').attributes('aria-checked')).toBe('true');
     w.unmount();
   });
 
