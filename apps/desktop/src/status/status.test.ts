@@ -108,7 +108,7 @@ describe('StatusBar', () => {
       props: {
         chapterCount: 12,
         showChapterSegment: true,
-        columnTracks: '18rem minmax(0, 1fr) var(--ct-story-notes-w)',
+        columnTracks: '18rem minmax(0, 1fr) auto',
         wordCount: 2154,
         wordsBeforeCaretInBook: 500,
         trackChanges: false,
@@ -131,7 +131,7 @@ describe('StatusBar', () => {
       props: {
         chapterCount: 4,
         showChapterSegment: false,
-        columnTracks: 'var(--ct-rail-w) minmax(0, 1fr) var(--ct-story-notes-w)',
+        columnTracks: 'var(--ct-rail-w) minmax(0, 1fr) auto',
         wordCount: 10,
         wordsBeforeCaretInBook: 0,
         storyNotesPanelId: 'story-notes-panel',

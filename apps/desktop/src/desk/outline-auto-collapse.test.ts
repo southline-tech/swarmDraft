@@ -298,8 +298,8 @@ describe('no room for the outline while notes show (#98)', () => {
 
   it('OUTLINE_ROOM matches the 18rem outline column (flush workspace grid, #207)', () => {
     const app = readFileSync(resolve(__dirname, '../App.vue'), 'utf8');
-    expect(app).toContain('18rem_minmax(0,1fr)_');
-    expect(app).toContain('--ct-story-notes-w');
+    expect(app).toContain('grid-cols-[18rem_minmax(0,1fr)]');
+    expect(app).not.toContain('story-notes-col');
     expect(app).toMatch(/class="workspace grid min-h-0 min-w-0 flex-1 gap-0/);
     expect(OUTLINE_ROOM).toBe(18 * 16);
   });

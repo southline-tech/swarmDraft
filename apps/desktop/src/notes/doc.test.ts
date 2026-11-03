@@ -6,7 +6,20 @@ vi.mock('../backend', () => ({
 }));
 
 import { notesApplyUpdate } from '../backend';
-import { addNote, createNotesDoc, listNotes, updateNoteSectionLink, updateNoteTitle } from './doc';
+import {
+  addNote,
+  copyNoteBodyBetween,
+  createNotesDoc,
+  deleteNote,
+  listNotes,
+  noteBodySnapshot,
+  readNoteMeta,
+  seedNoteBodyText,
+  updateNoteSectionLink,
+  updateNoteTags,
+  updateNoteTitle,
+  updateNoteType,
+} from './doc';
 import { readNotesSaveStatus, subscribeNotesSaveStatus, watchNotesDoc } from './persist';
 
 describe('story notes doc', () => {
@@ -32,8 +45,67 @@ describe('story notes doc', () => {
     expect(listNotes(doc).find((x) => x.id === n.id)).toMatchObject({
       title: 'Timeline',
       sectionId: 'ch-2',
+      sectionIds: ['ch-2'],
       authorKind: 'agent',
     });
+  });
+
+  it('round-trips type, tags, and multi section links', () => {
+    const doc = createNotesDoc();
+    const n = addNote(doc, { kind: 'human', id: 'h', name: 'Author' }, 'One', {
+      noteType: 'character',
+      tags: ['hero', 'arc'],
+      sectionIds: ['ch-1', 'ch-2'],
+    });
+    expect(readNoteMeta(doc, n.id)).toMatchObject({
+      noteType: 'character',
+      tags: ['hero', 'arc'],
+      sectionIds: ['ch-1', 'ch-2'],
+      sectionId: 'ch-1',
+    });
+    updateNoteType(doc, n.id, 'research');
+    updateNoteTags(doc, n.id, ['notes']);
+    expect(readNoteMeta(doc, n.id)?.noteType).toBe('research');
+    expect(readNoteMeta(doc, n.id)?.tags).toEqual(['notes']);
+  });
+
+  it('migrates legacy singular sectionId on read', () => {
+    const doc = createNotesDoc();
+    const id = 'note-legacy';
+    const entry = new Y.Map<unknown>();
+    entry.set('title', 'Legacy');
+    entry.set('sectionId', 'ch-old');
+    entry.set('authorKind', 'human');
+    entry.set('authorId', 'h');
+    entry.set('authorName', 'Author');
+    entry.set('createdAt', new Date().toISOString());
+    entry.set('updatedAt', new Date().toISOString());
+    doc.getMap('entries').set(id, entry);
+    doc.getArray<string>('order').push([id]);
+    expect(readNoteMeta(doc, id)).toMatchObject({
+      sectionId: 'ch-old',
+      sectionIds: ['ch-old'],
+      noteType: 'other',
+      tags: [],
+    });
+  });
+
+  it('copyNoteBodyBetween copies body XmlFragment across docs', () => {
+    const src = createNotesDoc();
+    const dst = createNotesDoc();
+    const n = addNote(src, { kind: 'human', id: 'h', name: 'A' }, 'T');
+    seedNoteBodyText(src, n.id, 'Cross-doc');
+    copyNoteBodyBetween(src, n.id, dst, 'target');
+    expect(noteBodySnapshot(dst, 'target')).toContain('Cross-doc');
+  });
+
+  it('deleteNote removes order entry and metadata', () => {
+    const doc = createNotesDoc();
+    const a = addNote(doc, { kind: 'human', id: 'h', name: 'Author' }, 'A');
+    const b = addNote(doc, { kind: 'human', id: 'h', name: 'Author' }, 'B');
+    deleteNote(doc, a.id);
+    expect(listNotes(doc).map((x) => x.id)).toEqual([b.id]);
+    expect(readNoteMeta(doc, a.id)).toBeUndefined();
   });
 
   it('survives Yjs round-trip like storage', () => {
