@@ -1628,7 +1628,7 @@ defineExpose({ open, closeSession });
           :outline="session.outline.value"
           :human-author="humanNotesAuthor"
           :readonly="session.closed || restoreInProgress"
-          anchor-selector="[data-test='editor-stack']"
+          anchor-selector="[data-test='continuous-manuscript']"
           @select-section="focusEditor"
           @close="onStoryNotesClose"
           @sheet-height="onStoryNotesSheetHeight"

@@ -15,7 +15,7 @@ describe('StoryNotesSheet', () => {
   it('resizes by 24px with arrow keys and persists height', async () => {
     ensureOverlayLayer();
     const anchor = document.createElement('div');
-    anchor.dataset.test = 'editor-stack';
+    anchor.dataset.test = 'continuous-manuscript';
     document.body.appendChild(anchor);
     vi.spyOn(anchor, 'getBoundingClientRect').mockReturnValue({
       left: 100,
@@ -36,7 +36,7 @@ describe('StoryNotesSheet', () => {
         notesDoc,
         outline: [],
         humanAuthor: { id: 'h', name: 'Author' },
-        anchorSelector: "[data-test='editor-stack']",
+        anchorSelector: "[data-test='continuous-manuscript']",
       },
     });
     await flushPromises();
@@ -67,7 +67,7 @@ describe('StoryNotesSheet', () => {
         notesDoc,
         outline: [],
         humanAuthor: { id: 'h', name: 'Author' },
-        anchorSelector: "[data-test='editor-stack']",
+        anchorSelector: "[data-test='continuous-manuscript']",
       },
     });
     await flushPromises();
@@ -81,10 +81,59 @@ describe('StoryNotesSheet', () => {
     });
   });
 
+  it('positions the sheet to the anchor column only (not a wider parent)', async () => {
+    ensureOverlayLayer();
+    const stack = document.createElement('div');
+    stack.dataset.test = 'editor-stack';
+    document.body.appendChild(stack);
+    const anchor = document.createElement('div');
+    anchor.dataset.test = 'continuous-manuscript';
+    stack.appendChild(anchor);
+    vi.spyOn(stack, 'getBoundingClientRect').mockReturnValue({
+      left: 200,
+      top: 40,
+      right: 1200,
+      bottom: 800,
+      width: 1000,
+      height: 760,
+      x: 200,
+      y: 40,
+      toJSON: () => ({}),
+    } as DOMRect);
+    vi.spyOn(anchor, 'getBoundingClientRect').mockReturnValue({
+      left: 200,
+      top: 40,
+      right: 900,
+      bottom: 800,
+      width: 700,
+      height: 760,
+      x: 200,
+      y: 40,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    const w = mount(StoryNotesSheet, {
+      attachTo: document.body,
+      props: {
+        notesDoc: createNotesDoc(),
+        outline: [],
+        humanAuthor: { id: 'h', name: 'Author' },
+      },
+    });
+    await flushPromises();
+    await vi.waitFor(() =>
+      expect(overlayWrap('[data-test="story-notes-sheet"]').exists()).toBe(true),
+    );
+    const sheet = overlayWrap('[data-test="story-notes-sheet"]').element as HTMLElement;
+    expect(sheet.style.left).toBe('200px');
+    expect(sheet.style.width).toBe('700px');
+    w.unmount();
+  });
+
   it('clamps height between 240px and 70% of the anchor', async () => {
     ensureOverlayLayer();
     const anchor = document.createElement('div');
-    anchor.dataset.test = 'editor-stack';
+    anchor.dataset.test = 'continuous-manuscript';
     document.body.appendChild(anchor);
     vi.spyOn(anchor, 'getBoundingClientRect').mockReturnValue({
       left: 0,
@@ -104,7 +153,7 @@ describe('StoryNotesSheet', () => {
         notesDoc: createNotesDoc(),
         outline: [],
         humanAuthor: { id: 'h', name: 'Author' },
-        anchorSelector: "[data-test='editor-stack']",
+        anchorSelector: "[data-test='continuous-manuscript']",
       },
     });
     await flushPromises();

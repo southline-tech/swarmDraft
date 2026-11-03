@@ -41,8 +41,10 @@ const modalOpen = ref(false);
 const editingId = ref<string | null>(null);
 const modalReturnFocus = ref<HTMLElement | null>(null);
 
+const DEFAULT_ANCHOR = '[data-test="continuous-manuscript"]';
+
 function anchorEl(): Element | null {
-  const sel = props.anchorSelector ?? '[data-test="editor-stack"]';
+  const sel = props.anchorSelector ?? DEFAULT_ANCHOR;
   return document.querySelector(sel);
 }
 
