@@ -318,7 +318,7 @@ pub(crate) fn revive_or_insert_agent(
         #[cfg(debug_assertions)]
         eprintln!("[agents] pairing: revived agent id={id} name={name:?}");
         c.execute(
-            &format!("UPDATE agents SET revoked_at = NULL, name = ?2, color = ?3 WHERE id = ?1"),
+            "UPDATE agents SET revoked_at = NULL, name = ?2, color = ?3 WHERE id = ?1",
             params![id, name, color],
         )?;
         return c
