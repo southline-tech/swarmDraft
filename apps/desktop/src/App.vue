@@ -662,7 +662,7 @@ function onAppMenuKey(e: KeyboardEvent) {
   const k = e.key.toLowerCase();
   if (k === 'n' && !importing.value) {
     e.preventDefault();
-    chooseFile();
+    void onToolbarDraftNew();
   } else if (k === 'o') {
     e.preventDefault();
     openBookPicker();
@@ -1191,7 +1191,7 @@ defineExpose({ open, closeSession });
                 @click="
                   () => {
                     if (importing) return;
-                    chooseFile();
+                    void onToolbarDraftNew();
                     closeBookMenu();
                   }
                 "
