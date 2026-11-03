@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue';
+import { nextTick, onBeforeUnmount, shallowRef, watch } from 'vue';
 import { anchorMenuPosition, type AnchorPlacement } from './anchor-position';
 import { APP_OVERLAY_LAYER, ensureOverlayLayer } from './layer';
 
