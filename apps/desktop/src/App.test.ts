@@ -2627,6 +2627,48 @@ describe('title bar book menu (#104)', () => {
     w.unmount();
   });
 
+  it('creates a blank draft from New in the book menu (#266)', async () => {
+    const backend = await import('./backend');
+    const blank = storedFixture();
+    blank.manuscript = { ...blank.manuscript, id: 'blank-menu', title: 'Untitled draft' };
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    vi.mocked(backend.createBlankManuscript).mockClear();
+    vi.mocked(backend.persistImport).mockClear();
+    vi.mocked(backend.createBlankManuscript).mockResolvedValueOnce(blank);
+    const fileInput = w.get('[data-test="open-docx"]');
+    const clickSpy = vi.spyOn(fileInput.element as HTMLInputElement, 'click');
+    await w.get('[data-test="app-menu-trigger"]').trigger('click');
+    await settle();
+    await overlayWrap('[data-test="app-menu-new"]').trigger('click');
+    await settle();
+    expect(backend.createBlankManuscript).toHaveBeenCalledTimes(1);
+    expect(backend.persistImport).not.toHaveBeenCalled();
+    expect(clickSpy).not.toHaveBeenCalled();
+    clickSpy.mockRestore();
+    w.unmount();
+  });
+
+  it('binds Ctrl+N to create a blank draft (#266)', async () => {
+    const backend = await import('./backend');
+    const blank = storedFixture();
+    blank.manuscript = { ...blank.manuscript, id: 'blank-key', title: 'Untitled draft' };
+    const w = mount(App, { attachTo: document.body });
+    await flushPromises();
+    vi.mocked(backend.createBlankManuscript).mockClear();
+    vi.mocked(backend.persistImport).mockClear();
+    vi.mocked(backend.createBlankManuscript).mockResolvedValueOnce(blank);
+    const fileInput = w.get('[data-test="open-docx"]');
+    const clickSpy = vi.spyOn(fileInput.element as HTMLInputElement, 'click');
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', ctrlKey: true, bubbles: true }));
+    await settle();
+    expect(backend.createBlankManuscript).toHaveBeenCalledTimes(1);
+    expect(backend.persistImport).not.toHaveBeenCalled();
+    expect(clickSpy).not.toHaveBeenCalled();
+    clickSpy.mockRestore();
+    w.unmount();
+  });
+
   it('Recent submenu toggles without closing the book menu; picking a book closes it (#104)', async () => {
     const backend = await import('./backend');
     const stored = storedFixture();
