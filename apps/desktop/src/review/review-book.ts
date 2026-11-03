@@ -2,6 +2,24 @@ import type { SuggestionItem } from '@swarmdraft/editor';
 import type { ReviewChange } from './review-state';
 import { groupChanges } from './review-state';
 
+/** Lead-section suggestions merged into the book-wide rail (#265). */
+export function mergeSectionBookChanges(
+  sectionId: string,
+  bookChanges: readonly ReviewChange[],
+  localItems: readonly SuggestionItem[],
+): ReviewChange[] {
+  const book = [...bookChanges];
+  const keys = new Set(book.map((c) => c.key));
+  for (const c of groupChanges(localItems)) {
+    const key = scopeBookChangeKey(sectionId, c.key);
+    if (!keys.has(key)) {
+      book.push({ ...c, key });
+      keys.add(key);
+    }
+  }
+  return book;
+}
+
 /** Separates section id from the review change key in book-wide lists. */
 export const BOOK_SCOPE = '\u0002';
 

@@ -248,6 +248,48 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
 </template>
 
 <style scoped>
+.who {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-space-2);
+  font-weight: var(--ct-weight-semibold);
+}
+.av {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--ct-radius-full);
+  background: var(--ct-suggester);
+  color: var(--ct-accent-contrast);
+  font-size: var(--ct-text-sm);
+  font-weight: var(--ct-weight-semibold);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.note {
+  color: var(--ct-text-muted);
+  font-size: var(--ct-text-sm);
+}
+.pill {
+  font-size: var(--ct-text-xs);
+  font-weight: var(--ct-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px var(--ct-space-2);
+  border-radius: var(--ct-radius-full);
+  border: 1px solid var(--ct-border-strong);
+  color: var(--ct-text-muted);
+  flex: none;
+}
+.card.outdated .who {
+  color: var(--ct-text-muted);
+}
 .comment-pill {
   color: var(--ct-text-muted);
 }

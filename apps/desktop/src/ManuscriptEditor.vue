@@ -133,6 +133,7 @@ import {
   type ReviewListItem,
 } from './review/review-inline';
 import {
+  mergeSectionBookChanges,
   parseBookChangeKey,
   scopeBookChangeKey,
   type BookChapterGroup,
@@ -555,11 +556,12 @@ watch(currentKey, (key) => {
 });
 const collapsed = shallowRef(loadCollapsed());
 watch(collapsed, (v) => saveCollapsed(v));
-const changes = computed(() =>
-  props.reviewTarget && props.bookChanges != null
-    ? [...props.bookChanges]
-    : groupChanges(suggestions.value),
-);
+const changes = computed(() => {
+  const local = groupChanges(suggestions.value);
+  if (!props.reviewTarget || props.bookChanges == null) return local;
+  if (!props.sectionId) return [...props.bookChanges];
+  return mergeSectionBookChanges(props.sectionId, props.bookChanges, suggestions.value);
+});
 /** Margin callouts align to marks in this section's doc only (#212); the rail may stay book-wide. */
 const marginChanges = computed(() => visibleItems(groupChanges(suggestions.value), filter.value));
 
@@ -1680,7 +1682,7 @@ onBeforeUnmount(() => {
             :list-items="reviewListItems"
             :suggestion-count="filteredSuggestions.length"
             :show-resolved="showResolved"
-            :book-changes="reviewTarget ? bookChanges : undefined"
+            :book-changes="reviewTarget ? changes : undefined"
             :chapter-groups="reviewTarget ? bookChapterGroups : undefined"
             :active-scroll-key="reviewTarget ? reviewActiveScrollKey : undefined"
             :follow="reviewTarget ? (reviewFollow ?? true) : true"

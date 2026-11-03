@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   bookChangesFromSections,
   bookChapterGroups,
+  mergeSectionBookChanges,
   openChangeCountsBySection,
   parseBookChangeKey,
   scopeBookChangeKey,
@@ -20,6 +21,16 @@ describe('review-book', () => {
   it('scopes change keys by section and parses them back', () => {
     const scoped = scopeBookChangeKey('ch-1', 'brett\u0000a');
     expect(parseBookChangeKey(scoped)).toEqual({ sectionId: 'ch-1', changeKey: 'brett\u0000a' });
+  });
+
+  it('merges lead-section suggestions when the book map is still empty (#265)', () => {
+    const titlePage: SuggestionItem[] = [
+      { id: 'tp1', kind: 'suggestion_insert', author: 'brett', ts: 't', text: 'Harbor' },
+    ];
+    const merged = mergeSectionBookChanges('title', [], titlePage);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.key).toBe(scopeBookChangeKey('title', 'brett\u0000tp1'));
+    expect(merged[0]!.ins).toBe('Harbor');
   });
 
   it('aggregates open changes in reading order across sections', () => {
