@@ -559,6 +559,22 @@ function closeBookMenu() {
   bookMenuOpen.value = false;
   recentOpen.value = false;
 }
+
+function onBookMenuKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return;
+  e.preventDefault();
+  e.stopPropagation();
+  closeBookMenu();
+  bookMenuTrigger.value?.focus();
+}
+
+function onRecentMenuKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return;
+  e.preventDefault();
+  e.stopPropagation();
+  recentOpen.value = false;
+  recentTrigger.value?.focus();
+}
 function onAppMenuToggle(e: Event) {
   const open = (e.target as HTMLDetailsElement).open;
   bookMenuOpen.value = open;
@@ -1165,7 +1181,7 @@ defineExpose({ open, closeSession });
             :trigger="bookMenuTrigger"
             placement="bottom-start"
           >
-            <div class="topbar__menu-list sh-menu" role="menu">
+            <div class="topbar__menu-list sh-menu" role="menu" @keydown="onBookMenuKeydown">
               <button
                 type="button"
                 class="sh-mi"
@@ -1289,10 +1305,11 @@ defineExpose({ open, closeSession });
             placement="right-start"
           >
             <div
-              class="topbar__menu-list sh-menu sh-sub topbar__submenu"
+              class="topbar__menu-list sh-menu topbar__recent-flyout"
               role="menu"
               aria-label="Recent books"
               @click.stop
+              @keydown="onRecentMenuKeydown"
             >
               <button
                 v-for="m in recentBooks"
@@ -1776,10 +1793,8 @@ body {
 .topbar__recent {
   position: relative;
 }
-.topbar__submenu {
-  top: 0;
-  left: 100%;
-  margin-left: var(--ct-space-1);
+.topbar__recent-flyout {
+  width: 220px;
 }
 .visually-hidden {
   position: absolute;

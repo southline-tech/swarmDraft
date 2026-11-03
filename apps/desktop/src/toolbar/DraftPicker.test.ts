@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import DraftPicker from './DraftPicker.vue';
-import { overlayWrap } from '../overlay/queries';
+import { overlayWrap, overlayVisible } from '../overlay/queries';
 
 describe('DraftPicker (#243)', () => {
   it('lists drafts as menuitemradio with the current draft marked', async () => {
@@ -51,6 +51,22 @@ describe('DraftPicker (#243)', () => {
     });
     await w.find('[data-test="draft-picker"]').trigger('click');
     expect(w.emitted('menu-open')).toHaveLength(1);
+    w.unmount();
+  });
+
+  it('closes on Escape and refocuses the trigger', async () => {
+    const w = mount(DraftPicker, {
+      props: { label: 'Only', currentId: 'x', drafts: [{ id: 'x', title: 'Only' }] },
+      attachTo: document.body,
+    });
+    const trigger = w.get('[data-test="draft-picker"]');
+    await trigger.trigger('click');
+    await flushPromises();
+    expect(overlayVisible('[data-test="draft-menu"]')).toBe(true);
+    await overlayWrap('[data-test="draft-menu"]').trigger('keydown', { key: 'Escape' });
+    await flushPromises();
+    expect(overlayVisible('[data-test="draft-menu"]')).toBe(false);
+    expect(document.activeElement).toBe(trigger.element);
     w.unmount();
   });
 });

@@ -89,6 +89,14 @@ describe('PairingPrompt', () => {
     expect(api.approve).toHaveBeenCalledWith('p1', ['comment', 'suggest'], null);
   });
 
+  it('shows only row Deny/Allow for a single pending request (#269)', async () => {
+    mountPrompt([sample('p1', 'Only')]);
+    await flushPromises();
+    expect(queryInOverlay('[data-test="pairing-deny-all"]')).toBeNull();
+    expect(queryAllInOverlay('[data-test="pairing-deny"]')).toHaveLength(1);
+    expect(queryAllInOverlay('[data-test="pairing-allow"]')).toHaveLength(1);
+  });
+
   it('shows every pending request in one dialog (#269)', async () => {
     mountPrompt([sample('p1', 'First'), sample('p2', 'Second')]);
     await flushPromises();

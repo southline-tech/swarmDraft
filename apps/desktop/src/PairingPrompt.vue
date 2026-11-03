@@ -57,7 +57,11 @@ async function afterQueueChange() {
   inlineError.value = '';
   if (queue.value.length) {
     await nextTick();
-    denyAllButton.value?.focus();
+    const focusEl =
+      queue.value.length === 1
+        ? dialog.value?.querySelector<HTMLButtonElement>('[data-test="pairing-deny"]')
+        : denyAllButton.value;
+    focusEl?.focus();
     return;
   }
   if (opener?.isConnected) {
@@ -239,8 +243,8 @@ onBeforeUnmount(() => {
             <div class="pair__row-actions">
               <button
                 type="button"
-                class="st-btn"
-                :data-test="`pairing-deny-${p.id}`"
+                class="st-btn pair__row-btn"
+                :data-test="queue.length === 1 ? 'pairing-deny' : `pairing-deny-${p.id}`"
                 :disabled="!!busyId || bulkBusy"
                 @click="onDenied(p.id)"
               >
@@ -248,8 +252,8 @@ onBeforeUnmount(() => {
               </button>
               <button
                 type="button"
-                class="st-btn st-btn--primary"
-                :data-test="`pairing-allow-${p.id}`"
+                class="st-btn st-btn--primary pair__row-btn"
+                :data-test="queue.length === 1 ? 'pairing-allow' : `pairing-allow-${p.id}`"
                 :disabled="!!busyId || bulkBusy"
                 @click="onAllowed(p.id)"
               >
@@ -285,27 +289,6 @@ onBeforeUnmount(() => {
             Allow all
           </button>
         </div>
-        <div v-else class="pair__actions pair__actions--single">
-          <button
-            ref="denyAllButton"
-            type="button"
-            class="st-btn"
-            data-test="pairing-deny"
-            :disabled="!!busyId || bulkBusy"
-            @click="onDenied(queue[0]!.id)"
-          >
-            Deny
-          </button>
-          <button
-            type="button"
-            class="st-btn st-btn--primary"
-            data-test="pairing-allow"
-            :disabled="!!busyId || bulkBusy"
-            @click="onAllowed(queue[0]!.id)"
-          >
-            Allow
-          </button>
-        </div>
       </div>
     </div>
   </Teleport>
@@ -322,15 +305,15 @@ onBeforeUnmount(() => {
   margin: 0;
 }
 .pair__list {
-  margin: var(--ct-space-4) 0 0;
+  margin: var(--ct-space-3) 0 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: var(--ct-space-4);
+  gap: var(--ct-space-2);
 }
 .pair__row {
-  padding: var(--ct-space-3);
+  padding: var(--ct-space-2) var(--ct-space-3);
   border: 1px solid var(--ct-border);
   border-radius: var(--ct-radius-md);
   background: var(--ct-bg);
@@ -338,38 +321,46 @@ onBeforeUnmount(() => {
 .pair__head {
   display: flex;
   align-items: center;
-  gap: var(--ct-space-3);
-  margin-bottom: var(--ct-space-2);
+  gap: var(--ct-space-2);
+  margin-bottom: var(--ct-space-1);
 }
 .pair__swatch {
   flex: none;
-  width: var(--ct-space-8);
-  height: var(--ct-space-8);
+  width: var(--ct-space-6);
+  height: var(--ct-space-6);
   border-radius: var(--ct-radius-full);
   border: 1px solid var(--ct-border-strong);
 }
 .pair__name {
   font-weight: var(--ct-weight-semibold);
+  font-size: var(--ct-text-sm);
 }
 .pair__chips {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--ct-space-2);
-  margin: 0 0 var(--ct-space-3);
+  gap: var(--ct-space-1);
+  margin: 0 0 var(--ct-space-2);
   padding: 0;
   list-style: none;
 }
 .pair__chips li {
-  padding: var(--ct-space-1) var(--ct-space-3);
+  padding: 0 var(--ct-space-2);
   border: 1px solid var(--ct-border-strong);
   border-radius: var(--ct-radius-full);
   background: var(--ct-surface);
-  font-size: var(--ct-text-sm);
+  font-size: var(--ct-text-xs);
+  line-height: 1.6;
 }
 .pair__row-actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--ct-space-2);
+  justify-content: flex-end;
+}
+.pair__row-btn {
+  min-height: var(--ct-space-8);
+  padding: var(--ct-space-1) var(--ct-space-3);
+  font-size: var(--ct-text-sm);
 }
 .pair__hint {
   margin: var(--ct-space-4) 0 0;
@@ -384,9 +375,6 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   gap: var(--ct-space-3);
-  margin-top: var(--ct-space-6);
-}
-.pair__actions--single {
   margin-top: var(--ct-space-4);
 }
 </style>
