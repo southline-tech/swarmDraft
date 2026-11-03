@@ -12,6 +12,7 @@ vi.mock('./backend', async (orig) => {
   return { ...real, agentsApi: { ...real.agentsApi, list: () => tauri.list() } };
 });
 import { flushPromises, mount } from '@vue/test-utils';
+import { overlayWrap, queryAllInOverlay } from './overlay/queries';
 import type { SuggestionItem } from '@swarmdraft/editor';
 import type { Agent } from './backend';
 import {
@@ -190,7 +191,7 @@ describe('agent display names (RAD-263)', () => {
     setAgents([agent('a1', 'Draft Helper')]);
     await flushPromises();
     await p.find('[data-test=filter-toggle]').trigger('click');
-    await p.findAll('[data-test=view-author]')[1]!.trigger('click');
+    await queryAllInOverlay('[data-test=view-author]')[1]!.click();
     expect(p.emitted('select-view')![0]).toEqual(['agent:gone']);
 
     const row = (

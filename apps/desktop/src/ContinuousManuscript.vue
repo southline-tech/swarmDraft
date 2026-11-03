@@ -576,7 +576,7 @@ onBeforeUnmount(() => {
 }
 .continuous-review-rail {
   position: relative;
-  z-index: 35;
+  z-index: var(--ct-z-panel);
   display: flex;
   flex-direction: column;
   min-height: 0;

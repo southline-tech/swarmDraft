@@ -128,6 +128,14 @@
   --ct-elevation-2: 0 4px 12px rgb(43 38 32 / 0.1), 0 1px 3px rgb(43 38 32 / 0.06);
   --ct-elevation-3: 0 16px 40px rgb(43 38 32 / 0.18), 0 4px 12px rgb(43 38 32 / 0.08);
 
+  /* Stacking (ascending): panel < chrome < dropdown/flyout < modal < toast */
+  --ct-z-panel: 30;
+  --ct-z-chrome: 40;
+  --ct-z-dropdown: 45;
+  --ct-z-flyout: 46;
+  --ct-z-modal: 50;
+  --ct-z-toast: 55;
+
   /* Focus: 2px ring, >=3:1 vs adjacent colors (6.1:1 on paper) */
   --ct-focus-ring-color: #2f5da8;
   --ct-focus-ring: 0 0 0 2px var(--ct-surface), 0 0 0 4px var(--ct-focus-ring-color);

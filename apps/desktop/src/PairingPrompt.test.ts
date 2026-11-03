@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import PairingPrompt from './PairingPrompt.vue';
 import { type PairingApi, type PairingSummary } from './pairing-client';
+import type { Agent } from './backend';
+import { ensureOverlayLayer } from './overlay/layer';
+import { overlayWrap, queryAllInOverlay, queryInOverlay } from './overlay/queries';
 
 const sample = (id: string, name: string): PairingSummary => ({
   id,
@@ -12,23 +15,33 @@ const sample = (id: string, name: string): PairingSummary => ({
   expiresAt: '2026-01-01T00:05:00Z',
 });
 
+const agentStub = (): Agent => ({
+  id: 'new-agent',
+  name: 'Helper',
+  color: '#3366ff',
+  createdAt: 't',
+  revokedAt: null,
+  primary: false,
+  lastSeenAt: null,
+});
+
 function mountPrompt(
   pending: PairingSummary[],
   overrides: Partial<PairingApi> = {},
   subscribe?: (cb: (pairingId: string) => void) => () => void,
 ) {
+  document.body.innerHTML = '';
+  ensureOverlayLayer();
+  let queue = pending.map((p) => ({ ...p }));
   const api: PairingApi = {
-    listPending: vi.fn(async () => pending.map((p) => ({ ...p }))),
-    approve: vi.fn(async () => ({
-      id: 'new-agent',
-      name: 'Helper',
-      color: '#3366ff',
-      createdAt: 't',
-      revokedAt: null,
-      primary: false,
-      lastSeenAt: null,
-    })),
-    deny: vi.fn(async () => {}),
+    listPending: vi.fn(async () => queue.map((p) => ({ ...p }))),
+    approve: vi.fn(async (id) => {
+      queue = queue.filter((p) => p.id !== id);
+      return agentStub();
+    }),
+    deny: vi.fn(async (id) => {
+      queue = queue.filter((p) => p.id !== id);
+    }),
     ...overrides,
   };
   const w = mount(PairingPrompt, {
@@ -41,6 +54,7 @@ function mountPrompt(
 describe('PairingPrompt', () => {
   afterEach(() => {
     document.body.innerHTML = '';
+    ensureOverlayLayer();
   });
 
   it('opens on pairing-requested with Deny focused', async () => {
@@ -49,68 +63,52 @@ describe('PairingPrompt', () => {
       notify = cb;
       return () => {};
     };
-    const { w, api } = mountPrompt([], {}, subscribe);
+    const { api } = mountPrompt([], {}, subscribe);
     await flushPromises();
-    expect(w.find('[data-test="pairing-dialog"]').exists()).toBe(false);
+    expect(queryInOverlay('[data-test="pairing-dialog"]')).toBeNull();
     (api.listPending as ReturnType<typeof vi.fn>).mockResolvedValue([sample('p1', 'Helper')]);
     notify!('p1');
     await flushPromises();
-    expect(w.find('[data-test="pairing-dialog"]').exists()).toBe(true);
-    expect(document.activeElement).toBe(w.get('[data-test="pairing-deny"]').element);
+    expect(queryInOverlay('[data-test="pairing-dialog"]')).not.toBeNull();
+    expect(document.activeElement).toBe(overlayWrap('[data-test="pairing-deny"]').element);
   });
 
   it('calls deny on Esc', async () => {
-    const { w, api } = mountPrompt([sample('p1', 'Helper')]);
+    const { api } = mountPrompt([sample('p1', 'Helper')]);
     await flushPromises();
-    await w.get('[data-test="pairing-dialog"]').trigger('keydown', { key: 'Escape' });
+    await overlayWrap('[data-test="pairing-dialog"]').trigger('keydown', { key: 'Escape' });
     await flushPromises();
     expect(api.deny).toHaveBeenCalledWith('p1');
   });
 
   it('calls approve with pairing id on Allow', async () => {
-    const { w, api } = mountPrompt([sample('p1', 'Helper')]);
+    const { api } = mountPrompt([sample('p1', 'Helper')]);
     await flushPromises();
-    await w.get('[data-test="pairing-allow"]').trigger('click');
+    await overlayWrap('[data-test="pairing-allow"]').trigger('click');
     await flushPromises();
     expect(api.approve).toHaveBeenCalledWith('p1', ['comment', 'suggest'], null);
   });
 
-  it('shows the second request after the first resolves', async () => {
-    const list = vi
-      .fn()
-      .mockResolvedValueOnce([sample('p1', 'First'), sample('p2', 'Second')])
-      .mockResolvedValueOnce([sample('p2', 'Second')]);
-    const api: PairingApi = {
-      listPending: list,
-      approve: vi.fn(async () => ({
-        id: 'new-agent',
-        name: 'Helper',
-        color: '#3366ff',
-        createdAt: 't',
-        revokedAt: null,
-        primary: false,
-        lastSeenAt: null,
-      })),
-      deny: vi.fn(async () => {}),
-    };
-    const w = mount(PairingPrompt, { props: { api }, attachTo: document.body });
+  it('shows every pending request in one dialog (#269)', async () => {
+    mountPrompt([sample('p1', 'First'), sample('p2', 'Second')]);
     await flushPromises();
-    expect(w.text()).toContain('First');
-    await w.get('[data-test="pairing-deny"]').trigger('click');
+    const dialog = overlayWrap('[data-test="pairing-dialog"]');
+    expect(dialog.text()).toContain('First');
+    expect(dialog.text()).toContain('Second');
+    await overlayWrap('[data-test="pairing-deny-p1"]').trigger('click');
     await flushPromises();
-    expect(w.text()).toContain('Second');
-    expect(w.text()).not.toContain('Allow First to connect');
+    expect(queryAllInOverlay('[data-test="pairing-row"]')).toHaveLength(1);
+    expect(overlayWrap('[data-test="pairing-dialog"]').text()).toContain('Second');
   });
 
   it('uses ap1 title, body, access chips, and Esc hint', async () => {
-    const { w } = mountPrompt([sample('p1', 'Helper')]);
+    mountPrompt([sample('p1', 'Helper')]);
     await flushPromises();
-    expect(w.text()).toContain('Allow Helper to connect?');
-    expect(w.text()).toContain('A bot on this computer is asking to pair over MCP');
-    expect(w.text()).toContain('Requested access');
-    expect(w.text()).toContain('Suggest changes');
-    expect(w.text()).toContain('Comment');
-    expect(w.text()).toContain('Esc denies and dismisses. Focus returns to the app.');
+    const dialog = overlayWrap('[data-test="pairing-dialog"]');
+    expect(dialog.text()).toContain('Allow Helper to connect?');
+    expect(dialog.text()).toContain('Bots on this computer are asking to pair over MCP');
+    expect(dialog.text()).toContain('Comment');
+    expect(dialog.text()).toContain('Esc denies all pending requests');
   });
 
   it('closes quietly when the pairing expired', async () => {
@@ -124,11 +122,13 @@ describe('PairingPrompt', () => {
       }),
       deny: vi.fn(async () => {}),
     };
-    const w = mount(PairingPrompt, { props: { api }, attachTo: document.body });
+    document.body.innerHTML = '';
+    ensureOverlayLayer();
+    mount(PairingPrompt, { props: { api }, attachTo: document.body });
     await flushPromises();
-    await w.get('[data-test="pairing-allow"]').trigger('click');
+    await overlayWrap('[data-test="pairing-allow"]').trigger('click');
     await flushPromises();
-    expect(w.find('[data-test="pairing-dialog"]').exists()).toBe(false);
+    expect(queryInOverlay('[data-test="pairing-dialog"]')).toBeNull();
   });
 
   it('disables buttons while a decision is in flight', async () => {
@@ -139,35 +139,49 @@ describe('PairingPrompt', () => {
           resolveDeny = r;
         }),
     );
-    const { w } = mountPrompt([sample('p1', 'Wait')], { deny });
+    mountPrompt([sample('p1', 'Wait')], { deny });
     await flushPromises();
-    void w.get('[data-test="pairing-deny"]').trigger('click');
+    void overlayWrap('[data-test="pairing-deny"]').trigger('click');
     await flushPromises();
-    expect(w.get('[data-test="pairing-deny"]').attributes('disabled')).toBeDefined();
-    expect(w.get('[data-test="pairing-allow"]').attributes('disabled')).toBeDefined();
+    expect(overlayWrap('[data-test="pairing-deny"]').attributes('disabled')).toBeDefined();
+    expect(overlayWrap('[data-test="pairing-allow"]').attributes('disabled')).toBeDefined();
     resolveDeny();
     await flushPromises();
   });
 
   it('shows inline error on failure and keeps the dialog', async () => {
-    const { w, api } = mountPrompt([sample('p1', 'Nope')], {
+    const { api } = mountPrompt([sample('p1', 'Nope')], {
       deny: vi.fn(async () => {
         throw 'database is locked';
       }),
     });
     await flushPromises();
-    await w.get('[data-test="pairing-deny"]').trigger('click');
+    await overlayWrap('[data-test="pairing-deny"]').trigger('click');
     await flushPromises();
     expect(api.deny).toHaveBeenCalled();
-    expect(w.find('[data-test="pairing-error"]').exists()).toBe(true);
-    expect(w.find('[data-test="pairing-dialog"]').exists()).toBe(true);
+    expect(queryInOverlay('[data-test="pairing-error"]')).not.toBeNull();
+    expect(queryInOverlay('[data-test="pairing-dialog"]')).not.toBeNull();
+  });
+
+  it('shows a clear message on duplicate agent name (#270)', async () => {
+    mountPrompt([sample('p1', 'QA Bot 2')], {
+      approve: vi.fn(async () => {
+        throw 'an agent named "QA Bot 2" already exists; choose another name';
+      }),
+    });
+    await flushPromises();
+    await overlayWrap('[data-test="pairing-allow"]').trigger('click');
+    await flushPromises();
+    expect(overlayWrap('[data-test="pairing-error"]').text()).toContain(
+      'A bot named QA Bot 2 already exists',
+    );
   });
 
   it('loads pending pairings on mount', async () => {
-    const { w, api } = mountPrompt([sample('p0', 'Early')]);
+    const { api } = mountPrompt([sample('p0', 'Early')]);
     await flushPromises();
     expect(api.listPending).toHaveBeenCalled();
-    expect(w.text()).toContain('Early');
+    expect(overlayWrap('[data-test="pairing-dialog"]').text()).toContain('Early');
   });
 });
 

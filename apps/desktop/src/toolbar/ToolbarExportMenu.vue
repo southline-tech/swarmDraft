@@ -6,6 +6,7 @@ import { exportApi } from '../export/api';
 import { runBookExport } from '../export/run-book-export';
 import { loadPandocPath } from '../settings/prefs';
 import AppIcon from '../icons/AppIcon.vue';
+import OverlayAnchoredMenu from '../overlay/OverlayAnchoredMenu.vue';
 import { useToolbarMenu } from './menu';
 
 const props = defineProps<{
@@ -86,49 +87,50 @@ const btn =
       Export
       <AppIcon name="chevron-down" class="h-4 w-4 opacity-70" aria-hidden="true" />
     </button>
-    <div
-      v-show="open"
-      ref="menuEl"
-      role="menu"
-      aria-label="Export formats"
-      data-test="export-menu"
-      class="absolute top-9 right-0 z-20 min-w-44 rounded-md border border-border bg-surface p-1.5 shadow-3"
-      @keydown="onMenuKey"
-    >
-      <button
-        type="button"
-        role="menuitem"
-        tabindex="-1"
-        class="tb-menu-item"
-        data-test="export-docx"
-        @click="runDocx()"
+    <OverlayAnchoredMenu :open="open" :trigger="trigger" placement="bottom-end">
+      <div
+        ref="menuEl"
+        role="menu"
+        aria-label="Export formats"
+        data-test="export-menu"
+        class="min-w-44 rounded-md border border-border bg-surface p-1.5 shadow-3"
+        @keydown="onMenuKey"
       >
-        Word (.docx)
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        tabindex="-1"
-        class="tb-menu-item tb-menu-item--soon"
-        data-test="export-pdf"
-        disabled
-        aria-disabled="true"
-        title="PDF export is coming in a later update."
-      >
-        <span class="tb-menu-item__label">PDF</span>
-        <span class="tb-menu-item__hint">Coming later</span>
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        tabindex="-1"
-        class="tb-menu-item"
-        data-test="export-md"
-        @click="runComingLater('md')"
-      >
-        Markdown
-      </button>
-    </div>
+        <button
+          type="button"
+          role="menuitem"
+          tabindex="-1"
+          class="tb-menu-item"
+          data-test="export-docx"
+          @click="runDocx()"
+        >
+          Word (.docx)
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          tabindex="-1"
+          class="tb-menu-item tb-menu-item--soon"
+          data-test="export-pdf"
+          disabled
+          aria-disabled="true"
+          title="PDF export is coming in a later update."
+        >
+          <span class="tb-menu-item__label">PDF</span>
+          <span class="tb-menu-item__hint">Coming later</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          tabindex="-1"
+          class="tb-menu-item"
+          data-test="export-md"
+          @click="runComingLater('md')"
+        >
+          Markdown
+        </button>
+      </div>
+    </OverlayAnchoredMenu>
     <div v-if="status || savedPath" class="tb-export-feedback">
       <p v-if="status" role="status" class="tb-export-status" data-test="toolbar-export-status">
         {{ status }}
@@ -183,7 +185,7 @@ const btn =
   position: absolute;
   top: 100%;
   right: 0;
-  z-index: 10;
+  z-index: var(--ct-z-panel);
   display: flex;
   flex-direction: column;
   align-items: flex-end;

@@ -218,12 +218,13 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
           {{ shownReplies().more }} more repl{{ shownReplies().more === 1 ? 'y' : 'ies' }}
         </li>
       </ul>
-      <form class="comment-actions" @submit.prevent="submitReply">
+      <form class="comment-actions" @submit.prevent="submitReply" @click.stop>
         <input
           :value="draft"
           data-test="reply-input"
           placeholder="Reply"
           :disabled="busy"
+          @click.stop
           @input="
             item.kind === 'comment' &&
             emit('update:draft', item.thread.id, ($event.target as HTMLInputElement).value)

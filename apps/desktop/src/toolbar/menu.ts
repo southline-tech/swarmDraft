@@ -18,7 +18,10 @@ export function useToolbarMenu(
   }
 
   function onOutside(ev: PointerEvent) {
-    if (!wrapEl.value?.contains(ev.target as Node)) close(false);
+    const t = ev.target as Node;
+    if (wrapEl.value?.contains(t)) return;
+    if (menuEl.value?.contains(t)) return;
+    close(false);
   }
 
   function show() {

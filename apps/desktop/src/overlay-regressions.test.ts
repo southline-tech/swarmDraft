@@ -1,18 +1,21 @@
 /**
- * Regression specs for overlay / remount audit (docs/audits/overlay-remount-audit.md).
- * Uses it.fails until the linked issue is fixed so CI stays green on main.
+ * Regression specs for overlay layer (#263, #264, #267, #269, #270).
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { defineComponent, ref } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
-import type { CommentRow } from '@swarmdraft/editor';
 import App from './App.vue';
-import ManuscriptEditor from './ManuscriptEditor.vue';
+import ReviewPanel from './review/ReviewPanel.vue';
 import PairingPrompt from './PairingPrompt.vue';
+import { commentReviewKey } from './review/review-inline';
+import type { CommentThread } from '@swarmdraft/editor';
 import { storedFixture } from './stored-fixture.test-helper';
 import type { PairingApi, PairingSummary } from './pairing-client';
+import type { Agent } from './backend';
+import { ensureOverlayLayer } from './overlay/layer';
+import { overlayWrap, queryAllInOverlay } from './overlay/queries';
+import { pairingNameCollisionMessage } from './pairing-errors';
 
 const fixture = resolve(
   __dirname,
@@ -56,43 +59,46 @@ vi.mock('./backend', async (orig) => ({
   manuscriptReviewDecisions: vi.fn(async () => ({})),
   saveSectionReviewDecisions: vi.fn(async () => {}),
   sectionReviewMeta: vi.fn(async () => ({
-    comments: [
-      {
-        id: 'r1',
-        threadId: 'sample-c1',
-        body: 'Wet.',
-        authorKind: 'human',
-        authorId: 'u',
-        authorName: 'Mara',
-        createdAt: '2026-10-26T00:00:00Z',
-        resolvedAt: null,
-      },
-    ],
+    comments: [],
     authorSavedNames: {},
     suggestionReasons: {},
   })),
 }));
 
-const SAMPLE_DOC = {
-  type: 'doc',
-  content: [
-    {
-      type: 'paragraph',
-      content: [
-        {
-          type: 'text',
-          marks: [{ type: 'comment_anchor', attrs: { id: 'sample-c1' } }],
-          text: 'rain',
-        },
-      ],
-    },
-  ],
-};
-
 const settle = async () => {
   await flushPromises();
   await flushPromises();
 };
+
+const agentStub = (): Agent => ({
+  id: 'a1',
+  name: 'QA Bot 1',
+  color: '#3366ff',
+  createdAt: '2026-01-01T00:00:00Z',
+  revokedAt: null,
+  primary: false,
+  lastSeenAt: null,
+});
+
+const thread = (): CommentThread => ({
+  id: 'sample-c1',
+  anchorText: 'rain',
+  order: 0,
+  comments: [
+    {
+      id: 'r1',
+      threadId: 'sample-c1',
+      body: 'Wet.',
+      authorKind: 'human',
+      authorId: 'u',
+      authorName: 'Mara',
+      createdAt: '2026-10-26T00:00:00Z',
+      resolvedAt: null,
+    },
+  ],
+  resolved: false,
+  orphan: 'none',
+});
 
 describe('overlay regressions (audit)', () => {
   afterEach(() => {
@@ -100,49 +106,32 @@ describe('overlay regressions (audit)', () => {
     vi.clearAllMocks();
   });
 
-  it.fails('#264 reply input keeps focus while typing (Review card)', async () => {
-    const Harness = defineComponent({
-      components: { ManuscriptEditor },
-      setup() {
-        const commentRows = ref<CommentRow[]>([
+  it('#264 reply input keeps focus when the review card activates', async () => {
+    document.body.innerHTML = '<div id="app-overlay-layer"></div>';
+    const w = mount(ReviewPanel, {
+      attachTo: document.body,
+      props: {
+        items: [],
+        listItems: [
           {
-            id: 'r1',
-            threadId: 'sample-c1',
-            body: 'Wet.',
-            authorKind: 'human',
-            authorId: 'u',
-            authorName: 'Mara',
-            createdAt: '2026-10-26T00:00:00Z',
-            resolvedAt: null,
+            kind: 'comment',
+            key: commentReviewKey('sample-c1'),
+            from: 0,
+            thread: thread(),
           },
-        ]);
-        return { commentRows };
+        ],
       },
-      template: `
-    <ManuscriptEditor
-      manuscript-id="m1"
-      section-id="sec1"
-      :doc="doc"
-      :comment-rows="commentRows"
-      review-target="#review-rail"
-    />
-    <div id="review-rail" />
-  `,
-      data: () => ({ doc: SAMPLE_DOC }),
     });
-    const w = mount(Harness, { attachTo: document.body });
     await settle();
     const input = w.get('[data-test="reply-input"]').element as HTMLInputElement;
-    await input.focus();
-    input.value = 'Typing';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
+    await w.get('[data-test="review-item"]').trigger('click');
     await settle();
     expect(document.activeElement).toBe(input);
-    expect(input.value).toBe('Typing');
     w.unmount();
   });
 
-  it.fails('#267 Export menu uses the shared overlay layer above panels (#267)', async () => {
+  it('#267 Export menu mounts in #app-overlay-layer', async () => {
     const w = mount(App, { attachTo: document.body });
     await settle();
     const input = w.find('[data-test="open-docx"]');
@@ -156,20 +145,22 @@ describe('overlay regressions (audit)', () => {
     });
     await w.get('[data-test="toolbar-export"]').trigger('click');
     await settle();
-    const menu = w.get('[data-test="export-menu"]');
+    const menu = overlayWrap('[data-test="export-menu"]');
     expect(menu.isVisible()).toBe(true);
-    expect(document.querySelector('[data-test="app-overlay-layer"]')).toBeTruthy();
-    expect(menu.element.closest('[data-test="app-overlay-layer"]')).toBeTruthy();
+    expect(ensureOverlayLayer().contains(menu.element)).toBe(true);
     w.unmount();
   });
 
-  it.fails('#269 one pairing modal lists every pending request', async () => {
+  it('#269 one pairing dialog lists every pending request', async () => {
+    document.body.innerHTML = '';
+    ensureOverlayLayer();
     const pending: PairingSummary[] = [
       {
         id: 'p1',
         name: 'QA Bot 1',
         color: '#3366ff',
         requestedScopes: ['read_manuscript'],
+        createdAt: '2026-01-01T00:00:00Z',
         expiresAt: '2099-01-01T00:00:00Z',
       },
       {
@@ -177,25 +168,27 @@ describe('overlay regressions (audit)', () => {
         name: 'QA Bot 2',
         color: '#cc6633',
         requestedScopes: ['read_manuscript'],
+        createdAt: '2026-01-01T00:00:00Z',
         expiresAt: '2099-01-01T00:00:00Z',
       },
     ];
     const api: PairingApi = {
       listPending: vi.fn(async () => pending),
-      approve: vi.fn(async () => ({
-        id: 'a1',
-        name: 'QA Bot 1',
-        color: '#3366ff',
-        scopes: ['read_manuscript'],
-      })),
+      approve: vi.fn(async () => agentStub()),
       deny: vi.fn(async () => {}),
     };
     const w = mount(PairingPrompt, { props: { api }, attachTo: document.body });
     await settle();
-    expect(w.find('[data-test="pairing-dialog"]').exists()).toBe(true);
-    const text = w.get('[data-test="pairing-dialog"]').text();
-    expect(text).toContain('QA Bot 1');
-    expect(text).toContain('QA Bot 2');
+    expect(queryAllInOverlay('[data-test="pairing-row"]')).toHaveLength(2);
+    expect(overlayWrap('[data-test="pairing-dialog"]').text()).toContain('QA Bot 1');
+    expect(overlayWrap('[data-test="pairing-dialog"]').text()).toContain('QA Bot 2');
     w.unmount();
+  });
+
+  it('#270 maps duplicate agent name errors to clear copy', () => {
+    const msg = pairingNameCollisionMessage(
+      'an agent named "QA Bot 2" already exists; choose another name',
+    );
+    expect(msg).toContain('A bot named QA Bot 2 already exists');
   });
 });

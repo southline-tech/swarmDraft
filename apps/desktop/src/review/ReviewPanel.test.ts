@@ -7,6 +7,7 @@ import type { SuggestionItem } from '@swarmdraft/editor';
 import ReviewPanel from './ReviewPanel.vue';
 import { REVIEW_CHANGES_REGION_ID } from './review-panel-a11y';
 import { resetCollabSlots } from '../author-colors';
+import { overlayWrap } from '../overlay/queries';
 
 const items: SuggestionItem[] = [
   { id: 's1', kind: 'suggestion_insert', author: 'agent:a', ts: 't', text: 'flickered' },
@@ -84,14 +85,14 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(w.find('[data-test=view-scope-status]').text()).toContain('Showing 3 changes');
     expect(w.find('[data-test=view-cycle-hint]').text()).toContain('Alt+]');
     await w.find('[data-test=filter-toggle]').trigger('click');
-    expect(w.find('[data-test=view-all]').attributes('aria-checked')).toBe('true');
-    expect(w.findAll('[data-test=view-author]')).toHaveLength(2);
-    const tabStops = w
+    expect(overlayWrap('[data-test=view-all]').attributes('aria-checked')).toBe('true');
+    expect(overlayWrap('[data-test=view-menu]').findAll('[data-test=view-author]')).toHaveLength(2);
+    const tabStops = overlayWrap('[data-test=view-menu]')
       .findAll('[data-view-option]')
       .filter((el) => (el.element as HTMLElement).tabIndex === 0);
     expect(tabStops).toHaveLength(1);
     expect(tabStops[0]!.attributes('data-test')).toBe('view-all');
-    await w.findAll('[data-test=view-author]')[0]!.trigger('click');
+    await overlayWrap('[data-test=view-author]').trigger('click');
     expect(w.emitted('select-view')).toEqual([['agent:a']]);
     await w.setProps({ filter: 'brett' });
     expect(w.findAll('[data-test=item]').map((i) => i.text())).toEqual([
@@ -99,7 +100,7 @@ describe('ReviewPanel (RAD-258)', () => {
     ]);
     expect(w.find('[data-test=accept-all]').text()).toBe('Accept all from Mara');
     await w.find('[data-test=filter-toggle]').trigger('click');
-    await w.find('[data-test=view-all]').trigger('click');
+    await overlayWrap('[data-test=view-all]').trigger('click');
     expect(w.emitted('select-view')!.slice(-1)).toEqual([[null]]);
     w.unmount();
   });
@@ -117,7 +118,7 @@ describe('ReviewPanel (RAD-258)', () => {
       props: { items: many, labels: (a: string) => ({ name: names[a] ?? a }) },
     });
     await w.find('[data-test=filter-toggle]').trigger('click');
-    const vars = w
+    const vars = overlayWrap('[data-test=view-menu]')
       .findAll('[data-test=view-author]')
       .map((el) => (el.element as HTMLElement).querySelector('.av') as HTMLElement | null)
       .filter(Boolean)

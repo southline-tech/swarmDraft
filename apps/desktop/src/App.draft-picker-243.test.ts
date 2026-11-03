@@ -6,6 +6,7 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import App from './App.vue';
 import { storedFixture } from './stored-fixture.test-helper';
 import { sessionFromDocx } from './manuscript-session';
+import { overlayWrap } from './overlay/queries';
 
 const setTitle = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock('@tauri-apps/api/core', async (importOriginal) => ({
@@ -98,7 +99,7 @@ describe('toolbar draft picker (#243)', () => {
     const { w } = await withManuscript();
     await w.find('[data-test="draft-picker"]').trigger('click');
     await settle();
-    await w.find('[data-test="draft-new"]').trigger('click');
+    await overlayWrap('[data-test="draft-new"]').trigger('click');
     await settle();
     expect(backend.createBlankManuscript).toHaveBeenCalledTimes(1);
     expect(w.find('[data-test="draft-picker"]').text()).toContain('Untitled draft');
@@ -136,7 +137,9 @@ describe('toolbar draft picker (#243)', () => {
     const { w } = await withManuscript();
     await w.find('[data-test="draft-picker"]').trigger('click');
     await settle();
-    await w.find(`[data-test="draft-item"][data-draft="${other.manuscript.id}"]`).trigger('click');
+    await overlayWrap(`[data-test="draft-item"][data-draft="${other.manuscript.id}"]`).trigger(
+      'click',
+    );
     await settle();
     expect(backend.loadManuscript).toHaveBeenCalledWith(other.manuscript.id);
     expect(w.find('[data-test="draft-picker"]').text()).toContain('Second draft');

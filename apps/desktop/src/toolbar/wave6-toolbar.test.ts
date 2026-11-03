@@ -4,6 +4,7 @@ import { Editor } from '@tiptap/core';
 import { manuscriptEditorOptions } from '@swarmdraft/editor';
 import EditorToolbar from './EditorToolbar.vue';
 import { THEME_KEY } from '../settings/prefs';
+import { overlayVisible, overlayWrap, queryInOverlay } from '../overlay/queries';
 
 vi.mock('../export/run-book-export', () => ({
   runBookExport: vi.fn(),
@@ -54,9 +55,9 @@ describe('Wave 6a toolbar (#245)', () => {
   it('export menu exposes docx, pdf, and markdown items', async () => {
     const w = mountBar();
     await w.get('[data-test="toolbar-export"]').trigger('click');
-    expect(w.get('[data-test="export-menu"]').isVisible()).toBe(true);
+    expect(overlayVisible('[data-test="export-menu"]')).toBe(true);
     for (const id of ['export-docx', 'export-pdf', 'export-md']) {
-      expect(w.find(`[data-test="${id}"]`).exists()).toBe(true);
+      expect(queryInOverlay(`[data-test="${id}"]`)).toBeTruthy();
     }
     w.unmount();
   });
@@ -65,7 +66,7 @@ describe('Wave 6a toolbar (#245)', () => {
     const { runBookExport } = await import('../export/run-book-export');
     const w = mountBar();
     await w.get('[data-test="toolbar-export"]').trigger('click');
-    const pdf = w.get('[data-test="export-pdf"]');
+    const pdf = overlayWrap('[data-test="export-pdf"]');
     expect(pdf.attributes('disabled')).toBeDefined();
     expect(pdf.text()).toContain('Coming later');
     expect(runBookExport).not.toHaveBeenCalled();

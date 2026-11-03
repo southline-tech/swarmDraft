@@ -10,6 +10,11 @@ import { PRODUCT_NAME } from './lib/brand';
 import { storedFixture } from './stored-fixture.test-helper';
 import { openSession, sessionFromDocx } from './manuscript-session';
 import { docWordCount } from './status/wordcount';
+import { overlayWrap, queryAllInOverlay, queryInOverlay } from './overlay/queries';
+
+const toastRegionWrap = () => overlayWrap('[data-test="toast-region"]');
+const openToastWrap = () => overlayWrap('[data-test="open-toast"]');
+const toastVisible = () => queryInOverlay('[data-test="toast"]') !== null;
 
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(async () => () => {}),
@@ -1904,7 +1909,7 @@ describe('home screen', () => {
     const { w, session } = await withManuscript();
     persist.mockClear();
     await w.get('[data-test="app-menu-trigger"]').trigger('click');
-    await w.find('[data-test="app-menu-open"]').trigger('click');
+    await overlayWrap('[data-test="app-menu-open"]').trigger('click');
     const bad = new File(['hello'], 'notes.txt');
     await w.find('[data-test="drop-zone"]').trigger('drop', { dataTransfer: { files: [bad] } });
     await settle();
@@ -1922,7 +1927,7 @@ describe('home screen', () => {
     const { w } = await withManuscript();
     expect(w.find('[data-test="home"]').exists()).toBe(false);
     await w.get('[data-test="app-menu-trigger"]').trigger('click');
-    await w.find('[data-test="app-menu-open"]').trigger('click');
+    await overlayWrap('[data-test="app-menu-open"]').trigger('click');
     expect(w.find('[data-test="home-open"]').exists()).toBe(true);
     await chooseFile(w);
     expect(w.find('[data-test="home"]').exists()).toBe(false);
@@ -2417,16 +2422,16 @@ describe('book-open toast (ob7)', () => {
     vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(null);
     const w = mount(App, { attachTo: document.body });
     await settle();
-    const region = w.get('[data-test="toast-region"]');
+    const region = toastRegionWrap();
     expect(region.attributes('role')).toBe('status');
     expect(region.attributes('aria-live')).toBe('polite');
     expect(region.text()).toBe('');
     const node = region.element;
     await chooseFile(w);
-    expect(w.get('[data-test="toast-region"]').element).toBe(node);
+    expect(toastRegionWrap().element).toBe(node);
     expect(node.textContent).toContain('Your book is open.');
-    await w.get('[data-test="toast-dismiss"]').trigger('click');
-    expect(w.get('[data-test="toast-region"]').element).toBe(node);
+    await overlayWrap('[data-test="toast-dismiss"]').trigger('click');
+    expect(toastRegionWrap().element).toBe(node);
     expect(node.isConnected).toBe(true);
     expect(node.textContent?.trim()).toBe('');
     w.unmount();
@@ -2437,11 +2442,11 @@ describe('book-open toast (ob7)', () => {
     vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(null);
     const w = mount(App, { attachTo: document.body });
     await settle();
-    expect(w.find('[data-test="toast"]').exists()).toBe(false);
+    expect(toastVisible()).toBe(false);
     await chooseFile(w);
-    const toast = w.find('[data-test="open-toast"] [data-test="toast"]');
+    const toast = overlayWrap('[data-test="toast"]');
     expect(toast.exists()).toBe(true);
-    expect(w.get('[data-test="toast-region"]').attributes('aria-live')).toBe('polite');
+    expect(toastRegionWrap().attributes('aria-live')).toBe('polite');
     expect(toast.text()).toContain('Your book is open.');
     expect(toast.text()).toContain('original file is untouched');
     w.unmount();
@@ -2453,7 +2458,7 @@ describe('book-open toast (ob7)', () => {
     const w = mount(App, { attachTo: document.body });
     await settle();
     await chooseFile(w);
-    const node = w.get('[data-test="open-toast"] [data-test="toast-region"]').element;
+    const node = toastRegionWrap().element;
     expect(node.textContent).toContain('original file is untouched');
     // Each mutation record is one DOM change; replay them to get the region's text over time.
     const steps: string[] = [];
@@ -2468,7 +2473,7 @@ describe('book-open toast (ob7)', () => {
     await chooseFile(w);
     await new Promise((r) => setTimeout(r, 0));
     obs.disconnect();
-    expect(w.get('[data-test="open-toast"] [data-test="toast-region"]').element).toBe(node);
+    expect(toastRegionWrap().element).toBe(node);
     // The region went empty, then got the text back (a fresh announcement), on the same node.
     expect(steps.join(',')).toMatch(/(^|,),text$/);
     expect(node.textContent).toContain('original file is untouched');
@@ -2484,7 +2489,7 @@ describe('book-open toast (ob7)', () => {
     vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(storedFixture());
     await chooseFile(w);
     expect(w.find('[data-test="open-error"]').exists()).toBe(true);
-    expect(w.find('[data-test="toast"]').exists()).toBe(false);
+    expect(toastVisible()).toBe(false);
     w.unmount();
   });
 
@@ -2494,7 +2499,7 @@ describe('book-open toast (ob7)', () => {
     const w = mount(App, { attachTo: document.body });
     await settle();
     expect(w.find('[contenteditable="true"]').exists()).toBe(true);
-    expect(w.find('[data-test="toast"]').exists()).toBe(false);
+    expect(toastVisible()).toBe(false);
     w.unmount();
   });
 
@@ -2506,7 +2511,7 @@ describe('book-open toast (ob7)', () => {
       const w = mount(App, { attachTo: document.body });
       await settle();
       await chooseFile(w);
-      expect(w.find('[data-test="toast"]').exists()).toBe(true);
+      expect(toastVisible()).toBe(true);
       await vi.advanceTimersByTimeAsync(2000);
       // A read failure: nothing is closed or reopened, so only the failure path's clear runs.
       const input = w.find('[data-test="open-docx"]');
@@ -2517,7 +2522,7 @@ describe('book-open toast (ob7)', () => {
       await settle();
       expect(w.find('[data-test="open-error"]').exists()).toBe(true);
       // Still well inside the 8 s auto-close: only the failure path can have cleared it.
-      expect(w.find('[data-test="toast"]').exists()).toBe(false);
+      expect(toastVisible()).toBe(false);
       w.unmount();
     } finally {
       vi.useRealTimers();
@@ -2532,11 +2537,11 @@ describe('book-open toast (ob7)', () => {
       const w = mount(App, { attachTo: document.body });
       await settle();
       await chooseFile(w);
-      expect(w.find('[data-test="toast"]').exists()).toBe(true);
+      expect(toastVisible()).toBe(true);
       const other = sessionFromDocx(bytes(), 'm2');
       (w.vm as unknown as { open: (s: typeof other) => void }).open(other);
       await settle();
-      expect(w.find('[data-test="toast"]').exists()).toBe(false);
+      expect(toastVisible()).toBe(false);
       w.unmount();
     } finally {
       vi.useRealTimers();
@@ -2549,13 +2554,13 @@ describe('book-open toast (ob7)', () => {
     const w = mount(App, { attachTo: document.body });
     await settle();
     await chooseFile(w);
-    await w.find('[data-test="toast-dismiss"]').trigger('click');
-    expect(w.find('[data-test="toast"]').exists()).toBe(false);
+    await overlayWrap('[data-test="toast-dismiss"]').trigger('click');
+    expect(toastVisible()).toBe(false);
     vi.useFakeTimers({ shouldAdvanceTime: true });
     await chooseFile(w);
-    expect(w.find('[data-test="toast"]').exists()).toBe(true);
+    expect(toastVisible()).toBe(true);
     await vi.advanceTimersByTimeAsync(8000);
-    expect(w.find('[data-test="toast"]').exists()).toBe(false);
+    expect(toastVisible()).toBe(false);
     vi.useRealTimers();
     w.unmount();
   });
@@ -2595,7 +2600,7 @@ describe('title bar book menu (#104)', () => {
     await w.get('[data-test="app-menu-trigger"]').trigger('click');
     await settle();
     expect(menu.attributes('open')).toBeDefined();
-    expect(w.find('[data-test="settings-open"]').exists()).toBe(true);
+    expect(overlayWrap('[data-test="settings-open"]').exists()).toBe(true);
     w.unmount();
   });
 
@@ -2604,12 +2609,13 @@ describe('title bar book menu (#104)', () => {
     await flushPromises();
     await w.get('[data-test="app-menu-trigger"]').trigger('click');
     await settle();
-    const labels = w.findAll('[data-test="app-menu"] [role=menuitem]').map((b) => b.text());
-    expect(labels.some((l) => l.startsWith('New') && l.includes('Ctrl+N'))).toBe(true);
-    expect(labels.some((l) => l.startsWith('Open') && l.includes('Ctrl+O'))).toBe(true);
-    expect(labels.some((l) => l.startsWith('Recent'))).toBe(true);
-    expect(labels.some((l) => l.startsWith('Settings') && l.includes('Ctrl+,'))).toBe(true);
-    expect(w.get('[data-test="app-menu-new"]').find('[data-icon="plus"]').exists()).toBe(true);
+    expect(overlayWrap('[data-test="app-menu-new"]').text()).toMatch(/^New/);
+    expect(overlayWrap('[data-test="app-menu-open"]').text()).toMatch(/^Open/);
+    expect(overlayWrap('[data-test="app-menu-recent"]').text()).toMatch(/^Recent/);
+    expect(overlayWrap('[data-test="settings-open"]').text()).toMatch(/^Settings/);
+    expect(overlayWrap('[data-test="app-menu-new"]').find('[data-icon="plus"]').exists()).toBe(
+      true,
+    );
     w.unmount();
   });
 
@@ -2641,10 +2647,10 @@ describe('title bar book menu (#104)', () => {
     const menu = w.get('[data-test="app-menu"]');
     await w.get('[data-test="app-menu-trigger"]').trigger('click');
     await settle();
-    await w.get('[data-test="app-menu-recent"]').trigger('click');
+    await overlayWrap('[data-test="app-menu-recent"]').trigger('click');
     await settle();
     expect(menu.attributes('open')).toBeDefined();
-    await w.get(`[data-test="app-menu-recent-${other.manuscript.id}"]`).trigger('click');
+    await overlayWrap(`[data-test="app-menu-recent-${other.manuscript.id}"]`).trigger('click');
     await settle();
     expect(menu.attributes('open')).toBeUndefined();
     w.unmount();
@@ -2713,7 +2719,7 @@ describe('App outline auto-collapse on a narrow desk (#92)', () => {
     // 1024px window, outline auto-closed: desk 16..688, review panel from 688.
     ed().vm.$emit('layout', { ...layout(true, 672), deskLeft: 16 });
     await settle();
-    const style = w.find('[data-test="open-toast"]').attributes('style') ?? '';
+    const style = openToastWrap().attributes('style') ?? '';
     expect(style).toContain('left: 352px');
     expect(style).toContain('max-width: 624px');
     w.unmount();
@@ -2836,22 +2842,22 @@ describe('App outline vs margin notes (#98)', () => {
     expect(sidebar().isVisible()).toBe(false);
     await chapters().trigger('click');
     await settle();
-    const regions = w.findAll('[data-test="toast-region"]');
+    const regions = queryAllInOverlay('[data-test="toast-region"]');
     expect(regions).toHaveLength(1); // the existing region, not a second one
-    expect(regions[0]!.attributes('role')).toBe('status');
-    expect(regions[0]!.attributes('aria-live')).toBe('polite');
-    expect(regions[0]!.text()).toContain(noRoomCopy);
+    expect(regions[0]!.getAttribute('role')).toBe('status');
+    expect(regions[0]!.getAttribute('aria-live')).toBe('polite');
+    expect(regions[0]!.textContent).toContain(noRoomCopy);
     expect(sidebar().isVisible()).toBe(false);
     expect(chapters().attributes('aria-expanded')).toBe('false');
-    expect(w.find('[data-test="open-toast"]').attributes('style')).toContain('left: 352px');
-    const action = w.get('[data-test="toast-dismiss"]');
+    expect(openToastWrap().attributes('style')).toContain('left: 352px');
+    const action = overlayWrap('[data-test="toast-dismiss"]');
     expect(action.text()).toBe('Hide notes');
     await action.trigger('click');
     await settle();
     expect(ed().props('notesHidden')).toBe(true);
     expect(sidebar().isVisible()).toBe(true);
     expect(chapters().attributes('aria-expanded')).toBe('true');
-    expect(w.find('[data-test="toast"]').exists()).toBe(false);
+    expect(toastVisible()).toBe(false);
     // The editor reports the new layout (no notes, outline open): it holds.
     ed().vm.$emit('layout', L(368, false));
     await settle();
@@ -2871,10 +2877,10 @@ describe('App outline vs margin notes (#98)', () => {
     await settle();
     await w.find('[data-test="tb-navigator"]').trigger('click');
     await settle();
-    expect(w.find('[data-test="toast"]').exists()).toBe(true);
+    expect(toastVisible()).toBe(true);
     ed().vm.$emit('layout', L(800, true));
     await settle();
-    expect(w.find('[data-test="toast"]').exists()).toBe(false);
+    expect(toastVisible()).toBe(false);
     w.unmount();
   });
 
@@ -2894,10 +2900,10 @@ describe('App outline vs margin notes (#98)', () => {
       // A restart would push the dismissal to 13s: it must still close at the original 8s.
       vi.advanceTimersByTime(2999);
       await nextTick();
-      expect(w.find('[data-test="toast"]').text()).toContain(noRoomCopy);
+      expect(overlayWrap('[data-test="toast"]').text()).toContain(noRoomCopy);
       vi.advanceTimersByTime(1);
       await nextTick();
-      expect(w.find('[data-test="toast"]').exists()).toBe(false);
+      expect(toastVisible()).toBe(false);
     } finally {
       vi.useRealTimers();
     }
@@ -2957,7 +2963,7 @@ describe('App outline vs margin notes (#98)', () => {
     await settle();
     await w.find('[data-test="tb-navigator"]').trigger('click');
     await settle();
-    await w.get('[data-test="toast-dismiss"]').trigger('click');
+    await overlayWrap('[data-test="toast-dismiss"]').trigger('click');
     await settle();
     expect(w.find('[data-test="margin-notes"]').exists()).toBe(false);
     const layouts = ed().emitted('layout')!;

@@ -11,6 +11,7 @@ import App from './App.vue';
 import type { StoredManuscript } from './backend';
 import { storedFixture } from './stored-fixture.test-helper';
 import { sessionFromDocx } from './manuscript-session';
+import { overlayWrap } from './overlay/queries';
 import { shellChromeViewportTop } from './shell-chrome';
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -162,7 +163,7 @@ describe('top chrome survives navigation (#261)', () => {
     async function pickDraft(id: string) {
       await w.find('[data-test="draft-picker"]').trigger('click');
       await settle();
-      await w.find(`[data-test="draft-item"][data-draft="${id}"]`).trigger('click');
+      await overlayWrap(`[data-test="draft-item"][data-draft="${id}"]`).trigger('click');
       await settle();
       await expectToolbarVisible(w);
       expectShellChromeInViewport(w);

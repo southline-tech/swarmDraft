@@ -144,6 +144,7 @@ import {
   type MarginNoteLayout,
 } from './review/margin-note-layout';
 import { CONTINUOUS_REVIEW_NAV, CONTINUOUS_SCROLL_ROOT } from './continuous-review-nav';
+import { reviewComposerHasFocus } from './review/review-focus-policy';
 import type { ReviewChange } from './review/review-state';
 import { SECTION_LOAD_ERROR_COPY } from './errors/map-error';
 import type { DocNode } from '@swarmdraft/schema';
@@ -866,7 +867,7 @@ function focusCommentByThreadId(threadId: string, skipEditorFocus = false) {
     : commentReviewKey(threadId);
   void nextTick(() => {
     refreshCommentAnchorDecorations();
-    focusReviewRow(rowKey);
+    if (!reviewComposerHasFocus()) focusReviewRow(rowKey);
   });
 }
 

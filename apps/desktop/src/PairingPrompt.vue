@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Global MCP pairing approval dialog (#188 ap1). One request at a time; tokens never shown.
+ * Global MCP pairing approval (#188, #269): one dialog lists all pending requests.
  */
 import { isTauri } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -9,15 +9,15 @@ import { errorLine, rawErrorText } from './errors/map-error';
 import type { Agent } from './backend';
 import { pairingApi, type PairingApi, type PairingSummary } from './pairing-client';
 import { pairingAccessChips } from './pairing-copy';
+import { pairingNameCollisionMessage } from './pairing-errors';
 import { trapTab } from './settings/focus-trap';
+import { APP_OVERLAY_LAYER } from './overlay/layer';
 import './settings/settings.css';
 
 const props = withDefaults(
   defineProps<{
     api?: PairingApi;
-    /** Active draft when pairing is approved (#244); grants that draft only. */
     contextManuscriptId?: string | null;
-    /** Test hook: subscribe to pairing-requested instead of Tauri events. */
     subscribePairingRequested?: (cb: (pairingId: string) => void) => () => void;
   }>(),
   { api: () => pairingApi, contextManuscriptId: null, subscribePairingRequested: undefined },
@@ -28,19 +28,21 @@ const emit = defineEmits<{
 }>();
 
 const queue = ref<PairingSummary[]>([]);
-const busy = ref(false);
+const busyId = ref<string | null>(null);
+const bulkBusy = ref(false);
 const inlineError = ref('');
 const dialog = ref<HTMLElement | null>(null);
-const denyButton = ref<HTMLButtonElement | null>(null);
+const denyAllButton = ref<HTMLButtonElement | null>(null);
 let opener: HTMLElement | null = null;
 let stopPairingListen = () => {};
-let showing = false;
-
-const active = () => queue.value[0] ?? null;
 
 function pairingGone(err: unknown): boolean {
   const t = rawErrorText(err).toLowerCase();
   return t.includes('not found') || t.includes('no longer pending') || t.includes('expired');
+}
+
+function mapPairingError(err: unknown): string {
+  return pairingNameCollisionMessage(err) ?? errorLine(err);
 }
 
 async function syncQueue() {
@@ -51,24 +53,11 @@ async function syncQueue() {
   }
 }
 
-async function showNext() {
-  const cur = active();
-  if (!cur || showing) return;
-  showing = true;
+async function afterQueueChange() {
   inlineError.value = '';
-  const activeEl = document.activeElement;
-  opener = activeEl instanceof HTMLElement ? activeEl : null;
-  await nextTick();
-  denyButton.value?.focus();
-}
-
-async function afterResolved() {
-  busy.value = false;
-  showing = false;
-  inlineError.value = '';
-  await syncQueue();
   if (queue.value.length) {
-    await showNext();
+    await nextTick();
+    denyAllButton.value?.focus();
     return;
   }
   if (opener?.isConnected) {
@@ -78,49 +67,91 @@ async function afterResolved() {
   opener = null;
 }
 
-async function onDenied() {
-  const cur = active();
-  if (!cur || busy.value) return;
-  busy.value = true;
+async function onDenied(id: string) {
+  if (busyId.value || bulkBusy.value) return;
+  busyId.value = id;
   inlineError.value = '';
   try {
-    await props.api.deny(cur.id);
-    await afterResolved();
+    await props.api.deny(id);
+    await syncQueue();
+    await afterQueueChange();
   } catch (e) {
     console.error('Deny pairing failed', e);
     if (pairingGone(e)) {
-      await afterResolved();
+      await syncQueue();
+      await afterQueueChange();
       return;
     }
-    inlineError.value = errorLine(e);
-    busy.value = false;
+    inlineError.value = mapPairingError(e);
+  } finally {
+    busyId.value = null;
   }
 }
 
-async function onAllowed() {
-  const cur = active();
-  if (!cur || busy.value) return;
-  busy.value = true;
+async function onAllowed(id: string) {
+  if (busyId.value || bulkBusy.value) return;
+  const row = queue.value.find((p) => p.id === id);
+  if (!row) return;
+  busyId.value = id;
   inlineError.value = '';
   try {
-    const agent = await props.api.approve(cur.id, cur.requestedScopes, props.contextManuscriptId);
+    const agent = await props.api.approve(id, row.requestedScopes, props.contextManuscriptId);
     emit('approved', agent);
-    await afterResolved();
+    await syncQueue();
+    await afterQueueChange();
   } catch (e) {
     console.error('Approve pairing failed', e);
     if (pairingGone(e)) {
-      await afterResolved();
+      await syncQueue();
+      await afterQueueChange();
       return;
     }
-    inlineError.value = errorLine(e);
-    busy.value = false;
+    inlineError.value = mapPairingError(e);
+  } finally {
+    busyId.value = null;
+  }
+}
+
+async function denyAll() {
+  if (bulkBusy.value || busyId.value || !queue.value.length) return;
+  bulkBusy.value = true;
+  inlineError.value = '';
+  const ids = queue.value.map((p) => p.id);
+  try {
+    for (const id of ids) await props.api.deny(id);
+    await syncQueue();
+    await afterQueueChange();
+  } catch (e) {
+    inlineError.value = mapPairingError(e);
+    await syncQueue();
+  } finally {
+    bulkBusy.value = false;
+  }
+}
+
+async function allowAll() {
+  if (bulkBusy.value || busyId.value || !queue.value.length) return;
+  bulkBusy.value = true;
+  inlineError.value = '';
+  try {
+    for (const row of [...queue.value]) {
+      const agent = await props.api.approve(row.id, row.requestedScopes, props.contextManuscriptId);
+      emit('approved', agent);
+    }
+    await syncQueue();
+    await afterQueueChange();
+  } catch (e) {
+    inlineError.value = mapPairingError(e);
+    await syncQueue();
+  } finally {
+    bulkBusy.value = false;
   }
 }
 
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     e.stopPropagation();
-    void onDenied();
+    void denyAll();
   } else if (dialog.value) trapTab(e, dialog.value);
 }
 
@@ -129,15 +160,23 @@ function accessChips(scopes: string[]) {
 }
 
 watch(
-  () => queue.value[0]?.id,
-  async (id) => {
-    if (id) await showNext();
+  () => queue.value.length,
+  async (n, prev) => {
+    if (n > 0 && prev === 0) {
+      const activeEl = document.activeElement;
+      opener = activeEl instanceof HTMLElement ? activeEl : null;
+      await afterQueueChange();
+    }
   },
 );
 
 onMounted(async () => {
   await syncQueue();
-  if (queue.value.length) await showNext();
+  if (queue.value.length) {
+    const activeEl = document.activeElement;
+    opener = activeEl instanceof HTMLElement ? activeEl : null;
+    await afterQueueChange();
+  }
 
   if (props.subscribePairingRequested) {
     stopPairingListen = props.subscribePairingRequested(() => {
@@ -159,67 +198,143 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="active()" class="st-dlg-scrim" data-test="pairing-scrim">
-    <div
-      ref="dialog"
-      class="st-dlg"
-      role="alertdialog"
-      aria-modal="true"
-      aria-labelledby="pair-title"
-      aria-describedby="pair-body pair-hint"
-      data-test="pairing-dialog"
-      @keydown="onKeydown"
-    >
-      <div class="pair__head">
-        <span class="pair__swatch" aria-hidden="true" :style="{ background: active()!.color }" />
+  <Teleport :to="APP_OVERLAY_LAYER">
+    <div v-if="queue.length" class="st-dlg-scrim" data-test="pairing-scrim">
+      <div
+        ref="dialog"
+        class="st-dlg pair-batch"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="pair-title"
+        aria-describedby="pair-body pair-hint"
+        data-test="pairing-dialog"
+        @keydown="onKeydown"
+      >
         <h2 id="pair-title" class="st-h2 pair__title">
-          Allow <bdi dir="auto">{{ active()!.name }}</bdi> to connect?
+          {{
+            queue.length === 1
+              ? `Allow ${queue[0]!.name} to connect?`
+              : `Allow ${queue.length} bots to connect?`
+          }}
         </h2>
-      </div>
-      <p id="pair-body" class="st-desc pair__body">
-        A bot on this computer is asking to pair over MCP. It will get a key with the access below.
-        You can revoke it later in Settings › Agents.
-      </p>
-      <div class="pair__access">
-        <span class="pair__access-label">Requested access</span>
-        <ul class="pair__chips">
-          <li v-for="chip in accessChips(active()!.requestedScopes)" :key="chip">
-            {{ chip }}
+        <p id="pair-body" class="st-desc pair__body">
+          Bots on this computer are asking to pair over MCP. Each gets a key with the access shown.
+          You can revoke keys later in Settings › Agents.
+        </p>
+        <ul class="pair__list">
+          <li
+            v-for="p in queue"
+            :key="p.id"
+            class="pair__row"
+            data-test="pairing-row"
+            :data-pairing-id="p.id"
+          >
+            <div class="pair__head">
+              <span class="pair__swatch" aria-hidden="true" :style="{ background: p.color }" />
+              <bdi class="pair__name" dir="auto">{{ p.name }}</bdi>
+            </div>
+            <ul class="pair__chips">
+              <li v-for="chip in accessChips(p.requestedScopes)" :key="chip">{{ chip }}</li>
+            </ul>
+            <div class="pair__row-actions">
+              <button
+                type="button"
+                class="st-btn"
+                :data-test="`pairing-deny-${p.id}`"
+                :disabled="!!busyId || bulkBusy"
+                @click="onDenied(p.id)"
+              >
+                Deny
+              </button>
+              <button
+                type="button"
+                class="st-btn st-btn--primary"
+                :data-test="`pairing-allow-${p.id}`"
+                :disabled="!!busyId || bulkBusy"
+                @click="onAllowed(p.id)"
+              >
+                Allow
+              </button>
+            </div>
           </li>
         </ul>
-      </div>
-      <p id="pair-hint" class="st-muted pair__hint">
-        Esc denies and dismisses. Focus returns to the app.
-      </p>
-      <p v-if="inlineError" class="pair__error" role="alert" data-test="pairing-error">
-        {{ inlineError }}
-      </p>
-      <div class="pair__actions">
-        <button
-          ref="denyButton"
-          type="button"
-          class="st-btn"
-          data-test="pairing-deny"
-          :disabled="busy"
-          @click="onDenied"
-        >
-          Deny
-        </button>
-        <button
-          type="button"
-          class="st-btn st-btn--primary"
-          data-test="pairing-allow"
-          :disabled="busy"
-          @click="onAllowed"
-        >
-          Allow
-        </button>
+        <p id="pair-hint" class="st-muted pair__hint">
+          Esc denies all pending requests. Focus returns to the app when the queue is empty.
+        </p>
+        <p v-if="inlineError" class="pair__error" role="alert" data-test="pairing-error">
+          {{ inlineError }}
+        </p>
+        <div v-if="queue.length > 1" class="pair__actions">
+          <button
+            ref="denyAllButton"
+            type="button"
+            class="st-btn"
+            data-test="pairing-deny-all"
+            :disabled="!!busyId || bulkBusy"
+            @click="denyAll()"
+          >
+            Deny all
+          </button>
+          <button
+            type="button"
+            class="st-btn st-btn--primary"
+            data-test="pairing-allow-all"
+            :disabled="!!busyId || bulkBusy"
+            @click="allowAll()"
+          >
+            Allow all
+          </button>
+        </div>
+        <div v-else class="pair__actions pair__actions--single">
+          <button
+            ref="denyAllButton"
+            type="button"
+            class="st-btn"
+            data-test="pairing-deny"
+            :disabled="!!busyId || bulkBusy"
+            @click="onDenied(queue[0]!.id)"
+          >
+            Deny
+          </button>
+          <button
+            type="button"
+            class="st-btn st-btn--primary"
+            data-test="pairing-allow"
+            :disabled="!!busyId || bulkBusy"
+            @click="onAllowed(queue[0]!.id)"
+          >
+            Allow
+          </button>
+        </div>
       </div>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <style scoped>
+.pair-batch {
+  max-width: 28rem;
+}
+.pair__title {
+  margin: 0 0 var(--ct-space-2);
+}
+.pair__body {
+  margin: 0;
+}
+.pair__list {
+  margin: var(--ct-space-4) 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-space-4);
+}
+.pair__row {
+  padding: var(--ct-space-3);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-md);
+  background: var(--ct-bg);
+}
 .pair__head {
   display: flex;
   align-items: center;
@@ -233,26 +348,14 @@ onBeforeUnmount(() => {
   border-radius: var(--ct-radius-full);
   border: 1px solid var(--ct-border-strong);
 }
-.pair__title {
-  margin: 0;
-}
-.pair__body {
-  margin: 0;
-}
-.pair__access {
-  margin-top: var(--ct-space-4);
-}
-.pair__access-label {
-  display: block;
-  margin-bottom: var(--ct-space-2);
-  font-size: var(--ct-text-sm);
+.pair__name {
   font-weight: var(--ct-weight-semibold);
 }
 .pair__chips {
   display: flex;
   flex-wrap: wrap;
   gap: var(--ct-space-2);
-  margin: 0;
+  margin: 0 0 var(--ct-space-3);
   padding: 0;
   list-style: none;
 }
@@ -260,9 +363,13 @@ onBeforeUnmount(() => {
   padding: var(--ct-space-1) var(--ct-space-3);
   border: 1px solid var(--ct-border-strong);
   border-radius: var(--ct-radius-full);
-  background: var(--ct-bg);
+  background: var(--ct-surface);
   font-size: var(--ct-text-sm);
-  font-weight: var(--ct-weight-semibold);
+}
+.pair__row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ct-space-2);
 }
 .pair__hint {
   margin: var(--ct-space-4) 0 0;
@@ -278,5 +385,8 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   gap: var(--ct-space-3);
   margin-top: var(--ct-space-6);
+}
+.pair__actions--single {
+  margin-top: var(--ct-space-4);
 }
 </style>

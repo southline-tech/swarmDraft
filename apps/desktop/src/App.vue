@@ -70,6 +70,7 @@ import AppToast from './shells/AppToast.vue';
 import OpeningProgress from './shells/OpeningProgress.vue';
 import ErrorCard from './shells/ErrorCard.vue';
 import PairingPrompt from './PairingPrompt.vue';
+import OverlayAnchoredMenu from './overlay/OverlayAnchoredMenu.vue';
 import {
   OPENING_REVEAL_MS,
   errorCardIcon,
@@ -550,12 +551,17 @@ async function refreshRecentBooks() {
   await refreshDraftRows();
 }
 const appMenu = ref<HTMLDetailsElement | null>(null);
+const bookMenuOpen = ref(false);
+const bookMenuTrigger = shallowRef<HTMLElement | null>(null);
+const recentTrigger = shallowRef<HTMLButtonElement | null>(null);
 function closeBookMenu() {
   appMenu.value?.removeAttribute('open');
+  bookMenuOpen.value = false;
   recentOpen.value = false;
 }
 function onAppMenuToggle(e: Event) {
   const open = (e.target as HTMLDetailsElement).open;
+  bookMenuOpen.value = open;
   if (open) void refreshRecentBooks();
   else recentOpen.value = false;
 }
@@ -1143,6 +1149,7 @@ defineExpose({ open, closeSession });
             @toggle="onAppMenuToggle"
           >
             <summary
+              ref="bookMenuTrigger"
               class="topbar__trigger"
               data-test="app-menu-trigger"
               aria-label="Book menu"
@@ -1152,6 +1159,12 @@ defineExpose({ open, closeSession });
               <AppIcon name="menu" class="topbar__hamburger" />
               <AppLogo :size="24" />
             </summary>
+          </details>
+          <OverlayAnchoredMenu
+            :open="bookMenuOpen"
+            :trigger="bookMenuTrigger"
+            placement="bottom-start"
+          >
             <div class="topbar__menu-list sh-menu" role="menu">
               <button
                 type="button"
@@ -1195,6 +1208,7 @@ defineExpose({ open, closeSession });
                 @mouseleave="recentOpen = false"
               >
                 <button
+                  ref="recentTrigger"
                   type="button"
                   class="sh-mi"
                   role="menuitem"
@@ -1209,25 +1223,6 @@ defineExpose({ open, closeSession });
                   /></span>
                   Recent<span class="sh-k">›</span>
                 </button>
-                <div
-                  v-if="recentOpen && recentBooks.length"
-                  class="topbar__menu-list sh-menu sh-sub topbar__submenu"
-                  role="menu"
-                  aria-label="Recent books"
-                  @click.stop
-                >
-                  <button
-                    v-for="m in recentBooks"
-                    :key="m.id"
-                    type="button"
-                    class="sh-mi"
-                    role="menuitem"
-                    :data-test="`app-menu-recent-${m.id}`"
-                    @click="openRecentBook(m.id)"
-                  >
-                    {{ m.title || 'Untitled' }}
-                  </button>
-                </div>
               </div>
               <div class="sh-sep" role="separator" />
               <button
@@ -1287,7 +1282,31 @@ defineExpose({ open, closeSession });
                 Quit<span class="sh-k">{{ appMenuShortcuts.quit }}</span>
               </button>
             </div>
-          </details>
+          </OverlayAnchoredMenu>
+          <OverlayAnchoredMenu
+            :open="bookMenuOpen && recentOpen && recentBooks.length > 0"
+            :trigger="recentTrigger"
+            placement="right-start"
+          >
+            <div
+              class="topbar__menu-list sh-menu sh-sub topbar__submenu"
+              role="menu"
+              aria-label="Recent books"
+              @click.stop
+            >
+              <button
+                v-for="m in recentBooks"
+                :key="m.id"
+                type="button"
+                class="sh-mi"
+                role="menuitem"
+                :data-test="`app-menu-recent-${m.id}`"
+                @click="openRecentBook(m.id)"
+              >
+                {{ m.title || 'Untitled' }}
+              </button>
+            </div>
+          </OverlayAnchoredMenu>
           <span class="topbar__brand">
             <span class="topbar__name">{{
               session && !choosingBook ? session.title : PRODUCT_NAME
@@ -1411,17 +1430,19 @@ defineExpose({ open, closeSession });
         :save-copy="saveCopyOfOpen"
       />
       <!-- Always mounted so the live region exists before its text (#79). -->
-      <div class="open-toast" data-test="open-toast" :style="toastStyle ?? undefined">
-        <!-- #98: the no-room cue shares this one polite region with the open-book toast. -->
-        <AppToast
-          :open="(!!openToast || noRoomToast) && !!session"
-          :lead="noRoomToast ? undefined : 'Your book is open.'"
-          :message="noRoomToast ? NO_ROOM_COPY : openToast"
-          :action="noRoomToast ? 'Hide notes' : undefined"
-          :icon="noRoomToast ? 'alert' : 'check'"
-          @dismiss="noRoomToast ? hideNotesForOutline() : dismissToast()"
-        />
-      </div>
+      <Teleport to="#app-overlay-layer">
+        <div class="open-toast" data-test="open-toast" :style="toastStyle ?? undefined">
+          <!-- #98: the no-room cue shares this one polite region with the open-book toast. -->
+          <AppToast
+            :open="(!!openToast || noRoomToast) && !!session"
+            :lead="noRoomToast ? undefined : 'Your book is open.'"
+            :message="noRoomToast ? NO_ROOM_COPY : openToast"
+            :action="noRoomToast ? 'Hide notes' : undefined"
+            :icon="noRoomToast ? 'alert' : 'check'"
+            @dismiss="noRoomToast ? hideNotesForOutline() : dismissToast()"
+          />
+        </div>
+      </Teleport>
       <HomeScreen
         v-if="(!session || choosingBook) && !openingVisible && !openingError"
         ref="home"
@@ -1586,8 +1607,9 @@ defineExpose({ open, closeSession });
   position: fixed;
   bottom: var(--ct-space-12);
   left: 50%;
-  z-index: 40;
+  z-index: var(--ct-z-toast);
   transform: translateX(-50%);
+  pointer-events: auto;
 }
 .opening-shell {
   flex: 1;
@@ -1621,7 +1643,7 @@ body {
 }
 .shell__chrome {
   position: relative;
-  z-index: 40;
+  z-index: var(--ct-z-chrome);
   flex: none;
   min-width: 0;
   background: var(--ct-surface);
@@ -1737,7 +1759,7 @@ body {
 .topbar__menu-list.sh-menu {
   position: absolute;
   left: 0;
-  z-index: 20;
+  z-index: var(--ct-z-flyout);
   width: 240px;
   white-space: nowrap;
 }

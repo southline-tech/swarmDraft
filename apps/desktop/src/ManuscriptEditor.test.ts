@@ -4,9 +4,11 @@ import { flushPromises, mount } from '@vue/test-utils';
 import ManuscriptEditor from './ManuscriptEditor.vue';
 import { SAMPLE_DOC } from './fixtures/sample';
 
+import { overlayWrap, queryAllInOverlay } from './overlay/queries';
+
 async function pickReviewViewAuthor(w: ReturnType<typeof mount>, authorIndex: number) {
   await w.find('[data-test="filter-toggle"]').trigger('click');
-  await w.findAll('[data-test="view-author"]')[authorIndex]!.trigger('click');
+  await queryAllInOverlay('[data-test="view-author"]')[authorIndex]!.click();
   await flushPromises();
 }
 
@@ -607,7 +609,7 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     expect(w.find('.tiptap .suggestion-filter-hidden-insert').exists()).toBe(true);
 
     await w.find('[data-test="filter-toggle"]').trigger('click');
-    await w.find('[data-test="view-all"]').trigger('click');
+    await overlayWrap('[data-test="view-all"]').trigger('click');
     await flushPromises();
     expect(suggesters()).toHaveLength(2);
     expect(hidden()).toHaveLength(0);
@@ -748,7 +750,9 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     await gutter.trigger('click');
     await flushPromises();
     await w.find('[data-test="filter-toggle"]').trigger('click');
-    expect(w.find('[data-test="view-author"][data-author="agent:b"]').classes()).toContain('sel');
+    expect(overlayWrap('[data-test="view-author"][data-author="agent:b"]').classes()).toContain(
+      'sel',
+    );
     w.unmount();
   });
 

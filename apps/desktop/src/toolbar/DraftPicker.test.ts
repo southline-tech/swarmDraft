@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import DraftPicker from './DraftPicker.vue';
+import { overlayWrap } from '../overlay/queries';
 
 describe('DraftPicker (#243)', () => {
   it('lists drafts as menuitemradio with the current draft marked', async () => {
@@ -17,7 +18,7 @@ describe('DraftPicker (#243)', () => {
     });
     await w.find('[data-test="draft-picker"]').trigger('click');
     await flushPromises();
-    const items = w.findAll('[data-test="draft-item"]');
+    const items = overlayWrap('[data-test="draft-menu"]').findAll('[data-test="draft-item"]');
     expect(items).toHaveLength(2);
     expect(items[0]!.attributes('aria-checked')).toBe('true');
     expect(items[1]!.attributes('aria-checked')).toBe('false');
@@ -38,7 +39,7 @@ describe('DraftPicker (#243)', () => {
       attachTo: document.body,
     });
     await w.find('[data-test="draft-picker"]').trigger('click');
-    await w.find('[data-test="draft-item"][data-draft="b"]').trigger('click');
+    await overlayWrap('[data-test="draft-item"][data-draft="b"]').trigger('click');
     expect(w.emitted('select')).toEqual([['b']]);
     w.unmount();
   });
