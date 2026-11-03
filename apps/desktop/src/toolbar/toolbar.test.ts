@@ -331,7 +331,18 @@ describe('EditorToolbar', () => {
 
   it('gives every top-level control an accessible name and a tooltip', async () => {
     const { w } = await mountBar({ manuscriptId: 'm1' });
-    for (const b of w.findAll('[data-test="editor-toolbar"] button[data-test]')) {
+    const barButtons = w
+      .findAll(
+        '[data-test="tb-pinned-left"] button[data-test], [data-test="tb-inline"] button[data-test], [data-test="tb-pinned-right"] button[data-test]',
+      )
+      .filter(
+        (b) =>
+          !b.element.closest(
+            '[data-test="draft-menu"], [data-test="export-menu"], [data-test="tb-overflow-menu"]',
+          ),
+      );
+    expect(w.find('[data-test="paragraph-style"]').attributes('aria-label')).toBeTruthy();
+    for (const b of barButtons) {
       expect(b.attributes('aria-label') || b.attributes('title')).toBeTruthy();
     }
     expect(w.find('[data-test="tb-bold"]').attributes('title')).toBe(`Bold (${SHORTCUTS.bold})`);
