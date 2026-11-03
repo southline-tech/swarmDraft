@@ -79,6 +79,44 @@ describe('ManuscriptEditor', () => {
     w.unmount();
   });
 
+  it('shows title-page track changes in the review rail when book-wide aggregate is empty (#265)', async () => {
+    const rail = document.createElement('div');
+    rail.id = 'continuous-review-rail';
+    document.body.appendChild(rail);
+    const content = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              marks: [
+                { type: 'suggestion_insert', attrs: { id: 'tp1', author: 'brett', ts: 't' } },
+              ],
+              text: 'Harbor',
+            },
+          ],
+        },
+      ],
+    };
+    const w = mount(ManuscriptEditor, {
+      props: {
+        content,
+        sectionId: 'title-page',
+        reviewTarget: '#continuous-review-rail',
+        bookChanges: [],
+      },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    const items = document.querySelectorAll('#continuous-review-rail [data-test=item]');
+    expect(items).toHaveLength(1);
+    expect(items[0]!.querySelector('[data-test=ins]')?.textContent).toBe('Harbor');
+    w.unmount();
+    rail.remove();
+  });
+
   it('shows icon-card empty states when there is nothing to review and no comments (ob8)', async () => {
     const plain = {
       type: 'doc',

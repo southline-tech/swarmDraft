@@ -357,6 +357,63 @@ describe('ReviewPanel (RAD-258)', () => {
     w.unmount();
   });
 
+  it('ReviewMixedCard lays out agent name, note, and Comment pill separately (#262)', () => {
+    const css = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), 'ReviewMixedCard.vue'),
+      'utf8',
+    );
+    expect(css).toMatch(/\.who\s*\{[^}]*display:\s*flex/s);
+    const labels = () => ({ name: 'Line', note: '(removed)', agent: true });
+    const w = mount(ReviewPanel, {
+      props: {
+        items: [],
+        listItems: [
+          {
+            kind: 'suggestion',
+            key: 'agent:a\u0000s1',
+            from: 0,
+            change: {
+              key: 'agent:a\u0000s1',
+              id: 's1',
+              author: 'agent:a',
+              ins: 'word',
+              targets: [{ kind: 'suggestion_insert', id: 's1' }],
+            },
+          },
+          {
+            kind: 'comment',
+            key: 'title\u0002comment:th1',
+            from: 1,
+            thread: {
+              id: 'th1',
+              anchorText: 'Line',
+              order: 0,
+              orphan: 'none' as const,
+              resolved: false,
+              comments: [
+                {
+                  id: 'th1',
+                  threadId: 'th1',
+                  body: 'Fix tone',
+                  authorKind: 'agent' as const,
+                  authorId: 'a',
+                  authorName: 'Line',
+                  createdAt: '2026-01-01T00:00:00Z',
+                },
+              ],
+            },
+          },
+        ],
+        labels,
+      },
+    });
+    const suggWho = w.find('[data-test=item] .who');
+    expect(suggWho.find('[data-test=agent-name]').text()).toBe('Line');
+    expect(suggWho.find('[data-test=agent-note]').text()).toBe('(removed)');
+    expect(w.find('[data-test=review-item] .comment-pill').text()).toBe('Comment');
+    w.unmount();
+  });
+
   it('outdated cards are muted with Dismiss only (#179)', async () => {
     const outdatedItems: SuggestionItem[] = [
       {

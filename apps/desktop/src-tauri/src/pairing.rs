@@ -1,6 +1,8 @@
 //! MCP agent pairing (#188): pending requests approved in-app, token delivered once via poll.
 
-use crate::agents::{hash_token, insert_agent, insert_token, normalize_scopes, Agent, NewToken};
+use crate::agents::{
+    hash_token, insert_token, normalize_scopes, revive_or_insert_agent, Agent, NewToken,
+};
 use crate::storage::{StorageError, Store};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
@@ -354,7 +356,7 @@ impl Store {
                     approved = req_scopes;
                 }
             }
-            let agent = insert_agent(&tx, &name, &color)?;
+            let agent = revive_or_insert_agent(&tx, &name, &color)?;
             if let Some(mid) = grant_manuscript_id {
                 Store::grant_agent_manuscript_on_conn(&tx, &agent.id, mid)?;
             }
@@ -532,7 +534,57 @@ mod tests {
             .filter(|a| a.name.eq_ignore_ascii_case("line editor"))
             .collect();
         assert_eq!(editors.len(), 1);
-        assert_ne!(editors[0].id, retired.id);
+        assert_eq!(editors[0].id, retired.id);
+    }
+
+    #[test]
+    fn re_pair_revives_revoked_agent_for_open_comments() {
+        use crate::manuscripts::{Author, Comment};
+
+        let (_t, s) = store();
+        let line = s.create_agent("Line", "#3366ff").unwrap();
+        let (m, secs) = s
+            .import_manuscript(
+                "Harbor",
+                &[crate::manuscripts::ImportSection {
+                    id: Some("c1".into()),
+                    parent_id: None,
+                    kind: "chapter".into(),
+                    title: "One".into(),
+                    doc: serde_json::json!({"type":"doc","content":[{"type":"paragraph","attrs":{"style":"body"},
+                        "content":[{"type":"text","text":"Text."}]}]}),
+                }],
+            )
+            .unwrap();
+        let sid = secs[0].id.clone();
+        s.insert_comment(
+            &m.id,
+            &Comment {
+                id: "th1".into(),
+                section_id: sid.clone(),
+                block_id: None,
+                quote: Some("Text".into()),
+                body: "Note".into(),
+                thread_id: None,
+                author: Author {
+                    kind: "agent".into(),
+                    id: line.id.clone(),
+                    name: line.name.clone(),
+                },
+                created_at: "2026-01-01T00:00:00.000Z".into(),
+                resolved_at: None,
+            },
+        )
+        .unwrap();
+        s.revoke_agent(&line.id).unwrap();
+        let r = s.request_pairing("Line", Some("#112233"), None).unwrap();
+        let (agent, _) = s.approve_pairing(&r.pairing_id, None, None).unwrap();
+        assert_eq!(agent.id, line.id);
+        assert!(agent.revoked_at.is_none());
+        let listed = s.list_agents().unwrap();
+        assert_eq!(listed.iter().filter(|a| a.name.eq_ignore_ascii_case("line")).count(), 1);
+        let comments = s.open_comments(&sid).unwrap();
+        assert_eq!(comments[0].author.id, line.id);
     }
 
     #[test]

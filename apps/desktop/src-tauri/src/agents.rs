@@ -220,22 +220,16 @@ fn name_key(name: &str) -> String {
 
 const TOKEN_COLS: &str = "id, agent_id, prefix, scopes, created_at, last_used_at, revoked_at";
 
-/// Insert an agent row on an open connection (used by pairing approve in one transaction).
-pub(crate) fn insert_agent(
+fn validate_new_agent_name(
     c: &rusqlite::Connection,
     name: &str,
-    color: &str,
-) -> Result<Agent, StorageError> {
+) -> Result<(String, String), StorageError> {
     let name = clean_name(name);
     let name = name.as_str();
     if name.is_empty() || name.chars().count() > 64 {
         return Err(StorageError::Invalid("name must be 1-64 characters".into()));
     }
     let key = name_key(name);
-    if !valid_color(color) {
-        return Err(StorageError::Invalid("color must look like #rrggbb".into()));
-    }
-    let id = new_id();
     let user_display_name: Option<String> = c
         .query_row(
             "SELECT value FROM app_meta WHERE key = ?1",
@@ -260,6 +254,21 @@ pub(crate) fn insert_agent(
             "an agent named \"{name}\" already exists; choose another name"
         )));
     }
+    Ok((name.to_string(), key))
+}
+
+/// Insert an agent row on an open connection (used by pairing approve in one transaction).
+pub(crate) fn insert_agent(
+    c: &rusqlite::Connection,
+    name: &str,
+    color: &str,
+) -> Result<Agent, StorageError> {
+    let (name, _key) = validate_new_agent_name(c, name)?;
+    let name = name.as_str();
+    if !valid_color(color) {
+        return Err(StorageError::Invalid("color must look like #rrggbb".into()));
+    }
+    let id = new_id();
     let has_primary = c
         .query_row(
             "SELECT 1 FROM agents WHERE is_primary = 1 AND revoked_at IS NULL LIMIT 1",
@@ -281,6 +290,49 @@ pub(crate) fn insert_agent(
         [&id],
         row_agent,
     )?)
+}
+
+/// Re-pairing: reuse a revoked agent with the same [`name_key`] when one exists (#262).
+pub(crate) fn revive_or_insert_agent(
+    c: &rusqlite::Connection,
+    name: &str,
+    color: &str,
+) -> Result<Agent, StorageError> {
+    let (name, key) = validate_new_agent_name(c, name)?;
+    let name = name.as_str();
+    if !valid_color(color) {
+        return Err(StorageError::Invalid("color must look like #rrggbb".into()));
+    }
+    let revoked_id: Option<String> = {
+        let mut st = c.prepare(
+            "SELECT id, name FROM agents WHERE revoked_at IS NOT NULL ORDER BY created_at DESC, id",
+        )?;
+        let rows = st
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter()
+            .find(|(_, n)| name_key(n) == key)
+            .map(|(id, _)| id)
+    };
+    if let Some(id) = revoked_id {
+        #[cfg(debug_assertions)]
+        eprintln!("[agents] pairing: revived agent id={id} name={name:?}");
+        c.execute(
+            &format!(
+                "UPDATE agents SET revoked_at = NULL, name = ?2, color = ?3 WHERE id = ?1"
+            ),
+            params![id, name, color],
+        )?;
+        return c.query_row(
+            &format!("SELECT {AGENT_COLS} FROM agents WHERE id = ?1"),
+            [&id],
+            row_agent,
+        )
+        .map_err(StorageError::from);
+    }
+    #[cfg(debug_assertions)]
+    eprintln!("[agents] pairing: inserted new agent name={name:?}");
+    insert_agent(c, name, color)
 }
 
 /// Mint a token on an open connection (plaintext returned once; hash stored).

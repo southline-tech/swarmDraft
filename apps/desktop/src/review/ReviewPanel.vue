@@ -1049,7 +1049,6 @@ button.secondary {
   border-left-color: var(--ct-text-muted);
   background: color-mix(in srgb, var(--ct-surface-raised) 88%, var(--ct-bg));
 }
-.card.outdated .who,
 .card.outdated .q,
 .card.outdated .format {
   color: var(--ct-text-muted);
@@ -1082,12 +1081,6 @@ button.secondary {
   border-left-color: var(--ct-suggester);
   background: color-mix(in srgb, var(--ct-accent) 12%, var(--ct-selected-bg));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ct-accent) 35%, transparent);
-}
-.who {
-  display: flex;
-  align-items: center;
-  gap: var(--ct-space-2);
-  font-weight: var(--ct-weight-semibold);
 }
 .card .format {
   margin: var(--ct-space-2) 0 var(--ct-space-2);
