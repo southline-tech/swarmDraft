@@ -53,7 +53,11 @@ pub struct Manuscript {
     pub created_at: String,
     pub numbering_style: String,
     pub book_author: Option<String>,
+    pub last_opened_at: Option<String>,
 }
+
+/// `app_meta` key for the manuscript id the writer last opened (#280).
+pub(crate) const LAST_ACTIVE_MANUSCRIPT_KEY: &str = "last_active_manuscript_id";
 
 const NUMBERING_STYLES: [&str; 4] = [
     "chapter_arabic",
@@ -72,10 +76,11 @@ fn row_manuscript(r: &rusqlite::Row<'_>) -> rusqlite::Result<Manuscript> {
         created_at: r.get(2)?,
         numbering_style: r.get(3)?,
         book_author: r.get(4)?,
+        last_opened_at: r.get(5)?,
     })
 }
 
-const MANUSCRIPT_COLS: &str = "id, title, created_at, numbering_style, book_author";
+const MANUSCRIPT_COLS: &str = "id, title, created_at, numbering_style, book_author, last_opened_at";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -200,6 +205,34 @@ pub fn new_id() -> String {
 
 pub fn section_doc_id(manuscript_id: &str, section_id: &str) -> String {
     format!("manuscript/{manuscript_id}/section/{section_id}")
+}
+
+fn manuscript_id_by_last_opened(
+    c: &rusqlite::Connection,
+) -> Result<Option<String>, rusqlite::Error> {
+    c.query_row(
+        "SELECT id FROM manuscripts
+         ORDER BY last_opened_at DESC NULLS LAST, created_at DESC, rowid DESC
+         LIMIT 1",
+        [],
+        |r| r.get(0),
+    )
+    .optional()
+}
+
+fn most_recently_modified_manuscript_id(
+    c: &rusqlite::Connection,
+) -> Result<Option<String>, rusqlite::Error> {
+    c.query_row(
+        "SELECT s.manuscript_id FROM doc_updates u
+         INNER JOIN sections s ON s.doc_id = u.doc_id
+         GROUP BY s.manuscript_id
+         ORDER BY MAX(u.seq) DESC, s.manuscript_id DESC
+         LIMIT 1",
+        [],
+        |r| r.get(0),
+    )
+    .optional()
 }
 
 fn row_section(r: &rusqlite::Row) -> rusqlite::Result<Section> {
@@ -705,6 +738,7 @@ impl Store {
         manuscript_id: &str,
         mut progress: Option<&mut crate::opening_progress::Callback<'_>>,
     ) -> Result<StoredManuscript, StorageError> {
+        self.touch_last_opened(manuscript_id)?;
         let manuscript = self.get_manuscript(manuscript_id)?;
         let title = manuscript.title.clone();
         // Read the cursor first: anything written after it is replayed by `updates_since`
@@ -783,7 +817,7 @@ impl Store {
         })
     }
 
-    /// The most recently created manuscript, for reopening at startup.
+    /// The manuscript to reopen at startup (#280): last opened, with fallbacks when that row is gone.
     pub fn latest_manuscript(&self) -> Result<Option<StoredManuscript>, StorageError> {
         self.latest_manuscript_with_progress(None)
     }
@@ -792,16 +826,63 @@ impl Store {
         &self,
         progress: Option<&mut crate::opening_progress::Callback<'_>>,
     ) -> Result<Option<StoredManuscript>, StorageError> {
-        let id: Option<String> = self.with_conn(|c| {
-            Ok(c.query_row(
-                "SELECT id FROM manuscripts ORDER BY created_at DESC, rowid DESC LIMIT 1",
-                [],
-                |r| r.get(0),
-            )
-            .optional()?)
-        })?;
+        let id = self.resume_manuscript_id()?;
         id.map(|id| self.load_manuscript_with_progress(&id, progress))
             .transpose()
+    }
+
+    /// Which stored manuscript should reopen, without loading section bodies or updating stamps.
+    pub fn peek_resume_manuscript(&self) -> Result<Option<Manuscript>, StorageError> {
+        Ok(match self.resume_manuscript_id()? {
+            Some(id) => Some(self.get_manuscript(&id)?),
+            None => None,
+        })
+    }
+
+    pub fn resume_manuscript_id(&self) -> Result<Option<String>, StorageError> {
+        self.with_conn(|c| {
+            let preferred: Option<String> = c
+                .query_row(
+                    "SELECT value FROM app_meta WHERE key = ?1",
+                    params![LAST_ACTIVE_MANUSCRIPT_KEY],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(id) = preferred {
+                let exists = c
+                    .query_row(
+                        "SELECT 1 FROM manuscripts WHERE id = ?1",
+                        params![&id],
+                        |_| Ok(true),
+                    )
+                    .optional()?
+                    .is_some();
+                if exists {
+                    return Ok(Some(id));
+                }
+                return Ok(most_recently_modified_manuscript_id(c)?);
+            }
+            Ok(manuscript_id_by_last_opened(c)?)
+        })
+    }
+
+    pub fn touch_last_opened(&self, manuscript_id: &str) -> Result<(), StorageError> {
+        self.with_conn(|c| {
+            let n = c.execute(
+                &format!("UPDATE manuscripts SET last_opened_at = {NOW} WHERE id = ?1"),
+                params![manuscript_id],
+            )?;
+            if n == 0 {
+                return Err(StorageError::NotFound(format!(
+                    "manuscript {manuscript_id}"
+                )));
+            }
+            c.execute(
+                "INSERT OR REPLACE INTO app_meta (key, value) VALUES (?1, ?2)",
+                params![LAST_ACTIVE_MANUSCRIPT_KEY, manuscript_id],
+            )?;
+            Ok(())
+        })
     }
 
     /// Save an editor update (Yjs v1) to a section. The update is applied to the stored doc
@@ -1685,6 +1766,149 @@ mod tests {
         assert_eq!(sections[0].title, "Title page");
         assert_eq!(sections[1].kind, "chapter");
         assert_eq!(sections[1].title, "New chapter");
+    }
+
+    #[test]
+    fn resume_prefers_last_opened_over_newer_created() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = Store::open(tmp.path()).unwrap();
+        s.with_conn(|c| {
+            c.execute(
+                "INSERT INTO manuscripts (id, title, created_at, numbering_style, book_author, last_opened_at)
+                 VALUES ('old', 'Older opened', '2020-01-01T00:00:00Z', 'chapter_arabic', NULL, '2026-02-01T00:00:00Z')",
+                [],
+            )?;
+            c.execute(
+                "INSERT INTO manuscripts (id, title, created_at, numbering_style, book_author, last_opened_at)
+                 VALUES ('new', 'Newer created', '2026-06-01T00:00:00Z', 'chapter_arabic', NULL, NULL)",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(s.resume_manuscript_id().unwrap().as_deref(), Some("old"));
+        let latest = s.latest_manuscript().unwrap().unwrap();
+        assert_eq!(latest.manuscript.id, "old");
+    }
+
+    #[test]
+    fn load_stamps_last_opened_on_new_import_and_switch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = Store::open(tmp.path()).unwrap();
+        let a = s.create_manuscript("Alpha").unwrap();
+        let b = s.create_manuscript("Beta").unwrap();
+        assert!(a.last_opened_at.is_none());
+        s.load_manuscript(&a.id).unwrap();
+        assert!(s.get_manuscript(&a.id).unwrap().last_opened_at.is_some());
+        s.load_manuscript(&b.id).unwrap();
+        assert_eq!(
+            s.resume_manuscript_id().unwrap().as_deref(),
+            Some(b.id.as_str())
+        );
+        let pm = serde_json::json!({"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Hi."}]}]});
+        let (m, _) = s
+            .import_manuscript(
+                "Imported",
+                &[ImportSection {
+                    id: Some("c1".into()),
+                    parent_id: None,
+                    kind: "chapter".into(),
+                    title: "One".into(),
+                    doc: pm,
+                }],
+            )
+            .unwrap();
+        s.load_manuscript(&m.id).unwrap();
+        assert_eq!(
+            s.resume_manuscript_id().unwrap().as_deref(),
+            Some(m.id.as_str())
+        );
+    }
+
+    #[test]
+    fn deleted_last_active_falls_back_to_most_recently_modified() {
+        use yrs::updates::decoder::Decode;
+        use yrs::{ReadTxn, Text, Transact, Update, XmlFragment, XmlOut};
+        let tmp = tempfile::tempdir().unwrap();
+        let s = Store::open(tmp.path()).unwrap();
+        let (a, a_sec) = {
+            let (m, secs) = s
+                .import_manuscript("A", &[ImportSection {
+                    id: Some("a1".into()),
+                    parent_id: None,
+                    kind: "chapter".into(),
+                    title: "A1".into(),
+                    doc: serde_json::json!({"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"A"}]}]}),
+                }])
+                .unwrap();
+            (m, secs[0].clone())
+        };
+        let (b, b_sec) = {
+            let (m, secs) = s
+                .import_manuscript("B", &[ImportSection {
+                    id: Some("b1".into()),
+                    parent_id: None,
+                    kind: "chapter".into(),
+                    title: "B1".into(),
+                    doc: serde_json::json!({"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"B"}]}]}),
+                }])
+                .unwrap();
+            (m, secs[0].clone())
+        };
+        let loaded = s.load_manuscript(&b.id).unwrap();
+        let doc = crate::content::new_doc();
+        doc.transact_mut()
+            .apply_update(Update::decode_v1(&loaded.sections[0].state).unwrap())
+            .unwrap();
+        let before = doc.transact().state_vector();
+        let frag = doc.get_or_insert_xml_fragment(crate::content::FRAGMENT);
+        let mut txn = doc.transact_mut();
+        let Some(XmlOut::Element(p)) = frag.get(&txn, 0) else {
+            panic!("no paragraph")
+        };
+        let Some(XmlOut::Text(t)) = p.get(&txn, 0) else {
+            panic!("no text")
+        };
+        t.insert(&mut txn, 0, "Edited ");
+        drop(txn);
+        let u = doc.transact().encode_state_as_update_v1(&before);
+        s.apply_section_update(&b.id, &b_sec.id, &u).unwrap();
+        s.touch_last_opened(&a.id).unwrap();
+        s.with_conn(|c| {
+            c.execute(
+                "DELETE FROM doc_updates WHERE doc_id = ?1",
+                params![a_sec.doc_id],
+            )?;
+            c.execute(
+                "DELETE FROM sections WHERE manuscript_id = ?1",
+                params![a.id],
+            )?;
+            c.execute("DELETE FROM manuscripts WHERE id = ?1", params![a.id])?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            s.resume_manuscript_id().unwrap().as_deref(),
+            Some(b.id.as_str())
+        );
+    }
+
+    #[test]
+    fn peek_resume_matches_resume_candidate_without_loading() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = Store::open(tmp.path()).unwrap();
+        s.with_conn(|c| {
+            c.execute(
+                "INSERT INTO manuscripts (id, title, created_at, numbering_style, book_author, last_opened_at)
+                 VALUES ('x', 'Peek title', '2020-01-01T00:00:00Z', 'chapter_arabic', NULL, '2026-02-01T00:00:00Z')",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        let peek = s.peek_resume_manuscript().unwrap().unwrap();
+        assert_eq!(peek.title, "Peek title");
+        assert_eq!(peek.last_opened_at.as_deref(), Some("2026-02-01T00:00:00Z"));
     }
 
     #[test]

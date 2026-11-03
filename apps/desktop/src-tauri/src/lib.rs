@@ -540,7 +540,15 @@ async fn manuscript_import_json(
     .await
 }
 
-/// The most recently created manuscript, if any.
+/// Resume title/id for the opening shell before the full load runs (#280).
+#[tauri::command]
+async fn manuscript_peek_resume(
+    store: tauri::State<'_, storage::Store>,
+) -> Result<Option<manuscripts::Manuscript>, String> {
+    blocking(&store, |s| s.peek_resume_manuscript()).await
+}
+
+/// The manuscript the writer last had open, if any.
 #[tauri::command]
 async fn manuscript_open_latest(
     app: tauri::AppHandle,
@@ -569,6 +577,14 @@ async fn manuscript_create_blank(
         s.create_blank_manuscript_with_progress(Some(&mut emit))
     })
     .await
+}
+
+#[tauri::command]
+async fn manuscript_touch_last_opened(
+    store: tauri::State<'_, storage::Store>,
+    manuscript_id: String,
+) -> Result<(), String> {
+    blocking(&store, move |s| s.touch_last_opened(&manuscript_id)).await
 }
 
 #[tauri::command]
@@ -1020,9 +1036,11 @@ pub fn run() {
             restore_backup,
             manuscript_import_json,
             manuscripts_list,
+            manuscript_peek_resume,
             manuscript_open_latest,
             manuscript_create_blank,
             manuscript_load,
+            manuscript_touch_last_opened,
             section_apply_update,
             manuscript_save_outline,
             manuscript_updates_since,

@@ -18,6 +18,7 @@ import {
   getMigrationNotices,
   dismissMigrationNotices,
   listManuscripts,
+  peekResumeManuscript,
   loadManuscript,
   createBlankManuscript,
   listenOpeningProgress,
@@ -723,11 +724,11 @@ onMounted(async () => {
     try {
       let reopenTitle = 'your book';
       try {
-        const books = await listManuscripts();
-        const t = books[0]?.title?.trim();
+        const resume = await peekResumeManuscript();
+        const t = resume?.title?.trim();
         if (t) reopenTitle = t;
       } catch (e) {
-        console.error('List manuscripts before reopen failed', e);
+        console.error('Peek resume manuscript before reopen failed', e);
       }
       openingRetry.value = { kind: 'reopen-latest', title: reopenTitle };
       startOpening(reopenTitle);
@@ -1803,6 +1804,9 @@ body {
   width: 240px;
   white-space: nowrap;
 }
+.topbar__menu-list.sh-menu.topbar__recent-flyout {
+  width: 220px;
+}
 .sh-mi-lead {
   display: inline-flex;
   width: 16px;
@@ -1815,9 +1819,6 @@ body {
 }
 .topbar__recent {
   position: relative;
-}
-.topbar__recent-flyout {
-  width: 220px;
 }
 .visually-hidden {
   position: absolute;

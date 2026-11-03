@@ -233,10 +233,15 @@ const MIGRATIONS: &[&str] = &[
     // #259: repair book_author for DBs that skipped the mid-array #235 migration (#251).
     // Sentinel — real work is `ensure_manuscripts_book_author` in `migrate_with`.
     BOOK_AUTHOR_REPAIR_MIGRATION,
+    // #280: reopen the draft the writer last had open, not merely the newest created row.
+    LAST_OPENED_AT_MIGRATION,
 ];
 
 /// Sentinel for the #259 trailing repair; not executed as SQL.
 const BOOK_AUTHOR_REPAIR_MIGRATION: &str = "__swarmdraft_repair_book_author__";
+
+/// Sentinel for #280; real work is `ensure_manuscripts_last_opened_at` in `migrate_with`.
+const LAST_OPENED_AT_MIGRATION: &str = "__swarmdraft_add_last_opened_at__";
 
 /// SHA-256 of the 14 migrations before #259 (length-prefixed). Update only when appending.
 #[cfg(test)]
@@ -541,6 +546,8 @@ fn migrate_with(conn: &mut Connection, migrations: &[&str]) -> Result<(), Storag
     for sql in migrations.iter().skip(current as usize) {
         if *sql == BOOK_AUTHOR_REPAIR_MIGRATION {
             ensure_manuscripts_book_author(&tx)?;
+        } else if *sql == LAST_OPENED_AT_MIGRATION {
+            ensure_manuscripts_last_opened_at(&tx)?;
         } else {
             tx.execute_batch(sql)?;
         }
@@ -562,6 +569,19 @@ fn ensure_manuscripts_book_author(tx: &rusqlite::Transaction<'_>) -> Result<(), 
     drop(stmt);
     if !has {
         tx.execute_batch("ALTER TABLE manuscripts ADD COLUMN book_author TEXT;")?;
+    }
+    Ok(())
+}
+
+fn ensure_manuscripts_last_opened_at(tx: &rusqlite::Transaction<'_>) -> Result<(), StorageError> {
+    let mut stmt = tx.prepare("PRAGMA table_info(manuscripts)")?;
+    let has = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .filter_map(|c| c.ok())
+        .any(|name| name == "last_opened_at");
+    drop(stmt);
+    if !has {
+        tx.execute_batch("ALTER TABLE manuscripts ADD COLUMN last_opened_at TEXT;")?;
     }
     Ok(())
 }

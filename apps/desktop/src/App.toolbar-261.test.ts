@@ -36,6 +36,7 @@ vi.mock('./backend', async (orig) => ({
   getRecoveryNotices: vi.fn(async () => []),
   persistImport: vi.fn(async () => storedFixture()),
   openLatestManuscript: vi.fn(async () => null),
+  peekResumeManuscript: vi.fn(async () => null),
   listManuscripts: vi.fn(async () => []),
   createBlankManuscript: vi.fn(async () => null),
   loadManuscript: vi.fn(async () => null),

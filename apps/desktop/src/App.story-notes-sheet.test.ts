@@ -47,6 +47,7 @@ vi.mock('./backend', async (orig) => ({
   })),
   persistImport: vi.fn(async () => null),
   openLatestManuscript: vi.fn(async () => null),
+  peekResumeManuscript: vi.fn(async () => null),
   listManuscripts: vi.fn(async () => []),
   saveSectionUpdate: vi.fn(async () => {}),
   saveOutline: vi.fn(async () => {}),
