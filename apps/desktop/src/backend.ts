@@ -184,6 +184,7 @@ export interface StoredManuscriptRow {
   title: string;
   createdAt: string;
   numberingStyle: string;
+  lastOpenedAt?: string | null;
 }
 
 /** Progress while the backend imports or loads a manuscript (#80, ob6). */
@@ -283,10 +284,22 @@ export async function persistImport(payload: ImportPayload): Promise<StoredManus
   });
 }
 
+/** Resume candidate row for the opening shell (#280); null if none or in a plain browser. */
+export async function peekResumeManuscript(): Promise<StoredManuscriptRow | null> {
+  if (!isTauri()) return null;
+  return invoke<StoredManuscriptRow | null>('manuscript_peek_resume');
+}
+
 /** The most recent manuscript, to reopen at startup; null if none or in a plain browser. */
 export async function openLatestManuscript(): Promise<StoredManuscript | null> {
   if (!isTauri()) return null;
   return invoke<StoredManuscript | null>('manuscript_open_latest');
+}
+
+/** Mark a draft as the writer's last-opened manuscript (#280). */
+export async function touchLastOpened(manuscriptId: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('manuscript_touch_last_opened', { manuscriptId });
 }
 
 /** All stored manuscripts, newest first; empty in a plain browser. */

@@ -27,6 +27,7 @@ vi.mock('./backend', async (importOriginal) => {
     getRecoveryNotices: async () => [],
     getMigrationNotices: async () => [],
     openLatestManuscript: async () => null,
+    peekResumeManuscript: async () => null,
     listenOpeningProgress: async () => () => {},
     spellLintParagraph: async () => [],
     sectionReviewMeta: async () => ({

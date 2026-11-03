@@ -353,9 +353,12 @@ describe('App', () => {
   it('cold reopen ob6 title uses the stored book name, not the product name (#80)', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const backend = await import('./backend');
-    vi.mocked(backend.listManuscripts).mockResolvedValueOnce([
-      { id: 'm1', title: 'Harbor Light', createdAt: '2026-01-01', numberingStyle: 'arabic' },
-    ]);
+    vi.mocked(backend.peekResumeManuscript).mockResolvedValueOnce({
+      id: 'm1',
+      title: 'Harbor Light',
+      createdAt: '2026-01-01',
+      numberingStyle: 'chapter_arabic',
+    });
     let finish!: (v: ReturnType<typeof storedFixture>) => void;
     const pending = new Promise<ReturnType<typeof storedFixture>>((resolve) => {
       finish = resolve;
@@ -1050,6 +1053,7 @@ vi.mock('./backend', async (orig) => ({
   getRecoveryNotices: vi.fn(async () => []),
   persistImport: vi.fn(async () => storedFixture()),
   openLatestManuscript: vi.fn(async () => null),
+  peekResumeManuscript: vi.fn(async () => null),
   listManuscripts: vi.fn(async () => []),
   createBlankManuscript: vi.fn(async () => null),
   loadManuscript: vi.fn(async () => null),
