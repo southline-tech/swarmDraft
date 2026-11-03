@@ -940,12 +940,14 @@ const decideOne = (key: string, d: Decision) => {
   }
   currentKey.value = key;
   currentIndex = visible.value.findIndex((v) => v.key === key);
-  decide(targetOf(parsed?.changeKey ?? key), d);
+  decide(targetOf(key), d);
 };
 
 function decideLocalChange(changeKey: string, decision: Decision) {
-  currentKey.value = props.sectionId ? scopeBookChangeKey(props.sectionId, changeKey) : changeKey;
-  decide(targetOf(changeKey), decision);
+  const scoped = props.sectionId ? scopeBookChangeKey(props.sectionId, changeKey) : changeKey;
+  currentKey.value = scoped;
+  currentIndex = visible.value.findIndex((v) => v.key === scoped);
+  decide(targetOf(scoped), decision);
 }
 /** Bulk decision over the change keys locked when the confirmation opened. */
 const decideVisible = (d: Decision, keys: readonly string[]) =>
