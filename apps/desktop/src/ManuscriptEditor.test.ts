@@ -117,6 +117,58 @@ describe('ManuscriptEditor', () => {
     rail.remove();
   });
 
+  it('accepts a title-page change when book-wide changes include a chapter (#265)', async () => {
+    const rail = document.createElement('div');
+    rail.id = 'continuous-review-rail';
+    document.body.appendChild(rail);
+    const titleContent = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              marks: [
+                { type: 'suggestion_insert', attrs: { id: 'tp1', author: 'brett', ts: 't' } },
+              ],
+              text: 'Harbor',
+            },
+          ],
+        },
+      ],
+    };
+    const chapterKey = `ch-1\u0002brett\u0000ch1`;
+    const w = mount(ManuscriptEditor, {
+      props: {
+        content: titleContent,
+        sectionId: 'title-page',
+        reviewTarget: '#continuous-review-rail',
+        bookChanges: [
+          {
+            key: chapterKey,
+            id: 'ch1',
+            author: 'brett',
+            ins: 'Dawn',
+            targets: [{ kind: 'suggestion_insert', id: 'ch1' }],
+          },
+        ],
+      },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    const accept = document.querySelector(
+      '#continuous-review-rail [data-test=item] [data-test=accept]',
+    ) as HTMLElement;
+    expect(accept).toBeTruthy();
+    await accept.click();
+    await flushPromises();
+    expect(w.find('.tiptap').text()).toContain('Harbor');
+    expect(w.find('.tiptap ins.suggestion-insert').exists()).toBe(false);
+    w.unmount();
+    rail.remove();
+  });
+
   it('shows icon-card empty states when there is nothing to review and no comments (ob8)', async () => {
     const plain = {
       type: 'doc',

@@ -248,6 +248,49 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
 </template>
 
 <style scoped>
+.card {
+  position: relative;
+  border: 1px solid var(--ct-border);
+  border-left: 3px solid var(--ct-suggester);
+  border-radius: var(--ct-radius-md);
+  background: var(--ct-surface-raised);
+  padding: var(--ct-space-3) var(--ct-space-4);
+  cursor: pointer;
+}
+.card.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--ct-accent);
+  border-radius: var(--ct-radius-md) 0 0 var(--ct-radius-md);
+  pointer-events: none;
+}
+.card.active {
+  box-shadow: none;
+}
+.card.outdated {
+  opacity: 0.72;
+  border-left-color: var(--ct-text-muted);
+  background: color-mix(in srgb, var(--ct-surface-raised) 88%, var(--ct-bg));
+}
+.card.outdated .q,
+.card.outdated .format {
+  color: var(--ct-text-muted);
+}
+.card.outdated.current {
+  border-color: var(--ct-border-strong);
+  box-shadow: none;
+  background: color-mix(in srgb, var(--ct-surface-raised) 82%, var(--ct-bg));
+}
+.card.current:not(.outdated) {
+  border-color: var(--ct-accent);
+  border-left-color: var(--ct-suggester);
+  background: color-mix(in srgb, var(--ct-accent) 12%, var(--ct-selected-bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ct-accent) 35%, transparent);
+}
 .who {
   display: flex;
   align-items: center;
@@ -289,6 +332,84 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
 }
 .card.outdated .who {
   color: var(--ct-text-muted);
+}
+.outdated-head {
+  margin: var(--ct-space-2) 0 0;
+}
+.outdated-badge {
+  font-size: var(--ct-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px var(--ct-space-2);
+  border-radius: var(--ct-radius-full);
+  border: 1px solid var(--ct-border-strong);
+  background: var(--ct-warning-bg);
+  color: var(--ct-warning);
+}
+.outdated-note {
+  margin: var(--ct-space-1) 0 var(--ct-space-2);
+  font-size: var(--ct-text-sm);
+  color: var(--ct-text-muted);
+}
+.format {
+  margin: var(--ct-space-2) 0 var(--ct-space-2);
+  font-family: var(--ct-font-ui);
+  font-size: var(--ct-text-md);
+  font-weight: var(--ct-weight-semibold);
+  color: var(--ct-text);
+  padding: var(--ct-space-2) var(--ct-space-3);
+  border-radius: var(--ct-radius-sm);
+  background: var(--ct-suggest-format-bg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ct-suggester) 35%, transparent);
+}
+.q {
+  margin: var(--ct-space-2) 0 var(--ct-space-2);
+  font-family: var(--ct-font-manuscript);
+  font-size: var(--ct-text-md);
+  line-height: 1.5;
+}
+.q .ins {
+  color: var(--ct-text);
+  background: var(--ct-suggest-insert-bg);
+  text-decoration: underline 2px var(--ct-suggest-insert-underline) !important;
+  text-underline-offset: 3px;
+}
+.q .del {
+  color: var(--ct-suggest-delete-text);
+  background: var(--ct-suggest-delete-bg);
+  text-decoration: line-through 2px var(--ct-suggest-delete-strike) !important;
+}
+.reason {
+  margin-bottom: var(--ct-space-3);
+}
+.actions {
+  display: flex;
+  gap: var(--ct-space-2);
+}
+.actions .primary,
+.actions .secondary {
+  min-height: var(--ct-space-12);
+  padding: 0 var(--ct-space-5);
+  font-size: var(--ct-text-md);
+  font-weight: var(--ct-weight-semibold);
+  border-radius: var(--ct-radius-md);
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid var(--ct-border);
+}
+.actions .primary {
+  background: var(--ct-accent);
+  color: var(--ct-accent-contrast);
+  border-color: var(--ct-accent);
+}
+.actions .secondary {
+  background: var(--ct-surface);
+  border-color: var(--ct-border-strong);
+}
+.actions .primary:disabled,
+.actions .secondary:disabled {
+  color: var(--ct-text-muted);
+  cursor: default;
 }
 .comment-pill {
   color: var(--ct-text-muted);

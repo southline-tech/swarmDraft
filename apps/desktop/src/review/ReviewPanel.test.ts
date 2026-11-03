@@ -336,14 +336,20 @@ describe('ReviewPanel (RAD-258)', () => {
   });
 
   it('active and selected cards stack accent bar with selected ring (#217)', () => {
-    const css = readFileSync(
+    const mixedCss = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), 'ReviewMixedCard.vue'),
+      'utf8',
+    );
+    expect(mixedCss).toMatch(/\.card\.active::before/);
+    expect(mixedCss).toMatch(
+      /\.card\.current:not\(\.outdated\)\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px/s,
+    );
+    const panelCss = readFileSync(
       resolve(dirname(fileURLToPath(import.meta.url)), 'ReviewPanel.vue'),
       'utf8',
     );
-    expect(css).toMatch(/\.card\.active::before/);
-    expect(css).toMatch(
-      /\.card\.current:not\(\.outdated\)\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px/s,
-    );
+    expect(panelCss).not.toMatch(/\.card \.q/);
+    expect(panelCss).toMatch(/\.head\s*\{/);
     const w = mount(ReviewPanel, {
       props: {
         items,
