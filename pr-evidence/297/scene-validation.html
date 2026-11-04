@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Feedback validation</title>
+    <link rel="stylesheet" href="../../apps/desktop/src/styles/tokens.css" />
+    <link rel="stylesheet" href="../../apps/desktop/src/styles/app.css" />
+    <link rel="stylesheet" href="../../apps/desktop/src/settings/settings.css" />
+    <link rel="stylesheet" href="./evidence-shared.css" />
+  </head>
+  <body>
+    <div class="stage">
+      <div class="st-dlg-scrim">
+        <div class="st-dlg st-dlg--feedback" role="dialog">
+          <h2 class="st-h2">Send feedback</h2>
+          <label class="st-row st-row--stack">
+            <span class="st-row__k">Description</span>
+            <textarea
+              class="st-inp st-inp--area"
+              rows="6"
+              required
+              aria-required="true"
+              aria-invalid="true"
+              aria-describedby="err"
+            ></textarea>
+          </label>
+          <p id="err" class="st-field-error" role="alert">Add a message.</p>
+          <div class="st-dlg__actions">
+            <button type="button" class="st-btn">Cancel</button>
+            <button type="button" class="st-btn st-btn--primary" disabled>Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

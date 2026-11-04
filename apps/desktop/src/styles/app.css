@@ -55,6 +55,9 @@
     color: var(--ct-text);
     font-weight: var(--ct-weight-semibold);
   }
+  .st-row--stack .st-inp {
+    box-sizing: border-box;
+  }
   .st-row--check {
     display: flex;
     align-items: flex-start;
@@ -64,6 +67,7 @@
     cursor: pointer;
   }
   .st-inp--area {
+    box-sizing: border-box;
     flex: none;
     width: 100%;
     min-height: calc(var(--ct-space-12) * 3);

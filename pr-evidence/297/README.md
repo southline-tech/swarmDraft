@@ -1,14 +1,8 @@
 # PR #297 evidence (#208 feedback UI)
 
-Static scenes in `evidence.html` (`?scene=` + optional `&theme=dark`):
+Static HTML reproduces shipped dialog CSS (`tokens.css`, `app.css`, `settings.css`).
 
-| File                            | Scene        |
-| ------------------------------- | ------------ |
-| `feedback-empty-light.png`      | `empty`      |
-| `feedback-validation-light.png` | `validation` |
-| `feedback-send-error-light.png` | `send-error` |
-| `feedback-success-light.png`    | `success`    |
-| `feedback-bot-one-light.png`    | `bot-one`    |
-| `feedback-bot-queue-light.png`  | `bot-queue`  |
+- **Per-scene files** (used by `./capture.sh`): `scene-empty.html`, `scene-validation.html`, `scene-send-error.html`, `scene-success.html`, `scene-bot-one.html`, `scene-bot-queue.html`
+- **Combined viewer**: `evidence.html?scene=` (manual browser only; headless uses per-scene files)
 
-Capture (requires Chromium): open each scene in `evidence.html` at 900×640 and save PNGs here.
+Capture: `./capture.sh` (Chromium, 900×640). Verify six distinct MD5s.

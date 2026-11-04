@@ -1,11 +1,6 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <script>
-      const q = new URLSearchParams(location.search);
-      if (q.get('theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
-      document.documentElement.dataset.scene = q.get('scene') ?? 'empty';
-    </script>
     <meta charset="utf-8" />
     <title>Feedback evidence (#208 / PR #297)</title>
     <link rel="stylesheet" href="../../apps/desktop/src/styles/tokens.css" />
@@ -33,144 +28,266 @@
       .stage {
         display: grid;
         place-items: center;
-        min-height: 520px;
+        min-height: 592px;
+      }
+      .st-dlg-scrim {
+        position: static;
+        inset: auto;
+        display: grid;
+        place-items: center;
+        min-height: 560px;
+        padding: var(--ct-space-4);
+        background: var(--ct-scrim);
+      }
+      .fb-batch {
+        max-width: 35rem;
+      }
+      .fb-batch__title {
+        margin: 0 0 var(--ct-space-2);
+      }
+      .fb-batch__list {
+        margin: var(--ct-space-3) 0 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: var(--ct-space-2);
       }
       .fb-batch__row {
         padding: var(--ct-space-2) var(--ct-space-3);
         border: 1px solid var(--ct-border);
         border-radius: var(--ct-radius-md);
         background: var(--ct-bg);
-        margin-top: var(--ct-space-2);
       }
       .fb-batch__head {
         display: flex;
         align-items: center;
         gap: var(--ct-space-2);
+        margin-bottom: var(--ct-space-1);
       }
       .fb-batch__name {
         font-weight: var(--ct-weight-semibold);
+        font-size: var(--ct-text-sm);
+      }
+      .fb-batch__meta {
+        margin: 0 0 var(--ct-space-1);
+        font-size: var(--ct-text-sm);
+      }
+      .fb-batch__desc {
+        margin: 0;
+        white-space: pre-wrap;
+      }
+      .fb-batch__excerpt {
+        margin: var(--ct-space-2) 0 0;
+        padding: var(--ct-space-2);
+        border: 1px solid var(--ct-border);
+        border-radius: var(--ct-radius-md);
+        background: var(--ct-surface);
+        font-size: var(--ct-text-sm);
+      }
+      .fb-batch__row-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--ct-space-2);
+        justify-content: flex-end;
+        margin-top: var(--ct-space-2);
+      }
+      .fb-batch__actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--ct-space-3);
+        margin-top: var(--ct-space-4);
+      }
+      .ev-focus-ring {
+        outline: 0;
+        box-shadow: var(--ct-focus-ring);
       }
     </style>
   </head>
   <body>
     <div class="scene scene-empty stage">
-      <div class="st-dlg st-dlg--feedback" role="dialog" aria-labelledby="t1">
-        <h2 id="t1" class="st-h2">Send feedback</h2>
-        <p class="st-muted st-desc st-flush">Tell us what happened or what you'd like.</p>
-        <label class="st-row st-row--stack" for="a1">
-          <span class="st-row__k">Area</span>
-          <select id="a1" class="st-inp">
-            <option>Editor</option>
-          </select>
-        </label>
-        <fieldset class="st-fieldset">
-          <legend class="st-row__k">Type</legend>
-          <div class="st__seg" role="radiogroup">
-            <button type="button" class="st__segb st__segb--on" role="radio">
-              Something broke
-            </button>
-            <button type="button" class="st__segb" role="radio">Idea</button>
-            <button type="button" class="st__segb" role="radio">Question</button>
+      <div class="st-dlg-scrim">
+        <div class="st-dlg st-dlg--feedback" role="dialog" aria-labelledby="t1">
+          <h2 id="t1" class="st-h2">Send feedback</h2>
+          <p class="st-muted st-desc st-flush">
+            Tell us what happened or what you'd like. Version 0.1.0 is included automatically.
+          </p>
+          <label class="st-row st-row--stack" for="a1">
+            <span class="st-row__k">Area</span>
+            <select id="a1" class="st-inp">
+              <option>Editor</option>
+            </select>
+          </label>
+          <fieldset class="st-fieldset">
+            <legend class="st-row__k">Type</legend>
+            <div class="st__seg" role="radiogroup" aria-label="Feedback type">
+              <button type="button" class="st__segb st__segb--on" role="radio" aria-checked="true">
+                Something broke
+              </button>
+              <button type="button" class="st__segb" role="radio">Idea</button>
+              <button type="button" class="st__segb" role="radio">Question</button>
+            </div>
+          </fieldset>
+          <label class="st-row st-row--stack" for="d1">
+            <span class="st-row__k">Description</span>
+            <textarea
+              id="d1"
+              class="st-inp st-inp--area"
+              rows="6"
+              required
+              aria-required="true"
+              placeholder=""
+            ></textarea>
+          </label>
+          <label class="st-row st-row--stack" for="e1">
+            <span class="st-row__k">Reply email <span class="st-muted">(optional)</span></span>
+            <input id="e1" type="email" class="st-inp" />
+          </label>
+          <label class="st-row st-row--check">
+            <input type="checkbox" />
+            <span>Include diagnostics (version, OS, recent errors)</span>
+          </label>
+          <div class="st-dlg__actions">
+            <button type="button" class="st-btn">Cancel</button>
+            <button type="button" class="st-btn st-btn--primary" disabled>Send</button>
           </div>
-        </fieldset>
-        <label class="st-row st-row--stack" for="d1">
-          <span class="st-row__k">Description</span>
-          <textarea id="d1" class="st-inp st-inp--area" rows="6" placeholder=""></textarea>
-        </label>
-        <div class="st-dlg__actions">
-          <button type="button" class="st-btn">Cancel</button>
-          <button type="button" class="st-btn st-btn--primary" disabled>Send</button>
         </div>
       </div>
     </div>
 
     <div class="scene scene-validation stage">
-      <div class="st-dlg st-dlg--feedback">
-        <h2 class="st-h2">Send feedback</h2>
-        <label class="st-row st-row--stack">
-          <span class="st-row__k">Description</span>
-          <textarea class="st-inp st-inp--area" rows="6" aria-invalid="true"></textarea>
-        </label>
-        <p class="st-field-error" role="alert">Add a message.</p>
-        <div class="st-dlg__actions">
-          <button type="button" class="st-btn">Cancel</button>
-          <button type="button" class="st-btn st-btn--primary" disabled>Send</button>
+      <div class="st-dlg-scrim">
+        <div class="st-dlg st-dlg--feedback" role="dialog">
+          <h2 class="st-h2">Send feedback</h2>
+          <label class="st-row st-row--stack" for="d2">
+            <span class="st-row__k">Description</span>
+            <textarea
+              id="d2"
+              class="st-inp st-inp--area"
+              rows="6"
+              required
+              aria-required="true"
+              aria-invalid="true"
+              aria-describedby="err2"
+            ></textarea>
+          </label>
+          <p id="err2" class="st-field-error" role="alert">Add a message.</p>
+          <div class="st-dlg__actions">
+            <button type="button" class="st-btn">Cancel</button>
+            <button type="button" class="st-btn st-btn--primary" disabled>Send</button>
+          </div>
         </div>
       </div>
     </div>
 
     <div class="scene scene-send-error stage">
-      <div class="st-dlg st-dlg--feedback">
-        <h2 class="st-h2">Send feedback</h2>
-        <textarea class="st-inp st-inp--area" rows="6">Still here after failure</textarea>
-        <div class="st-field-error st-field-error--block" role="alert">
-          <p>Couldn't reach the feedback server. Check your internet connection and try again.</p>
-          <button type="button" class="st-btn st-btn--link">Try again</button>
-        </div>
-        <div class="st-dlg__actions">
-          <button type="button" class="st-btn">Cancel</button>
-          <button type="button" class="st-btn st-btn--primary">Send</button>
+      <div class="st-dlg-scrim">
+        <div class="st-dlg st-dlg--feedback" role="dialog">
+          <h2 class="st-h2">Send feedback</h2>
+          <label class="st-row st-row--stack">
+            <span class="st-row__k">Description</span>
+            <textarea class="st-inp st-inp--area" rows="6">Still here after failure</textarea>
+          </label>
+          <div class="st-field-error st-field-error--block" role="alert">
+            <p>Couldn't reach the feedback server. Check your internet connection and try again.</p>
+            <button type="button" class="st-btn st-btn--link">Try again</button>
+          </div>
+          <div class="st-dlg__actions">
+            <button type="button" class="st-btn">Cancel</button>
+            <button type="button" class="st-btn st-btn--primary">Send</button>
+          </div>
         </div>
       </div>
     </div>
 
     <div class="scene scene-success stage">
-      <div class="st-dlg st-dlg--feedback">
-        <h2 class="st-h2">Send feedback</h2>
-        <textarea class="st-inp st-inp--area" rows="6">Thanks flow</textarea>
-        <p class="st-status" role="status">Thanks — your feedback was sent.</p>
-        <div class="st-dlg__actions">
-          <button type="button" class="st-btn">Cancel</button>
-          <button type="button" class="st-btn st-btn--primary" disabled>Sent</button>
+      <div class="st-dlg-scrim">
+        <div class="st-dlg st-dlg--feedback" role="dialog">
+          <h2 class="st-h2">Send feedback</h2>
+          <label class="st-row st-row--stack">
+            <span class="st-row__k">Description</span>
+            <textarea class="st-inp st-inp--area" rows="6">Export failed on chapter 3</textarea>
+          </label>
+          <p class="st-status" role="status">Thanks — your feedback was sent.</p>
+          <div class="st-dlg__actions">
+            <button type="button" class="st-btn">Cancel</button>
+            <button type="button" class="st-btn st-btn--primary" disabled>Sent</button>
+          </div>
         </div>
       </div>
     </div>
 
     <div class="scene scene-bot-one stage">
-      <div class="st-dlg fb-batch">
-        <h2 class="st-h2">Send feedback from a bot?</h2>
-        <div class="fb-batch__row">
-          <div class="fb-batch__head">
-            <bdi class="fb-batch__name">Line Bot</bdi>
-            <span class="st-tag">Bot</span>
-          </div>
-          <p class="st-muted">Something broke · Editor</p>
-          <p>Export failed on chapter 3</p>
-          <p class="fb-batch__excerpt">She opened the door and —</p>
-          <label class="st-row st-row--check">
-            <input type="checkbox" />
-            <span>Include excerpt in feedback (opt-in)</span>
-          </label>
-          <div class="st-dlg__actions">
-            <button type="button" class="st-btn">Deny</button>
-            <button type="button" class="st-btn st-btn--primary">Allow</button>
-          </div>
+      <div class="st-dlg-scrim">
+        <div class="st-dlg fb-batch" role="alertdialog">
+          <h2 class="st-h2 fb-batch__title">Send feedback from a bot?</h2>
+          <p class="st-muted st-desc st-flush">
+            Esc closes for now; pending requests stay until you Allow or Deny.
+          </p>
+          <ul class="fb-batch__list">
+            <li class="fb-batch__row">
+              <div class="fb-batch__head">
+                <bdi class="fb-batch__name">Line Bot</bdi>
+                <span class="st-tag">Bot</span>
+              </div>
+              <p class="st-muted fb-batch__meta">Something broke · Editor</p>
+              <p class="fb-batch__desc">Export failed on chapter 3</p>
+              <p class="fb-batch__excerpt">She opened the door and —</p>
+              <label class="st-row st-row--check">
+                <input type="checkbox" />
+                <span>Include excerpt in feedback (opt-in)</span>
+              </label>
+              <div class="fb-batch__row-actions">
+                <button type="button" class="st-btn st-btn--s ev-focus-ring">Deny</button>
+                <button type="button" class="st-btn st-btn--primary st-btn--s">Allow</button>
+              </div>
+            </li>
+          </ul>
         </div>
       </div>
     </div>
 
     <div class="scene scene-bot-queue stage">
-      <div class="st-dlg fb-batch">
-        <h2 class="st-h2">Send feedback from 2 bots?</h2>
-        <div class="fb-batch__row">
-          <div class="fb-batch__head">
-            <bdi class="fb-batch__name">Line Bot</bdi>
-            <span class="st-tag">Bot</span>
+      <div class="st-dlg-scrim">
+        <div class="st-dlg fb-batch" role="alertdialog">
+          <h2 class="st-h2 fb-batch__title">Send feedback from 2 bots?</h2>
+          <p class="st-muted st-desc st-flush">
+            Esc closes for now; pending requests stay until you Allow or Deny.
+          </p>
+          <ul class="fb-batch__list">
+            <li class="fb-batch__row">
+              <div class="fb-batch__head">
+                <bdi class="fb-batch__name">Line Bot</bdi>
+                <span class="st-tag">Bot</span>
+              </div>
+              <p class="fb-batch__desc">Bug: export menu greyed out</p>
+              <div class="fb-batch__row-actions">
+                <button type="button" class="st-btn st-btn--s">Deny</button>
+                <button type="button" class="st-btn st-btn--primary st-btn--s">Allow</button>
+              </div>
+            </li>
+            <li class="fb-batch__row">
+              <div class="fb-batch__head">
+                <bdi class="fb-batch__name">Continuity Bot</bdi>
+                <span class="st-tag">Bot</span>
+              </div>
+              <p class="fb-batch__desc">Idea: timeline view in outline</p>
+              <div class="fb-batch__row-actions">
+                <button type="button" class="st-btn st-btn--s">Deny</button>
+                <button type="button" class="st-btn st-btn--primary st-btn--s">Allow</button>
+              </div>
+            </li>
+          </ul>
+          <div class="fb-batch__actions">
+            <button type="button" class="st-btn ev-focus-ring">Deny all</button>
+            <button type="button" class="st-btn st-btn--primary">Allow all</button>
           </div>
-          <p>Bug note</p>
-        </div>
-        <div class="fb-batch__row">
-          <div class="fb-batch__head">
-            <bdi class="fb-batch__name">Continuity Bot</bdi>
-            <span class="st-tag">Bot</span>
-          </div>
-          <p>Idea note</p>
-        </div>
-        <div class="st-dlg__actions">
-          <button type="button" class="st-btn">Deny all</button>
-          <button type="button" class="st-btn st-btn--primary">Allow all</button>
         </div>
       </div>
     </div>
+    <script>
+      const scene = new URLSearchParams(location.search).get('scene') || 'empty';
+      document.documentElement.setAttribute('data-scene', scene);
+    </script>
   </body>
 </html>
