@@ -25,7 +25,8 @@ on Linux only.
 3. Watch **Release** workflow (`.github/workflows/release.yml`) on the tag. It builds unsigned
    NSIS + MSI on `windows-latest` and publishes a GitHub Release with `SHA256SUMS.txt`.
 4. On a Windows test machine, install from the Release (`swarmDraft_<version>_x64-setup.exe`) and
-   smoke-test before sharing with authors.
+   run [new-draft-checklist.md](./qa/new-draft-checklist.md) (New / import / switch / resume) before
+   broader smoke-test and sharing with authors.
 5. Share [install-kim.md](./install-kim.md) for download → SmartScreen → Install → update → data.
 
 Do **not** push a tag from a PR branch. Tags must match `pnpm version:check --tag vX.Y.Z`.
@@ -35,4 +36,4 @@ Do **not** push a tag from a PR branch. Tags must match `pnpm version:check --ta
 - Authenticode signing
 - Tauri updater / `latest.json`
 - Pandoc bundling ([#186](https://github.com/southline-tech/swarmDraft/issues/186))
-- Arm-A-Rillo QA checklist sign-off
+- Arm-A-Rillo sign-off beyond [new-draft-checklist.md](./qa/new-draft-checklist.md)
