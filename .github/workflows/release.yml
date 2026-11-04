@@ -65,7 +65,7 @@ jobs:
           Get-Content SHA256SUMS.txt
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@65c4caa7510997a68c3136981679e943a20a3097 # v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: swarmdraft-windows-unsigned-${{ github.ref_name }}
           path: |
@@ -75,7 +75,7 @@ jobs:
           retention-days: 14
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@15aac0ad49409f68a7bcbfc57646a9b9e9594cf6 # v2.2.1
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
         with:
           name: swarmDraft ${{ github.ref_name }}
           prerelease: ${{ contains(github.ref_name, '-') }}
