@@ -58,7 +58,9 @@ describe('docs/qa/new-draft-checklist.md (#285)', () => {
       let foundPair = false;
       while ((match = COVERAGE_PAIR.exec(lastCell)) !== null) {
         foundPair = true;
-        const [, basename, testName] = match;
+        const basename = match[1];
+        const testName = match[2];
+        if (basename === undefined || testName === undefined) continue;
         const path = resolveSourceFile(basename);
         let source = sourceCache.get(path);
         if (source === undefined) {
