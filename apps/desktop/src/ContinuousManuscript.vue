@@ -241,7 +241,10 @@ watch(
   (id, prev) => {
     caretPlaced.value = false;
     scheduleScrollPageEstimate();
-    if (id !== prev) toolbarSectionId.value = props.selectedId;
+    if (id !== prev) {
+      toolbarSectionId.value = props.selectedId;
+      authorFilter.value = null;
+    }
   },
 );
 
@@ -511,7 +514,7 @@ onBeforeUnmount(() => {
             :book-chapter-groups="sec.id === selectedId ? bookChapterGroups : undefined"
             :review-active-scroll-key="sec.id === selectedId ? activeScrollKey : undefined"
             :review-follow="sec.id === selectedId ? reviewFollow : undefined"
-            :author-filter="sec.id === selectedId ? authorFilter : undefined"
+            :author-filter="authorFilter"
             :chapter-title="sec.id === selectedId ? chapterTitle : undefined"
             :chapter-label="sectionLabels?.get(sec.id)"
             :book-docs="sec.id === selectedId ? bookDocs : undefined"
