@@ -37,6 +37,7 @@ const emit = defineEmits<{
   confirmRestore: [];
   cancelRestore: [];
   dismissNotice: [];
+  openFeedback: [];
   numberingStyle: [style: NumberingStyle];
 }>();
 
@@ -155,6 +156,21 @@ onMounted(() => root.value?.focus());
                   >Used for every new book. You can't change this yet.</span
                 >
               </div>
+            </section>
+            <section class="st-card" aria-labelledby="st-feedback">
+              <h2 id="st-feedback" class="st-h2">Feedback</h2>
+              <p class="st-muted st-desc">
+                Report a bug, share an idea, or ask a question. Your book text is never included
+                unless you opt in on the form.
+              </p>
+              <button
+                type="button"
+                class="st-btn st-btn--primary"
+                data-test="settings-send-feedback"
+                @click="emit('openFeedback')"
+              >
+                Send feedback
+              </button>
             </section>
             <section v-if="info" class="st-card" aria-labelledby="st-about" data-test="app-info">
               <h2 id="st-about" class="st-h2">About</h2>

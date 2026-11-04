@@ -49,4 +49,9 @@ describe('Editor bot templates (#248)', () => {
       });
     });
   }
+
+  it('bot setup doc lists send_feedback (#208)', () => {
+    const setup = readFileSync(resolve(repoRoot, 'docs/bot-setup-prompt.md'), 'utf8');
+    expect(setup).toMatch(/send_feedback/);
+  });
 });

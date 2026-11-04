@@ -14,6 +14,7 @@ pub mod backup;
 pub mod content;
 pub mod dictionary;
 pub mod export;
+pub mod feedback;
 pub mod manuscripts;
 pub mod mcp;
 pub mod migrate;
@@ -224,6 +225,43 @@ fn agents_bulk_revoke_all_drafts(
 #[tauri::command]
 fn deny_pairing(store: tauri::State<'_, storage::Store>, pairing_id: String) -> Result<(), String> {
     store.deny_pairing(&pairing_id).map_err(err)
+}
+
+#[tauri::command]
+fn send_feedback(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, storage::Store>,
+    input: feedback::SendFeedbackInput,
+) -> Result<(), String> {
+    store
+        .send_feedback_app(&app.package_info().version.to_string(), input)
+        .map_err(|e| e.code().to_string())
+}
+
+#[tauri::command]
+fn list_pending_feedback(
+    store: tauri::State<'_, storage::Store>,
+) -> Result<Vec<feedback::FeedbackPendingSummary>, String> {
+    store.list_pending_feedback().map_err(err)
+}
+
+#[tauri::command]
+fn approve_feedback(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, storage::Store>,
+    feedback_id: String,
+) -> Result<(), String> {
+    store
+        .approve_feedback(&app.package_info().version.to_string(), &feedback_id)
+        .map_err(|e| e.code().to_string())
+}
+
+#[tauri::command]
+fn deny_feedback(
+    store: tauri::State<'_, storage::Store>,
+    feedback_id: String,
+) -> Result<(), String> {
+    store.deny_feedback(&feedback_id).map_err(err)
 }
 
 /// Write a full backup. The destination is chosen here, never taken from the webview (#73):
@@ -995,7 +1033,15 @@ pub fn run() {
                         serde_json::json!({ "pairingId": pairing_id }),
                     );
                 });
-                let result = mcp::serve_on(store, listener, Some(hook)).await;
+                let feedback_emit = handle.clone();
+                let feedback_hook: mcp::FeedbackRequestedHook =
+                    Arc::new(move |feedback_id: String| {
+                        let _ = feedback_emit.emit(
+                            "feedback-requested",
+                            serde_json::json!({ "feedbackId": feedback_id }),
+                        );
+                    });
+                let result = mcp::serve_on(store, listener, Some(hook), Some(feedback_hook)).await;
                 let state = handle.state::<std::sync::Mutex<McpStatus>>();
                 let mut st = state.lock().expect("status poisoned");
                 match result {
@@ -1021,6 +1067,10 @@ pub fn run() {
             list_pending_pairings,
             approve_pairing,
             deny_pairing,
+            send_feedback,
+            list_pending_feedback,
+            approve_feedback,
+            deny_feedback,
             agents_draft_access_list,
             agent_set_draft_access_mode,
             agent_grant_draft,

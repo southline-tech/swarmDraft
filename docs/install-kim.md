@@ -16,3 +16,5 @@
 
 For more detail (SmartScreen, coAuthor migration, uninstall pages), see
 [install-windows.md](./install-windows.md).
+
+Use **Send feedback** in the book menu or Settings if something goes wrong — we read every report.

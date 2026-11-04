@@ -37,6 +37,7 @@ pub use tools::SwarmdraftMcp;
 
 /// Called when a bot opens an MCP pairing request (#188).
 pub type PairingRequestedHook = Arc<dyn Fn(String) + Send + Sync>;
+pub type FeedbackRequestedHook = Arc<dyn Fn(String) + Send + Sync>;
 
 /// Set on unauthenticated MCP requests allowed to reach pairing tools only.
 #[derive(Clone, Copy, Debug)]
@@ -354,11 +355,19 @@ pub fn router_with_stats(
     store: Store,
     cfg: McpConfig,
     pairing_hook: Option<PairingRequestedHook>,
+    feedback_hook: Option<FeedbackRequestedHook>,
 ) -> (axum::Router, Arc<GateStats>) {
     let mcp_store = store.clone();
     let hook = pairing_hook.clone();
+    let fb_hook = feedback_hook.clone();
     let service = StreamableHttpService::new(
-        move || Ok(SwarmdraftMcp::new(mcp_store.clone(), hook.clone())),
+        move || {
+            Ok(SwarmdraftMcp::new(
+                mcp_store.clone(),
+                hook.clone(),
+                fb_hook.clone(),
+            ))
+        },
         Arc::new(NeverSessionManager::default()),
         StreamableHttpServerConfig::default()
             .with_legacy_session_mode(false)
@@ -399,8 +408,9 @@ pub fn router(
     store: Store,
     cfg: McpConfig,
     pairing_hook: Option<PairingRequestedHook>,
+    feedback_hook: Option<FeedbackRequestedHook>,
 ) -> axum::Router {
-    router_with_stats(store, cfg, pairing_hook).0
+    router_with_stats(store, cfg, pairing_hook, feedback_hook).0
 }
 
 /// When another program holds the MCP port and it is not the legacy desktop app.
@@ -450,10 +460,16 @@ pub async fn serve_on(
     store: Store,
     listener: std::net::TcpListener,
     pairing_hook: Option<PairingRequestedHook>,
+    feedback_hook: Option<FeedbackRequestedHook>,
 ) -> std::io::Result<SocketAddr> {
     let listener = tokio::net::TcpListener::from_std(listener)?;
     let addr = listener.local_addr()?;
-    let app = router(store, McpConfig::new(addr.port()), pairing_hook);
+    let app = router(
+        store,
+        McpConfig::new(addr.port()),
+        pairing_hook,
+        feedback_hook,
+    );
     tokio::spawn(async move {
         let app = app.into_make_service_with_connect_info::<SocketAddr>();
         if let Err(e) = axum::serve(listener, app).await {
@@ -468,6 +484,7 @@ pub async fn serve(
     store: Store,
     port: u16,
     pairing_hook: Option<PairingRequestedHook>,
+    feedback_hook: Option<FeedbackRequestedHook>,
 ) -> std::io::Result<SocketAddr> {
-    serve_on(store, bind(port)?, pairing_hook).await
+    serve_on(store, bind(port)?, pairing_hook, feedback_hook).await
 }

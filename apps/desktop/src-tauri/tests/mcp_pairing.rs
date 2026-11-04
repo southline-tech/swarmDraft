@@ -34,7 +34,7 @@ async fn start_pairing_server() -> PairServer {
     let addr = listener.local_addr().unwrap();
     let mut cfg = mcp::McpConfig::new(addr.port());
     cfg.auth_failure_floor = std::time::Duration::from_millis(5);
-    let (app, _) = mcp::router_with_stats(store.clone(), cfg, Some(hook));
+    let (app, _) = mcp::router_with_stats(store.clone(), cfg, Some(hook), None);
     tokio::spawn(async move {
         axum::serve(listener, app.into_make_service())
             .await

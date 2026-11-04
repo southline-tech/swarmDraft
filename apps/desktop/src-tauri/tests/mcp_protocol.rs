@@ -44,7 +44,7 @@ pub async fn start_with(scopes: &[&str], tune: impl FnOnce(&mut mcp::McpConfig))
     let mut cfg = mcp::McpConfig::new(addr.port());
     cfg.auth_failure_floor = std::time::Duration::from_millis(20);
     tune(&mut cfg);
-    let (app, stats) = mcp::router_with_stats(store.clone(), cfg, None);
+    let (app, stats) = mcp::router_with_stats(store.clone(), cfg, None, None);
     let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     Server {
@@ -139,6 +139,7 @@ async fn initialize_and_list_tools() {
         "write_note",
         "trigger_export",
         "get_export",
+        "send_feedback",
     ] {
         assert!(names.contains(&t), "missing {t}: {names:?}");
     }
@@ -662,7 +663,7 @@ async fn write_tools_listed_and_decisions_absent() {
     ] {
         assert!(names.contains(&t), "missing {t}");
     }
-    assert_eq!(names.len(), 15, "{names:?}");
+    assert_eq!(names.len(), 16, "{names:?}");
     let r = call(&s, "accept_suggestion", json!({"id": "x"})).await;
     let r2 = rpc(
         &s,
@@ -1323,11 +1324,12 @@ async fn suggest_only_no_tool_can_accept_or_reject() {
             "read_chapter",
             "request_pairing",
             "search_text",
+            "send_feedback",
             "suggest_edit",
             "suggest_insert",
             "suggest_style",
             "trigger_export",
-            "write_note"
+            "write_note",
         ]
     );
     for name in [
