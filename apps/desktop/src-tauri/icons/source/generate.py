@@ -25,6 +25,15 @@ PNGS = {"32x32.png": 32, "64x64.png": 64, "128x128.png": 128, "128x128@2x.png": 
         "Square150x150Logo.png": 150, "Square284x284Logo.png": 284, "Square310x310Logo.png": 310,
         "StoreLogo.png": 50}
 ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
+# Pillow ICNS writer: OSType -> side length in pixels (see PIL/IcnsImagePlugin.py).
+ICNS_SIZES = {
+    b"ic07": 128,
+    b"ic08": 256,
+    b"ic09": 512,
+    b"ic10": 1024,
+    b"ic11": 32,
+    b"ic12": 64,
+}
 
 
 def render(px):
@@ -56,12 +65,59 @@ def write_ico(path, sizes):
     path.write_bytes(head + body)
 
 
+def write_icns(path):
+    """Build .icns from per-size renders (small mark at 32px and below, same as PNG/ICO)."""
+    by_side = {px: render(px) for px in sorted(set(ICNS_SIZES.values()))}
+    # Pillow saves ic07–ic14 from the 1024px image plus append_images keyed by width.
+    largest = by_side[1024]
+    append = [by_side[px] for px in sorted(by_side) if px != 1024]
+    largest.save(path, format="ICNS", append_images=append)
+
+
+def icns_png_chunk(path, otype=b"ic11"):
+    """Return the PNG image stored in one ICNS chunk (e.g. ic11 = 32px slot)."""
+    data = path.read_bytes()
+    if data[:4] != b"icns":
+        raise SystemExit(f"{path} is not ICNS")
+    i = 8
+    filesize = struct.unpack(">I", data[4:8])[0]
+    while i < filesize:
+        t = data[i : i + 4]
+        ln = struct.unpack(">I", data[i + 4 : i + 8])[0]
+        if ln < 8:
+            raise SystemExit(f"bad ICNS chunk length at {i}")
+        if t == otype:
+            return Image.open(io.BytesIO(data[i + 8 : i + ln])).convert("RGBA")
+        i += ln
+    raise SystemExit(f"{path} missing chunk {otype!r}")
+
+
+def verify_icns_32_matches_png(icns_path, png_path, tolerance=0):
+    ref = Image.open(png_path).convert("RGBA")
+    got = icns_png_chunk(icns_path, b"ic11")
+    if ref.size != got.size:
+        raise SystemExit(f"ICNS ic11 size {got.size} != {ref.size} from {png_path.name}")
+    diff = Image.new("RGBA", ref.size)
+    px_diff = 0
+    for x in range(ref.width):
+        for y in range(ref.height):
+            a = ref.getpixel((x, y))
+            b = got.getpixel((x, y))
+            if a != b:
+                px_diff += 1
+    if px_diff > tolerance:
+        raise SystemExit(
+            f"ICNS 32px slot differs from {png_path.name} on {px_diff} pixels (tolerance {tolerance})"
+        )
+
+
 def main():
     icons = ROOT / "icons"
     for name, px in PNGS.items():
         render(px).save(icons / name)
     write_ico(icons / "icon.ico", ICO_SIZES)
-    render(1024).save(icons / "icon.icns")
+    write_icns(icons / "icon.icns")
+    verify_icns_32_matches_png(icons / "icon.icns", icons / "32x32.png")
 
     win = ROOT / "windows"
     literata = str(win / "fonts" / "Literata-Regular.ttf")
