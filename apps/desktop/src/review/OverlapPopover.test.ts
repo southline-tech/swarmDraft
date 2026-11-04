@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
+import { nextTick } from 'vue';
 import OverlapPopover from './OverlapPopover.vue';
 
 describe('OverlapPopover (#179)', () => {
@@ -77,5 +78,36 @@ describe('OverlapPopover (#179)', () => {
     await rows[0]!.trigger('keydown', { key: 'ArrowDown' });
     expect(rows[1]!.element).toBe(document.activeElement);
     w.unmount();
+  });
+
+  it('#240: calls restoreFocus when the popover closes', async () => {
+    const restoreFocus = vi.fn();
+    const w = mount(OverlapPopover, {
+      props: {
+        x: 0,
+        y: 0,
+        entries: [
+          {
+            targets: [{ kind: 'suggestion_insert' as const, id: 'a1' }],
+            author: 'agent:a',
+            ins: 'x',
+            changeType: 'Insert' as const,
+            ts: '1',
+          },
+        ],
+        restoreFocus,
+      },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    const dialog = w.get('[data-test=overlap-popover]').element as HTMLElement;
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await nextTick();
+    await nextTick();
+    expect(restoreFocus).toHaveBeenCalled();
+    restoreFocus.mockClear();
+    w.unmount();
+    await nextTick();
+    expect(restoreFocus).toHaveBeenCalled();
   });
 });

@@ -93,7 +93,7 @@ describe('review wave 1', () => {
     desk.scrollTop = 800;
     await w.find('.tiptap [data-test=overlap-badge]').trigger('click');
     await flushPromises();
-    await w.find('[data-test=context-dismiss]').trigger('click');
+    await w.find('[data-test=context-dismiss]').trigger('mousedown');
     await flushPromises();
     expect(desk.scrollTop).toBe(800);
     w.unmount();

@@ -532,7 +532,36 @@ const labelAuthor = (author: string) => {
 /** Review step-through (RAD-258). Suggestions in document order, keyed on raw author id. */
 const suggestions = shallowRef<SuggestionItem[]>([]);
 const outdatedIds = ref(new Set<string>());
-const overlapPopover = shallowRef<{ x: number; y: number; cluster: OverlapCluster } | null>(null);
+const overlapPopover = shallowRef<{
+  x: number;
+  y: number;
+  cluster: OverlapCluster;
+  restoreFocus: () => void;
+} | null>(null);
+
+/** Return focus to the overlap range in this section without scrolling (#240). */
+function focusOverlapCluster(cluster: OverlapCluster) {
+  const e = editor.value;
+  if (!e || e.isDestroyed) return;
+  const { from, to } = cluster;
+  const end = Math.max(from, to);
+  const tr = e.state.tr
+    .setSelection(TextSelection.create(e.state.doc, from, end))
+    .setMeta('addToHistory', false);
+  e.view.dispatch(tr);
+  (e.view.dom as HTMLElement).focus({ preventScroll: true });
+}
+
+function closeOverlapPopover() {
+  overlapPopover.value?.restoreFocus();
+  overlapPopover.value = null;
+}
+
+function dismissContextOverlay() {
+  spellMenu.value = null;
+  menuAt.value = null;
+  closeOverlapPopover();
+}
 const localAuthorFilter = shallowRef<AuthorFilter>(null);
 const filter = computed({
   get(): AuthorFilter {
@@ -984,7 +1013,7 @@ function dismissOne(key: string) {
 }
 
 function onOverlapDecide(targets: OverlapEntry['targets'], decision: Decision) {
-  overlapPopover.value = null;
+  closeOverlapPopover();
   decide(targets, decision);
 }
 
@@ -1360,7 +1389,12 @@ const options: Partial<EditorOptions> = {
           if (editor.value) refreshReview(editor.value);
         },
         onOverlapClick: (cluster, anchor) => {
-          overlapPopover.value = { cluster, x: anchor.x, y: anchor.y + 4 };
+          overlapPopover.value = {
+            cluster,
+            x: anchor.x,
+            y: anchor.y + 4,
+            restoreFocus: () => focusOverlapCluster(cluster),
+          };
         },
       }),
     }),
@@ -1717,16 +1751,9 @@ onBeforeUnmount(() => {
       v-if="spellMenu || menuAt || overlapPopover"
       class="fixed inset-0 z-30 context-dismiss"
       data-test="context-dismiss"
-      @click="
-        spellMenu = null;
-        menuAt = null;
-        overlapPopover = null;
-      "
-      @contextmenu.prevent="
-        spellMenu = null;
-        menuAt = null;
-        overlapPopover = null;
-      "
+      @mousedown.self.prevent="dismissContextOverlay"
+      @click.self.prevent="dismissContextOverlay"
+      @contextmenu.self.prevent="dismissContextOverlay"
     />
     <OverlapPopover
       v-if="overlapPopover"
@@ -1734,8 +1761,9 @@ onBeforeUnmount(() => {
       :y="overlapPopover.y"
       :entries="overlapEntries(overlapPopover.cluster)"
       :labels="labelAuthor"
+      :restore-focus="overlapPopover.restoreFocus"
       @decide="onOverlapDecide"
-      @close="overlapPopover = null"
+      @close="closeOverlapPopover"
     />
     <SpellMenu
       v-if="spellMenu"

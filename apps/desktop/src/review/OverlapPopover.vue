@@ -22,6 +22,8 @@ const props = defineProps<{
   entries: readonly OverlapEntry[];
   busy?: boolean;
   labels?: (author: string) => AgentName;
+  /** Focus the opener section at the overlap range without scrolling the manuscript (#240). */
+  restoreFocus?: () => void;
 }>();
 const emit = defineEmits<{
   close: [];
@@ -61,9 +63,11 @@ function focusRow(index: number) {
 
 function restoreEditorFocus() {
   void nextTick(() => {
-    const page = document.querySelector<HTMLElement>('.manuscript-editor .ProseMirror');
-    if (page) page.focus({ preventScroll: true });
-    else opener?.focus?.({ preventScroll: true });
+    if (props.restoreFocus) {
+      props.restoreFocus();
+      return;
+    }
+    opener?.focus?.({ preventScroll: true });
   });
 }
 
