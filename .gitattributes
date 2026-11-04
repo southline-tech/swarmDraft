@@ -1,0 +1,12 @@
+* text=auto eol=lf
+
+# Binaries: never normalize
+*.png binary
+*.ico binary
+*.icns binary
+*.bmp binary
+*.woff2 binary
+*.ttf binary
+*.docx binary
+*.zip binary
+*.yupdate binary
