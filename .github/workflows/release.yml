@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '20.19.2'
+  PNPM_VERSION: '9.15.0'
+  RUST_TOOLCHAIN: '1.99.1'
+
+jobs:
+  windows-installer:
+    name: Windows unsigned installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/check-version.mjs --tag ${{ github.ref_name }}
+
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm typecheck
+      - run: pnpm test
+
+      - name: Build NSIS and MSI (unsigned)
+        run: pnpm tauri build --bundles nsis,msi
+
+      - name: SHA256 checksums
+        shell: pwsh
+        run: |
+          $bundle = "apps/desktop/src-tauri/target/release/bundle"
+          $files = @(
+            Get-ChildItem "$bundle/nsis/*-setup.exe" -ErrorAction SilentlyContinue
+            Get-ChildItem "$bundle/msi/*.msi" -ErrorAction SilentlyContinue
+          ) | Where-Object { $_ }
+          if (-not $files) { throw "No installer bundles found under $bundle" }
+          $lines = foreach ($f in $files) {
+            $hash = (Get-FileHash -Algorithm SHA256 -Path $f.FullName).Hash.ToLowerInvariant()
+            "$hash  $($f.Name)"
+          }
+          $lines | Set-Content -Encoding utf8 SHA256SUMS.txt
+          Get-Content SHA256SUMS.txt
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@65c4caa7510997a68c3136981679e943a20a3097 # v4.6.2
+        with:
+          name: swarmdraft-windows-unsigned-${{ github.ref_name }}
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+            apps/desktop/src-tauri/target/release/bundle/msi/*.msi
+            SHA256SUMS.txt
+          retention-days: 14
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@15aac0ad49409f68a7bcbfc57646a9b9e9594cf6 # v2.2.1
+        with:
+          name: swarmDraft ${{ github.ref_name }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          body_path: docs/release-notes-template.md
+          files: |
+            apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+            apps/desktop/src-tauri/target/release/bundle/msi/*.msi
+            SHA256SUMS.txt

@@ -2,13 +2,14 @@
 
 The P1 builds are **unsigned**. Code signing is deferred until a certificate is approved.
 
-1. Open the latest successful **CI** run on `main` (Actions tab) and download the
-   `coauthor-windows-unsigned-<sha>` artifact. Unzip it.
-2. The zip contains two subfolders; run either installer:
-   - `msi/swarmDraft_<version>_x64_en-US.msi` (MSI), or
-   - `nsis/swarmDraft_<version>_x64-setup.exe` (NSIS).
+1. Open **[Releases](https://github.com/southline-tech/swarmDraft/releases)** and pick the
+   newest `vX.Y.Z`. Download `swarmDraft_<version>_x64-setup.exe` (recommended: per-user
+   install, no admin) or the `.msi`. Optionally verify the file against `SHA256SUMS.txt` on
+   that release.
 
-   The app installs as `swarmdraft.exe`.
+   For a short walkthrough (including SmartScreen), see [install-kim.md](./install-kim.md).
+
+2. Run the installer you downloaded. The app installs as `swarmdraft.exe`.
 
 3. Windows SmartScreen will show **"Windows protected your PC"** / unknown publisher, because the
    build is unsigned. Click **More info** then **Run anyway**.
