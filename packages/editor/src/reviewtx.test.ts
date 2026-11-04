@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Editor, JSONContent } from '@tiptap/core';
 import { ReplaceStep } from '@tiptap/pm/transform';
@@ -332,7 +332,7 @@ describe('agent path cannot reach the port', () => {
         if (statSync(p).isDirectory()) walk(p);
         else if (/\.(ts|tsx|cts|mts|vue|js|mjs|cjs)$/.test(f)) {
           const src = readFileSync(p, 'utf8');
-          if (importsTrusted(src)) hits.push(relative(repo, p));
+          if (importsTrusted(src)) hits.push(relative(repo, p).split(sep).join('/'));
         }
       }
     };
