@@ -53,5 +53,15 @@ describe('Editor bot templates (#248)', () => {
   it('bot setup doc lists send_feedback (#208)', () => {
     const setup = readFileSync(resolve(repoRoot, 'docs/bot-setup-prompt.md'), 'utf8');
     expect(setup).toMatch(/send_feedback/);
+    expect(setup).toMatch(/4000/);
+    expect(setup).toMatch(/once per agent per day/i);
   });
+
+  for (const file of ROLE_FILES) {
+    it(`${file} documents send_feedback batching (#208)`, () => {
+      const body = readTemplate(file);
+      expect(body).toMatch(/send_feedback/);
+      expect(body).toMatch(/4000/);
+    });
+  }
 });

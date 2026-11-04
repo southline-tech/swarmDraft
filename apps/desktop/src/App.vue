@@ -434,6 +434,7 @@ const choosingBook = ref(false);
 const settingsOpen = ref(false);
 const feedbackOpen = ref(false);
 const feedbackFocusReturn = ref<HTMLElement | null>(null);
+const feedbackExcerpt = ref<string | null>(null);
 const agentsOpen = ref(false);
 const newlyPairedAgentIds = ref<string[]>([]);
 const agentsBatchBanner = computed(() => newlyPairedAgentIds.value.length >= 5);
@@ -457,7 +458,10 @@ function openToolbarSettings() {
 }
 function openFeedback(from?: HTMLElement | null) {
   feedbackFocusReturn.value =
-    from ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    from ??
+    document.querySelector<HTMLElement>('[data-test="toolbar-settings"]') ??
+    (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  feedbackExcerpt.value = editorPane.value?.feedbackExcerpt?.()?.trim() || null;
   feedbackOpen.value = true;
 }
 function closeFeedbackModal() {
@@ -1221,6 +1225,7 @@ defineExpose({ open, closeSession });
       <SendFeedbackModal
         v-if="feedbackOpen && isTauri()"
         :info="info"
+        :excerpt="feedbackExcerpt"
         @close="closeFeedbackModal"
       />
       <div v-show="!focusMode" class="shell__chrome" data-test="shell-chrome">

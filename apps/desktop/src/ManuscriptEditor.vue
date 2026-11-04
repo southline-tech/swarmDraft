@@ -1357,6 +1357,19 @@ function reportLoadError() {
 function setZoom(next: number) {
   zoom.value = clampZoom(next);
 }
+
+/** Short book excerpt for optional feedback attachment (#208). */
+function feedbackExcerpt(): string {
+  const e = editor.value;
+  if (!e || e.isDestroyed) return '';
+  const { from, to, empty } = e.state.selection;
+  const doc = e.state.doc;
+  const text = empty
+    ? doc.textBetween(Math.max(0, from - 400), Math.min(doc.content.size, from + 400), '\n', '\n')
+    : doc.textBetween(from, to, '\n', '\n');
+  return text.trim().slice(0, 2000);
+}
+
 defineExpose({
   focusBody,
   reportLoadError,
@@ -1365,6 +1378,7 @@ defineExpose({
   selectLocalChange,
   decideLocalChange,
   editorReady: () => !!editor.value && !editor.value.isDestroyed,
+  feedbackExcerpt,
 });
 
 /** Set when the content does not fit the schema; the editor is then read-only and never emits. */

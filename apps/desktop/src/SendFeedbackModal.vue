@@ -8,6 +8,7 @@ import {
   FEEDBACK_AREA_LABELS,
   FEEDBACK_TYPES,
   FEEDBACK_TYPE_LABELS,
+  validateFeedbackForm,
   type FeedbackArea,
   type FeedbackType,
 } from './feedback-client';
@@ -22,23 +23,48 @@ const dialog = ref<HTMLElement | null>(null);
 const descriptionInput = ref<HTMLTextAreaElement | null>(null);
 const overlayReady = ref(false);
 const sending = ref(false);
-const status = ref('');
 const sent = ref(false);
+const sendError = ref('');
+const fieldError = ref('');
 
 const area = ref<FeedbackArea>('editor');
 const feedbackType = ref<FeedbackType>('bug');
 const description = ref('');
 const replyEmail = ref('');
 const includeText = ref(false);
+const includeDiagnostics = ref(false);
 
 const canSend = computed(
   () => !sending.value && description.value.trim().length > 0 && !sent.value,
 );
 
+const emailErrorId = 'feedback-email-error';
+const descriptionErrorId = 'feedback-description-error';
+
+function onTypeKeydown(e: KeyboardEvent, t: FeedbackType) {
+  const idx = FEEDBACK_TYPES.indexOf(t);
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    feedbackType.value = FEEDBACK_TYPES[(idx + 1) % FEEDBACK_TYPES.length]!;
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    feedbackType.value = FEEDBACK_TYPES[(idx + FEEDBACK_TYPES.length - 1) % FEEDBACK_TYPES.length]!;
+  }
+}
+
+function validateFields(): boolean {
+  const msg = validateFeedbackForm(description.value, replyEmail.value);
+  fieldError.value = msg ?? '';
+  return !msg;
+}
+
+let successTimer: ReturnType<typeof setTimeout> | undefined;
+
 async function submit() {
-  if (!canSend.value) return;
+  if (sending.value || sent.value) return;
+  if (!validateFields()) return;
   sending.value = true;
-  status.value = '';
+  sendError.value = '';
   try {
     await feedbackApi.send({
       area: area.value,
@@ -50,14 +76,19 @@ async function submit() {
         includeText.value && props.excerpt?.trim()
           ? props.excerpt.trim().slice(0, 2000)
           : undefined,
+      includeDiagnostics: includeDiagnostics.value,
     });
     sent.value = true;
-    status.value = 'Thanks — your feedback was sent.';
+    successTimer = setTimeout(() => emit('close'), 1500);
   } catch (e) {
-    status.value = feedbackErrorMessage(typeof e === 'string' ? e : String(e));
+    sendError.value = feedbackErrorMessage(typeof e === 'string' ? e : String(e));
   } finally {
     sending.value = false;
   }
+}
+
+function retrySend() {
+  sendError.value = '';
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -67,18 +98,15 @@ function onKeydown(e: KeyboardEvent) {
   } else if (dialog.value) trapTab(e, dialog.value);
 }
 
-let opener: HTMLElement | null = null;
-
 onMounted(async () => {
   ensureOverlayLayer();
   overlayReady.value = true;
-  opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   await nextTick();
   descriptionInput.value?.focus();
 });
 
 onBeforeUnmount(() => {
-  if (opener?.isConnected) opener.focus();
+  if (successTimer) clearTimeout(successTimer);
 });
 </script>
 
@@ -87,7 +115,7 @@ onBeforeUnmount(() => {
     <div class="st-dlg-scrim" data-test="feedback-overlay" @mousedown.self.prevent="emit('close')">
       <div
         ref="dialog"
-        class="st-dlg"
+        class="st-dlg st-dlg--feedback"
         role="dialog"
         aria-modal="true"
         aria-labelledby="feedback-title"
@@ -119,8 +147,10 @@ onBeforeUnmount(() => {
               class="st__segb"
               :class="{ 'st__segb--on': feedbackType === t }"
               :aria-checked="feedbackType === t"
+              :tabindex="feedbackType === t ? 0 : -1"
               :data-test="`feedback-type-${t}`"
               @click="feedbackType = t"
+              @keydown="onTypeKeydown($event, t)"
             >
               {{ FEEDBACK_TYPE_LABELS[t] }}
             </button>
@@ -133,25 +163,75 @@ onBeforeUnmount(() => {
             ref="descriptionInput"
             v-model="description"
             class="st-inp st-inp--area"
-            rows="5"
+            rows="6"
             maxlength="4000"
+            required
+            aria-required="true"
+            :aria-invalid="fieldError === 'Add a message.' ? 'true' : undefined"
+            :aria-describedby="fieldError === 'Add a message.' ? descriptionErrorId : undefined"
             data-test="feedback-description"
+            @blur="validateFields()"
           />
         </label>
+        <p
+          v-if="fieldError === 'Add a message.'"
+          :id="descriptionErrorId"
+          class="st-field-error"
+          role="alert"
+        >
+          {{ fieldError }}
+        </p>
         <label class="st-row st-row--stack" for="feedback-email">
           <span class="st-row__k">Reply email <span class="st-muted">(optional)</span></span>
-          <input id="feedback-email" v-model="replyEmail" type="email" class="st-inp" />
+          <input
+            id="feedback-email"
+            v-model="replyEmail"
+            type="email"
+            class="st-inp"
+            :aria-invalid="fieldError && fieldError !== 'Add a message.' ? 'true' : undefined"
+            :aria-describedby="
+              fieldError && fieldError !== 'Add a message.' ? emailErrorId : undefined
+            "
+            @blur="validateFields()"
+          />
         </label>
+        <p
+          v-if="fieldError && fieldError !== 'Add a message.'"
+          :id="emailErrorId"
+          class="st-field-error"
+          role="alert"
+        >
+          {{ fieldError }}
+        </p>
         <label v-if="excerpt?.trim()" class="st-row st-row--check">
           <input v-model="includeText" type="checkbox" data-test="feedback-include-text" />
           <span>Include a short excerpt from my book (opt-in)</span>
         </label>
-        <p v-if="status" class="st-status" role="status" data-test="feedback-status">
-          {{ status }}
+        <label class="st-row st-row--check">
+          <input
+            v-model="includeDiagnostics"
+            type="checkbox"
+            data-test="feedback-include-diagnostics"
+          />
+          <span>Include diagnostics (version, OS, recent errors)</span>
+        </label>
+        <p v-if="sent" class="st-status" role="status" data-test="feedback-status">
+          Thanks — your feedback was sent.
         </p>
+        <div v-if="sendError" class="st-field-error st-field-error--block" role="alert">
+          <p data-test="feedback-send-error">{{ sendError }}</p>
+          <button
+            type="button"
+            class="st-btn st-btn--link"
+            data-test="feedback-try-again"
+            @click="retrySend"
+          >
+            Try again
+          </button>
+        </div>
         <div class="st-dlg__actions">
           <button type="button" class="st-btn" data-test="feedback-cancel" @click="emit('close')">
-            {{ sent ? 'Close' : 'Cancel' }}
+            Cancel
           </button>
           <button
             type="button"

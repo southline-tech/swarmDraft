@@ -228,14 +228,23 @@ fn deny_pairing(store: tauri::State<'_, storage::Store>, pairing_id: String) -> 
 }
 
 #[tauri::command]
-fn send_feedback(
+async fn send_feedback(
     app: tauri::AppHandle,
     store: tauri::State<'_, storage::Store>,
     input: feedback::SendFeedbackInput,
 ) -> Result<(), String> {
-    store
-        .send_feedback_app(&app.package_info().version.to_string(), input)
-        .map_err(|e| e.code().to_string())
+    let store = store.inner().clone();
+    let version = app.package_info().version.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        store
+            .send_feedback_app(&version, input)
+            .map_err(feedback::feedback_ipc_error)
+    })
+    .await
+    .map_err(|e| {
+        eprintln!("send_feedback task failed: {e}");
+        "unavailable".to_string()
+    })?
 }
 
 #[tauri::command]
@@ -246,14 +255,25 @@ fn list_pending_feedback(
 }
 
 #[tauri::command]
-fn approve_feedback(
+async fn approve_feedback(
     app: tauri::AppHandle,
     store: tauri::State<'_, storage::Store>,
     feedback_id: String,
+    include_excerpt: Option<bool>,
 ) -> Result<(), String> {
-    store
-        .approve_feedback(&app.package_info().version.to_string(), &feedback_id)
-        .map_err(|e| e.code().to_string())
+    let store = store.inner().clone();
+    let version = app.package_info().version.to_string();
+    let include = include_excerpt.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || {
+        store
+            .approve_feedback(&version, &feedback_id, include)
+            .map_err(feedback::feedback_ipc_error)
+    })
+    .await
+    .map_err(|e| {
+        eprintln!("approve_feedback task failed: {e}");
+        "unavailable".to_string()
+    })?
 }
 
 #[tauri::command]

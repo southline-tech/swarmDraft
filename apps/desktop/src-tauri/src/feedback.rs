@@ -19,8 +19,13 @@ pub const FEEDBACK_ENDPOINT: &str = match option_env!("FEEDBACK_ENDPOINT") {
 };
 
 const FEEDBACK_TTL_SECS: i64 = 300;
-pub(crate) const FEEDBACK_RATE_WINDOW_SECS: i64 = 3600;
-pub(crate) const FEEDBACK_RATE_MAX: i64 = 20;
+pub(crate) const APP_FEEDBACK_RATE_WINDOW_SECS: i64 = 3600;
+pub(crate) const APP_FEEDBACK_RATE_MAX: i64 = 20;
+pub(crate) const BOT_FEEDBACK_RATE_WINDOW_SECS: i64 = 86400;
+pub(crate) const BOT_FEEDBACK_RATE_MAX: i64 = 1;
+
+pub const BOT_FEEDBACK_RATE_MESSAGE: &str =
+    "You may send at most one feedback digest per day from this agent. Batch it into tomorrow's digest.";
 const MAX_PENDING: i64 = 10;
 
 const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
@@ -85,6 +90,8 @@ pub struct SendFeedbackInput {
     pub excerpt: Option<String>,
     #[serde(default)]
     pub screenshot_png: Option<String>,
+    #[serde(default)]
+    pub include_diagnostics: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,10 +133,17 @@ impl std::fmt::Display for FeedbackSendError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Offline => write!(f, "offline"),
-            Self::RateLimited => write!(f, "rate_limited"),
+            Self::RateLimited => write!(f, "{BOT_FEEDBACK_RATE_MESSAGE}"),
             Self::Unavailable => write!(f, "unavailable"),
             Self::Validation(m) => write!(f, "{m}"),
         }
+    }
+}
+
+pub fn feedback_ipc_error(e: FeedbackSendError) -> String {
+    match e {
+        FeedbackSendError::Validation(m) => m,
+        other => other.code().to_string(),
     }
 }
 
@@ -247,15 +261,59 @@ impl Store {
         })
     }
 
-    fn feedback_rate_count(&self, c: &rusqlite::Connection) -> Result<i64, StorageError> {
+    fn app_feedback_rate_count(&self, c: &rusqlite::Connection) -> Result<i64, StorageError> {
         c.query_row(
             "SELECT count(*) FROM audit_events
-             WHERE action = 'send_feedback' AND outcome = 'ok'
+             WHERE action = 'send_feedback' AND outcome = 'ok' AND principal_kind = 'human'
                AND ts > strftime('%Y-%m-%dT%H:%M:%fZ','now',?1)",
-            [format!("-{FEEDBACK_RATE_WINDOW_SECS} seconds")],
+            [format!("-{APP_FEEDBACK_RATE_WINDOW_SECS} seconds")],
             |r| r.get(0),
         )
         .map_err(StorageError::from)
+    }
+
+    fn bot_feedback_rate_count(
+        &self,
+        c: &rusqlite::Connection,
+        agent_id: &str,
+    ) -> Result<i64, StorageError> {
+        c.query_row(
+            "SELECT count(*) FROM audit_events
+             WHERE action = 'send_feedback' AND outcome = 'ok' AND principal_kind = 'agent'
+               AND principal_id = ?1
+               AND ts > strftime('%Y-%m-%dT%H:%M:%fZ','now',?2)",
+            params![
+                agent_id,
+                format!("-{BOT_FEEDBACK_RATE_WINDOW_SECS} seconds")
+            ],
+            |r| r.get(0),
+        )
+        .map_err(StorageError::from)
+    }
+
+    fn recent_error_lines(
+        &self,
+        c: &rusqlite::Connection,
+        limit: i64,
+    ) -> Result<Vec<String>, StorageError> {
+        let mut stmt = c.prepare(
+            "SELECT action, payload FROM audit_events
+             WHERE outcome != 'ok' ORDER BY ts DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (action, payload) = row?;
+            let line = if payload.trim().is_empty() {
+                action
+            } else {
+                format!("{action}: {payload}")
+            };
+            out.push(line);
+        }
+        Ok(out)
     }
 
     fn expire_feedback_pending(c: &rusqlite::Connection) -> Result<(), StorageError> {
@@ -286,7 +344,7 @@ impl Store {
     ) -> Result<(), FeedbackSendError> {
         validate_input(&input)?;
         let over_limit = self
-            .with_conn(|c| Ok(self.feedback_rate_count(c)? >= FEEDBACK_RATE_MAX))
+            .with_conn(|c| Ok(self.app_feedback_rate_count(c)? >= APP_FEEDBACK_RATE_MAX))
             .map_err(|e: StorageError| FeedbackSendError::Validation(e.to_string()))?;
         if over_limit {
             return Err(FeedbackSendError::RateLimited);
@@ -294,7 +352,22 @@ impl Store {
         let install_id = self
             .install_id()
             .map_err(|e| FeedbackSendError::Validation(e.to_string()))?;
-        let body = build_json_body(&input, app_version, &install_id, "app", None, new_uuid_v4())?;
+        let diagnostics = if input.include_diagnostics {
+            self.with_conn(|c| self.recent_error_lines(c, 8))
+                .ok()
+                .filter(|lines| !lines.is_empty())
+        } else {
+            None
+        };
+        let body = build_json_body(
+            &input,
+            app_version,
+            &install_id,
+            "app",
+            None,
+            new_uuid_v4(),
+            diagnostics.as_deref(),
+        )?;
         post_feedback(app_version, &body)?;
         let _ = self.audit("human", "writer", None, "send_feedback", "ok", &body);
         Ok(())
@@ -365,8 +438,9 @@ impl Store {
         &self,
         app_version: &str,
         feedback_id: &str,
+        include_excerpt: bool,
     ) -> Result<(), FeedbackSendError> {
-        let (input, agent_id, agent_name) = self
+        let (mut input, agent_id, agent_name) = self
             .with_conn(|c| {
                 Self::expire_feedback_pending(c)?;
                 let row: Option<(String, String, String)> = c
@@ -387,6 +461,12 @@ impl Store {
                 Ok((input, agent_id, agent_name))
             })
             .map_err(|e| FeedbackSendError::Validation(e.to_string()))?;
+        if !include_excerpt {
+            input.include_text = false;
+            input.excerpt = None;
+        } else if input.excerpt.is_some() {
+            input.include_text = true;
+        }
         validate_input(&input)?;
         let install_id = self
             .install_id()
@@ -398,6 +478,7 @@ impl Store {
             "bot",
             Some(agent_name.as_str()),
             new_uuid_v4(),
+            None,
         )?;
         post_feedback(app_version, &body)?;
         self.with_conn(|c| {
@@ -438,8 +519,8 @@ impl Store {
         let payload_json = serde_json::to_string(&input)
             .map_err(|e| FeedbackSendError::Validation(format!("serialize pending: {e}")))?;
         self.with_conn(|c| {
-            if self.feedback_rate_count(c)? >= FEEDBACK_RATE_MAX {
-                return Err(StorageError::Invalid("rate".into()));
+            if self.bot_feedback_rate_count(c, agent_id)? >= BOT_FEEDBACK_RATE_MAX {
+                return Err(StorageError::Invalid("bot_rate".into()));
             }
             if Self::count_pending_feedback(c)? >= MAX_PENDING {
                 return Err(StorageError::Invalid(
@@ -463,7 +544,7 @@ impl Store {
             Ok(())
         })
         .map_err(|e| match e.to_string().as_str() {
-            "rate" => FeedbackSendError::RateLimited,
+            "bot_rate" => FeedbackSendError::RateLimited,
             s if s.contains("too many pending") => FeedbackSendError::Validation(s.to_string()),
             s => FeedbackSendError::Validation(s.to_string()),
         })?;
@@ -499,6 +580,7 @@ fn build_json_body(
     source: &str,
     bot_name: Option<&str>,
     nonce: String,
+    recent_errors: Option<&[String]>,
 ) -> Result<serde_json::Value, FeedbackSendError> {
     let mut body = serde_json::json!({
         "area": input.area.as_str(),
@@ -535,6 +617,11 @@ fn build_json_body(
     if let Some(name) = bot_name {
         body["botName"] = serde_json::Value::String(name.to_string());
     }
+    if input.include_diagnostics {
+        if let Some(lines) = recent_errors.filter(|l| !l.is_empty()) {
+            body["diagnostics"] = serde_json::json!({ "recentErrors": lines });
+        }
+    }
     Ok(body)
 }
 
@@ -553,8 +640,11 @@ pub fn post_feedback(app_version: &str, body: &serde_json::Value) -> Result<(), 
         .map_err(|_| FeedbackSendError::Offline)?;
     match res.status().as_u16() {
         202 | 200 => Ok(()),
+        400 | 422 => Err(FeedbackSendError::Validation(
+            "feedback was rejected by the server".into(),
+        )),
         429 => Err(FeedbackSendError::RateLimited),
-        503 => Err(FeedbackSendError::Unavailable),
+        403 | 503 => Err(FeedbackSendError::Unavailable),
         _ => Err(FeedbackSendError::Unavailable),
     }
 }
@@ -564,7 +654,10 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
+    use std::sync::Mutex;
     use std::thread;
+
+    static FEEDBACK_ENV: Mutex<()> = Mutex::new(());
 
     fn temp_store() -> (tempfile::TempDir, Store) {
         let dir = tempfile::tempdir().unwrap();
@@ -601,6 +694,7 @@ mod tests {
 
     #[test]
     fn post_maps_status_codes() {
+        let _env = FEEDBACK_ENV.lock().unwrap();
         let input = SendFeedbackInput {
             area: FeedbackArea::Editor,
             feedback_type: FeedbackType::Bug,
@@ -609,9 +703,18 @@ mod tests {
             include_text: false,
             excerpt: None,
             screenshot_png: None,
+            include_diagnostics: false,
         };
-        let body =
-            build_json_body(&input, "0.1.0", &new_uuid_v4(), "app", None, new_uuid_v4()).unwrap();
+        let body = build_json_body(
+            &input,
+            "0.1.0",
+            &new_uuid_v4(),
+            "app",
+            None,
+            new_uuid_v4(),
+            None,
+        )
+        .unwrap();
 
         let (url, h) = mock_server(202, r#"{"ok":true}"#);
         std::env::set_var("FEEDBACK_ENDPOINT", &url);
@@ -627,10 +730,20 @@ mod tests {
         );
         h.join().unwrap();
         std::env::remove_var("FEEDBACK_ENDPOINT");
+
+        let (url, h) = mock_server(422, "{}");
+        std::env::set_var("FEEDBACK_ENDPOINT", url);
+        assert!(matches!(
+            post_feedback("0.1.0", &body).unwrap_err(),
+            FeedbackSendError::Validation(_)
+        ));
+        h.join().unwrap();
+        std::env::remove_var("FEEDBACK_ENDPOINT");
     }
 
     #[test]
     fn bot_feedback_waits_for_approval() {
+        let _env = FEEDBACK_ENV.lock().unwrap();
         let (_d, store) = temp_store();
         let (url, h) = mock_server(202, r#"{"ok":true}"#);
         std::env::set_var("FEEDBACK_ENDPOINT", url);
@@ -642,6 +755,7 @@ mod tests {
             include_text: false,
             excerpt: None,
             screenshot_png: None,
+            include_diagnostics: false,
         };
         let id = store
             .enqueue_bot_feedback("agent-1", "Line Bot", input)
@@ -654,9 +768,124 @@ mod tests {
         });
         let pending = store.list_pending_feedback().unwrap();
         assert_eq!(pending.len(), 1);
-        store.approve_feedback("0.1.0", &id).unwrap();
+        store.approve_feedback("0.1.0", &id, false).unwrap();
         waiter.join().unwrap().unwrap();
         h.join().unwrap();
         std::env::remove_var("FEEDBACK_ENDPOINT");
+    }
+
+    #[test]
+    fn bot_approve_uses_paired_name_not_payload() {
+        let _env = FEEDBACK_ENV.lock().unwrap();
+        let (_d, store) = temp_store();
+        let (url, h) = mock_server_capture();
+        std::env::set_var("FEEDBACK_ENDPOINT", &url);
+        let input = SendFeedbackInput {
+            area: FeedbackArea::Agents,
+            feedback_type: FeedbackType::Bug,
+            description: "From bot".into(),
+            reply_email: None,
+            include_text: false,
+            excerpt: None,
+            screenshot_png: None,
+            include_diagnostics: false,
+        };
+        let id = store
+            .enqueue_bot_feedback("agent-1", "Paired Name", input)
+            .unwrap();
+        store.approve_feedback("0.1.0", &id, false).unwrap();
+        let posted = h.join().unwrap();
+        assert!(posted.contains(r#""botName":"Paired Name""#));
+        assert!(posted.contains(r#""source":"bot""#));
+        std::env::remove_var("FEEDBACK_ENDPOINT");
+    }
+
+    #[test]
+    fn bot_feedback_rate_limited_per_agent_per_day() {
+        let (_d, store) = temp_store();
+        let input = SendFeedbackInput {
+            area: FeedbackArea::Editor,
+            feedback_type: FeedbackType::Idea,
+            description: "One".into(),
+            reply_email: None,
+            include_text: false,
+            excerpt: None,
+            screenshot_png: None,
+            include_diagnostics: false,
+        };
+        store
+            .enqueue_bot_feedback("agent-a", "Bot A", input.clone())
+            .unwrap();
+        store
+            .deny_feedback(&store.list_pending_feedback().unwrap()[0].id)
+            .unwrap();
+        let _ = store.audit(
+            "agent",
+            "agent-a",
+            None,
+            "send_feedback",
+            "ok",
+            &serde_json::json!({}),
+        );
+        let err = store
+            .enqueue_bot_feedback("agent-a", "Bot A", input)
+            .unwrap_err();
+        assert_eq!(err, FeedbackSendError::RateLimited);
+    }
+
+    #[test]
+    fn approve_strips_excerpt_unless_opted_in() {
+        let _env = FEEDBACK_ENV.lock().unwrap();
+        let (_d, store) = temp_store();
+        let (url, h) = mock_server_capture();
+        std::env::set_var("FEEDBACK_ENDPOINT", &url);
+        let input = SendFeedbackInput {
+            area: FeedbackArea::Editor,
+            feedback_type: FeedbackType::Bug,
+            description: "Secret context".into(),
+            reply_email: None,
+            include_text: true,
+            excerpt: Some("private excerpt".into()),
+            screenshot_png: None,
+            include_diagnostics: false,
+        };
+        let id = store.enqueue_bot_feedback("agent-1", "Bot", input).unwrap();
+        store.approve_feedback("0.1.0", &id, false).unwrap();
+        let posted = h.join().unwrap();
+        assert!(!posted.contains("private excerpt"));
+        assert!(!posted.contains(r#""excerpt""#));
+        std::env::remove_var("FEEDBACK_ENDPOINT");
+    }
+
+    fn mock_server_capture() -> (String, thread::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = thread::spawn(move || {
+            let mut body = String::new();
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 4096];
+                loop {
+                    match stream.read(&mut chunk) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            buf.extend_from_slice(&chunk[..n]);
+                            if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                                break;
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+                let req = String::from_utf8_lossy(&buf);
+                if let Some(i) = req.find("\r\n\r\n") {
+                    body = req[i + 4..].trim().to_string();
+                }
+                let resp = "HTTP/1.1 202 OK\r\nContent-Length: 11\r\n\r\n{\"ok\":true}";
+                let _ = stream.write_all(resp.as_bytes());
+            }
+            body
+        });
+        (format!("http://{addr}"), handle)
     }
 }

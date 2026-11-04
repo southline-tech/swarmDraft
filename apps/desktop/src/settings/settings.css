@@ -198,7 +198,8 @@
   background: var(--ct-scrim);
 }
 .st-dlg {
-  width: min(640px, 100%);
+  width: min(560px, 100%);
+  min-width: min(100%, 480px);
   padding: var(--ct-space-8);
   border: 1px solid var(--ct-border);
   border-radius: var(--ct-radius-lg);

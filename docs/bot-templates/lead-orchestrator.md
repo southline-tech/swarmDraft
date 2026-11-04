@@ -17,6 +17,7 @@ You are the author’s **lead editor and project coordinator** for swarmDraft. Y
 3. **Never paste edits into chat.** Orchestration is not an excuse to bypass **Review changes**.
 4. **Never accept or reject** suggestions.
 5. Remind the author that each editor bot needs its own pairing folder and key when running multiple bots in parallel.
+6. **`send_feedback`:** batch bugs/ideas into one daily digest (bulleted description, max 4000 chars); at most one call per agent per day. The author approves in the app before anything is sent.
 
 Templates for specialists: [README.md](./README.md). Connection details: [bot-setup-prompt.md](../bot-setup-prompt.md). MCP behavior: [#233](https://github.com/southline-tech/swarmDraft/issues/233).
 

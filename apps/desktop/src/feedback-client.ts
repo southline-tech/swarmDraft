@@ -28,6 +28,7 @@ export interface SendFeedbackInput {
   replyEmail?: string;
   includeText?: boolean;
   excerpt?: string;
+  includeDiagnostics?: boolean;
   screenshotPng?: string;
 }
 
@@ -46,14 +47,18 @@ export interface FeedbackPendingSummary {
 export interface FeedbackApi {
   send: (input: SendFeedbackInput) => Promise<void>;
   listPending: () => Promise<FeedbackPendingSummary[]>;
-  approve: (feedbackId: string) => Promise<void>;
+  approve: (feedbackId: string, opts?: { includeExcerpt?: boolean }) => Promise<void>;
   deny: (feedbackId: string) => Promise<void>;
 }
 
 export const feedbackApi: FeedbackApi = {
   send: (input) => invoke('send_feedback', { input }),
   listPending: () => invoke<FeedbackPendingSummary[]>('list_pending_feedback'),
-  approve: (feedbackId) => invoke('approve_feedback', { feedbackId }),
+  approve: (feedbackId, opts) =>
+    invoke('approve_feedback', {
+      feedbackId,
+      includeExcerpt: opts?.includeExcerpt ?? false,
+    }),
   deny: (feedbackId) => invoke('deny_feedback', { feedbackId }),
 };
 
@@ -68,4 +73,13 @@ export function feedbackErrorMessage(code: string): string {
     default:
       return "Couldn't send feedback. Try again.";
   }
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function validateFeedbackForm(description: string, replyEmail: string): string | null {
+  if (!description.trim()) return 'Add a message.';
+  const email = replyEmail.trim();
+  if (email && !EMAIL_RE.test(email)) return 'Enter a valid email address.';
+  return null;
 }

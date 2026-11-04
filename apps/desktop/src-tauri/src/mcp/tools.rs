@@ -15,7 +15,8 @@ use serde_json::{json, Value};
 use crate::agents::AgentPrincipal;
 use crate::content;
 use crate::feedback::{
-    FeedbackArea, FeedbackType, SendFeedbackInput, MAX_DESCRIPTION, MAX_EXCERPT,
+    FeedbackArea, FeedbackSendError, FeedbackType, SendFeedbackInput, BOT_FEEDBACK_RATE_MESSAGE,
+    MAX_DESCRIPTION, MAX_EXCERPT,
 };
 use crate::manuscripts::AgentWrite;
 use crate::notes::{self, NoteEntry};
@@ -1236,7 +1237,7 @@ Use this instead of cramming new scenes into suggest_edit replacements."
     }
 
     #[tool(
-        description = "Send product feedback to the swarmDraft team on the author's behalf. The author sees a preview and must Allow or Deny before anything is sent."
+        description = "Send product feedback to the swarmDraft team on the author's behalf. Batch notes into one digest (bulleted description, max 4000 chars); at most one send_feedback call per agent per day. The author previews and Allow/Deny in the app before anything is sent."
     )]
     async fn send_feedback(
         &self,
@@ -1279,10 +1280,16 @@ Use this instead of cramming new scenes into suggest_edit replacements."
             include_text,
             excerpt: a.excerpt,
             screenshot_png: None,
+            include_diagnostics: false,
         };
         let store = self.store.clone();
         let feedback_id = match store.enqueue_bot_feedback(&p.agent_id, &p.name, input) {
             Ok(id) => id,
+            Err(FeedbackSendError::RateLimited) => {
+                return Ok(CallToolResult::error(vec![ContentBlock::text(
+                    BOT_FEEDBACK_RATE_MESSAGE,
+                )]));
+            }
             Err(e) => {
                 return Ok(CallToolResult::error(vec![ContentBlock::text(
                     e.to_string(),
@@ -1599,7 +1606,7 @@ impl ServerHandler for SwarmdraftMcp {
 read_chapter (markdown with block ids) and search_text before edits; suggest_edit to replace or \
 delete an exact quote; suggest_insert for new paragraphs or scenes; suggest_style for paragraph \
 format; add_comment and write_note for comments; list_suggestions to see pending work; \
-trigger_export/get_export only when the author asks; send_feedback to report bugs or ideas (author approves first). Pair with request_pairing/poll_pairing. \
+trigger_export/get_export only when the author asks; send_feedback to report bugs or ideas (batch into one daily digest per agent, max 4000 chars; author approves first). Pair with request_pairing/poll_pairing. \
 Accepting or rejecting suggestions is human-only in the app."
             ),
         )
