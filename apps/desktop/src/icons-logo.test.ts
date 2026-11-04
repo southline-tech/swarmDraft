@@ -97,7 +97,7 @@ describe('logo', () => {
     expect(html).toMatch(/<link rel="icon" href="\/favicon\.svg"/);
   });
 
-  it('uses the full S SVG at 48px and up and 24/48 PNG below', () => {
+  it('uses the full mark SVG at 48px and up and 24/48 PNG below', () => {
     const big = mount(AppLogo, { props: { size: 64 } }).get('img');
     const at48 = mount(AppLogo, { props: { size: 48 } }).get('img');
     const small = mount(AppLogo, { props: { size: 24 } }).get('img');
