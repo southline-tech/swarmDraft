@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * swarmDraft mark: 48px+ uses the full SVG (circle accent); below 48px the small-mark
- * 24/48 PNG pair keeps the simplified S crisp on dense screens.
+ * C4c final mark: 48px+ uses the full SVG (stacked cards + hex cluster); below 48px the
+ * small-mark 24/48 PNG pair keeps the simplified stack crisp on dense screens.
  */
 import { computed } from 'vue';
 import logo from './assets/logo/swarmdraft-icon.svg';
