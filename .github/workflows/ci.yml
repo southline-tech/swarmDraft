@@ -1,8 +1,7 @@
 name: CI
 
-# Single minimal Linux job on PRs to main only. No Windows runners, no push,
-# no manual dispatch. Windows builds/installers run on a local Windows test
-# machine with each action approved by Brett, not in GitHub Actions.
+# PR CI runs on ubuntu-latest only. Windows installer bundles build in release.yml
+# on version tags (v*) only — not on pull requests.
 on:
   pull_request:
     branches: [main]
@@ -36,6 +35,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm version:check
       - run: pnpm lint
       - run: pnpm format:check
       - run: pnpm typecheck

@@ -10,6 +10,10 @@ const pkg = JSON.parse(readFileSync(resolve(repoRoot, 'package.json'), 'utf8')) 
 };
 
 describe('Prettier in CI (#252)', () => {
+  it('runs version:check after install', () => {
+    expect(ciYml).toMatch(/- run: pnpm install --frozen-lockfile\n\s+- run: pnpm version:check/);
+  });
+
   it('runs pnpm format:check in the Lint and test job after lint', () => {
     expect(ciYml).toMatch(
       /- run: pnpm lint\n\s+- run: pnpm format:check\n\s+- run: pnpm typecheck/s,
