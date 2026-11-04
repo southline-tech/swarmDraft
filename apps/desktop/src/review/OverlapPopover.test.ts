@@ -80,7 +80,7 @@ describe('OverlapPopover (#179)', () => {
     w.unmount();
   });
 
-  it('#240: calls restoreFocus when the popover closes', async () => {
+  it('#240: Escape closes without restoring focus (parent restores once)', async () => {
     const restoreFocus = vi.fn();
     const w = mount(OverlapPopover, {
       props: {
@@ -95,7 +95,6 @@ describe('OverlapPopover (#179)', () => {
             ts: '1',
           },
         ],
-        restoreFocus,
       },
       attachTo: document.body,
     });
@@ -103,11 +102,10 @@ describe('OverlapPopover (#179)', () => {
     const dialog = w.get('[data-test=overlap-popover]').element as HTMLElement;
     dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await nextTick();
-    await nextTick();
-    expect(restoreFocus).toHaveBeenCalled();
-    restoreFocus.mockClear();
+    expect(w.emitted('close')).toHaveLength(1);
+    expect(restoreFocus).not.toHaveBeenCalled();
     w.unmount();
     await nextTick();
-    expect(restoreFocus).toHaveBeenCalled();
+    expect(restoreFocus).not.toHaveBeenCalled();
   });
 });

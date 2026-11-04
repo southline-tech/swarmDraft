@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** All-view overlap popover (#179): list overlapping suggestions, Accept/Reject each. */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import type { Decision, SuggestionItem } from '@swarmdraft/editor';
 import { authorKind, type ChangeTypeLabel } from './review-state';
 import type { AgentName } from '../agent-names';
@@ -22,8 +22,6 @@ const props = defineProps<{
   entries: readonly OverlapEntry[];
   busy?: boolean;
   labels?: (author: string) => AgentName;
-  /** Focus the opener section at the overlap range without scrolling the manuscript (#240). */
-  restoreFocus?: () => void;
 }>();
 const emit = defineEmits<{
   close: [];
@@ -31,7 +29,6 @@ const emit = defineEmits<{
 }>();
 
 const root = ref<HTMLElement | null>(null);
-const opener = document.activeElement as HTMLElement | null;
 const titleId = 'overlap-popover-title';
 
 const sorted = computed(() =>
@@ -61,16 +58,6 @@ function focusRow(index: number) {
   items[i]?.focus();
 }
 
-function restoreEditorFocus() {
-  void nextTick(() => {
-    if (props.restoreFocus) {
-      props.restoreFocus();
-      return;
-    }
-    opener?.focus?.({ preventScroll: true });
-  });
-}
-
 function onKey(e: KeyboardEvent) {
   const items = focusables();
   const active = document.activeElement as HTMLElement | null;
@@ -92,7 +79,6 @@ function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     e.stopPropagation();
     emit('close');
-    restoreEditorFocus();
   }
 }
 
@@ -102,7 +88,6 @@ watch(
 );
 
 onMounted(() => void nextTick(() => root.value?.focus()));
-onBeforeUnmount(restoreEditorFocus);
 </script>
 
 <template>

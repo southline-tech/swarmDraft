@@ -539,12 +539,24 @@ const overlapPopover = shallowRef<{
   restoreFocus: () => void;
 } | null>(null);
 
+/** Map overlap cluster positions into the live doc (reject/accept may shrink the range). */
+function clampOverlapSelection(doc: PMNode, from: number, to: number) {
+  const max = doc.content.size;
+  let a = Math.max(0, Math.min(from, max));
+  let b = Math.max(0, Math.min(to, max));
+  if (a > b) [a, b] = [b, a];
+  return { from: a, to: Math.max(a, b) };
+}
+
 /** Return focus to the overlap range in this section without scrolling (#240). */
 function focusOverlapCluster(cluster: OverlapCluster) {
   const e = editor.value;
   if (!e || e.isDestroyed) return;
-  const { from, to } = cluster;
-  const end = Math.max(from, to);
+  const { from, to: end } = clampOverlapSelection(
+    e.state.doc,
+    cluster.from,
+    Math.max(cluster.from, cluster.to),
+  );
   const tr = e.state.tr
     .setSelection(TextSelection.create(e.state.doc, from, end))
     .setMeta('addToHistory', false);
@@ -553,8 +565,9 @@ function focusOverlapCluster(cluster: OverlapCluster) {
 }
 
 function closeOverlapPopover() {
-  overlapPopover.value?.restoreFocus();
+  const restore = overlapPopover.value?.restoreFocus;
   overlapPopover.value = null;
+  restore?.();
 }
 
 function dismissContextOverlay() {
@@ -1013,8 +1026,10 @@ function dismissOne(key: string) {
 }
 
 function onOverlapDecide(targets: OverlapEntry['targets'], decision: Decision) {
-  closeOverlapPopover();
+  const restore = overlapPopover.value?.restoreFocus;
+  overlapPopover.value = null;
   decide(targets, decision);
+  restore?.();
 }
 
 function onSelectView(author: string | null) {
@@ -1761,7 +1776,6 @@ onBeforeUnmount(() => {
       :y="overlapPopover.y"
       :entries="overlapEntries(overlapPopover.cluster)"
       :labels="labelAuthor"
-      :restore-focus="overlapPopover.restoreFocus"
       @decide="onOverlapDecide"
       @close="closeOverlapPopover"
     />

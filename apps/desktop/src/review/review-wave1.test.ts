@@ -111,6 +111,40 @@ describe('review wave 1', () => {
     w.unmount();
   });
 
+  it('#240: reject on overlap that shrinks the doc does not throw and keeps desk scroll', async () => {
+    const tall: JSONContent = {
+      type: 'doc',
+      content: Array.from({ length: 40 }, (_, i) => ({
+        type: 'paragraph',
+        content: [{ type: 'text', text: `Line ${i}. ` }],
+      })),
+    };
+    tall.content![35] = {
+      type: 'paragraph',
+      content: [
+        {
+          type: 'text',
+          text: 'overlap',
+          marks: [
+            { type: 'suggestion_insert', attrs: { id: 's1', ...byA } },
+            { type: 'suggestion_insert', attrs: { id: 's2', ...byB } },
+          ],
+        },
+      ],
+    };
+    const w = mount(ManuscriptEditor, { props: { content: tall }, attachTo: document.body });
+    await flushPromises();
+    const desk = w.get('[data-test=desk]').element as HTMLElement;
+    desk.scrollTop = 800;
+    await w.find('.tiptap [data-test=overlap-badge]').trigger('click');
+    await flushPromises();
+    await w.find('[data-test=overlap-reject]').trigger('click');
+    await flushPromises();
+    await flushPromises();
+    expect(desk.scrollTop).toBe(800);
+    w.unmount();
+  });
+
   it('#240: accept keeps desk scroll position after auto-advance', async () => {
     const tall: JSONContent = {
       type: 'doc',
