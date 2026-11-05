@@ -206,8 +206,30 @@ function failOpening(err: unknown, context: 'open' | 'import') {
   clearTimeout(openingRevealTimer);
   openingVisible.value = false;
   opening.value = null;
+  openError.value = '';
   openingError.value = mapError(err, context);
 }
+function unsavedImportError(fileName: string): MappedError {
+  return {
+    code: 'save-failed',
+    title: "Edits aren't saved yet",
+    message: `Couldn't import ${fileName}: some edits in the current manuscript aren't saved yet`,
+    action: 'dismiss',
+    actionLabel: 'Got it',
+    tone: 'warning',
+  };
+}
+function dismissOpeningError() {
+  finishOpening();
+}
+const showOpeningShell = computed(
+  () =>
+    !!openingError.value ||
+    (openingVisible.value && (!session.value || choosingBook.value || importing.value)),
+);
+const openingShellOverlay = computed(
+  () => !!session.value && !choosingBook.value && (importing.value || !!openingError.value),
+);
 function onOpeningErrorAction() {
   const err = openingError.value;
   if (!err) return;
@@ -220,6 +242,10 @@ function onOpeningErrorAction() {
   if (err.action === 'try-again') {
     openingError.value = null;
     void runOpeningRetry();
+    return;
+  }
+  if (err.action === 'dismiss') {
+    dismissOpeningError();
     return;
   }
   openingError.value = null;
@@ -686,7 +712,10 @@ watch(settingsOpen, async (isOpen) => {
   }
 });
 const fileInput = ref<HTMLInputElement | null>(null);
-const chooseFile = () => fileInput.value?.click();
+const chooseFile = () => {
+  openError.value = '';
+  fileInput.value?.click();
+};
 
 /** Book-menu shortcuts wired in this build (#104 Designer). */
 const appMenuShortcuts = computed(() => ({
@@ -977,7 +1006,6 @@ async function onFile(e: Event) {
 }
 
 /** Word manuscripts only; checked before anything (including the open book) is touched. */
-const NOT_WORD_FILE = "That file isn't a Word manuscript. Please choose a Word file.";
 const isWordFile = (f: File) => f.name.toLowerCase().endsWith('.docx');
 
 async function restoreAfterImportCancelled(current?: ManuscriptSession | null) {
@@ -1049,15 +1077,15 @@ async function importBytes(fileName: string, bytes: Uint8Array) {
     }
     console.error('Import failed', err);
     dismissToast();
+    openError.value = '';
     if (err instanceof UnsavedEditsError) {
-      finishOpening();
       openingRetry.value = null;
-      openError.value = `Couldn't import ${fileName}: some edits in the current manuscript aren't saved yet`;
+      clearTimeout(openingRevealTimer);
+      openingVisible.value = false;
+      opening.value = null;
+      openingError.value = unsavedImportError(fileName);
     } else {
       failOpening(err, 'import');
-      if (session.value && !choosingBook.value) {
-        openError.value = `Couldn't import ${fileName}. ${errorLine(err, 'import')}`;
-      }
     }
   } finally {
     if (importJobSeq === job) {
@@ -1070,7 +1098,8 @@ async function importBytes(fileName: string, bytes: Uint8Array) {
 async function importFile(file: File) {
   if (importing.value) return;
   if (!isWordFile(file)) {
-    openError.value = NOT_WORD_FILE;
+    openError.value = '';
+    failOpening(new Error('Not a valid .docx (zip directory not found)'), 'import');
     return;
   }
   let bytes: Uint8Array;
@@ -1080,9 +1109,6 @@ async function importFile(file: File) {
     console.error('Import failed', err);
     dismissToast();
     failOpening(err, 'import');
-    if (session.value && !choosingBook.value) {
-      openError.value = `Couldn't import ${file.name}. ${errorLine(err, 'import')}`;
-    }
     return;
   }
   await importBytes(file.name, bytes);
@@ -1612,7 +1638,7 @@ defineExpose({ open, closeSession });
         @change="onFile"
       />
       <p v-if="fatalError" role="alert" data-test="fatal-error">{{ fatalError }}</p>
-      <p v-if="openError" role="alert" data-test="open-error">{{ openError }}</p>
+      <p v-if="openError && !openingError" role="alert" data-test="open-error">{{ openError }}</p>
       <SaveFailureBanner
         v-if="saveFailure.failing"
         data-test="save-error"
@@ -1646,11 +1672,10 @@ defineExpose({ open, closeSession });
         @drop-file="importFile"
       />
       <div
-        v-if="(!session || choosingBook || importing) && (openingVisible || openingError)"
+        v-if="showOpeningShell"
         class="opening-shell"
-        :class="{ 'opening-shell--overlay': !!session && !choosingBook && importing }"
+        :class="{ 'opening-shell--overlay': openingShellOverlay }"
         data-test="opening-shell"
-        @keydown.esc="openingVisible && opening?.kind === 'import' && cancelImportOpening()"
       >
         <OpeningProgress
           v-if="openingVisible && opening"
@@ -1669,7 +1694,9 @@ defineExpose({ open, closeSession });
             :title="openingError.title"
             :text="openingError.message"
             :action="openingError.actionLabel"
+            dismissible
             @action="onOpeningErrorAction"
+            @dismiss="dismissOpeningError"
           />
         </div>
       </div>

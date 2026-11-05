@@ -38,9 +38,8 @@ onBeforeUnmount(() => cancelAnimationFrame(frame));
         ><ShellIcon :name="icon ?? 'check'"
       /></span>
       <p class="toast__msg">
-        <template v-if="lead"
-          ><b>{{ lead }}</b> </template
-        >{{ message }}
+        <b v-if="lead">{{ lead }}</b
+        ><span v-if="lead" aria-hidden="true">&nbsp;</span>{{ message }}
       </p>
       <button type="button" class="sh-btn" data-test="toast-dismiss" @click="emit('dismiss')">
         {{ action ?? 'Got it' }}

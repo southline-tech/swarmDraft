@@ -1,5 +1,6 @@
 import * as Y from 'yjs';
 import { importDocx, importedToYDocs, type ImportOptions } from '@swarmdraft/docx';
+import { devImportEvidenceDelay } from './dev-import-delay';
 
 export type WorkerImportRequest = {
   bytes: ArrayBuffer;
@@ -22,8 +23,9 @@ function transferBuffer(u8: Uint8Array): ArrayBuffer {
   return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
 }
 
-self.onmessage = (event: MessageEvent<WorkerImportRequest>) => {
+self.onmessage = async (event: MessageEvent<WorkerImportRequest>) => {
   try {
+    await devImportEvidenceDelay();
     const { bytes, options } = event.data;
     const imported = importDocx(new Uint8Array(bytes), options);
     const { manuscript, sections } = importedToYDocs(imported);

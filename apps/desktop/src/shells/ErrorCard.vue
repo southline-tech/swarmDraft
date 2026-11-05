@@ -1,9 +1,5 @@
 <script setup lang="ts">
-/**
- * ob9: plain-language error card, and (variant="banner") the save-failure banner. Visual only.
- * No live role of its own: the parent keeps a persistent assertive region mounted and renders
- * this card inside it, so the region exists before the error text (#79).
- */
+import { nextTick, onMounted, ref } from 'vue';
 import ShellIcon from './ShellIcon.vue';
 
 withDefaults(
@@ -18,6 +14,7 @@ withDefaults(
     actionDataTest?: string;
     actionDisabled?: boolean;
     actionAriaBusy?: boolean;
+    dismissible?: boolean;
   }>(),
   {
     variant: 'card',
@@ -25,35 +22,47 @@ withDefaults(
     actionDataTest: undefined,
     actionDisabled: false,
     actionAriaBusy: false,
+    dismissible: false,
   },
 );
-const emit = defineEmits<{ action: [] }>();
+const emit = defineEmits<{ action: []; dismiss: [] }>();
+const root = ref<HTMLElement | null>(null);
+onMounted(async () => {
+  await nextTick();
+  root.value?.focus();
+});
 </script>
 
 <template>
   <section
+    ref="root"
     class="ec"
     :class="[`ec--${tone}`, variant === 'banner' ? 'ec--banner' : '']"
     :role="role ?? (variant === 'banner' ? 'alert' : undefined)"
+    tabindex="-1"
     :data-test="variant === 'banner' ? 'save-failure-banner' : 'error-card'"
+    @keydown.esc.prevent="dismissible && emit('dismiss')"
   >
     <span class="ec__icon"><ShellIcon :name="icon" /></span>
     <div class="ec__body">
-      <h3 class="ec__title" :data-test="variant === 'banner' ? 'save-failure-title' : undefined">
-        {{ title }}
-      </h3>
+      <h3 class="ec__title">{{ title }}</h3>
       <p class="ec__text">{{ text }}</p>
     </div>
-    <button
-      type="button"
-      class="sh-btn sh-btn--primary"
-      :data-test="actionDataTest"
-      :disabled="actionDisabled"
-      :aria-busy="actionAriaBusy || undefined"
-      @click="emit('action')"
-    >
-      {{ action }}
-    </button>
+    <div class="ec__actions">
+      <button type="button" class="sh-btn sh-btn--primary" @click="emit('action')">
+        {{ action }}
+      </button>
+      <button
+        v-if="dismissible"
+        type="button"
+        class="sh-btn sh-btn--secondary ec__dismiss"
+        aria-label="Dismiss"
+        data-test="error-card-dismiss"
+        @click="emit('dismiss')"
+      >
+        ×
+      </button>
+    </div>
   </section>
 </template>
 
@@ -70,6 +79,10 @@ const emit = defineEmits<{ action: [] }>();
   box-shadow: var(--ct-elevation-1);
   color: var(--ct-text);
 }
+.ec:focus-visible {
+  outline: 2px solid var(--ct-focus-ring-color);
+  outline-offset: 2px;
+}
 .ec__icon {
   display: grid;
   place-items: center;
@@ -80,6 +93,10 @@ const emit = defineEmits<{ action: [] }>();
 .ec--danger .ec__icon {
   background: var(--ct-danger-bg);
   color: var(--ct-danger);
+}
+.ec--danger {
+  border-left: 3px solid var(--ct-danger);
+  background: var(--ct-danger-bg);
 }
 .ec--warning .ec__icon {
   background: var(--ct-warning-bg);
@@ -95,6 +112,15 @@ const emit = defineEmits<{ action: [] }>();
   color: var(--ct-text-muted);
   font-size: var(--ct-text-sm);
 }
+.ec__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ct-space-2);
+  width: 100%;
+}
+.ec__dismiss {
+  min-width: var(--ct-space-8);
+}
 .ec--banner {
   flex-direction: row;
   align-items: center;
@@ -104,5 +130,8 @@ const emit = defineEmits<{ action: [] }>();
 }
 .ec--banner .ec__body {
   flex: 1;
+}
+.ec--banner .ec__actions {
+  width: auto;
 }
 </style>
