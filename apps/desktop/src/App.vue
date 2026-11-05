@@ -36,6 +36,7 @@ import {
   draftRecoverWorktreeToFile,
   draftAfterWordImport,
   listenOpenDraftPath,
+  draftTakeLaunchPath,
   draftSave,
   draftSaveAs,
   draftCheckpoint,
@@ -876,7 +877,6 @@ async function refreshRecentBooks() {
 const appMenu = ref<HTMLDetailsElement | null>(null);
 const bookMenuOpen = ref(false);
 const historyOpen = ref(false);
-const historyMenuTrigger = ref<HTMLButtonElement | null>(null);
 const bookMenuTrigger = shallowRef<HTMLElement | null>(null);
 const recentTrigger = shallowRef<HTMLButtonElement | null>(null);
 function closeBookMenu() {
@@ -1081,6 +1081,7 @@ const appMenuShortcuts = computed(() => ({
   open: 'Ctrl+O',
   importWord: 'Ctrl+Shift+O',
   save: session.value && isTauri() ? 'Ctrl+S' : undefined,
+  saveAs: session.value && isTauri() ? 'Ctrl+Shift+S' : undefined,
   settings: 'Ctrl+,',
   quit: isTauri() ? 'Ctrl+Q' : undefined,
 }));
@@ -1108,6 +1109,11 @@ function onAppMenuKey(e: KeyboardEvent) {
   if (mod && e.shiftKey && k === 'o' && !e.altKey) {
     e.preventDefault();
     if (!importing.value) chooseFile();
+    return;
+  }
+  if (mod && e.shiftKey && k === 's' && !e.altKey && session.value && isTauri()) {
+    e.preventDefault();
+    void onMenuSaveAs();
     return;
   }
   if (!mod || e.shiftKey || e.altKey) return;
@@ -1153,6 +1159,9 @@ onMounted(() => {
     void openDraftFromPath(path);
   }).then((unlisten) => {
     stopOpenDraftPath = unlisten;
+  });
+  void draftTakeLaunchPath().then((path) => {
+    if (path) void openDraftFromPath(path);
   });
   stopAppMenuKeys = () => {
     window.removeEventListener('keydown', onAppMenuKey);
@@ -1861,7 +1870,9 @@ defineExpose({ open, closeSession });
                 <span class="sh-mi-lead" aria-hidden="true"
                   ><AppIcon name="folder" class="app-menu-icon"
                 /></span>
-                Save As…
+                Save As…<span v-if="appMenuShortcuts.saveAs" class="sh-k">{{
+                  appMenuShortcuts.saveAs
+                }}</span>
               </button>
               <button
                 type="button"
@@ -1886,7 +1897,6 @@ defineExpose({ open, closeSession });
               </button>
               <button
                 v-if="session && isTauri()"
-                ref="historyMenuTrigger"
                 type="button"
                 class="sh-mi"
                 role="menuitem"
@@ -2172,7 +2182,7 @@ defineExpose({ open, closeSession });
         v-if="isTauri()"
         :open="historyOpen"
         :manuscript-id="session?.id ?? null"
-        :menu-trigger="historyMenuTrigger"
+        :menu-trigger="bookMenuTrigger"
         :before-restore="onHistoryBeforeRestore"
         @close="historyOpen = false"
         @restored="() => void reloadOpenManuscript()"

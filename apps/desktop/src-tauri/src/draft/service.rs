@@ -658,23 +658,35 @@ impl DraftService {
 
 pub(crate) fn path_with_draft_extension(path: &str) -> String {
     let p = Path::new(path);
-    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
-    if ext.eq_ignore_ascii_case("draft") {
-        return path.to_string();
+    let file_name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+    if file_name.len() >= 6 {
+        let lower = file_name.to_ascii_lowercase();
+        if lower.ends_with(".draft") {
+            return path.to_string();
+        }
     }
-    let stem = p
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .filter(|s| !s.is_empty())
-        .unwrap_or("Untitled draft");
-    match p.parent() {
-        Some(parent) if parent.as_os_str().is_empty() => format!("{stem}.draft"),
-        Some(parent) => parent
-            .join(format!("{stem}.draft"))
-            .to_string_lossy()
-            .into_owned(),
-        None => format!("{stem}.draft"),
+    if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
+        let replace_ext = ext.len() >= 2
+            && ext.len() <= 4
+            && ext.chars().all(|c| c.is_ascii_alphanumeric())
+            && !ext.chars().all(|c| c.is_ascii_digit());
+        if replace_ext {
+            let stem = p
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("Untitled draft");
+            return match p.parent() {
+                Some(parent) if parent.as_os_str().is_empty() => format!("{stem}.draft"),
+                Some(parent) => parent
+                    .join(format!("{stem}.draft"))
+                    .to_string_lossy()
+                    .into_owned(),
+                None => format!("{stem}.draft"),
+            };
+        }
     }
+    format!("{path}.draft")
 }
 
 fn unique_draft_path(dir: &Path, base: &str) -> PathBuf {
@@ -773,6 +785,18 @@ mod path_tests {
         assert_eq!(
             path_with_draft_extension("/tmp/book.draft"),
             "/tmp/book.draft"
+        );
+        assert_eq!(
+            path_with_draft_extension("/tmp/Vol. 2"),
+            "/tmp/Vol. 2.draft"
+        );
+        assert_eq!(
+            path_with_draft_extension("/tmp/Mr. Smith"),
+            "/tmp/Mr. Smith.draft"
+        );
+        assert_eq!(
+            path_with_draft_extension("/tmp/book.DRAFT"),
+            "/tmp/book.DRAFT"
         );
     }
 }

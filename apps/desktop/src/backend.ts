@@ -414,6 +414,16 @@ export async function listenOpenDraftPath(onPath: (path: string) => void): Promi
   }
 }
 
+/** Cold-start `.draft` from argv; returned once then cleared on the backend. */
+export async function draftTakeLaunchPath(): Promise<string | null> {
+  if (!isTauri()) return null;
+  try {
+    return await invoke<string | null>('draft_take_launch_path');
+  } catch {
+    return null;
+  }
+}
+
 export async function draftAfterWordImport(
   manuscriptId: string,
   sourceFileName: string,

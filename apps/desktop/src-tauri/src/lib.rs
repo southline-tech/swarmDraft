@@ -30,6 +30,8 @@ use std::sync::Arc;
 use tauri::Emitter;
 use tauri::Manager;
 
+use std::sync::Mutex;
+
 use dictionary::{
     spell_dictionary_add, spell_dictionary_ignore, spell_dictionary_list, spell_dictionary_remove,
     spell_lint_paragraph,
@@ -1172,10 +1174,29 @@ fn focus_main_window(app: &tauri::AppHandle) {
     }
 }
 
+/// Cold-start `.draft` path from argv (consumed once via [`draft_take_launch_path`]).
+#[derive(Default)]
+struct LaunchDraftPath(Mutex<Option<String>>);
+
+fn take_stored_launch_path(slot: &Mutex<Option<String>>) -> Option<String> {
+    slot.lock().ok()?.take()
+}
+
 fn draft_path_from_argv(argv: &[String]) -> Option<String> {
+    use std::path::Path;
     argv.iter()
-        .find(|a| a.ends_with(".draft") || a.ends_with(".DRAFT") || a.ends_with(".Draft"))
+        .find(|a| {
+            Path::new(a)
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("draft"))
+        })
         .cloned()
+}
+
+#[tauri::command]
+fn draft_take_launch_path(state: tauri::State<'_, LaunchDraftPath>) -> Option<String> {
+    take_stored_launch_path(&state.0)
 }
 
 fn draft_author_name(store: &storage::Store) -> String {
@@ -1250,13 +1271,13 @@ pub fn run() {
             let draft_service = std::sync::Arc::new(draft_service);
             app.manage(draft_service.clone());
             app.manage(store.clone());
+            let launch_draft = LaunchDraftPath::default();
             if let Some(path) = draft_path_from_argv(&std::env::args().collect::<Vec<_>>()) {
-                let handle = app.handle().clone();
-                let path = path.clone();
-                tauri::async_runtime::spawn(async move {
-                    let _ = handle.emit("open-draft-path", path);
-                });
+                if let Ok(mut slot) = launch_draft.0.lock() {
+                    *slot = Some(path);
+                }
             }
+            app.manage(launch_draft);
             app.manage(export::PandocDownloadState::default());
             app.manage(backup::OpLock::default());
             app.manage(std::sync::Mutex::new(McpStatus {
@@ -1370,6 +1391,7 @@ pub fn run() {
             export_save_via_dialog,
             export_reveal_in_folder,
             draft_open,
+            draft_take_launch_path,
             draft_open_path,
             draft_recover_worktree_to_file,
             draft_after_word_import,
@@ -1386,7 +1408,27 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::os_user_display_name;
+    use super::{draft_path_from_argv, os_user_display_name, take_stored_launch_path};
+    use std::sync::Mutex;
+
+    #[test]
+    fn draft_path_from_argv_matches_extension_case_insensitive() {
+        let argv = vec!["swarmdraft".into(), r"C:\Books\My Book.DRAFT".into()];
+        assert_eq!(
+            draft_path_from_argv(&argv).as_deref(),
+            Some(r"C:\Books\My Book.DRAFT")
+        );
+    }
+
+    #[test]
+    fn draft_take_launch_path_returns_once() {
+        let slot = Mutex::new(Some("/tmp/a.draft".into()));
+        assert_eq!(
+            take_stored_launch_path(&slot).as_deref(),
+            Some("/tmp/a.draft")
+        );
+        assert_eq!(take_stored_launch_path(&slot), None);
+    }
 
     #[test]
     fn os_user_display_name_trims_username_env() {

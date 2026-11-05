@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { DraftCommitEntry } from '../backend';
 import { draftHistory, draftRestore } from '../backend';
+import AppIcon from '../icons/AppIcon.vue';
 import { APP_OVERLAY_LAYER, ensureOverlayLayer } from '../overlay/layer';
 import { trapTab } from '../settings/focus-trap';
 
@@ -143,7 +144,7 @@ watch(
             data-test="history-close"
             @click="emit('close')"
           >
-            ×
+            <AppIcon name="x" />
           </button>
         </header>
         <p v-if="error" class="history-panel__error" role="alert">{{ error }}</p>

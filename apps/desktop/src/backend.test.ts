@@ -25,3 +25,24 @@ describe('sectionReviewMeta browser path (#60)', () => {
     });
   });
 });
+
+describe('draftTakeLaunchPath (#302)', () => {
+  it('returns null when not in Tauri', async () => {
+    const { draftTakeLaunchPath } = await import('./backend');
+    await expect(draftTakeLaunchPath()).resolves.toBeNull();
+  });
+
+  it('invokes draft_take_launch_path when in Tauri', async () => {
+    vi.resetModules();
+    const invoke = vi.fn(async () => '/tmp/cold.draft');
+    vi.doMock('@tauri-apps/api/core', () => ({
+      isTauri: () => true,
+      invoke,
+    }));
+    const { draftTakeLaunchPath } = await import('./backend');
+    await expect(draftTakeLaunchPath()).resolves.toBe('/tmp/cold.draft');
+    expect(invoke).toHaveBeenCalledWith('draft_take_launch_path');
+    vi.doUnmock('@tauri-apps/api/core');
+    vi.resetModules();
+  });
+});

@@ -917,13 +917,15 @@ overlaps another bot's pending suggestion on the same passage."
                     },
                 )?;
                 let bot = author(p);
-                let _ = self.drafts.commit_bot_suggestion(
+                if let Err(e) = self.drafts.commit_bot_suggestion(
                     &self.store,
                     &a.manuscript_id,
                     &p.agent_id,
                     &bot.name,
                     "Bot suggestions",
-                );
+                ) {
+                    eprintln!("draft commit_bot_suggestion: {e}");
+                }
                 Ok(Output::Json(json!({ "suggestion": x })))
             },
         )
@@ -1054,13 +1056,15 @@ Use this instead of cramming new scenes into suggest_edit replacements."
                     },
                 )?;
                 let bot = author(p);
-                let _ = self.drafts.commit_bot_suggestion(
+                if let Err(e) = self.drafts.commit_bot_suggestion(
                     &self.store,
                     &a.manuscript_id,
                     &p.agent_id,
                     &bot.name,
                     "Bot suggestions",
-                );
+                ) {
+                    eprintln!("draft commit_bot_suggestion: {e}");
+                }
                 Ok(Output::Json(json!({ "suggestion": x, "blockIds": block_ids })))
             },
         )
@@ -1181,13 +1185,15 @@ Use this instead of cramming new scenes into suggest_edit replacements."
                     },
                 )?;
                 let bot = author(p);
-                let _ = self.drafts.commit_bot_suggestion(
+                if let Err(e) = self.drafts.commit_bot_suggestion(
                     &self.store,
                     &a.manuscript_id,
                     &p.agent_id,
                     &bot.name,
                     "Bot suggestions",
-                );
+                ) {
+                    eprintln!("draft commit_bot_suggestion: {e}");
+                }
                 Ok(Output::Json(json!({ "suggestion": x })))
             },
         )
