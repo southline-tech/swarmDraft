@@ -87,6 +87,7 @@ import {
   type OpeningUiState,
 } from './errors/opening-flow';
 import { ImportCancelledError } from './import/import-cancelled';
+import { useDeferredValue } from './a11y/deferred';
 import './shells/shells.css';
 import { applyThemeParam, readPreview } from './shells/preview';
 import { CLOSE_FLUSH_TIMEOUT_MS, confirmQuit, flushOnClose, flushWithTimeout } from './close-flush';
@@ -213,13 +214,29 @@ function unsavedImportError(fileName: string): MappedError {
   return {
     code: 'save-failed',
     title: "Edits aren't saved yet",
-    message: `Couldn't import ${fileName}: some edits in the current manuscript aren't saved yet`,
+    message: `Couldn't import ${fileName} yet. Your current book has edits that aren't saved — wait a moment and try again.`,
     action: 'dismiss',
     actionLabel: 'Got it',
     tone: 'warning',
   };
 }
+let openingErrorReturnFocus: HTMLElement | null = null;
+watch(openingError, (err, prev) => {
+  if (err && !prev) {
+    const el = document.activeElement;
+    openingErrorReturnFocus = el instanceof HTMLElement ? el : null;
+  }
+});
+const openingErrorShown = useDeferredValue(openingError);
+function restoreOpeningErrorFocus() {
+  const el = openingErrorReturnFocus;
+  openingErrorReturnFocus = null;
+  void nextTick(() => {
+    el?.focus?.();
+  });
+}
 function dismissOpeningError() {
+  restoreOpeningErrorFocus();
   finishOpening();
 }
 const showOpeningShell = computed(
@@ -1677,6 +1694,20 @@ defineExpose({ open, closeSession });
         :class="{ 'opening-shell--overlay': openingShellOverlay }"
         data-test="opening-shell"
       >
+        <div role="alert" aria-live="assertive" data-test="opening-error">
+          <ErrorCard
+            v-if="openingErrorShown"
+            autofocus
+            :icon="errorCardIcon(openingErrorShown.code)"
+            :tone="openingErrorShown.tone"
+            :title="openingErrorShown.title"
+            :text="openingErrorShown.message"
+            :action="openingErrorShown.actionLabel"
+            dismissible
+            @action="onOpeningErrorAction"
+            @dismiss="dismissOpeningError"
+          />
+        </div>
         <OpeningProgress
           v-if="openingVisible && opening"
           :title="opening.title"
@@ -1687,18 +1718,6 @@ defineExpose({ open, closeSession });
           :cancellable="opening.kind === 'import' && importing"
           @cancel="cancelImportOpening"
         />
-        <div v-else-if="openingError" role="alert" aria-live="assertive" data-test="opening-error">
-          <ErrorCard
-            :icon="errorCardIcon(openingError.code)"
-            :tone="openingError.tone"
-            :title="openingError.title"
-            :text="openingError.message"
-            :action="openingError.actionLabel"
-            dismissible
-            @action="onOpeningErrorAction"
-            @dismiss="dismissOpeningError"
-          />
-        </div>
       </div>
       <div
         v-if="session && !choosingBook"
@@ -1861,8 +1880,13 @@ body {
 .opening-shell--overlay {
   position: absolute;
   inset: 0;
-  z-index: calc(var(--ct-z-chrome) + 1);
-  background: var(--ct-bg);
+  z-index: var(--ct-z-overlay);
+  background: var(--ct-scrim);
+}
+@media (max-width: 639px) {
+  .opening-shell {
+    padding: var(--ct-space-4);
+  }
 }
 .shell__chrome {
   position: relative;

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref } from 'vue';
+import AppIcon from '../icons/AppIcon.vue';
 import ShellIcon from './ShellIcon.vue';
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     icon: 'alert' | 'lock' | 'disk' | 'save';
     tone: 'danger' | 'warning';
@@ -15,6 +16,8 @@ withDefaults(
     actionDisabled?: boolean;
     actionAriaBusy?: boolean;
     dismissible?: boolean;
+    /** When true, focus the card on mount (dismissible overlays only; never save-failure banner). */
+    autofocus?: boolean;
   }>(),
   {
     variant: 'card',
@@ -23,11 +26,13 @@ withDefaults(
     actionDisabled: false,
     actionAriaBusy: false,
     dismissible: false,
+    autofocus: false,
   },
 );
 const emit = defineEmits<{ action: []; dismiss: [] }>();
 const root = ref<HTMLElement | null>(null);
 onMounted(async () => {
+  if (!props.autofocus) return;
   await nextTick();
   root.value?.focus();
 });
@@ -64,12 +69,12 @@ onMounted(async () => {
       <button
         v-if="dismissible"
         type="button"
-        class="sh-btn sh-btn--secondary ec__dismiss"
+        class="sh-tbtn sh-icon ec__dismiss"
         aria-label="Dismiss"
         data-test="error-card-dismiss"
         @click="emit('dismiss')"
       >
-        ×
+        <AppIcon name="x" />
       </button>
     </div>
   </section>
@@ -89,8 +94,8 @@ onMounted(async () => {
   color: var(--ct-text);
 }
 .ec:focus-visible {
-  outline: 2px solid var(--ct-focus-ring-color);
-  outline-offset: 2px;
+  outline: var(--ct-focus-outline);
+  outline-offset: var(--ct-focus-offset);
 }
 .ec__icon {
   display: grid;
@@ -128,7 +133,7 @@ onMounted(async () => {
   width: 100%;
 }
 .ec__dismiss {
-  min-width: var(--ct-space-8);
+  margin-left: auto;
 }
 .ec--banner {
   flex-direction: row;
@@ -142,5 +147,14 @@ onMounted(async () => {
 }
 .ec--banner .ec__actions {
   width: auto;
+}
+@media (max-width: 639px) {
+  .ec {
+    padding: var(--ct-space-4);
+  }
+  .ec__dismiss {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 </style>

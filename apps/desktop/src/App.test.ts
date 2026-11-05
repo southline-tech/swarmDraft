@@ -27,9 +27,11 @@ const fixture = resolve(
   '../../../fixtures/manuscripts/docx-import/mock-manuscript.docx',
 );
 const bytes = () => new Uint8Array(readFileSync(fixture));
+const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 const settle = async () => {
   await flushPromises();
   await flushPromises();
+  await frame();
 };
 
 function outlineCtx(testId: string) {
@@ -1392,7 +1394,7 @@ describe('restore confirmation', () => {
     await flushPromises();
     expect(backend.persistImport).not.toHaveBeenCalled();
     expect(w.find('[data-test="opening-error"]').text()).toContain(
-      "Couldn't import synthetic.docx: some edits in the current manuscript aren't saved yet",
+      "Couldn't import synthetic.docx yet. Your current book has edits that aren't saved",
     );
     expect(w.find('[data-test="open-error"]').exists()).toBe(false);
     expect(editorSurface(w).text()).toContain('UNSAVED ');

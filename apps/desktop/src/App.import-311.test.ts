@@ -13,9 +13,11 @@ const mockDocx = readFileSync(
   resolve(import.meta.dirname, '../../../fixtures/manuscripts/docx-import/mock-manuscript.docx'),
 );
 
+const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 async function settle() {
   await flushPromises();
   await flushPromises();
+  await frame();
 }
 
 async function chooseFile(w: ReturnType<typeof mount>) {
@@ -64,6 +66,29 @@ describe('import error overlay (#311)', () => {
     await settle();
     expect(w.find('[data-test="opening-error"]').exists()).toBe(true);
     expect(w.find('[data-test="open-error"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('maps a non-Word import failure to the Word-manuscript message (#311 C2)', async () => {
+    let rejectDone!: (err: Error) => void;
+    const done = new Promise<never>((_, reject) => {
+      rejectDone = reject;
+    });
+    vi.spyOn(runImport, 'runDocxImport').mockReturnValueOnce({
+      abort: vi.fn(),
+      done,
+    });
+    localStorage.setItem('swarmdraft.welcomed', '1');
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    const picked = chooseFile(w);
+    rejectDone(new Error('Not a valid .docx (zip directory not found)'));
+    await picked;
+    await settle();
+    expect(w.find('[data-test="opening-error"]').text()).toContain(
+      'can import Word manuscripts. Try choosing a different file.',
+    );
+    expect(w.find('[data-test="opening-error"]').text()).not.toMatch(/\.docx/);
     w.unmount();
   });
 
