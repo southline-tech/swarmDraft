@@ -6,7 +6,7 @@ import { nextTick, ref } from 'vue';
 defineProps<{
   /** 'welcome' on the very first launch (shown once), then 'open'. */
   step: 'welcome' | 'open';
-  /** True while a manuscript is being opened; the button is disabled. */
+  /** True while a manuscript is being imported; the button is disabled. */
   busy?: boolean;
   /** A manuscript is open behind this screen; offer a way back to it. */
   canCancel?: boolean;
@@ -70,7 +70,7 @@ defineExpose({ focusOpen });
       </p>
     </div>
     <div v-else class="home__inner" data-test="home-open">
-      <h1 class="home__title">Let's open your book</h1>
+      <h1 class="home__title">Let's import your book</h1>
       <p class="home__lede">
         Choose the Word manuscript you've been working on. We'll make a working copy — your original
         file is never changed.
@@ -87,13 +87,13 @@ defineExpose({ focusOpen });
           <path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z" />
           <path d="M4 21V5" />
         </svg>
-        {{ busy ? 'Opening your book…' : 'Open my Word manuscript' }}
+        {{ busy ? 'Importing your book…' : 'Import Word manuscript' }}
       </button>
       <div
         class="home__drop"
         :class="{ 'home__drop--active': dragging }"
         role="region"
-        aria-label="Drop a Word manuscript here to open it"
+        aria-label="Drop a Word manuscript here to import it"
         data-test="drop-zone"
         @dragenter.prevent="onEnter"
         @dragover.prevent

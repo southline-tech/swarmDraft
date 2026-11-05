@@ -15,13 +15,13 @@ describe('opening-flow (#80)', () => {
         title: 'Harbor',
         chaptersFound: 7,
       }),
-    ).toEqual({ title: 'Harbor', found: 7, progress: 0.45 });
+    ).toEqual({ title: 'Harbor', found: 7, progress: 0.45, kind: 'open', indeterminate: false });
   });
 
   it('keeps the working title when the backend sends an empty one', () => {
     expect(
       openingStateFromEvent(
-        { title: 'Draft', found: 0, progress: 0 },
+        { title: 'Draft', found: 0, progress: 0, kind: 'open' },
         { stage: 'saving', percent: 10, title: '', chaptersFound: 2 },
       ).title,
     ).toBe('Draft');

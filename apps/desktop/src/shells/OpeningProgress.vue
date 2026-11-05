@@ -1,28 +1,76 @@
 <script setup lang="ts">
-/** ob6: "Opening <book>…" progress card. Visual only; the caller supplies the numbers. */
+/** ob6: opening / import progress card (#80, #299). Visual only; the caller supplies the numbers. */
+import { nextTick, onMounted, ref } from 'vue';
 import ShellIcon from './ShellIcon.vue';
-defineProps<{ title: string; found: number; progress: number }>();
+
+const props = defineProps<{
+  title: string;
+  found: number;
+  progress: number;
+  kind?: 'open' | 'import';
+  indeterminate?: boolean;
+  cancellable?: boolean;
+}>();
+
+const emit = defineEmits<{ (e: 'cancel'): void }>();
+
+const card = ref<HTMLElement | null>(null);
+onMounted(async () => {
+  await nextTick();
+  card.value?.focus();
+});
+
+const verb = () => (props.kind === 'import' ? 'Importing' : 'Opening');
 </script>
 
 <template>
-  <section class="op" role="status" aria-live="polite" data-test="opening-progress">
+  <section
+    ref="card"
+    class="op"
+    tabindex="-1"
+    role="status"
+    aria-live="polite"
+    :aria-busy="indeterminate ? 'true' : undefined"
+    data-test="opening-progress"
+    @keydown.esc.prevent="cancellable && emit('cancel')"
+  >
     <span class="op__icon"><ShellIcon name="book" /></span>
     <h2 class="op__title">
-      Opening “<bdi dir="auto">{{ title }}</bdi
+      {{ verb() }} “<bdi dir="auto">{{ title }}</bdi
       >”…
     </h2>
-    <p class="op__text">Getting your chapters ready. This usually takes a few seconds.</p>
+    <p class="op__text">
+      {{
+        kind === 'import'
+          ? 'Getting your chapters ready from Word. This can take a minute for a long book.'
+          : 'Getting your chapters ready. This usually takes a few seconds.'
+      }}
+    </p>
     <div
       class="op__bar"
-      role="progressbar"
-      aria-label="Opening progress"
-      aria-valuemin="0"
-      aria-valuemax="100"
-      :aria-valuenow="Math.round(progress * 100)"
+      :class="{ 'op__bar--indeterminate': indeterminate }"
+      :role="indeterminate ? undefined : 'progressbar'"
+      :aria-label="indeterminate ? undefined : `${verb()} progress`"
+      :aria-valuemin="indeterminate ? undefined : 0"
+      :aria-valuemax="indeterminate ? undefined : 100"
+      :aria-valuenow="indeterminate ? undefined : Math.round(progress * 100)"
     >
-      <span class="op__fill" :style="{ width: `${Math.round(progress * 100)}%` }" />
+      <span
+        v-if="!indeterminate"
+        class="op__fill"
+        :style="{ width: `${Math.round(progress * 100)}%` }"
+      />
     </div>
-    <p class="op__count">Found {{ found }} chapters so far</p>
+    <p v-if="found > 0" class="op__count">Found {{ found }} chapters so far</p>
+    <button
+      v-if="cancellable"
+      type="button"
+      class="op__cancel sh-btn sh-btn--secondary"
+      data-test="opening-cancel"
+      @click="emit('cancel')"
+    >
+      Cancel
+    </button>
   </section>
 </template>
 
@@ -37,6 +85,10 @@ defineProps<{ title: string; found: number; progress: number }>();
   box-shadow: var(--ct-elevation-2);
   color: var(--ct-text);
   text-align: center;
+}
+.op:focus-visible {
+  outline: 2px solid var(--ct-focus-ring-color);
+  outline-offset: 2px;
 }
 .op__icon {
   display: inline-grid;
@@ -65,10 +117,33 @@ defineProps<{ title: string; found: number; progress: number }>();
   background: var(--ct-border);
   overflow: hidden;
 }
+.op__bar--indeterminate {
+  position: relative;
+}
+.op__bar--indeterminate::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  border-radius: inherit;
+  background: var(--ct-accent);
+  animation: op-slide 1.2s ease-in-out infinite;
+}
+@keyframes op-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
 .op__fill {
   display: block;
   height: 100%;
   border-radius: inherit;
   background: var(--ct-accent);
+}
+.op__cancel {
+  margin-top: var(--ct-space-4);
 }
 </style>

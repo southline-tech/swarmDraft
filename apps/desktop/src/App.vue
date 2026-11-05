@@ -79,10 +79,13 @@ import {
   errorCardIcon,
   openingStateFromEvent,
   openingTitleAfterImport,
+  openingUiForImport,
+  openingUiForStoredOpen,
   titleFromDocxName,
   type OpeningRetry,
   type OpeningUiState,
 } from './errors/opening-flow';
+import { ImportCancelledError } from './import/import-cancelled';
 import './shells/shells.css';
 import { applyThemeParam, readPreview } from './shells/preview';
 import { CLOSE_FLUSH_TIMEOUT_MS, confirmQuit, flushOnClose, flushWithTimeout } from './close-flush';
@@ -169,10 +172,23 @@ function startOpening(title: string) {
   clearTimeout(openingRevealTimer);
   openingVisible.value = false;
   openingError.value = null;
-  opening.value = { title, found: 0, progress: 0 };
+  opening.value = openingUiForStoredOpen(title);
   openingRevealTimer = setTimeout(() => {
     if (opening.value) openingVisible.value = true;
   }, OPENING_REVEAL_MS);
+}
+function startImportOpening(title: string) {
+  clearTimeout(openingRevealTimer);
+  openingError.value = null;
+  opening.value = openingUiForImport(title);
+  openingVisible.value = true;
+}
+let importAbort: AbortController | undefined;
+function cancelImportOpening() {
+  importAbort?.abort();
+  importAbort = undefined;
+  importing.value = false;
+  finishOpening();
 }
 function finishOpening() {
   clearTimeout(openingRevealTimer);
@@ -962,13 +978,15 @@ async function importBytes(fileName: string, bytes: Uint8Array) {
   if (importing.value) return;
   openError.value = '';
   openingRetry.value = { kind: 'import', name: fileName, bytes: bytes.slice() };
-  startOpening(titleFromDocxName(fileName));
+  startImportOpening(titleFromDocxName(fileName));
   importing.value = true;
+  importAbort = new AbortController();
   try {
     const current = session.value;
     try {
       const next = await importAndOpen(bytes, persistHooks, current, {
         fileName,
+        signal: importAbort.signal,
         onParsedTitle: (title) => {
           if (opening.value) {
             opening.value = {
@@ -977,11 +995,25 @@ async function importBytes(fileName: string, bytes: Uint8Array) {
             };
           }
         },
+        onParsed: (imported) => {
+          if (opening.value) {
+            const chapters = imported.sections.filter((s) => s.kind === 'chapter').length;
+            opening.value = {
+              ...opening.value,
+              found: chapters,
+              indeterminate: true,
+            };
+          }
+        },
       });
       finishOpening();
       open(next);
       showOpenToast(next);
     } catch (err) {
+      if (err instanceof ImportCancelledError) {
+        finishOpening();
+        return;
+      }
       if (current && !current.closed && session.value === current) current.resumeLive?.();
       if (current?.closed) {
         const back = await reopenAfterFailure();
@@ -993,19 +1025,24 @@ async function importBytes(fileName: string, bytes: Uint8Array) {
       throw err;
     }
   } catch (err) {
+    if (err instanceof ImportCancelledError) {
+      finishOpening();
+      return;
+    }
     console.error('Import failed', err);
     dismissToast();
     if (err instanceof UnsavedEditsError) {
       finishOpening();
       openingRetry.value = null;
-      openError.value = `Couldn't open ${fileName}: some edits in the current manuscript aren't saved yet`;
+      openError.value = `Couldn't import ${fileName}: some edits in the current manuscript aren't saved yet`;
     } else {
       failOpening(err, 'import');
       if (session.value && !choosingBook.value) {
-        openError.value = `Couldn't open ${fileName}. ${errorLine(err, 'import')}`;
+        openError.value = `Couldn't import ${fileName}. ${errorLine(err, 'import')}`;
       }
     }
   } finally {
+    importAbort = undefined;
     importing.value = false;
   }
 }
@@ -1024,7 +1061,7 @@ async function importFile(file: File) {
     dismissToast();
     failOpening(err, 'import');
     if (session.value && !choosingBook.value) {
-      openError.value = `Couldn't open ${file.name}. ${errorLine(err, 'import')}`;
+      openError.value = `Couldn't import ${file.name}. ${errorLine(err, 'import')}`;
     }
     return;
   }
@@ -1289,6 +1326,25 @@ defineExpose({ open, closeSession });
                   ><AppIcon name="folder" class="app-menu-icon"
                 /></span>
                 Open<span class="sh-k">{{ appMenuShortcuts.open }}</span>
+              </button>
+              <button
+                type="button"
+                class="sh-mi"
+                role="menuitem"
+                data-test="app-menu-import"
+                :aria-disabled="importing ? 'true' : undefined"
+                @click="
+                  () => {
+                    if (importing) return;
+                    chooseFile();
+                    closeBookMenu();
+                  }
+                "
+              >
+                <span class="sh-mi-lead" aria-hidden="true"
+                  ><AppIcon name="book" class="app-menu-icon"
+                /></span>
+                Import…
               </button>
               <div
                 class="topbar__recent"
@@ -1572,12 +1628,17 @@ defineExpose({ open, closeSession });
         v-if="(!session || choosingBook) && (openingVisible || openingError)"
         class="opening-shell"
         data-test="opening-shell"
+        @keydown.esc="openingVisible && opening?.kind === 'import' && cancelImportOpening()"
       >
         <OpeningProgress
           v-if="openingVisible && opening"
           :title="opening.title"
           :found="opening.found"
           :progress="opening.progress"
+          :kind="opening.kind"
+          :indeterminate="opening.indeterminate"
+          :cancellable="opening.kind === 'import' && importing"
+          @cancel="cancelImportOpening"
         />
         <div v-else-if="openingError" role="alert" aria-live="assertive" data-test="opening-error">
           <ErrorCard

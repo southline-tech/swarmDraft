@@ -259,8 +259,7 @@ describe('App', () => {
     w.unmount();
   });
 
-  it('shows ob6 after the reveal delay while import is still running (#80)', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+  it('shows ob6 as soon as import starts (#299)', async () => {
     const backend = await import('./backend');
     let done!: (v: ReturnType<typeof storedFixture>) => void;
     vi.mocked(backend.persistImport).mockImplementationOnce(
@@ -273,15 +272,13 @@ describe('App', () => {
     await flushPromises();
     const picked = chooseFile(w);
     await flushPromises();
-    expect(w.find('[data-test="opening-progress"]').exists()).toBe(false);
-    await vi.advanceTimersByTimeAsync(150);
     expect(w.find('[data-test="opening-progress"]').exists()).toBe(true);
+    expect(w.find('[data-test="opening-progress"]').text()).toContain('Importing');
     done(storedFixture());
     await picked;
     await flushPromises();
     expect(w.find('[data-test="opening-progress"]').exists()).toBe(false);
     w.unmount();
-    vi.useRealTimers();
   });
 
   it('does not flash ob6 when import finishes before the reveal delay (#80)', async () => {
@@ -849,7 +846,7 @@ describe('App open-file input', () => {
     expect(w.text()).not.toContain('Could not import');
 
     await pick(w, 'broken.docx', new TextEncoder().encode('not a zip'));
-    expect(w.text()).toContain("Couldn't open broken.docx. This isn't a Word manuscript.");
+    expect(w.text()).toContain("Couldn't import broken.docx. This isn't a Word manuscript.");
     expect(w.text()).not.toContain('zip directory');
     expect(w.findAll('.row')).toHaveLength(rows);
     w.unmount();
@@ -1392,7 +1389,7 @@ describe('restore confirmation', () => {
     await flushPromises();
     expect(backend.persistImport).not.toHaveBeenCalled();
     expect(w.find('[data-test="open-error"]').text()).toBe(
-      "Couldn't open synthetic.docx: some edits in the current manuscript aren't saved yet",
+      "Couldn't import synthetic.docx: some edits in the current manuscript aren't saved yet",
     );
     expect(editorSurface(w).text()).toContain('UNSAVED ');
     // Saves recover: the retry clears the banner, and now the import goes through.
@@ -1837,17 +1834,17 @@ describe('home screen', () => {
     expect(w.find('[data-test="home-welcome"]').text()).toContain('Welcome to swarmDraft');
     expect(w.find('[data-test="open-manuscript"]').exists()).toBe(false);
     await w.find('[data-test="get-started"]').trigger('click');
-    expect(w.find('[data-test="home-open"]').text()).toContain("Let's open your book");
+    expect(w.find('[data-test="home-open"]').text()).toContain("Let's import your book");
     expect(localStorage.getItem('swarmdraft.welcomed')).toBe('1');
     w.unmount();
     const again = mount(App);
     await flushPromises();
     expect(again.find('[data-test="home-welcome"]').exists()).toBe(false);
-    expect(again.find('[data-test="open-manuscript"]').text()).toContain('Open my Word manuscript');
+    expect(again.find('[data-test="open-manuscript"]').text()).toContain('Import Word manuscript');
     again.unmount();
   });
 
-  it('"Open my Word manuscript" opens the Word file picker', async () => {
+  it('"Import Word manuscript" opens the Word file picker', async () => {
     localStorage.setItem('swarmdraft.welcomed', '1');
     const w = mount(App, { attachTo: document.body });
     await flushPromises();
@@ -2596,13 +2593,14 @@ describe('title bar book menu (#104)', () => {
     w.unmount();
   });
 
-  it('lists New, Open, Recent, and Settings in the book menu (#104 PM)', async () => {
+  it('lists New, Open, Import, Recent, and Settings in the book menu (#104 PM, #301)', async () => {
     const w = mount(App);
     await flushPromises();
     await w.get('[data-test="app-menu-trigger"]').trigger('click');
     await settle();
     expect(overlayWrap('[data-test="app-menu-new"]').text()).toMatch(/^New/);
     expect(overlayWrap('[data-test="app-menu-open"]').text()).toMatch(/^Open/);
+    expect(overlayWrap('[data-test="app-menu-import"]').text()).toMatch(/^Import/);
     expect(overlayWrap('[data-test="app-menu-recent"]').text()).toMatch(/^Recent/);
     expect(overlayWrap('[data-test="settings-open"]').text()).toMatch(/^Settings/);
     expect(overlayWrap('[data-test="app-menu-new"]').find('[data-icon="plus"]').exists()).toBe(

@@ -7,8 +7,12 @@ export const OPENING_REVEAL_MS = 120;
 export interface OpeningUiState {
   title: string;
   found: number;
-  /** 0–1 for the progress bar. */
+  /** 0–1 for the progress bar; ignored when `indeterminate`. */
   progress: number;
+  /** Stored-book open vs Word import (#299 / #301). */
+  kind: 'open' | 'import';
+  /** Word import has no granular progress yet (#299). */
+  indeterminate?: boolean;
 }
 
 export function openingStateFromEvent(
@@ -19,7 +23,17 @@ export function openingStateFromEvent(
     title: event.title || prev?.title || '',
     found: event.chaptersFound,
     progress: Math.min(1, Math.max(0, event.percent / 100)),
+    kind: prev?.kind ?? 'open',
+    indeterminate: false,
   };
+}
+
+export function openingUiForImport(title: string): OpeningUiState {
+  return { title, found: 0, progress: 0, kind: 'import', indeterminate: true };
+}
+
+export function openingUiForStoredOpen(title: string): OpeningUiState {
+  return { title, found: 0, progress: 0, kind: 'open', indeterminate: false };
 }
 
 export function errorCardIcon(code: ErrorCode): 'alert' | 'lock' | 'disk' | 'save' {
