@@ -56,6 +56,45 @@ impl DraftRepo {
         })
     }
 
+    pub fn head_oid(&self) -> Result<Option<String>, DraftRepoError> {
+        Ok(self
+            .repo
+            .head()
+            .ok()
+            .and_then(|h| h.target().map(|o| o.to_string())))
+    }
+
+    pub fn commit_time_unix(&self, oid: &str) -> Result<i64, DraftRepoError> {
+        Ok(self.repo.find_commit(parse_oid(oid)?)?.time().seconds())
+    }
+
+    pub fn checkout_branch(&self, branch_name: &str) -> Result<(), DraftRepoError> {
+        let reference = format!("refs/heads/{branch_name}");
+        let obj = self
+            .repo
+            .revparse_single(&reference)
+            .or_else(|_| self.repo.revparse_single(branch_name))?;
+        let tree = obj.peel_to_tree()?;
+        self.repo.checkout_tree(
+            tree.as_object(),
+            Some(
+                git2::build::CheckoutBuilder::default()
+                    .force()
+                    .remove_untracked(true)
+                    .remove_ignored(true),
+            ),
+        )?;
+        self.repo.set_head(&reference)?;
+        Ok(())
+    }
+
+    pub fn checkout_main(&self) -> Result<(), DraftRepoError> {
+        if self.repo.find_branch("main", BranchType::Local).is_ok() {
+            return self.checkout_branch("main");
+        }
+        self.checkout_branch("master")
+    }
+
     pub fn commit_all(
         &self,
         message: &str,
@@ -139,6 +178,12 @@ impl DraftRepo {
             ),
         )?;
         Ok(())
+    }
+
+    pub fn has_branch(&self, branch_name: &str) -> bool {
+        self.repo
+            .find_branch(branch_name, BranchType::Local)
+            .is_ok()
     }
 
     pub fn ensure_bot_branch(&self, branch_name: &str) -> Result<(), DraftRepoError> {

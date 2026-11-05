@@ -32,10 +32,15 @@ import {
   type MigrationNotice,
   type StoredManuscriptRow,
   draftOpen,
+  draftOpenPath,
+  draftRecoverWorktreeToFile,
+  draftAfterWordImport,
+  listenOpenDraftPath,
   draftSave,
   draftSaveAs,
   draftCheckpoint,
   draftReviewCommit,
+  type OpenDraftResult,
 } from './backend';
 import HistoryPanel from './history/HistoryPanel.vue';
 import SettingsScreen from './settings/SettingsScreen.vue';
@@ -596,6 +601,7 @@ function onSectionDecisions(
         accepted: latest.status === 'accepted',
         botName,
         chapterTitle: chapter,
+        botAgentId: agentIdFromSuggestionAuthor(suggestionAuthor),
       }).catch((err) => console.error('Draft review commit failed', err));
     })
     .catch((err) => {
@@ -869,6 +875,7 @@ async function refreshRecentBooks() {
 const appMenu = ref<HTMLDetailsElement | null>(null);
 const bookMenuOpen = ref(false);
 const historyOpen = ref(false);
+const historyMenuTrigger = ref<HTMLButtonElement | null>(null);
 const bookMenuTrigger = shallowRef<HTMLElement | null>(null);
 const recentTrigger = shallowRef<HTMLButtonElement | null>(null);
 function closeBookMenu() {
@@ -898,6 +905,67 @@ function onAppMenuToggle(e: Event) {
   if (open) void refreshRecentBooks();
   else recentOpen.value = false;
 }
+function agentIdFromSuggestionAuthor(author?: string): string | undefined {
+  if (!author?.startsWith('agent:')) return undefined;
+  const id = author.slice('agent:'.length).trim();
+  return id || undefined;
+}
+
+async function resolveDraftRecovery(result: OpenDraftResult): Promise<OpenDraftResult | null> {
+  if (!result.recovery) return result;
+  const saveNewer = window.confirm(
+    'This book on your device is newer than the file on disk. Save the newer version to the file before opening?',
+  );
+  if (saveNewer) {
+    await draftRecoverWorktreeToFile(result.recovery.manuscriptId);
+    return draftOpenPath(result.recovery.draftPath, false);
+  }
+  return draftOpenPath(result.recovery.draftPath, true);
+}
+
+async function openManuscriptFromDraftResult(result: OpenDraftResult) {
+  let resolved = result;
+  for (let i = 0; i < 3 && resolved.recovery; i += 1) {
+    const next = await resolveDraftRecovery(resolved);
+    if (!next) return;
+    resolved = next;
+  }
+  const id = resolved.manuscriptId;
+  if (session.value?.id === id) {
+    await reloadOpenManuscript();
+    closeBookMenu();
+    await refreshDraftRows();
+    return;
+  }
+  await session.value?.flush().catch((e) => {
+    console.error('Flush before open failed', e);
+    throw e;
+  });
+  const stored = await loadManuscript(id);
+  if (!stored) {
+    openError.value = "Couldn't open that draft.";
+    return;
+  }
+  const next = openStored(stored, null, persistHooks);
+  open(next);
+  showOpenToast(next);
+  closeBookMenu();
+  await refreshDraftRows();
+}
+
+async function openDraftFromPath(path: string) {
+  if (!isTauri()) return;
+  openError.value = '';
+  try {
+    const result = await draftOpenPath(path, false);
+    if (!result) return;
+    await openManuscriptFromDraftResult(result);
+  } catch (e) {
+    console.error('Open draft path failed', e);
+    openError.value = errorLine(e, 'open');
+  }
+}
+
 async function openDraftFromDialog() {
   if (!isTauri()) {
     openBookPicker();
@@ -905,28 +973,9 @@ async function openDraftFromDialog() {
   }
   openError.value = '';
   try {
-    const id = await draftOpen();
-    if (!id) return;
-    if (session.value?.id === id) {
-      await reloadOpenManuscript();
-      closeBookMenu();
-      await refreshDraftRows();
-      return;
-    }
-    await session.value?.flush().catch((e) => {
-      console.error('Flush before open failed', e);
-      throw e;
-    });
-    const stored = await loadManuscript(id);
-    if (!stored) {
-      openError.value = "Couldn't open that draft.";
-      return;
-    }
-    const next = openStored(stored, null, persistHooks);
-    open(next);
-    showOpenToast(next);
-    closeBookMenu();
-    await refreshDraftRows();
+    const result = await draftOpen(false);
+    if (!result) return;
+    await openManuscriptFromDraftResult(result);
   } catch (e) {
     console.error('Open draft failed', e);
     openError.value = errorLine(e, 'open');
@@ -943,7 +992,10 @@ async function onMenuSave() {
   closeBookMenu();
   try {
     await session.value.flush();
-    await draftSave(session.value.id);
+    const outcome = await draftSave(session.value.id);
+    if (outcome.status === 'needsSaveAs') {
+      await draftSaveAs(session.value.id);
+    }
   } catch (e) {
     console.error('Save draft failed', e);
     saveFailure.value = saveFailed(saveFailure.value, e);
@@ -1088,6 +1140,7 @@ function blockFileNavigation(e: DragEvent) {
 }
 // Agent display names (RAD-263): load once, and again when the window regains focus.
 const reloadAgents = () => void reloadOnFocus();
+let stopOpenDraftPath = () => {};
 onMounted(() => {
   window.addEventListener('dragover', blockFileNavigation);
   window.addEventListener('drop', blockFileNavigation);
@@ -1095,6 +1148,11 @@ onMounted(() => {
   window.addEventListener('keydown', onAppMenuKey);
   window.addEventListener('keydown', onUpdatePromptEscape);
   void refreshAgents();
+  void listenOpenDraftPath((path) => {
+    void openDraftFromPath(path);
+  }).then((unlisten) => {
+    stopOpenDraftPath = unlisten;
+  });
   stopAppMenuKeys = () => {
     window.removeEventListener('keydown', onAppMenuKey);
     window.removeEventListener('keydown', onUpdatePromptEscape);
@@ -1105,6 +1163,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('drop', blockFileNavigation);
   window.removeEventListener('focus', reloadAgents);
   stopAppMenuKeys();
+  stopOpenDraftPath();
   appUpdater?.dispose();
 });
 onMounted(async () => {
@@ -1270,10 +1329,14 @@ const closeQuietly = (s?: ManuscriptSession | null) =>
   void s?.close().catch((err: unknown) => console.error('Edits not saved yet; retrying', err));
 
 async function onHistoryBeforeRestore() {
-  await session.value
-    ?.close({ discard: true })
-    .catch((e) => console.error('Pre-restore close failed', e));
-  notesSession.value = null;
+  if (!session.value) return;
+  try {
+    await session.value.flush();
+    await draftSave(session.value.id, 'Saved before restore');
+  } catch (e) {
+    console.error('Pre-restore save failed', e);
+    throw e;
+  }
 }
 
 /** Reload the open book from SQLite after git hydrate (History restore / portable open). */
@@ -1438,6 +1501,14 @@ async function importBytes(fileName: string, bytes: Uint8Array) {
       finishOpening();
       open(next);
       showOpenToast(next);
+      if (isTauri()) {
+        try {
+          await draftAfterWordImport(next.id, fileName);
+        } catch (e) {
+          console.error('Import draft file failed', e);
+          saveFailure.value = saveFailed(saveFailure.value, e);
+        }
+      }
     } catch (err) {
       if (err instanceof ImportCancelledError) {
         await restoreAfterImportCancelled(current);
@@ -1813,6 +1884,7 @@ defineExpose({ open, closeSession });
               </button>
               <button
                 v-if="session && isTauri()"
+                ref="historyMenuTrigger"
                 type="button"
                 class="sh-mi"
                 role="menuitem"
@@ -2098,8 +2170,9 @@ defineExpose({ open, closeSession });
         v-if="isTauri()"
         :open="historyOpen"
         :manuscript-id="session?.id ?? null"
-        @close="historyOpen = false"
+        :menu-trigger="historyMenuTrigger"
         :before-restore="onHistoryBeforeRestore"
+        @close="historyOpen = false"
         @restored="() => void reloadOpenManuscript()"
       />
       <!-- Always mounted so the live region exists before its text (#79). -->

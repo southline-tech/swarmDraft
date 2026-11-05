@@ -44,7 +44,13 @@ pub async fn start_with(scopes: &[&str], tune: impl FnOnce(&mut mcp::McpConfig))
     let mut cfg = mcp::McpConfig::new(addr.port());
     cfg.auth_failure_floor = std::time::Duration::from_millis(20);
     tune(&mut cfg);
-    let (app, stats) = mcp::router_with_stats(store.clone(), cfg, None, None);
+    let (app, stats) = mcp::router_with_stats(
+        store.clone(),
+        mcp::drafts_for_store(&store),
+        cfg,
+        None,
+        None,
+    );
     let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     Server {

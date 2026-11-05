@@ -119,10 +119,10 @@ fn hydrate_open_draft_loads_git_chapter_text() {
     set_chapter_plain(&store, &chapter.section.doc_id, "stale local only");
     assert!(chapter_text(&store, &chapter.section.doc_id).contains("stale local only"));
     let opened = svc
-        .open_draft_path(&store, &draft_path.to_string_lossy())
+        .open_draft_path(&store, &draft_path.to_string_lossy(), false)
         .unwrap()
         .expect("manuscript id");
-    assert_eq!(opened, m.id);
+    assert_eq!(opened.manuscript_id, m.id);
     assert!(chapter_text(&store, &chapter.section.doc_id).contains(marker));
     assert!(!chapter_text(&store, &chapter.section.doc_id).contains("stale local only"));
 }
@@ -191,6 +191,7 @@ fn review_commit_uses_bot_as_git_committer() {
         "Line Editor",
         "New chapter",
         "Author Name",
+        None,
     )
     .unwrap();
     let entry = svc
@@ -218,6 +219,157 @@ fn set_chapter_plain(store: &Store, doc_id: &str, text: &str) {
 fn chapter_text(store: &Store, doc_id: &str) -> String {
     let doc = store.load_doc(doc_id).unwrap();
     content::markdown(&decode(&doc))
+}
+
+#[test]
+fn save_without_linked_path_needs_save_as() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript;
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.1.1".into());
+    let outcome = svc.save_linked_or_needs_as(&store, &m.id, "Saved").unwrap();
+    assert!(matches!(
+        outcome,
+        swarmdraft_lib::draft::DraftSaveOutcome::NeedsSaveAs
+    ));
+}
+
+#[test]
+fn word_import_creates_draft_file() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript;
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.1.1".into());
+    let path = svc.after_word_import(&store, &m.id, "Harbor.docx").unwrap();
+    assert!(Path::new(&path).is_file());
+    let history = svc.history(&store, &m.id, 5, 0).unwrap();
+    assert!(history
+        .iter()
+        .any(|c| c.message.contains("Imported Harbor.docx")));
+}
+
+#[test]
+fn bot_branch_exists_before_accept_and_merges_after() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript;
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.1.1".into());
+    store
+        .set_draft_file_path(
+            &m.id,
+            &store
+                .data_dir()
+                .join("drafts/bot-branch.draft")
+                .to_string_lossy(),
+        )
+        .unwrap();
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap();
+    let bot_id = "agent-test-1";
+    svc.commit_bot_suggestion(&store, &m.id, bot_id, "Line Editor", "Bot suggestions")
+        .unwrap();
+    assert!(svc
+        .bot_branch_exists(&store, &m.id, bot_id, "Line Editor")
+        .unwrap());
+    svc.commit_review_decision(
+        &store,
+        &m.id,
+        true,
+        "Line Editor",
+        "Chapter",
+        "Author",
+        Some(bot_id),
+    )
+    .unwrap();
+    let history = svc.history(&store, &m.id, 10, 0).unwrap();
+    assert!(history.iter().any(|c| c.message.starts_with("Merged bot/")));
+}
+
+#[test]
+fn restore_commit_message_uses_human_datetime() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript;
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.1.1".into());
+    store
+        .set_draft_file_path(
+            &m.id,
+            &store
+                .data_dir()
+                .join("drafts/human-restore.draft")
+                .to_string_lossy(),
+        )
+        .unwrap();
+    svc.commit_now(&store, &m.id, "First", "Author", "author@swarmdraft.local")
+        .unwrap();
+    let first = svc.history(&store, &m.id, 1, 0).unwrap()[0].oid.clone();
+    svc.commit_now(&store, &m.id, "Second", "Author", "author@swarmdraft.local")
+        .unwrap();
+    svc.restore(&store, &m.id, &first, "Author").unwrap();
+    let msg = svc
+        .history(&store, &m.id, 1, 0)
+        .unwrap()
+        .into_iter()
+        .find(|c| c.message.contains("Restored version from"))
+        .expect("restore entry")
+        .message;
+    assert!(!msg
+        .chars()
+        .any(|c| c.is_ascii_digit() && msg.contains("1730")));
+    assert!(msg.contains("Restored version from"));
+}
+
+#[test]
+#[ignore = "352-page perf gate (#302); run with cargo test --test draft_git -- --ignored"]
+fn perf_large_book_commit_under_500ms_open_under_2s() {
+    use std::time::Instant;
+    let (_dir, store) = temp_store();
+    let mut sections = Vec::new();
+    for i in 0..352 {
+        sections.push(swarmdraft_lib::manuscripts::ImportSection {
+            id: None,
+            parent_id: None,
+            kind: "chapter".into(),
+            title: format!("Chapter {i}"),
+            doc: json!({"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text": format!("Body {i}")}]}]}),
+        });
+    }
+    let (m, _) = store
+        .import_manuscript("Perf book", &sections)
+        .expect("import");
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.1.1".into());
+    let draft_path = store.data_dir().join("drafts/perf.draft");
+    store
+        .set_draft_file_path(&m.id, &draft_path.to_string_lossy())
+        .unwrap();
+    let t0 = Instant::now();
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Perf checkpoint",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap();
+    assert!(
+        t0.elapsed().as_millis() < 500,
+        "commit took {} ms",
+        t0.elapsed().as_millis()
+    );
+    let t1 = Instant::now();
+    svc.open_draft_path(&store, &draft_path.to_string_lossy(), true)
+        .unwrap();
+    assert!(
+        t1.elapsed().as_secs() < 2,
+        "open took {} ms",
+        t1.elapsed().as_millis()
+    );
 }
 
 #[test]

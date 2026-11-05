@@ -378,9 +378,50 @@ export interface DraftCommitEntry {
   message: string;
 }
 
-export async function draftOpen(): Promise<string | null> {
+export interface OpenDraftResult {
+  manuscriptId: string;
+  recovery?: { manuscriptId: string; draftPath: string } | null;
+}
+
+export type DraftSaveOutcome =
+  { status: 'committed'; oid: string | null } | { status: 'needsSaveAs' };
+
+export async function draftOpen(forceDiscardRecovery = false): Promise<OpenDraftResult | null> {
   if (!isTauri()) return null;
-  return invoke<string | null>('draft_open', {});
+  return invoke<OpenDraftResult | null>('draft_open', { forceDiscardRecovery });
+}
+
+export async function draftOpenPath(
+  path: string,
+  forceDiscardRecovery = false,
+): Promise<OpenDraftResult | null> {
+  if (!isTauri()) return null;
+  return invoke<OpenDraftResult | null>('draft_open_path', { path, forceDiscardRecovery });
+}
+
+export async function draftRecoverWorktreeToFile(manuscriptId: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('draft_recover_worktree_to_file', { manuscriptId });
+}
+
+export async function listenOpenDraftPath(
+  onPath: (path: string) => void,
+): Promise<UnlistenFn> {
+  if (!isTauri()) return () => {};
+  try {
+    const { listen } = await import('@tauri-apps/api/event');
+    return await listen<string>('open-draft-path', (e) => onPath(e.payload));
+  } catch {
+    return () => {};
+  }
+}
+
+export async function draftAfterWordImport(
+  manuscriptId: string,
+  sourceFileName: string,
+): Promise<string> {
+  if (!isTauri()) return Promise.reject(new Error('Import draft requires the desktop app'));
+  return invoke<string>('draft_after_word_import', { manuscriptId, sourceFileName });
 }
 
 export async function draftSaveAs(manuscriptId: string): Promise<string | null> {
@@ -388,9 +429,9 @@ export async function draftSaveAs(manuscriptId: string): Promise<string | null> 
   return invoke<string | null>('draft_save_as', { manuscriptId });
 }
 
-export async function draftSave(manuscriptId: string, message?: string): Promise<string | null> {
-  if (!isTauri()) return null;
-  return invoke<string | null>('draft_save', { manuscriptId, message: message ?? null });
+export async function draftSave(manuscriptId: string, message?: string): Promise<DraftSaveOutcome> {
+  if (!isTauri()) return { status: 'needsSaveAs' };
+  return invoke<DraftSaveOutcome>('draft_save', { manuscriptId, message: message ?? null });
 }
 
 export async function draftCheckpoint(
@@ -420,6 +461,7 @@ export async function draftReviewCommit(args: {
   accepted: boolean;
   botName: string;
   chapterTitle: string;
+  botAgentId?: string;
 }): Promise<string | null> {
   if (!isTauri()) return null;
   return invoke<string | null>('draft_review_commit', args);

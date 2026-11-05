@@ -997,13 +997,61 @@ async fn draft_open(
     app: tauri::AppHandle,
     store: tauri::State<'_, storage::Store>,
     drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
-) -> Result<Option<String>, String> {
+    force_discard_recovery: Option<bool>,
+) -> Result<Option<draft::OpenDraftResult>, String> {
     let app = app.clone();
     let store = store.inner().clone();
     let drafts = std::sync::Arc::clone(drafts.inner());
-    tauri::async_runtime::spawn_blocking(move || drafts.open_dialog(&app, &store))
+    let force = force_discard_recovery.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || drafts.open_dialog(&app, &store, force))
         .await
         .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn draft_open_path(
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    path: String,
+    force_discard_recovery: Option<bool>,
+) -> Result<Option<draft::OpenDraftResult>, String> {
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    let force = force_discard_recovery.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || drafts.open_draft_path(&store, &path, force))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn draft_recover_worktree_to_file(
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+) -> Result<(), String> {
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        drafts.pack_recovery_if_newer(&store, &manuscript_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn draft_after_word_import(
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+    source_file_name: String,
+) -> Result<String, String> {
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        drafts.after_word_import(&store, &manuscript_id, &source_file_name)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1029,18 +1077,12 @@ async fn draft_save(
     drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
     manuscript_id: String,
     message: Option<String>,
-) -> Result<Option<String>, String> {
+) -> Result<draft::DraftSaveOutcome, String> {
     let msg = message.unwrap_or_else(|| "Saved".into());
     let store = store.inner().clone();
     let drafts = std::sync::Arc::clone(drafts.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        drafts.commit_now(
-            &store,
-            &manuscript_id,
-            &msg,
-            &draft_author_name(&store),
-            "author@swarmdraft.local",
-        )
+        drafts.save_linked_or_needs_as(&store, &manuscript_id, &msg)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1103,6 +1145,7 @@ async fn draft_review_commit(
     accepted: bool,
     bot_name: String,
     chapter_title: String,
+    bot_agent_id: Option<String>,
 ) -> Result<Option<String>, String> {
     let store = store.inner().clone();
     let drafts = std::sync::Arc::clone(drafts.inner());
@@ -1114,10 +1157,25 @@ async fn draft_review_commit(
             &bot_name,
             &chapter_title,
             &draft_author_name(&store),
+            bot_agent_id.as_deref(),
         )
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+fn focus_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn draft_path_from_argv(argv: &[String]) -> Option<String> {
+    argv.iter()
+        .find(|a| a.ends_with(".draft") || a.ends_with(".DRAFT") || a.ends_with(".Draft"))
+        .cloned()
 }
 
 fn draft_author_name(store: &storage::Store) -> String {
@@ -1133,7 +1191,13 @@ fn draft_author_name(store: &storage::Store) -> String {
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_process::init());
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            focus_main_window(app);
+            if let Some(path) = draft_path_from_argv(&argv) {
+                let _ = app.emit("open-draft-path", path);
+            }
+        }));
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     builder
@@ -1183,8 +1247,16 @@ pub fn run() {
                     let _ = store.app_meta_set("draft_file_migration_v1", "done");
                 }
             }
-            app.manage(std::sync::Arc::new(draft_service));
+            let draft_service = std::sync::Arc::new(draft_service);
+            app.manage(draft_service.clone());
             app.manage(store.clone());
+            if let Some(path) = draft_path_from_argv(&std::env::args().collect::<Vec<_>>()) {
+                let handle = app.handle().clone();
+                let path = path.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = handle.emit("open-draft-path", path);
+                });
+            }
             app.manage(export::PandocDownloadState::default());
             app.manage(backup::OpLock::default());
             app.manage(std::sync::Mutex::new(McpStatus {
@@ -1213,7 +1285,14 @@ pub fn run() {
                             serde_json::json!({ "feedbackId": feedback_id }),
                         );
                     });
-                let result = mcp::serve_on(store, listener, Some(hook), Some(feedback_hook)).await;
+                let result = mcp::serve_on(
+                    store,
+                    draft_service,
+                    listener,
+                    Some(hook),
+                    Some(feedback_hook),
+                )
+                .await;
                 let state = handle.state::<std::sync::Mutex<McpStatus>>();
                 let mut st = state.lock().expect("status poisoned");
                 match result {
@@ -1291,6 +1370,9 @@ pub fn run() {
             export_save_via_dialog,
             export_reveal_in_folder,
             draft_open,
+            draft_open_path,
+            draft_recover_worktree_to_file,
+            draft_after_word_import,
             draft_save_as,
             draft_save,
             draft_checkpoint,

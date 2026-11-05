@@ -87,15 +87,21 @@ pub fn pack_draft(
         zip.finish()?;
     }
     sync_file(&tmp)?;
-    let prev = dest.with_extension("draft.prev");
-    if dest.exists() {
-        let _ = fs::remove_file(&prev);
-        fs::rename(dest, &prev)?;
-    }
     fs::rename(&tmp, dest)?;
-    let _ = fs::remove_file(&prev);
     sync_dir(parent)?;
     Ok(())
+}
+
+/// If `path` is missing, use a sibling `.draft.prev` from an interrupted pack (best-effort).
+pub fn resolve_draft_archive(path: &Path) -> PathBuf {
+    if path.is_file() {
+        return path.to_path_buf();
+    }
+    let prev = path.with_extension("draft.prev");
+    if prev.is_file() {
+        return prev;
+    }
+    path.to_path_buf()
 }
 
 fn add_dir_to_zip<W: Write + std::io::Seek>(
@@ -207,6 +213,28 @@ fn sync_dir(path: &Path) -> Result<(), DraftFormatError> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn pack_replace_never_leaves_gap_without_dest() {
+        let work = tempdir().unwrap();
+        let repo = work.path().join("repo.git");
+        fs::create_dir_all(repo.join("objects")).unwrap();
+        fs::write(repo.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        let manifest = DraftManifest {
+            format: DRAFT_FORMAT.into(),
+            format_version: DRAFT_FORMAT_VERSION,
+            app_version: "0.1.1".into(),
+            book_id: "gap".into(),
+            title: "Gap".into(),
+        };
+        let draft = work.path().join("book.draft");
+        pack_draft(&draft, &manifest, &repo).unwrap();
+        assert!(draft.is_file());
+        // Simulate crash after dest was removed in the old two-rename scheme: dest must still exist
+        // after a successful replace-style pack.
+        pack_draft(&draft, &manifest, &repo).unwrap();
+        assert!(draft.is_file());
+    }
 
     #[test]
     fn pack_unpack_round_trip() {

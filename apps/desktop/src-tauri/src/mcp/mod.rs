@@ -353,17 +353,20 @@ async fn utf8_content_type(req: Request, next: Next) -> Response {
 /// then auth (pairing bypass reads the buffered body), then the MCP service.
 pub fn router_with_stats(
     store: Store,
+    drafts: std::sync::Arc<crate::draft::DraftService>,
     cfg: McpConfig,
     pairing_hook: Option<PairingRequestedHook>,
     feedback_hook: Option<FeedbackRequestedHook>,
 ) -> (axum::Router, Arc<GateStats>) {
     let mcp_store = store.clone();
+    let mcp_drafts = drafts.clone();
     let hook = pairing_hook.clone();
     let fb_hook = feedback_hook.clone();
     let service = StreamableHttpService::new(
         move || {
             Ok(SwarmdraftMcp::new(
                 mcp_store.clone(),
+                mcp_drafts.clone(),
                 hook.clone(),
                 fb_hook.clone(),
             ))
@@ -406,11 +409,12 @@ pub fn router_with_stats(
 
 pub fn router(
     store: Store,
+    drafts: std::sync::Arc<crate::draft::DraftService>,
     cfg: McpConfig,
     pairing_hook: Option<PairingRequestedHook>,
     feedback_hook: Option<FeedbackRequestedHook>,
 ) -> axum::Router {
-    router_with_stats(store, cfg, pairing_hook, feedback_hook).0
+    router_with_stats(store, drafts, cfg, pairing_hook, feedback_hook).0
 }
 
 /// When another program holds the MCP port and it is not the legacy desktop app.
@@ -458,6 +462,7 @@ pub fn bind(port: u16) -> std::io::Result<std::net::TcpListener> {
 /// Serve on a listener from [`bind`] until the process exits. Returns the bound address.
 pub async fn serve_on(
     store: Store,
+    drafts: std::sync::Arc<crate::draft::DraftService>,
     listener: std::net::TcpListener,
     pairing_hook: Option<PairingRequestedHook>,
     feedback_hook: Option<FeedbackRequestedHook>,
@@ -466,6 +471,7 @@ pub async fn serve_on(
     let addr = listener.local_addr()?;
     let app = router(
         store,
+        drafts,
         McpConfig::new(addr.port()),
         pairing_hook,
         feedback_hook,
@@ -482,9 +488,18 @@ pub async fn serve_on(
 /// Bind on loopback and serve until the process exits. Returns the bound address.
 pub async fn serve(
     store: Store,
+    drafts: std::sync::Arc<crate::draft::DraftService>,
     port: u16,
     pairing_hook: Option<PairingRequestedHook>,
     feedback_hook: Option<FeedbackRequestedHook>,
 ) -> std::io::Result<SocketAddr> {
-    serve_on(store, bind(port)?, pairing_hook, feedback_hook).await
+    serve_on(store, drafts, bind(port)?, pairing_hook, feedback_hook).await
+}
+
+/// Shared draft service for MCP integration tests.
+pub fn drafts_for_store(store: &Store) -> std::sync::Arc<crate::draft::DraftService> {
+    std::sync::Arc::new(crate::draft::DraftService::new(
+        store.data_dir().to_path_buf(),
+        "0.0.0-test".into(),
+    ))
 }
