@@ -14,10 +14,10 @@ import {
 } from '@swarmdraft/editor';
 import AppIcon from '../icons/AppIcon.vue';
 
-const props = defineProps<{ editor?: Editor; focusReplace?: boolean }>();
+const props = defineProps<{ editor?: Editor; focusReplace?: boolean; initialQuery?: string }>();
 const emit = defineEmits<{ close: [] }>();
 
-const query = ref('');
+const query = ref(props.initialQuery ?? '');
 const replacement = ref('');
 const matchCase = ref(false);
 const wholeWord = ref(false);

@@ -200,4 +200,27 @@ describe('find-replace', () => {
     expect(undoDepth(e.state)).toBe(depth);
     e.destroy();
   });
+
+  it('lists matches on a long manuscript within a reasonable budget (#36)', () => {
+    const paragraph = {
+      type: 'paragraph' as const,
+      content: [
+        {
+          type: 'text' as const,
+          text: 'The harbor light blinked once before the tide turned. '.repeat(40),
+        },
+      ],
+    };
+    const doc = {
+      type: 'doc' as const,
+      content: Array.from({ length: 800 }, () => paragraph),
+    };
+    const pm = boundEditor(doc);
+    const started = performance.now();
+    const hits = listFindMatches(pm.state.doc, 'harbor', { matchCase: false, wholeWord: false });
+    const elapsed = performance.now() - started;
+    expect(hits.length).toBeGreaterThan(0);
+    expect(elapsed).toBeLessThan(750);
+    pm.destroy();
+  });
 });

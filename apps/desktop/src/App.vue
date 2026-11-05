@@ -66,6 +66,7 @@ import Rad60ReviewEvidence from './evidence/Rad60ReviewEvidence.vue';
 import Rad67EditorChromeEvidence from './evidence/Rad67EditorChromeEvidence.vue';
 import Rad55FocusModeEvidence from './evidence/Rad55FocusModeEvidence.vue';
 import Rad304ChapterEvidence from './evidence/Rad304ChapterEvidence.vue';
+import Rad36WpEvidence from './evidence/Rad36WpEvidence.vue';
 import Rad38NotesEvidence from './evidence/Rad38NotesEvidence.vue';
 import Rad34InstallEvidence from './evidence/Rad34InstallEvidence.vue';
 import Rad310UpdateEvidence from './evidence/Rad310UpdateEvidence.vue';
@@ -1551,6 +1552,7 @@ defineExpose({ open, closeSession });
   <Rad67EditorChromeEvidence v-else-if="evidence === 'rad67'" class="shell" />
   <Rad55FocusModeEvidence v-else-if="evidence === 'rad55'" class="shell shell--focus-mode" />
   <Rad304ChapterEvidence v-else-if="evidence === '304-chapter'" class="shell" />
+  <Rad36WpEvidence v-else-if="evidence === '36-wp'" class="shell" />
   <ShellsPreview v-else-if="preview" class="shell" :initial="preview" @close="preview = null" />
   <main v-else class="shell" :class="{ 'shell--focus-mode': focusMode }">
     <div class="shell__main">
