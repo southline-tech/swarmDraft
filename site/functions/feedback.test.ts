@@ -124,6 +124,33 @@ describe('feedback API onRequestPost', () => {
     expect(res.status).toBe(202);
   });
 
+  it('returns 403 when landing client omits Origin', async () => {
+    const res = await onRequestPost({
+      request: makeRequest(validLandingBody, {}, 'landing/0.1.1'),
+      env,
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 422 when desktop client uses landing source', async () => {
+    const res = await onRequestPost({
+      request: makeRequest({ ...validDesktopBody, source: 'landing' }),
+      env,
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it('accepts desktop diagnostics in the body', async () => {
+    const res = await onRequestPost({
+      request: makeRequest({
+        ...validDesktopBody,
+        diagnostics: { recentErrors: ['save failed: disk full'] },
+      }),
+      env,
+    });
+    expect(res.status).toBe(202);
+  });
+
   it('returns 403 for disallowed landing Origin', async () => {
     const res = await onRequestPost({
       request: makeRequest(validLandingBody, { Origin: 'https://evil.example' }, 'landing/0.1.1'),

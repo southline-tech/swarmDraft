@@ -239,7 +239,13 @@
               — the form below needs JavaScript enabled.
             </p>
           </noscript>
-          <form class="feedback-form" data-feedback-form data-state="idle" novalidate>
+          <form
+            class="feedback-form"
+            data-feedback-form
+            data-state="idle"
+            novalidate
+            aria-labelledby="feedback-title"
+          >
             <div class="feedback-field">
               <label class="feedback-label" for="feedback-description">Your feedback</label>
               <textarea
@@ -255,6 +261,7 @@
                 class="feedback-error"
                 id="feedback-description-error"
                 data-feedback-error="description"
+                role="alert"
               ></p>
             </div>
             <div class="feedback-field">
@@ -273,6 +280,7 @@
                 class="feedback-error"
                 id="feedback-reply-error"
                 data-feedback-error="replyEmail"
+                role="alert"
               ></p>
             </div>
             <div class="feedback-honeypot" aria-hidden="true">

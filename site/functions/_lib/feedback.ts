@@ -17,6 +17,7 @@ const ALLOWED_KEYS = new Set([
   'excerpt',
   'screenshotPng',
   'website',
+  'diagnostics',
 ]);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -53,6 +54,7 @@ export type FeedbackPayload = {
   includeText: boolean;
   excerpt?: string;
   screenshotPng?: string;
+  recentErrors?: string[];
 };
 
 export function stripControlChars(value: string): string {
@@ -107,6 +109,19 @@ export function validateClientRequest(
     return 'forbidden_origin';
   }
   return 'ok';
+}
+
+export function validateSourceMatchesClient(
+  client: { kind: ClientKind },
+  source: string,
+): Record<string, string[]> | null {
+  if (client.kind === 'landing' && source !== 'landing') {
+    return { source: ['Landing client must use source landing.'] };
+  }
+  if (client.kind === 'desktop' && source === 'landing') {
+    return { source: ['Desktop client cannot use source landing.'] };
+  }
+  return null;
 }
 
 export function isHoneypotTripped(raw: Record<string, unknown>): boolean {
@@ -237,6 +252,41 @@ export function validateFeedbackBody(raw: Record<string, unknown>): {
     }
   }
 
+  let recentErrors: string[] | undefined;
+  if (raw.diagnostics !== undefined && raw.diagnostics !== null) {
+    if (source === 'landing') {
+      errors.diagnostics = ['Landing feedback cannot include diagnostics.'];
+    } else if (typeof raw.diagnostics !== 'object' || Array.isArray(raw.diagnostics)) {
+      errors.diagnostics = ['The diagnostics must be an object.'];
+    } else {
+      const diag = raw.diagnostics as Record<string, unknown>;
+      const lines = diag.recentErrors;
+      if (lines !== undefined && lines !== null) {
+        if (!Array.isArray(lines)) {
+          errors.diagnostics = ['diagnostics.recentErrors must be an array.'];
+        } else if (lines.length > 8) {
+          errors.diagnostics = ['diagnostics.recentErrors may not exceed 8 entries.'];
+        } else {
+          recentErrors = [];
+          for (const line of lines) {
+            if (typeof line !== 'string') {
+              errors.diagnostics = ['Each recent error must be a string.'];
+              break;
+            }
+            const cleaned = stripControlChars(line).trim();
+            if (cleaned.length > 512) {
+              errors.diagnostics = ['Each recent error may not exceed 512 characters.'];
+              break;
+            }
+            if (cleaned) {
+              recentErrors.push(cleaned);
+            }
+          }
+        }
+      }
+    }
+  }
+
   if (source === 'landing') {
     if (includeText) {
       errors.includeText = ['Landing feedback cannot include manuscript text.'];
@@ -269,6 +319,7 @@ export function validateFeedbackBody(raw: Record<string, unknown>): {
       includeText,
       excerpt: includeText ? excerpt : undefined,
       screenshotPng,
+      recentErrors: recentErrors?.length ? recentErrors : undefined,
     },
   };
 }
@@ -299,6 +350,9 @@ export function buildFeedbackEmail(payload: FeedbackPayload): {
   if (payload.includeText && payload.excerpt) {
     lines.push('', 'Excerpt:', payload.excerpt);
   }
+  if (payload.recentErrors?.length) {
+    lines.push('', 'Recent errors:', ...payload.recentErrors);
+  }
 
   const text = lines.join('\n');
 
@@ -318,6 +372,11 @@ export function buildFeedbackEmail(payload: FeedbackPayload): {
   );
   if (payload.includeText && payload.excerpt) {
     htmlParts.push(`<p><strong>Excerpt:</strong></p><pre>${escapeHtml(payload.excerpt)}</pre>`);
+  }
+  if (payload.recentErrors?.length) {
+    htmlParts.push(
+      `<p><strong>Recent errors:</strong></p><pre>${escapeHtml(payload.recentErrors.join('\n'))}</pre>`,
+    );
   }
 
   const result: {

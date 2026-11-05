@@ -109,6 +109,8 @@ export function initFeedbackForm(root) {
     }
 
     setFormState(form, 'sending');
+    const submitBtn = form.querySelector('button[type="submit"]');
+    submitBtn?.setAttribute('aria-busy', 'true');
     if (statusEl) statusEl.textContent = 'Sending…';
 
     const payload = buildLandingPayload({
@@ -129,6 +131,7 @@ export function initFeedbackForm(root) {
       });
       if (res.status === 202) {
         setFormState(form, 'success');
+        submitBtn?.removeAttribute('aria-busy');
         if (statusEl) {
           statusEl.textContent = 'Thanks — we received your feedback.';
         }
@@ -136,11 +139,13 @@ export function initFeedbackForm(root) {
         return;
       }
       setFormState(form, 'idle');
+      submitBtn?.removeAttribute('aria-busy');
       if (statusEl) {
         statusEl.textContent = feedbackErrorMessage(res.status);
       }
     } catch {
       setFormState(form, 'idle');
+      submitBtn?.removeAttribute('aria-busy');
       if (statusEl) {
         statusEl.textContent = feedbackErrorMessage(0);
       }

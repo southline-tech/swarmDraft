@@ -6,6 +6,7 @@ import {
   parseClientHeader,
   validateClientRequest,
   validateFeedbackBody,
+  validateSourceMatchesClient,
 } from '../_lib/feedback.ts';
 
 interface Env {
@@ -56,6 +57,7 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
   if (clientCheck === 'forbidden_origin') {
     return Response.json({ message: 'Origin not allowed.' }, { status: 403 });
   }
+  const validatedClient = client!;
 
   const contentLength = request.headers.get('Content-Length');
   if (contentLength && Number(contentLength) > MAX_BODY_BYTES) {
@@ -65,6 +67,19 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
   const rawText = await request.text();
   if (rawText.length > MAX_BODY_BYTES) {
     return Response.json({ message: 'Request body too large.' }, { status: 400 });
+  }
+
+  const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+
+  if (
+    await isRateLimited({
+      prefix: 'feedback-ip',
+      identifier: ip,
+      maxRequests: IP_LIMIT.max,
+      windowSeconds: IP_LIMIT.windowSeconds,
+    })
+  ) {
+    return Response.json({ message: 'Too many requests. Try again later.' }, { status: 429 });
   }
 
   let body: Record<string, unknown>;
@@ -86,17 +101,9 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
     return Response.json({ message: 'Invalid feedback.' }, { status: 400 });
   }
 
-  const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
-
-  if (
-    await isRateLimited({
-      prefix: 'feedback-ip',
-      identifier: ip,
-      maxRequests: IP_LIMIT.max,
-      windowSeconds: IP_LIMIT.windowSeconds,
-    })
-  ) {
-    return Response.json({ message: 'Too many requests. Try again later.' }, { status: 429 });
+  const sourceMismatch = validateSourceMatchesClient(validatedClient, payload.source);
+  if (sourceMismatch) {
+    return Response.json({ errors: sourceMismatch }, { status: 422 });
   }
 
   if (payload.source === 'landing') {

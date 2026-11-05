@@ -90,6 +90,7 @@ Implementor: add one line here for every review, design or QA finding, in the sa
 - 2026-11-04 · #310 · PR #318 · install failure reused check-for-updates copy · `install-failed` manual message + `onInstallFailed`; distinct install copy in `manualMessageCopy`
 - 2026-11-04 · #310 · PR #318 · update-available toast used success check + old copy · accent/download icon; `availableTitle` / `availableBody`; progress `aria-label` + `aria-valuetext`; Esc via `updatePromptEscapeAction`; menu `refresh` icon
 - 2026-11-04 · #310 · PR #318 · committed updater pubkey from agent-generated dev key, not `~/.tauri/swarmdraft-updater.key.pub` · sync with `node scripts/sync-updater-pubkey.mjs` from Brett's `.pub` or batch D prompt; never `tauri signer generate` a new pair for CI secrets
+- 2026-11-04 · #315 · feedback endpoint · honeypot before IP limit · apply IP rate limit before honeypot short-circuit; tie `X-SwarmDraft-Client` to `source`; allow `diagnostics.recentErrors`; landing form `role="alert"` + submit `aria-busy`
 - 2026-11-04 · #208 · PR #297 · bot feedback Esc silently denied · defer hides queue (`deferred` ref) without `deny`; hint copy; restore focus to opener
 - 2026-11-04 · #208 · PR #297 · excerpt sent without author opt-in on bot approve · `includeExcerpt` IPC flag; strip excerpt in `approve_feedback` when false; preview + unchecked checkbox in `FeedbackPrompt`
 - 2026-11-04 · #208 · PR #297 · global 20/hour feedback rate · per-agent 24h bot limit + `BOT_FEEDBACK_RATE_MESSAGE`; app writer limit 20/hour on `principal_kind = human`
