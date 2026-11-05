@@ -27,10 +27,6 @@
   .app-overlay-layer .st-dlg-scrim {
     z-index: var(--ct-z-modal);
   }
-  /* Teleported feedback / settings dialogs (#208): scoped settings.css does not reach overlay layer. */
-  .st-dlg--feedback {
-    max-width: 560px;
-  }
   .st-fieldset {
     margin: var(--ct-space-3) 0 0;
     padding: 0;
@@ -133,6 +129,23 @@
 .st-row.st-row--stack .st-inp {
   box-sizing: border-box;
   width: 100%;
+}
+
+/* Send feedback card (#208): beat settings.css .st-dlg when modal imports load later. */
+.st-dlg.st-dlg--feedback,
+.st-dlg--feedback {
+  box-sizing: border-box;
+  width: min(560px, 100%);
+  min-width: min(100%, 480px);
+  max-width: 560px;
+}
+fieldset.st-fieldset legend.st-row__k {
+  width: auto;
+  padding: 0;
+  margin: 0 0 var(--ct-space-1);
+  color: var(--ct-text);
+  font-weight: var(--ct-weight-semibold);
+  text-align: left;
 }
 
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));

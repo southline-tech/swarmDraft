@@ -6,3 +6,5 @@ Static HTML reproduces shipped dialog CSS (`tokens.css`, `app.css`, `settings.cs
 - **Combined viewer**: `evidence.html?scene=` (manual browser only; headless uses per-scene files)
 
 Capture: `./capture.sh` (Chromium, 720×900 viewport). Verify six distinct MD5s.
+
+Card width (480–560px): `node measure-dom-width.mjs` (CDP `getBoundingClientRect` on `.st-dlg--feedback`).

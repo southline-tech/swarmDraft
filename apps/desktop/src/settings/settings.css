@@ -197,6 +197,7 @@
   padding: var(--ct-space-6);
   background: var(--ct-scrim);
 }
+/* Pairing / backups / notes modals. Send feedback width: app.css .st-dlg--feedback. */
 .st-dlg {
   width: min(560px, 100%);
   min-width: min(100%, 480px);

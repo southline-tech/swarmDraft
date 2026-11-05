@@ -12,6 +12,8 @@ body {
 }
 .st-dlg-scrim {
   position: static;
+  width: 100%;
+  box-sizing: border-box;
   display: grid;
   place-items: center;
   min-height: 820px;
