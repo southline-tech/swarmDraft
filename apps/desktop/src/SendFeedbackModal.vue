@@ -157,7 +157,10 @@ onBeforeUnmount(() => {
           </div>
         </fieldset>
         <label class="st-row st-row--stack" for="feedback-description">
-          <span class="st-row__k">Description</span>
+          <span class="st-row__k"
+            >Description<span aria-hidden="true"> *</span
+            ><span class="visually-hidden">required</span></span
+          >
           <textarea
             id="feedback-description"
             ref="descriptionInput"

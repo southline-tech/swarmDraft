@@ -8,13 +8,13 @@ body {
 .stage {
   display: grid;
   place-items: center;
-  min-height: 592px;
+  min-height: 852px;
 }
 .st-dlg-scrim {
   position: static;
   display: grid;
   place-items: center;
-  min-height: 560px;
+  min-height: 820px;
   padding: var(--ct-space-4);
   background: var(--ct-scrim);
 }
@@ -71,8 +71,18 @@ body {
 }
 .fb-batch__actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--ct-space-3);
   margin-top: var(--ct-space-4);
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 .ev-focus-ring {
   outline: 0;

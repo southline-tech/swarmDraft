@@ -28,14 +28,14 @@
       .stage {
         display: grid;
         place-items: center;
-        min-height: 592px;
+        min-height: 852px;
       }
       .st-dlg-scrim {
         position: static;
         inset: auto;
         display: grid;
         place-items: center;
-        min-height: 560px;
+        min-height: 820px;
         padding: var(--ct-space-4);
         background: var(--ct-scrim);
       }
@@ -95,8 +95,17 @@
       .fb-batch__actions {
         display: flex;
         flex-wrap: wrap;
+        justify-content: flex-end;
         gap: var(--ct-space-3);
         margin-top: var(--ct-space-4);
+      }
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
       }
       .ev-focus-ring {
         outline: 0;
@@ -129,7 +138,10 @@
             </div>
           </fieldset>
           <label class="st-row st-row--stack" for="d1">
-            <span class="st-row__k">Description</span>
+            <span class="st-row__k"
+              >Description<span aria-hidden="true"> *</span
+              ><span class="visually-hidden">required</span></span
+            >
             <textarea
               id="d1"
               class="st-inp st-inp--area"
@@ -160,7 +172,10 @@
         <div class="st-dlg st-dlg--feedback" role="dialog">
           <h2 class="st-h2">Send feedback</h2>
           <label class="st-row st-row--stack" for="d2">
-            <span class="st-row__k">Description</span>
+            <span class="st-row__k"
+              >Description<span aria-hidden="true"> *</span
+              ><span class="visually-hidden">required</span></span
+            >
             <textarea
               id="d2"
               class="st-inp st-inp--area"
@@ -185,7 +200,10 @@
         <div class="st-dlg st-dlg--feedback" role="dialog">
           <h2 class="st-h2">Send feedback</h2>
           <label class="st-row st-row--stack">
-            <span class="st-row__k">Description</span>
+            <span class="st-row__k"
+              >Description<span aria-hidden="true"> *</span
+              ><span class="visually-hidden">required</span></span
+            >
             <textarea class="st-inp st-inp--area" rows="6">Still here after failure</textarea>
           </label>
           <div class="st-field-error st-field-error--block" role="alert">
@@ -205,7 +223,10 @@
         <div class="st-dlg st-dlg--feedback" role="dialog">
           <h2 class="st-h2">Send feedback</h2>
           <label class="st-row st-row--stack">
-            <span class="st-row__k">Description</span>
+            <span class="st-row__k"
+              >Description<span aria-hidden="true"> *</span
+              ><span class="visually-hidden">required</span></span
+            >
             <textarea class="st-inp st-inp--area" rows="6">Export failed on chapter 3</textarea>
           </label>
           <p class="st-status" role="status">Thanks — your feedback was sent.</p>

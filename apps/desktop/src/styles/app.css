@@ -45,18 +45,8 @@
   .st-row--stack {
     display: flex;
     flex-direction: column;
-    align-items: stretch;
     gap: var(--ct-space-1);
     padding: var(--ct-space-3) 0 0;
-    border-top: 0;
-  }
-  .st-row--stack .st-row__k {
-    width: auto;
-    color: var(--ct-text);
-    font-weight: var(--ct-weight-semibold);
-  }
-  .st-row--stack .st-inp {
-    box-sizing: border-box;
   }
   .st-row--check {
     display: flex;
@@ -124,6 +114,25 @@
   .st-field-error--block {
     margin-top: var(--ct-space-3);
   }
+}
+
+/* Teleported feedback (#208): unlayered so we beat settings.css .st-row / .st-row__k load order. */
+.st-row.st-row--stack {
+  align-items: stretch;
+  text-align: left;
+  flex-wrap: nowrap;
+  border-top: 0;
+}
+.st-row.st-row--stack .st-row__k {
+  width: auto;
+  flex: none;
+  color: var(--ct-text);
+  font-weight: var(--ct-weight-semibold);
+  text-align: left;
+}
+.st-row.st-row--stack .st-inp {
+  box-sizing: border-box;
+  width: 100%;
 }
 
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));

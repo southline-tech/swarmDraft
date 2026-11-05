@@ -353,6 +353,7 @@ onBeforeUnmount(() => {
 .fb-batch__actions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--ct-space-3);
   margin-top: var(--ct-space-4);
 }

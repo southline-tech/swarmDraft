@@ -7,7 +7,7 @@ if ! command -v "$CHROME" >/dev/null 2>&1; then CHROME=chromium; fi
 shot() {
   local html=$1 out=$2
   "$CHROME" --headless=new --disable-gpu --hide-scrollbars \
-    --window-size=900,640 --screenshot="$ROOT/$out" "file://${ROOT}/${html}" 2>/dev/null
+    --window-size=720,900 --screenshot="$ROOT/$out" "file://${ROOT}/${html}" 2>/dev/null
 }
 shot scene-empty.html feedback-empty-light.png
 shot scene-validation.html feedback-validation-light.png
