@@ -48,7 +48,7 @@ describe('ReviewPanel (RAD-258)', () => {
       {
         id: 'f1',
         kind: 'format_change',
-        author: 'Kim',
+        author: 'Author',
         ts: 't',
         text: 'word',
         target: 'bold',

@@ -50,7 +50,9 @@ onMounted(async () => {
   >
     <span class="ec__icon"><ShellIcon :name="icon" /></span>
     <div class="ec__body">
-      <h3 class="ec__title">{{ title }}</h3>
+      <h3 class="ec__title" :data-test="variant === 'banner' ? 'save-failure-title' : undefined">
+        {{ title }}
+      </h3>
       <p class="ec__text">{{ text }}</p>
     </div>
     <div class="ec__actions">

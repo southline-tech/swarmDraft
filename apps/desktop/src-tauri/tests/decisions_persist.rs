@@ -31,7 +31,7 @@ fn bot_suggestion(section_id: &str, id: &str) -> Suggestion {
         author: Author {
             kind: "agent".into(),
             id: "a1".into(),
-            name: "Kim".into(),
+            name: "Author".into(),
         },
         status: "open".into(),
         created_at: "2026-01-01T00:00:00.000Z".into(),
