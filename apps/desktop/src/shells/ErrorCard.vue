@@ -45,11 +45,20 @@ onMounted(async () => {
   >
     <span class="ec__icon"><ShellIcon :name="icon" /></span>
     <div class="ec__body">
-      <h3 class="ec__title">{{ title }}</h3>
+      <h3 class="ec__title" :data-test="variant === 'banner' ? 'save-failure-title' : undefined">
+        {{ title }}
+      </h3>
       <p class="ec__text">{{ text }}</p>
     </div>
     <div class="ec__actions">
-      <button type="button" class="sh-btn sh-btn--primary" @click="emit('action')">
+      <button
+        type="button"
+        class="sh-btn sh-btn--primary"
+        :data-test="actionDataTest"
+        :disabled="actionDisabled"
+        :aria-busy="actionAriaBusy || undefined"
+        @click="emit('action')"
+      >
         {{ action }}
       </button>
       <button

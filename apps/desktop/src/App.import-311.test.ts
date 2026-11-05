@@ -44,12 +44,13 @@ afterEach(() => {
 
 describe('import error overlay (#311)', () => {
   it('shows ErrorCard over an open book instead of the open-error strip', async () => {
+    let rejectDone!: (err: Error) => void;
+    const done = new Promise<never>((_, reject) => {
+      rejectDone = reject;
+    });
     vi.spyOn(runImport, 'runDocxImport').mockReturnValueOnce({
       abort: vi.fn(),
-      done: (async () => {
-        await Promise.resolve();
-        throw new Error('truncated zip');
-      })(),
+      done,
     });
     const w = mount(App, { attachTo: document.body });
     await settle();
@@ -57,7 +58,9 @@ describe('import error overlay (#311)', () => {
       sessionFromDocx(new Uint8Array(mockDocx), 'open-book'),
     );
     await settle();
-    await chooseFile(w);
+    const picked = chooseFile(w);
+    rejectDone(new Error('truncated zip'));
+    await picked;
     await settle();
     expect(w.find('[data-test="opening-error"]').exists()).toBe(true);
     expect(w.find('[data-test="open-error"]').exists()).toBe(false);

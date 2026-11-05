@@ -846,7 +846,9 @@ describe('App open-file input', () => {
     expect(w.text()).not.toContain('Could not import');
 
     await pick(w, 'broken.docx', new TextEncoder().encode('not a zip'));
-    expect(w.text()).toContain("Couldn't import broken.docx. This isn't a Word manuscript.");
+    expect(w.find('[data-test="opening-error"]').exists()).toBe(true);
+    expect(w.find('[data-test="error-card"]').text()).toContain("This isn't a Word manuscript");
+    expect(w.find('[data-test="open-error"]').exists()).toBe(false);
     expect(w.text()).not.toContain('zip directory');
     expect(w.findAll('.row')).toHaveLength(rows);
     w.unmount();
@@ -1318,7 +1320,8 @@ describe('restore confirmation', () => {
     vi.mocked(backend.persistImport).mockResolvedValueOnce(bad);
     vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(storedFixture()); // same id
     await chooseFile(w);
-    expect(w.find('[data-test="open-error"]').text()).toContain("We couldn't read this file");
+    expect(w.find('[data-test="opening-error"]').text()).toContain("We couldn't read this file");
+    expect(w.find('[data-test="open-error"]').exists()).toBe(false);
     w.unmount();
   });
 
@@ -1388,9 +1391,10 @@ describe('restore confirmation', () => {
     await chooseFile(w);
     await flushPromises();
     expect(backend.persistImport).not.toHaveBeenCalled();
-    expect(w.find('[data-test="open-error"]').text()).toBe(
+    expect(w.find('[data-test="opening-error"]').text()).toContain(
       "Couldn't import synthetic.docx: some edits in the current manuscript aren't saved yet",
     );
+    expect(w.find('[data-test="open-error"]').exists()).toBe(false);
     expect(editorSurface(w).text()).toContain('UNSAVED ');
     // Saves recover: the retry clears the banner, and now the import goes through.
     vi.mocked(backend.saveSectionUpdate).mockReset();
@@ -1902,11 +1906,12 @@ describe('home screen', () => {
     const bad = new File(['hello'], 'notes.txt');
     await w.find('[data-test="drop-zone"]').trigger('drop', { dataTransfer: { files: [bad] } });
     await settle();
-    expect(w.find('[data-test="open-error"]').text()).toBe(
-      "That file isn't a Word manuscript. Please choose a Word file.",
-    );
+    expect(w.find('[data-test="opening-error"]').text()).toContain("This isn't a Word manuscript");
+    expect(w.find('[data-test="open-error"]').exists()).toBe(false);
     expect(persist).not.toHaveBeenCalled();
     expect(session.closed).toBe(false);
+    await w.get('[data-test="error-card-dismiss"]').trigger('click');
+    await settle();
     await w.find('[data-test="open-cancel"]').trigger('click');
     expect(editorSurface(w).exists()).toBe(true);
     w.unmount();
@@ -2477,7 +2482,8 @@ describe('book-open toast (ob7)', () => {
     vi.mocked(backend.persistImport).mockRejectedValueOnce('disk full');
     vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(storedFixture());
     await chooseFile(w);
-    expect(w.find('[data-test="open-error"]').exists()).toBe(true);
+    expect(w.find('[data-test="opening-error"]').exists()).toBe(true);
+    expect(w.find('[data-test="open-error"]').exists()).toBe(false);
     expect(toastVisible()).toBe(false);
     w.unmount();
   });
@@ -2509,7 +2515,8 @@ describe('book-open toast (ob7)', () => {
       Object.defineProperty(input.element, 'files', { value: [file], configurable: true });
       await input.trigger('change');
       await settle();
-      expect(w.find('[data-test="open-error"]').exists()).toBe(true);
+      expect(w.find('[data-test="opening-error"]').exists()).toBe(true);
+      expect(w.find('[data-test="open-error"]').exists()).toBe(false);
       // Still well inside the 8 s auto-close: only the failure path can have cleared it.
       expect(toastVisible()).toBe(false);
       w.unmount();
