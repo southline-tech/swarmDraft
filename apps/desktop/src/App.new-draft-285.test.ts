@@ -100,6 +100,13 @@ vi.mock('./backend', async (orig) => ({
   loadNotesState: vi.fn(async () => null),
   notesApplyUpdate: vi.fn(async () => {}),
   listenOpeningProgress: vi.fn(async () => () => {}),
+  draftOpen: vi.fn(async () => null),
+  draftSave: vi.fn(async () => null),
+  draftSaveAs: vi.fn(async () => null),
+  draftCheckpoint: vi.fn(async () => null),
+  draftHistory: vi.fn(async () => []),
+  draftRestore: vi.fn(async () => 'oid'),
+  draftReviewCommit: vi.fn(async () => null),
 }));
 
 enableAutoUnmount(afterEach);

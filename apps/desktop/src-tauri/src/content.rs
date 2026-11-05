@@ -303,6 +303,21 @@ fn out_to_json(v: &Out) -> Value {
     }
 }
 
+/// Decode blocks from a named XmlFragment on a document (e.g. story-note bodies).
+pub fn decode_named_fragment(doc: &Doc, name: &str) -> Vec<Block> {
+    let frag = doc.get_or_insert_xml_fragment(name);
+    let txn = doc.transact();
+    frag.children(&txn)
+        .filter_map(|c| match c {
+            XmlOut::Element(e) => Some(Block {
+                id: block_id(AsRef::<yrs::branch::Branch>::as_ref(&e).id()),
+                node: decode_element(&txn, &e),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Decode a section document into its blocks (with stable ids).
 pub fn decode(doc: &Doc) -> Vec<Block> {
     let frag = doc.get_or_insert_xml_fragment(FRAGMENT);
