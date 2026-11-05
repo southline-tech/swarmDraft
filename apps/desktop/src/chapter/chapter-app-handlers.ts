@@ -1,6 +1,7 @@
 import * as Y from 'yjs';
 import { isEmptyChapterDoc } from '@swarmdraft/editor';
 import { yDocToDoc } from '@swarmdraft/docx';
+import { isMacPlatform } from '../shells/app-shortcuts';
 import type { ManuscriptSession } from '../manuscript-session';
 import {
   applyChapterMerge,
@@ -89,6 +90,10 @@ export async function runChapterMerge(
 
 export function chapterToastUndoDisabled(session: ManuscriptSession, toast: ChapterToastState) {
   return docsChangedSince(session, toast.watchDocIds, toast.stateVectors);
+}
+
+export function chapterToastUndoHint(): string {
+  return isMacPlatform() ? 'Text changed — use ⌘Z' : 'Text changed — use Ctrl+Z';
 }
 
 export async function undoChapterToast(

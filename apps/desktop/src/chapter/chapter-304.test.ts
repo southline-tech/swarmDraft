@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { docToYDoc, writeStructure, yDocToDoc } from '@swarmdraft/docx';
-import { addSection } from '@swarmdraft/editor';
+import { addSection, CHAPTER_OP_ORIGIN } from '@swarmdraft/editor';
 import { openSession } from '../manuscript-session';
 import { applyChapterSplit, captureChapterSnapshot, restoreChapterSnapshot } from './chapter-ops';
 
@@ -29,5 +29,30 @@ describe('chapter split wiring (#304)', () => {
     await restoreChapterSnapshot(session, snap);
     expect(session.outline.value).toHaveLength(1);
     expect(JSON.stringify(yDocToDoc(doc))).toContain('B');
+  });
+
+  it('split applies one chapter-op transaction on the source doc (one Ctrl+Z in the editor)', async () => {
+    let outline = addSection([], { manuscriptId: 'm', kind: 'chapter', title: 'One', id: 'c1' });
+    const manuscript = new Y.Doc();
+    writeStructure(
+      manuscript,
+      outline.map((s) => ({ ...s, docId: `manuscript/m/section/${s.id}` })),
+    );
+    outline = outline.map((s) => ({ ...s, docId: `manuscript/m/section/${s.id}` }));
+    const doc = docToYDoc({
+      type: 'doc',
+      content: [
+        { type: 'paragraph', attrs: { style: 'body' }, content: [{ type: 'text', text: 'A' }] },
+        { type: 'paragraph', attrs: { style: 'body' }, content: [{ type: 'text', text: 'B' }] },
+      ],
+    });
+    const sections = new Map([[outline[0]!.docId, doc]]);
+    const session = openSession('m', 'T', manuscript, sections, null);
+    let chapterOpTx = 0;
+    doc.on('afterTransaction', (tr) => {
+      if (tr.origin === CHAPTER_OP_ORIGIN) chapterOpTx += 1;
+    });
+    await applyChapterSplit(session, 'm', 'c1', 1, 'Part B', false);
+    expect(chapterOpTx).toBe(1);
   });
 });

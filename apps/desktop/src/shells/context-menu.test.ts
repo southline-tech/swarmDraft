@@ -4,6 +4,7 @@ import { manuscriptEditorOptions } from '@swarmdraft/editor';
 import { collectReviewItems } from '@swarmdraft/editor';
 import { SAMPLE_DOC } from '../fixtures/sample';
 import {
+  chapterSplitShortcut,
   contextMenuDisabled,
   contextMenuActionForKey,
   runContextMenuAction,
@@ -30,6 +31,19 @@ function selectText(e: Editor, snippet: string) {
 }
 
 describe('context menu actions (#54)', () => {
+  it('detects Ctrl+Shift+Enter as split chapter (#304)', () => {
+    expect(
+      chapterSplitShortcut(
+        new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, shiftKey: true }),
+      ),
+    ).toBe(true);
+    expect(
+      chapterSplitShortcut(
+        new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, altKey: true, shiftKey: true }),
+      ),
+    ).toBe(false);
+  });
+
   it('maps Ctrl+Alt+0/1/2/M to style and comment actions (#56)', () => {
     const key = (key: string) =>
       contextMenuActionForKey(

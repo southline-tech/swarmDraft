@@ -85,6 +85,7 @@ import { chapterNeighbors } from './chapter/chapter-editor';
 import {
   CHAPTER_TOAST_MS,
   chapterToastUndoDisabled,
+  chapterToastUndoHint,
   runChapterMerge,
   runChapterSplit,
   shouldConfirmMerge,
@@ -376,6 +377,7 @@ const reloads = ref(0);
 const commentMetaVersion = ref(0);
 const chapterToast = ref<ChapterToastState | null>(null);
 let chapterToastTimer: ReturnType<typeof setTimeout> | undefined;
+let chapterToastDeadline = 0;
 const mergePending = ref<{
   targetId: string;
   sourceId: string;
@@ -394,9 +396,40 @@ const chapterToastUndoBlocked = computed(() => {
 function scheduleChapterToast(toast: ChapterToastState) {
   chapterToast.value = toast;
   clearTimeout(chapterToastTimer);
+  chapterToastDeadline = Date.now() + CHAPTER_TOAST_MS;
   chapterToastTimer = setTimeout(() => {
     chapterToast.value = null;
   }, CHAPTER_TOAST_MS);
+}
+
+function pauseChapterToastTimer() {
+  if (!chapterToast.value) return;
+  clearTimeout(chapterToastTimer);
+  chapterToastTimer = undefined;
+}
+
+function resumeChapterToastTimer() {
+  if (!chapterToast.value || chapterToastTimer) return;
+  const remaining = chapterToastDeadline - Date.now();
+  if (remaining <= 0) {
+    chapterToast.value = null;
+    return;
+  }
+  chapterToastTimer = setTimeout(() => {
+    chapterToast.value = null;
+  }, remaining);
+}
+
+function onChapterToastFocusOut(e: FocusEvent) {
+  const root = e.currentTarget;
+  if (
+    root instanceof HTMLElement &&
+    e.relatedTarget instanceof Node &&
+    root.contains(e.relatedTarget)
+  ) {
+    return;
+  }
+  resumeChapterToastTimer();
 }
 async function onEditorSplitChapter(payload: {
   blockIndex: number;
@@ -451,6 +484,12 @@ function requestChapterMerge(targetId: string, sourceId: string) {
   }
   void commitChapterMerge(targetId, sourceId);
 }
+function onMergeClose() {
+  mergePending.value = null;
+  const id = selectedId.value;
+  if (id) void nextTick(() => editorPane.value?.focusSection(id));
+}
+
 async function onMergeConfirm(dontAsk: boolean) {
   if (dontAsk) mergeSkipConfirmSession.value = true;
   const p = mergePending.value;
@@ -1890,7 +1929,15 @@ defineExpose({ open, closeSession });
             @dismiss="onUpdateDismissManual"
           />
         </div>
-        <div class="open-toast" data-test="open-toast" :style="toastStyle ?? undefined">
+        <div
+          class="open-toast"
+          data-test="open-toast"
+          :style="toastStyle ?? undefined"
+          @mouseenter="pauseChapterToastTimer"
+          @mouseleave="resumeChapterToastTimer"
+          @focusin="pauseChapterToastTimer"
+          @focusout="onChapterToastFocusOut"
+        >
           <!-- #98: the no-room cue shares this one polite region with the open-book toast. -->
           <AppToast
             :open="(!!openToast || noRoomToast) && !!session && !chapterToast"
@@ -1900,45 +1947,47 @@ defineExpose({ open, closeSession });
             :icon="noRoomToast ? 'alert' : 'check'"
             @dismiss="noRoomToast ? hideNotesForOutline() : dismissToast()"
           />
-          <div
-            v-if="chapterToast"
-            class="chapter-toast"
-            role="status"
-            aria-live="polite"
+          <AppToast
             data-test="chapter-action-toast"
+            :open="!!chapterToast"
+            :message="chapterToast?.message ?? ''"
+            :detail="chapterToast?.detail"
           >
-            <p class="chapter-toast__msg">
-              {{ chapterToast.message }}
-              <span v-if="chapterToast.detail" class="chapter-toast__detail">{{
-                chapterToast.detail
-              }}</span>
-            </p>
-            <button
-              type="button"
-              class="sh-btn"
-              data-test="chapter-toast-undo"
-              :disabled="chapterToastUndoBlocked"
-              :title="chapterToastUndoBlocked ? 'Text changed since this, use Ctrl+Z' : undefined"
-              @click="undoChapterAction"
-            >
-              Undo
-            </button>
-            <button
-              type="button"
-              class="sh-btn"
-              data-test="chapter-toast-dismiss"
-              @click="dismissChapterToast"
-            >
-              Dismiss
-            </button>
-          </div>
+            <template #actions>
+              <p
+                v-if="chapterToastUndoBlocked"
+                class="chapter-toast__undo-hint"
+                data-test="chapter-toast-undo-hint"
+              >
+                {{ chapterToastUndoHint() }}
+              </p>
+              <button
+                type="button"
+                class="sh-btn"
+                data-test="chapter-toast-undo"
+                :disabled="chapterToastUndoBlocked"
+                :aria-disabled="chapterToastUndoBlocked ? 'true' : undefined"
+                @click="undoChapterAction"
+              >
+                Undo
+              </button>
+              <button
+                type="button"
+                class="sh-btn"
+                data-test="chapter-toast-dismiss"
+                @click="dismissChapterToast"
+              >
+                Dismiss
+              </button>
+            </template>
+          </AppToast>
         </div>
         <MergeChapterConfirm
           v-if="mergePending"
           :target-title="mergePending.targetTitle"
           :source-title="mergePending.sourceTitle"
           :skip-ask-session="mergeSkipConfirmSession"
-          @close="mergePending = null"
+          @close="onMergeClose"
           @confirm="onMergeConfirm"
         />
       </Teleport>
@@ -2125,32 +2174,14 @@ defineExpose({ open, closeSession });
   transform: translateX(-50%);
   pointer-events: auto;
 }
-.chapter-toast {
-  position: fixed;
-  bottom: var(--ct-space-12);
-  left: 50%;
-  z-index: var(--ct-z-toast);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--ct-space-2);
-  max-width: min(480px, 92vw);
-  padding: var(--ct-space-3) var(--ct-space-4);
-  transform: translateX(-50%);
-  background: var(--ct-surface-raised);
-  border: 1px solid var(--ct-border);
-  border-radius: var(--ct-radius-lg);
-  pointer-events: auto;
-}
-.chapter-toast__msg {
+.chapter-toast__undo-hint {
   margin: 0;
-  flex: 1 1 12rem;
-}
-.chapter-toast__detail {
-  display: block;
-  margin-top: var(--ct-space-1);
-  color: var(--ct-text-muted);
+  flex: 1 1 100%;
   font-size: var(--ct-text-sm);
+  color: var(--ct-text-muted);
+}
+.open-toast :deep(.toast) {
+  flex-wrap: wrap;
 }
 .opening-shell {
   flex: 1;

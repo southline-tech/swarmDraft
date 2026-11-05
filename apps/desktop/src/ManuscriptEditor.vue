@@ -502,6 +502,8 @@ const splitPopover = shallowRef<{
   removeLine: boolean;
   blockIndex: number;
 } | null>(null);
+const splitShortcutStatus = ref<string | null>(null);
+let splitShortcutStatusTimer: ReturnType<typeof setTimeout> | undefined;
 const splitAcrossSet = computed(() => new Set(props.splitAcrossThreadIds ?? []));
 function openSplitPopover(anchor?: { x: number; y: number }) {
   const e = editor.value;
@@ -516,6 +518,16 @@ function openSplitPopover(anchor?: { x: number; y: number }) {
     blockIndex: defaults.blockIndex,
   };
 }
+function editorReturnFocus() {
+  const e = editor.value;
+  if (e && !e.isDestroyed) e.view.focus();
+}
+
+function closeSplitPopover() {
+  splitPopover.value = null;
+  editorReturnFocus();
+}
+
 function confirmSplit(payload: { title: string; removeLine: boolean }) {
   const pop = splitPopover.value;
   splitPopover.value = null;
@@ -525,6 +537,15 @@ function confirmSplit(payload: { title: string; removeLine: boolean }) {
     title: payload.title,
     removeLine: payload.removeLine,
   });
+  editorReturnFocus();
+}
+
+function flashSplitShortcutStatus(message: string) {
+  splitShortcutStatus.value = message;
+  clearTimeout(splitShortcutStatusTimer);
+  splitShortcutStatusTimer = setTimeout(() => {
+    splitShortcutStatus.value = null;
+  }, 4000);
 }
 function jumpToReviewAtSplit() {
   reviewOpen.value = true;
@@ -642,6 +663,7 @@ function dismissContextOverlay() {
   spellMenu.value = null;
   menuAt.value = null;
   closeOverlapPopover();
+  if (splitPopover.value) closeSplitPopover();
 }
 const localAuthorFilter = shallowRef<AuthorFilter>(null);
 const filter = computed({
@@ -1123,10 +1145,8 @@ function onKeydown(ev: KeyboardEvent) {
       openSplitPopover();
       return;
     }
-    if (!reason.includes('Resolve')) {
-      ev.preventDefault();
-      return;
-    }
+    ev.preventDefault();
+    flashSplitShortcutStatus(reason);
   }
   const cycle = reviewViewCycleFor(ev);
   if (
@@ -1809,6 +1829,14 @@ onBeforeUnmount(() => {
               Jump to change
             </button>
           </p>
+          <p
+            v-if="splitShortcutStatus"
+            class="chapter-split-blocked"
+            data-test="split-chapter-shortcut-status"
+            role="status"
+          >
+            {{ splitShortcutStatus }}
+          </p>
           <EditorContent
             :editor="editor"
             class="page"
@@ -1890,7 +1918,7 @@ onBeforeUnmount(() => {
       </Teleport>
     </div>
     <div
-      v-if="spellMenu || menuAt || overlapPopover"
+      v-if="spellMenu || menuAt || overlapPopover || splitPopover"
       class="fixed inset-0 z-30 context-dismiss"
       data-test="context-dismiss"
       @mousedown.self.prevent="dismissContextOverlay"
@@ -1922,7 +1950,8 @@ onBeforeUnmount(() => {
       :y="splitPopover.y"
       :title="splitPopover.title"
       :remove-line="splitPopover.removeLine"
-      @close="splitPopover = null"
+      :return-focus="editor?.view.dom ?? null"
+      @close="closeSplitPopover"
       @confirm="confirmSplit"
     />
     <ContextMenu
@@ -1933,6 +1962,7 @@ onBeforeUnmount(() => {
       :active-style="menuActiveStyle"
       :show-chapter-group="!!chapterOpsEnabled && !sliceMode"
       :split-title="splitDisabledReason ?? undefined"
+      :merge-prev-title="!editor?.isEditable ? 'Read-only' : undefined"
       @select="onContextMenuSelect"
       @close="menuAt = null"
     />
