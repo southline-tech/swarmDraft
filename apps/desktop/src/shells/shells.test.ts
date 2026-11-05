@@ -51,6 +51,9 @@ describe('Find & replace (#53)', () => {
     expect(w.find('[data-test="find-close"] [data-icon="x"]').exists()).toBe(true);
 
     await w.find('[data-test="find-next"]').trigger('click');
+    const live = w.find('[data-test="find-count-live"]');
+    expect(live.attributes('aria-live')).toBe('polite');
+    expect(live.text()).toMatch(/1 of 1/);
     expect(editor.view.hasFocus()).toBe(false);
     await w.find('[data-test="find-prev"]').trigger('click');
     expect(editor.view.hasFocus()).toBe(false);
@@ -226,6 +229,7 @@ describe('UI shells (Part of #36)', () => {
     expect(sheet.text()).toContain(MANUSCRIPT_SHORTCUTS.find.split('+')[1]);
     expect(sheet.text()).toContain(REVIEW_SHORTCUTS.accept.split('+').slice(-1)[0]!);
     expect(document.activeElement?.getAttribute('data-test')).toBe('shortcuts-close');
+    expect(w.find('[data-test="shortcuts-close"] [data-icon="x"]').exists()).toBe(true);
     await sheet.trigger('keydown', { key: 'Escape' });
     expect(w.find('[data-test="shortcuts-sheet"]').exists()).toBe(false);
     unchanged();
