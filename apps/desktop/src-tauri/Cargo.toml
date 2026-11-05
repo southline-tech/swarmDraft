@@ -31,7 +31,11 @@ yrs = "0.28"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync", "time"] }
 unicode-normalization = "0.1.26"
 harper-core = "2"
+tauri-plugin-process = "2.3.1"
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 tempfile = "3"
+
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-updater = "2.12.0"
