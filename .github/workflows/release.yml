@@ -19,7 +19,7 @@ env:
 
 jobs:
   windows-installer:
-    name: Windows unsigned installer
+    name: Windows signed installer and updater
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -40,8 +40,21 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: node scripts/check-version.mjs --tag ${{ github.ref_name }}
 
-      - name: Build NSIS and MSI (unsigned)
-        run: pnpm tauri build --bundles nsis,msi
+      - name: Build NSIS and MSI (signed updater artifacts)
+        uses: tauri-apps/tauri-action@v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: swarmDraft ${{ github.ref_name }}
+          releaseBodyPath: docs/release-notes-template.md
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
+          args: --bundles nsis,msi
 
       - name: SHA256 checksums
         shell: pwsh
@@ -59,24 +72,20 @@ jobs:
           $lines | Set-Content -Encoding utf8 SHA256SUMS.txt
           Get-Content SHA256SUMS.txt
 
+      - name: Upload SHA256SUMS to release
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: SHA256SUMS.txt
+
       - name: Upload workflow artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: swarmdraft-windows-unsigned-${{ github.ref_name }}
+          name: swarmdraft-windows-${{ github.ref_name }}
           path: |
             apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+            apps/desktop/src-tauri/target/release/bundle/nsis/*.sig
             apps/desktop/src-tauri/target/release/bundle/msi/*.msi
+            apps/desktop/src-tauri/target/release/bundle/msi/*.sig
             SHA256SUMS.txt
           retention-days: 14
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
-        with:
-          name: swarmDraft ${{ github.ref_name }}
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          generate_release_notes: true
-          body_path: docs/release-notes-template.md
-          files: |
-            apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
-            apps/desktop/src-tauri/target/release/bundle/msi/*.msi
-            SHA256SUMS.txt

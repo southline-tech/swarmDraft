@@ -26,6 +26,12 @@ export const ICONS = {
   'chevron-up': ['M4 10l4-4 4 4'],
   'chevron-down': ['M4 6l4 4 4-4'],
   x: ['M4.5 4.5l7 7', 'M11.5 4.5l-7 7'],
+  refresh: [
+    'M11.5 2.5v3h-3',
+    'M4.5 13.5v-3h3',
+    'M12.2 5.8A4.5 4.5 0 0 0 4.8 4.2',
+    'M3.8 10.2A4.5 4.5 0 0 0 11.2 11.8',
+  ],
 } as const satisfies Record<string, readonly string[]>;
 
 export type IconName = keyof typeof ICONS;

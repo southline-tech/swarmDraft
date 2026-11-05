@@ -67,8 +67,18 @@ import Rad67EditorChromeEvidence from './evidence/Rad67EditorChromeEvidence.vue'
 import Rad55FocusModeEvidence from './evidence/Rad55FocusModeEvidence.vue';
 import Rad38NotesEvidence from './evidence/Rad38NotesEvidence.vue';
 import Rad34InstallEvidence from './evidence/Rad34InstallEvidence.vue';
+import Rad310UpdateEvidence from './evidence/Rad310UpdateEvidence.vue';
 import { readEvidenceQuery } from './evidence/evidence-routes';
 import AppToast from './shells/AppToast.vue';
+import UpdatePromptToast from './updater/UpdatePromptToast.vue';
+import {
+  createAppUpdater,
+  defaultUpdaterDeps,
+  initialUpdatePromptState,
+  type AppUpdaterHandle,
+  type UpdatePromptState,
+} from './updater/app-updater';
+import { updatePromptEscapeAction } from './updater/update-prompt-logic';
 import OpeningProgress from './shells/OpeningProgress.vue';
 import ErrorCard from './shells/ErrorCard.vue';
 import PairingPrompt from './PairingPrompt.vue';
@@ -114,6 +124,8 @@ import { openNotesSession, type NotesSession } from './notes/useNotesSession';
 import { loadProfile } from './settings/prefs';
 
 const info = ref<AppInfo | null>(null);
+const updatePrompt = ref<UpdatePromptState>(initialUpdatePromptState());
+let appUpdater: AppUpdaterHandle | undefined;
 const session = shallowRef<ManuscriptSession | null>(null);
 const notesSession = shallowRef<NotesSession | null>(null);
 /** #38: story notes dock under the editor; off until the writer opens them from the book menu. */
@@ -755,6 +767,18 @@ const appMenuShortcuts = computed(() => ({
 const menuField = (t: EventTarget | null) =>
   t instanceof HTMLElement && !!t.closest('input, textarea, select, [contenteditable=true]');
 
+function onUpdatePromptEscape(e: KeyboardEvent) {
+  if (e.key !== 'Escape' || menuField(e.target)) return;
+  const action = updatePromptEscapeAction(updatePrompt.value.mode);
+  if (action === 'later') {
+    e.preventDefault();
+    onUpdateLater();
+  } else if (action === 'dismiss') {
+    e.preventDefault();
+    onUpdateDismissManual();
+  }
+}
+
 function onAppMenuKey(e: KeyboardEvent) {
   if (preview.value) return;
   if (menuField(e.target)) return;
@@ -793,14 +817,19 @@ onMounted(() => {
   window.addEventListener('drop', blockFileNavigation);
   window.addEventListener('focus', reloadAgents);
   window.addEventListener('keydown', onAppMenuKey);
+  window.addEventListener('keydown', onUpdatePromptEscape);
   void refreshAgents();
-  stopAppMenuKeys = () => window.removeEventListener('keydown', onAppMenuKey);
+  stopAppMenuKeys = () => {
+    window.removeEventListener('keydown', onAppMenuKey);
+    window.removeEventListener('keydown', onUpdatePromptEscape);
+  };
 });
 onBeforeUnmount(() => {
   window.removeEventListener('dragover', blockFileNavigation);
   window.removeEventListener('drop', blockFileNavigation);
   window.removeEventListener('focus', reloadAgents);
   stopAppMenuKeys();
+  appUpdater?.dispose();
 });
 onMounted(async () => {
   stopOpeningProgress = await listenOpeningProgress(onOpeningProgress);
@@ -842,7 +871,30 @@ onMounted(async () => {
     }
   }
   stopCloseFlush = await flushOnClose(() => session.value?.flush() ?? Promise.resolve());
+  if (isTauri()) {
+    appUpdater = createAppUpdater(defaultUpdaterDeps(), (s) => {
+      updatePrompt.value = s;
+    });
+    appUpdater.scheduleAutoCheck();
+  }
 });
+
+async function checkForUpdatesManual() {
+  closeBookMenu();
+  await appUpdater?.manualCheck();
+}
+
+async function installUpdateNow() {
+  await appUpdater?.installPending(() => session.value?.flush() ?? Promise.resolve());
+}
+
+function onUpdateLater() {
+  appUpdater?.later();
+}
+
+function onUpdateDismissManual() {
+  appUpdater?.dismissManual();
+}
 
 const backupStatus = ref('');
 /** Plain notices for the restore codes from the backend (#83, #86); anything else is generic. */
@@ -1321,6 +1373,7 @@ defineExpose({ open, closeSession });
 <template>
   <p v-if="evidence === '34-c6'" class="ev34-c6-boot" data-test="ev34-c6-bootstrap">Loading…</p>
   <Rad34InstallEvidence v-else-if="evidence === '34-install'" class="shell" />
+  <Rad310UpdateEvidence v-else-if="evidence === '310-updater'" class="shell" />
   <Rad60ReviewEvidence v-else-if="evidence === 'rad60-review'" class="shell" />
   <Rad38NotesEvidence v-else-if="evidence === '38-notes'" class="shell" />
   <Rad67EditorChromeEvidence v-else-if="evidence === 'rad67'" class="shell" />
@@ -1480,6 +1533,19 @@ defineExpose({ open, closeSession });
                   ><AppIcon name="sparkle" class="app-menu-icon"
                 /></span>
                 Story notes
+              </button>
+              <button
+                v-if="isTauri()"
+                type="button"
+                class="sh-mi"
+                role="menuitem"
+                data-test="app-menu-check-updates"
+                @click="() => void checkForUpdatesManual()"
+              >
+                <span class="sh-mi-lead" aria-hidden="true"
+                  ><AppIcon name="refresh" class="app-menu-icon"
+                /></span>
+                Check for updates…
               </button>
               <button
                 ref="settingsButton"
@@ -1675,6 +1741,21 @@ defineExpose({ open, closeSession });
       />
       <!-- Always mounted so the live region exists before its text (#79). -->
       <Teleport to="#app-overlay-layer">
+        <div
+          v-if="isTauri() && updatePrompt.mode !== 'hidden'"
+          class="update-toast-wrap"
+          data-test="update-prompt-wrap"
+        >
+          <UpdatePromptToast
+            :mode="updatePrompt.mode"
+            :version="updatePrompt.version"
+            :progress="updatePrompt.progress"
+            :manual-message="updatePrompt.manualMessage"
+            @update-now="() => void installUpdateNow()"
+            @later="onUpdateLater"
+            @dismiss="onUpdateDismissManual"
+          />
+        </div>
         <div class="open-toast" data-test="open-toast" :style="toastStyle ?? undefined">
           <!-- #98: the no-room cue shares this one polite region with the open-book toast. -->
           <AppToast
@@ -1849,6 +1930,13 @@ defineExpose({ open, closeSession });
 </template>
 
 <style>
+.update-toast-wrap {
+  position: fixed;
+  top: var(--ct-space-12);
+  right: var(--ct-space-6);
+  z-index: var(--ct-z-toast);
+  pointer-events: auto;
+}
 .open-toast {
   position: fixed;
   bottom: var(--ct-space-12);

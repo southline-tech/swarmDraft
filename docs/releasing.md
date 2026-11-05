@@ -1,6 +1,6 @@
-# Releasing swarmDraft (unsigned Windows installer)
+# Releasing swarmDraft (Windows installer + in-app updater)
 
-**Code signing:** deferred ([#196](https://github.com/southline-tech/swarmDraft/issues/196)).
+**Authenticode / SmartScreen signing:** still deferred ([#196](https://github.com/southline-tech/swarmDraft/issues/196)). **Updater signing** uses Tauri minisign keys — see [updater-signing.md](./updater-signing.md).
 
 ## Version bump (before the release PR)
 
@@ -22,8 +22,10 @@ on Linux only.
    git push origin v0.1.0
    ```
 
-3. Watch **Release** workflow (`.github/workflows/release.yml`) on the tag. It builds unsigned
-   NSIS + MSI on `windows-latest` and publishes a GitHub Release with `SHA256SUMS.txt`.
+3. Watch **Release** workflow (`.github/workflows/release.yml`) on the tag. It builds signed
+   updater artifacts (NSIS + MSI) on `windows-latest`, publishes a GitHub Release with
+   `latest.json`, `.sig` files, and `SHA256SUMS.txt`. Requires `TAURI_SIGNING_PRIVATE_KEY*`
+   secrets — see [updater-signing.md](./updater-signing.md).
 4. On a Windows test machine, install from the Release (`swarmDraft_<version>_x64-setup.exe`) and
    run [new-draft-checklist.md](./qa/new-draft-checklist.md) (New / import / switch / resume) before
    broader smoke-test and sharing with authors.
@@ -33,7 +35,6 @@ Do **not** push a tag from a PR branch. Tags must match `pnpm version:check --ta
 
 ## Out of scope on this track
 
-- Authenticode signing
-- Tauri updater / `latest.json`
+- Authenticode signing (SmartScreen)
 - Pandoc bundling ([#186](https://github.com/southline-tech/swarmDraft/issues/186))
 - Arm-A-Rillo sign-off beyond [new-draft-checklist.md](./qa/new-draft-checklist.md)

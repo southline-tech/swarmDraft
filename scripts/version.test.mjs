@@ -102,8 +102,10 @@ test('release.yml policy', () => {
   const yml = readFileSync(resolve(repoRoot, '.github/workflows/release.yml'), 'utf8');
   assert.match(yml, /tags:\s*\n\s*- 'v\*'/);
   assert.match(yml, /runs-on:\s*windows-latest/);
-  assert.match(yml, /pnpm tauri build --bundles nsis,msi/);
-  assert.doesNotMatch(yml, /TAURI_SIGNING/i);
+  assert.match(yml, /tauri-apps\/tauri-action/);
+  assert.match(yml, /TAURI_SIGNING_PRIVATE_KEY/);
+  assert.match(yml, /uploadUpdaterJson:\s*true/);
+  assert.match(yml, /updaterJsonPreferNsis:\s*true/);
   assert.doesNotMatch(yml, /certificateThumbprint/);
   assert.doesNotMatch(yml, /signCommand/);
 });
