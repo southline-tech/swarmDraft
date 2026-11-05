@@ -1,9 +1,12 @@
-/** Landing feedback form (#315). */
+/** Landing feedback modal (#315 / site follow-up). */
 
 export const MAX_MESSAGE_LENGTH = 2000;
 export const MESSAGE_COUNTER_FROM = 1800;
+export const COUNTER_ARIA_LIVE_THROTTLE_MS = 400;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const FOCUSABLE =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function validateFeedbackForm(description, replyEmail) {
   const errors = {};
@@ -64,6 +67,12 @@ export function buildLandingPayload({ description, replyEmail, installId, siteVe
   return payload;
 }
 
+export function getFocusableElements(container) {
+  return [...container.querySelectorAll(FOCUSABLE)].filter(
+    (el) => !el.hasAttribute('hidden') && el.getAttribute('aria-hidden') !== 'true',
+  );
+}
+
 function setFieldError(form, name, message) {
   const el = form.querySelector(`[data-feedback-error="${name}"]`);
   const input = form.querySelector(`[name="${name}"]`);
@@ -86,7 +95,7 @@ function setFieldError(form, name, message) {
 }
 
 function setSubmitEnabled(form) {
-  const submitBtn = form.querySelector('button[type="submit"]');
+  const submitBtn = form.querySelector('[data-feedback-submit]');
   const description = form.description?.value ?? '';
   const hasText = description.trim().length > 0;
   const sending = form.dataset.state === 'sending';
@@ -95,16 +104,24 @@ function setSubmitEnabled(form) {
   }
 }
 
-function updateMessageCounter(form) {
+function updateMessageCounter(form, counterState) {
   const counter = form.querySelector('[data-feedback-counter]');
   const description = form.description?.value ?? '';
   if (!counter) return;
   if (description.length >= MESSAGE_COUNTER_FROM) {
-    counter.textContent = formatMessageCounter(description.length);
+    const text = formatMessageCounter(description.length);
+    counter.textContent = text;
     counter.hidden = false;
+    const now = Date.now();
+    if (now - counterState.lastLiveAt >= COUNTER_ARIA_LIVE_THROTTLE_MS) {
+      counter.setAttribute('aria-live', 'polite');
+      counterState.lastLiveAt = now;
+    }
   } else {
     counter.textContent = '';
     counter.hidden = true;
+    counter.setAttribute('aria-live', 'off');
+    counterState.lastLiveAt = 0;
   }
 }
 
@@ -113,12 +130,20 @@ function setFormState(form, state) {
   const sending = state === 'sending';
   form.querySelectorAll('input, textarea').forEach((node) => {
     if (node.name === 'website') return;
-    if (sending) {
-      node.readOnly = true;
-    } else {
-      node.readOnly = false;
-    }
+    node.readOnly = sending;
   });
+  const submitBtn = form.querySelector('[data-feedback-submit]');
+  const spinner = form.querySelector('[data-feedback-spinner]');
+  const label = form.querySelector('.feedback-submit__label');
+  if (submitBtn) {
+    submitBtn.setAttribute('aria-busy', sending ? 'true' : 'false');
+  }
+  if (spinner) {
+    spinner.hidden = !sending;
+  }
+  if (label) {
+    label.textContent = sending ? 'Sending…' : 'Send feedback';
+  }
   setSubmitEnabled(form);
 }
 
@@ -136,96 +161,75 @@ function showFormAlert(form, message) {
   alertEl.hidden = false;
 }
 
-function buildSuccessView() {
-  const wrap = document.createElement('div');
-  wrap.className = 'feedback-success';
-  wrap.setAttribute('role', 'status');
-  wrap.innerHTML = `
-    <p class="feedback-success__row">
-      <svg class="feedback-success__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <path fill="currentColor" d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/>
-      </svg>
-      <span>Thanks, your feedback is on its way.</span>
-    </p>
-    <button type="button" class="btn btn--text" data-feedback-send-another>Send another</button>
-  `;
-  return wrap;
+function resetFeedbackForm(form, counterState) {
+  form.reset();
+  hideFormAlert(form);
+  setFieldError(form, 'description', '');
+  setFieldError(form, 'replyEmail', '');
+  setFormState(form, 'idle');
+  updateMessageCounter(form, counterState);
+  setSubmitEnabled(form);
 }
 
-function mountEmptyForm(root, siteVersion) {
-  root.innerHTML = `
-    <form
-      class="feedback-form"
-      data-feedback-form
-      data-state="idle"
-      novalidate
-      aria-labelledby="feedback-title"
-    >
-      <div class="feedback-field">
-        <label class="feedback-label" for="feedback-description">Your message</label>
-        <textarea
-          class="feedback-input feedback-input--area"
-          id="feedback-description"
-          name="description"
-          rows="5"
-          required
-          autocomplete="off"
-          maxlength="${MAX_MESSAGE_LENGTH}"
-        ></textarea>
-        <p class="feedback-counter" data-feedback-counter aria-live="polite" hidden></p>
-        <p class="feedback-error" id="feedback-description-error" data-feedback-error="description"></p>
-      </div>
-      <div class="feedback-field">
-        <label class="feedback-label" for="feedback-email">Email (optional)</label>
-        <p class="feedback-hint" id="feedback-email-hint">Only if you'd like a reply.</p>
-        <input
-          class="feedback-input"
-          type="email"
-          id="feedback-email"
-          name="replyEmail"
-          autocomplete="email"
-          inputmode="email"
-          aria-describedby="feedback-email-hint"
-        />
-        <p class="feedback-error" id="feedback-reply-error" data-feedback-error="replyEmail"></p>
-      </div>
-      <div class="feedback-honeypot" aria-hidden="true">
-        <label for="feedback-website">Website</label>
-        <input type="text" id="feedback-website" name="website" tabindex="-1" autocomplete="off" />
-      </div>
-      <p class="feedback-alert" data-feedback-alert role="alert" hidden></p>
-      <div class="feedback-actions">
-        <button type="submit" class="btn btn--primary" disabled>Send feedback</button>
-      </div>
-    </form>
-  `;
-  wireFeedbackForm(root.querySelector('[data-feedback-form]'), root, siteVersion);
+function showFormPanel(dialog) {
+  const formPanel = dialog.querySelector('[data-feedback-form-panel]');
+  const successPanel = dialog.querySelector('[data-feedback-success-panel]');
+  if (formPanel) formPanel.hidden = false;
+  if (successPanel) successPanel.hidden = true;
 }
 
-function showSuccessView(root, siteVersion) {
-  const panel = document.createElement('div');
-  panel.appendChild(buildSuccessView());
-  root.replaceChildren(panel);
-  const sendAnother = panel.querySelector('[data-feedback-send-another]');
-  const statusRow = panel.querySelector('.feedback-success__row');
-  if (statusRow instanceof HTMLElement) {
-    statusRow.tabIndex = -1;
-    statusRow.focus();
+function showSuccessPanel(dialog) {
+  const formPanel = dialog.querySelector('[data-feedback-form-panel]');
+  const successPanel = dialog.querySelector('[data-feedback-success-panel]');
+  if (formPanel) formPanel.hidden = true;
+  if (successPanel) {
+    successPanel.hidden = false;
+    const status = successPanel.querySelector('[data-feedback-success-status]');
+    status?.focus();
   }
-  sendAnother?.addEventListener('click', () => {
-    mountEmptyForm(root, siteVersion);
-  });
 }
 
-function wireFeedbackForm(form, root, siteVersion) {
+function wireFocusTrap(dialog, onEscape) {
+  const card = dialog.querySelector('.feedback-dialog__card');
+  if (!card) return () => {};
+
+  const onKeyDown = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onEscape();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusables = getFocusableElements(card);
+    if (!focusables.length) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
+  dialog.addEventListener('keydown', onKeyDown);
+  return () => dialog.removeEventListener('keydown', onKeyDown);
+}
+
+function wireFeedbackForm(form, dialog, siteVersion, counterState, closeModal) {
   if (!form) return;
 
   const installId = parseInstallId(window.localStorage);
 
   form.description?.addEventListener('input', () => {
-    updateMessageCounter(form);
+    updateMessageCounter(form, counterState);
     setSubmitEnabled(form);
     hideFormAlert(form);
+  });
+
+  form.querySelector('[data-feedback-cancel]')?.addEventListener('click', () => {
+    closeModal();
   });
 
   form.addEventListener('submit', async (event) => {
@@ -245,17 +249,10 @@ function wireFeedbackForm(form, root, siteVersion) {
     }
 
     if (honeypot.trim()) {
-      showSuccessView(root, siteVersion);
       return;
     }
 
     setFormState(form, 'sending');
-    const submitBtn = form.querySelector('button[type="submit"]');
-    const defaultLabel = 'Send feedback';
-    if (submitBtn) {
-      submitBtn.textContent = 'Sending…';
-      submitBtn.setAttribute('aria-busy', 'true');
-    }
 
     const payload = buildLandingPayload({
       description,
@@ -274,40 +271,82 @@ function wireFeedbackForm(form, root, siteVersion) {
         body: JSON.stringify(payload),
       });
       if (res.status === 202) {
-        showSuccessView(root, siteVersion);
+        setFormState(form, 'idle');
+        showSuccessPanel(dialog);
         return;
       }
       setFormState(form, 'idle');
-      if (submitBtn) {
-        submitBtn.textContent = defaultLabel;
-        submitBtn.removeAttribute('aria-busy');
-      }
       showFormAlert(form, feedbackErrorMessage(res.status));
     } catch {
       setFormState(form, 'idle');
-      if (submitBtn) {
-        submitBtn.textContent = defaultLabel;
-        submitBtn.removeAttribute('aria-busy');
-      }
       showFormAlert(form, feedbackErrorMessage(0));
     }
   });
 
-  updateMessageCounter(form);
+  updateMessageCounter(form, counterState);
   setSubmitEnabled(form);
 }
 
-export function initFeedbackForm(documentRoot) {
-  const root = documentRoot.querySelector('[data-feedback-root]');
-  const form = root?.querySelector('[data-feedback-form]');
-  if (!root || !form) return;
+export function initFeedback(documentRoot) {
+  const dialog = documentRoot.querySelector('[data-feedback-dialog]');
+  const form = dialog?.querySelector('[data-feedback-form]');
+  if (!dialog || !form) return;
 
   const siteVersion = documentRoot.dataset.siteVersion || '0.1.1';
-  wireFeedbackForm(form, root, siteVersion);
+  const counterState = { lastLiveAt: 0 };
+  let focusReturn = null;
+  let removeTrap = () => {};
+
+  const closeModal = () => {
+    if (!dialog.open) return;
+    removeTrap();
+    dialog.close();
+    showFormPanel(dialog);
+    resetFeedbackForm(form, counterState);
+    const target = focusReturn;
+    focusReturn = null;
+    target?.focus();
+  };
+
+  const openModal = (trigger) => {
+    focusReturn = trigger instanceof HTMLElement ? trigger : null;
+    showFormPanel(dialog);
+    resetFeedbackForm(form, counterState);
+    dialog.showModal();
+    removeTrap = wireFocusTrap(dialog, closeModal);
+    form.description?.focus();
+  };
+
+  documentRoot.querySelectorAll('[data-feedback-open]').forEach((trigger) => {
+    trigger.addEventListener('click', () => openModal(trigger));
+  });
+
+  dialog.querySelectorAll('[data-feedback-close], [data-feedback-close-panel]').forEach((btn) => {
+    btn.addEventListener('click', () => closeModal());
+  });
+
+  dialog.addEventListener('click', (event) => {
+    if (event.target === dialog) {
+      closeModal();
+    }
+  });
+
+  dialog.addEventListener('cancel', (event) => {
+    event.preventDefault();
+    closeModal();
+  });
+
+  dialog.querySelector('[data-feedback-send-another]')?.addEventListener('click', () => {
+    showFormPanel(dialog);
+    resetFeedbackForm(form, counterState);
+    form.description?.focus();
+  });
+
+  wireFeedbackForm(form, dialog, siteVersion, counterState, closeModal);
 }
 
 if (typeof document !== 'undefined') {
   document.addEventListener('DOMContentLoaded', () => {
-    initFeedbackForm(document.body);
+    initFeedback(document.body);
   });
 }
