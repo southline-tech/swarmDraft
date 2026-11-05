@@ -160,8 +160,14 @@ const cards = [
     </section>
 
     <section v-if="show('ob6')" class="sp__sec" data-screen="ob6">
-      <h2 class="sp__h">ob6 · Opening your book</h2>
-      <OpeningProgress title="The Lantern Keeper" :found="7" :progress="0.45" />
+      <h2 class="sp__h">ob6 · Importing your book</h2>
+      <OpeningProgress
+        title="The Lantern Keeper"
+        kind="import"
+        :found="7"
+        :progress="0.45"
+        :indeterminate="false"
+      />
     </section>
 
     <section v-if="show('ob7')" class="sp__sec" data-screen="ob7">
@@ -191,9 +197,9 @@ const cards = [
           <EmptyState
             icon="book"
             title="No book open yet"
-            text="Open your Word manuscript to start writing."
-            action="Open my Word manuscript"
-            @action="stub('Open')"
+            text="Import your Word manuscript to start writing."
+            action="Import Word manuscript"
+            @action="stub('Import')"
           />
         </div>
         <div>

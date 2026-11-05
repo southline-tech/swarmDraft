@@ -12,6 +12,8 @@ import {
   parseNumberingStyle,
   type OutlineIssue,
 } from '@swarmdraft/editor';
+import { ImportCancelledError } from './import/import-cancelled';
+import { runDocxImport, type ParsedDocxImport } from './import/run-docx-import';
 import {
   docToYDoc,
   importDocx,
@@ -188,6 +190,27 @@ export function sessionFromImported(
 ): ManuscriptSession {
   const docs = importedToYDocs(imported);
   return openSession(manuscriptId, imported.title, docs.manuscript, docs.sections, imported.report);
+}
+
+function sessionFromParsedImport(
+  parsed: ParsedDocxImport,
+  manuscriptId: string,
+): ManuscriptSession {
+  const manuscript = new Y.Doc();
+  Y.applyUpdate(manuscript, parsed.ydocs.manuscriptUpdate);
+  const sections = new Map<string, Y.Doc>();
+  for (const [docId, update] of parsed.ydocs.sectionUpdates) {
+    const doc = new Y.Doc();
+    Y.applyUpdate(doc, update);
+    sections.set(docId, doc);
+  }
+  return openSession(
+    manuscriptId,
+    parsed.imported.title,
+    manuscript,
+    sections,
+    parsed.imported.report,
+  );
 }
 
 /** What the backend persists for an import: title plus each section's kind, title and content. */
@@ -552,20 +575,43 @@ export async function importAndOpen(
   bytes: Uint8Array,
   persistHooks?: Pick<SectionPersister, 'onError' | 'onSaved'>,
   current?: ManuscriptSession | null,
-  importMeta?: { fileName?: string; onParsedTitle?: (title: string) => void },
+  importMeta?: {
+    fileName?: string;
+    onParsedTitle?: (title: string) => void;
+    onParsed?: (imported: ImportedManuscript) => void;
+    signal?: AbortSignal;
+  },
 ): Promise<ManuscriptSession> {
   const id = crypto.randomUUID();
   const fileNameStem = importMeta?.fileName
     ? importMeta.fileName.replace(/\.docx$/i, '').trim() || importMeta.fileName
     : undefined;
-  const imported = importDocx(bytes, { manuscriptId: id, fileNameStem });
-  importMeta?.onParsedTitle?.(imported.title);
-  const payload = importPayload(imported);
+  const job = runDocxImport(bytes, { manuscriptId: id, fileNameStem });
+  const onAbort = () => job.abort();
+  importMeta?.signal?.addEventListener('abort', onAbort);
+  let parsed: ParsedDocxImport;
+  try {
+    parsed = await job.done;
+  } catch (err) {
+    if (importMeta?.signal?.aborted || err instanceof ImportCancelledError) {
+      throw new ImportCancelledError();
+    }
+    throw err;
+  } finally {
+    importMeta?.signal?.removeEventListener('abort', onAbort);
+  }
+  if (importMeta?.signal?.aborted) throw new ImportCancelledError();
+  importMeta?.onParsedTitle?.(parsed.imported.title);
+  importMeta?.onParsed?.(parsed.imported);
+  const payload = importPayload(parsed.imported);
+  if (importMeta?.signal?.aborted) throw new ImportCancelledError();
   await current?.close();
+  if (importMeta?.signal?.aborted) throw new ImportCancelledError();
   const saved = await persistImport(payload);
+  if (importMeta?.signal?.aborted) throw new ImportCancelledError();
   return saved
-    ? openStored(saved, imported.report, persistHooks)
-    : sessionFromImported(imported, id);
+    ? openStored(saved, parsed.imported.report, persistHooks)
+    : sessionFromParsedImport(parsed, id);
 }
 
 /** Reopen the most recent stored manuscript (null if none or no database). */
