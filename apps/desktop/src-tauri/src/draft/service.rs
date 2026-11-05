@@ -20,6 +20,8 @@ pub struct DraftService {
     /// manuscript id → working repo path
     working: Mutex<HashMap<String, PathBuf>>,
     last_checkpoint: Mutex<HashMap<String, u128>>,
+    /// Serialize pack, commit, open, restore (git2 + SQLite hydrate).
+    op: Mutex<()>,
 }
 
 impl DraftService {
@@ -29,20 +31,40 @@ impl DraftService {
             app_version,
             working: Mutex::new(HashMap::new()),
             last_checkpoint: Mutex::new(HashMap::new()),
+            op: Mutex::new(()),
         }
+    }
+
+    fn with_op<T>(&self, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+        let _guard = self.op.lock().expect("draft op");
+        f()
     }
 
     fn work_dir(&self, manuscript_id: &str) -> PathBuf {
         self.store_data_dir.join("draft-repos").join(manuscript_id)
     }
 
+    fn hydrate_from_worktree(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        worktree: &Path,
+    ) -> Result<(), String> {
+        sync::sync_worktree_to_store(store, manuscript_id, worktree).map_err(|e| e.to_string())
+    }
+
     pub fn ensure_open(&self, store: &Store, manuscript_id: &str) -> Result<PathBuf, String> {
+        self.with_op(|| self.ensure_open_inner(store, manuscript_id))
+    }
+
+    fn ensure_open_inner(&self, store: &Store, manuscript_id: &str) -> Result<PathBuf, String> {
         let mut map = self.working.lock().expect("draft working");
         if let Some(p) = map.get(manuscript_id) {
             return Ok(p.clone());
         }
         let dir = self.work_dir(manuscript_id);
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let mut fresh_unpack = false;
         if !dir.join(".git").exists() {
             if let Some(path) = store
                 .draft_file_path(manuscript_id)
@@ -58,6 +80,7 @@ impl DraftService {
                         .map_err(|e| e.to_string())?
                         .checkout_head()
                         .map_err(|e| e.to_string())?;
+                    fresh_unpack = true;
                 } else {
                     DraftRepo::init_working(&dir).map_err(|e| e.to_string())?;
                 }
@@ -66,6 +89,10 @@ impl DraftService {
             }
         }
         map.insert(manuscript_id.to_string(), dir.clone());
+        drop(map);
+        if fresh_unpack {
+            self.hydrate_from_worktree(store, manuscript_id, &dir)?;
+        }
         Ok(dir)
     }
 
@@ -75,24 +102,26 @@ impl DraftService {
         manuscript_id: &str,
         message: &str,
     ) -> Result<Option<String>, String> {
-        let now = now_ms();
-        let mut last = self.last_checkpoint.lock().expect("draft checkpoint");
-        if let Some(prev) = last.get(manuscript_id) {
-            if now.saturating_sub(*prev) < CHECKPOINT_DEBOUNCE_MS {
-                return Ok(None);
+        self.with_op(|| {
+            let now = now_ms();
+            let mut last = self.last_checkpoint.lock().expect("draft checkpoint");
+            if let Some(prev) = last.get(manuscript_id) {
+                if now.saturating_sub(*prev) < CHECKPOINT_DEBOUNCE_MS {
+                    return Ok(None);
+                }
             }
-        }
-        let oid = self.commit_now(
-            store,
-            manuscript_id,
-            message,
-            &author_name(store),
-            "author@swarmdraft.local",
-        )?;
-        if oid.is_some() {
-            last.insert(manuscript_id.to_string(), now);
-        }
-        Ok(oid)
+            let oid = self.commit_now_inner(
+                store,
+                manuscript_id,
+                message,
+                &author_name(store),
+                "author@swarmdraft.local",
+            )?;
+            if oid.is_some() {
+                last.insert(manuscript_id.to_string(), now);
+            }
+            Ok(oid)
+        })
     }
 
     pub fn commit_now(
@@ -103,8 +132,27 @@ impl DraftService {
         committer_name: &str,
         committer_email: &str,
     ) -> Result<Option<String>, String> {
+        self.with_op(|| {
+            self.commit_now_inner(
+                store,
+                manuscript_id,
+                message,
+                committer_name,
+                committer_email,
+            )
+        })
+    }
+
+    fn commit_now_inner(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        message: &str,
+        committer_name: &str,
+        committer_email: &str,
+    ) -> Result<Option<String>, String> {
         let dir = self
-            .ensure_open(store, manuscript_id)
+            .ensure_open_inner(store, manuscript_id)
             .map_err(|e| format!("ensure_open: {e}"))?;
         sync::sync_store_to_worktree(store, manuscript_id, &dir)
             .map_err(|e| format!("sync: {e}"))?;
@@ -113,7 +161,7 @@ impl DraftService {
             .commit_all(message, committer_name, committer_email)
             .map_err(|e| format!("commit: {e}"))?;
         if oid.is_some() {
-            self.pack_if_linked(store, manuscript_id)
+            self.pack_if_linked_inner(store, manuscript_id)
                 .map_err(|e| format!("pack: {e}"))?;
         }
         Ok(oid)
@@ -126,37 +174,44 @@ impl DraftService {
         accepted: bool,
         bot_name: &str,
         chapter_title: &str,
-        committer_name: &str,
+        _decided_by: &str,
     ) -> Result<Option<String>, String> {
-        let verb = if accepted { "Accepted" } else { "Rejected" };
-        let msg = format!("{verb} {bot_name}'s change in {chapter_title}");
-        let oid = self.commit_now(
-            store,
-            manuscript_id,
-            &msg,
-            committer_name,
-            "author@swarmdraft.local",
-        )?;
-        if accepted {
-            if let Some(branch) = bot_branch_name(bot_name) {
-                let dir = self.ensure_open(store, manuscript_id)?;
-                let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
-                if repo.ensure_bot_branch(&branch).is_ok() {
-                    let _ = repo.merge_bot_branch(&branch, committer_name);
+        self.with_op(|| {
+            let verb = if accepted { "Accepted" } else { "Rejected" };
+            let msg = format!("{verb} {bot_name}'s change in {chapter_title}");
+            // Git committer is the bot for review checkpoints (#116 slice); author remains human in SQLite.
+            let oid = self.commit_now_inner(
+                store,
+                manuscript_id,
+                &msg,
+                bot_name,
+                "bot@swarmdraft.local",
+            )?;
+            if accepted {
+                if let Some(branch) = bot_branch_name(bot_name) {
+                    let dir = self.ensure_open_inner(store, manuscript_id)?;
+                    let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+                    if repo.ensure_bot_branch(&branch).is_ok() {
+                        let _ = repo.merge_bot_branch(&branch, &author_name(store));
+                    }
                 }
             }
-        }
-        Ok(oid)
+            Ok(oid)
+        })
     }
 
     pub fn pack_if_linked(&self, store: &Store, manuscript_id: &str) -> Result<(), String> {
+        self.with_op(|| self.pack_if_linked_inner(store, manuscript_id))
+    }
+
+    fn pack_if_linked_inner(&self, store: &Store, manuscript_id: &str) -> Result<(), String> {
         let Some(draft_path) = store
             .draft_file_path(manuscript_id)
             .map_err(|e| e.to_string())?
         else {
             return Ok(());
         };
-        let dir = self.ensure_open(store, manuscript_id)?;
+        let dir = self.ensure_open_inner(store, manuscript_id)?;
         let manuscript = store
             .get_manuscript(manuscript_id)
             .map_err(|e| e.to_string())?;
@@ -183,25 +238,27 @@ impl DraftService {
         store: &Store,
         manuscript_id: &str,
     ) -> Result<Option<String>, String> {
-        let manuscript = store
-            .get_manuscript(manuscript_id)
-            .map_err(|e| e.to_string())?;
-        let default_name = sanitize_filename(&manuscript.title);
-        let picked = app
-            .dialog()
-            .file()
-            .set_file_name(format!("{default_name}.draft"))
-            .add_filter("swarmDraft draft", &["draft"])
-            .blocking_save_file();
-        let Some(file) = picked else {
-            return Ok(None);
-        };
-        let path = file.to_string();
-        store
-            .set_draft_file_path(manuscript_id, &path)
-            .map_err(|e| e.to_string())?;
-        self.pack_if_linked(store, manuscript_id)?;
-        Ok(Some(path))
+        self.with_op(|| {
+            let manuscript = store
+                .get_manuscript(manuscript_id)
+                .map_err(|e| e.to_string())?;
+            let default_name = sanitize_filename(&manuscript.title);
+            let picked = app
+                .dialog()
+                .file()
+                .set_file_name(format!("{default_name}.draft"))
+                .add_filter("swarmDraft draft", &["draft"])
+                .blocking_save_file();
+            let Some(file) = picked else {
+                return Ok(None);
+            };
+            let path = file.to_string();
+            store
+                .set_draft_file_path(manuscript_id, &path)
+                .map_err(|e| e.to_string())?;
+            self.pack_if_linked_inner(store, manuscript_id)?;
+            Ok(Some(path))
+        })
     }
 
     pub fn open_dialog(
@@ -222,16 +279,21 @@ impl DraftService {
     }
 
     pub fn open_draft_path(&self, store: &Store, path: &str) -> Result<Option<String>, String> {
+        self.with_op(|| self.open_draft_path_inner(store, path))
+    }
+
+    fn open_draft_path_inner(&self, store: &Store, path: &str) -> Result<Option<String>, String> {
         let unpacked = tempfile::tempdir().map_err(|e| e.to_string())?;
         let manifest =
             format::unpack_draft(Path::new(path), unpacked.path()).map_err(|e| e.to_string())?;
-        if let Some(existing) = store
+        let id = if let Some(existing) = store
             .manuscript_id_for_draft_path(path)
             .map_err(|e| e.to_string())?
         {
-            return Ok(Some(existing));
-        }
-        let id = manifest.book_id.clone();
+            existing
+        } else {
+            manifest.book_id.clone()
+        };
         if store.get_manuscript(&id).is_err() {
             store
                 .create_manuscript_with_id(&id, &manifest.title)
@@ -251,6 +313,7 @@ impl DraftService {
             .map_err(|e| e.to_string())?
             .checkout_head()
             .map_err(|e| e.to_string())?;
+        self.hydrate_from_worktree(store, &id, &work)?;
         self.working
             .lock()
             .expect("draft working")
@@ -265,11 +328,13 @@ impl DraftService {
         limit: usize,
         skip: usize,
     ) -> Result<Vec<CommitEntry>, String> {
-        let dir = self.ensure_open(store, manuscript_id)?;
-        DraftRepo::open_working(&dir)
-            .map_err(|e| e.to_string())?
-            .list_main_commits(limit, skip)
-            .map_err(|e| e.to_string())
+        self.with_op(|| {
+            let dir = self.ensure_open_inner(store, manuscript_id)?;
+            DraftRepo::open_working(&dir)
+                .map_err(|e| e.to_string())?
+                .list_main_commits(limit, skip)
+                .map_err(|e| e.to_string())
+        })
     }
 
     pub fn restore(
@@ -279,19 +344,22 @@ impl DraftService {
         oid: &str,
         committer_name: &str,
     ) -> Result<String, String> {
-        let dir = self.ensure_open(store, manuscript_id)?;
-        let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
-        let time = repo
-            .list_main_commits(1, 0)
-            .ok()
-            .and_then(|v| v.first().map(|c| c.time_unix))
-            .unwrap_or(0);
-        let msg = format!("Restored version from {time}");
-        let new_oid = repo
-            .restore_as_new_commit(oid, committer_name, "author@swarmdraft.local", &msg)
-            .map_err(|e| e.to_string())?;
-        self.pack_if_linked(store, manuscript_id)?;
-        Ok(new_oid)
+        self.with_op(|| {
+            let dir = self.ensure_open_inner(store, manuscript_id)?;
+            let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+            let time = repo
+                .list_main_commits(1, 0)
+                .ok()
+                .and_then(|v| v.first().map(|c| c.time_unix))
+                .unwrap_or(0);
+            let msg = format!("Restored version from {time}");
+            let new_oid = repo
+                .restore_as_new_commit(oid, committer_name, "author@swarmdraft.local", &msg)
+                .map_err(|e| e.to_string())?;
+            self.hydrate_from_worktree(store, manuscript_id, &dir)?;
+            self.pack_if_linked_inner(store, manuscript_id)?;
+            Ok(new_oid)
+        })
     }
 }
 

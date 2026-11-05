@@ -256,7 +256,7 @@ const emit = defineEmits<{
   /** The toolbar's chapters toggle; the parent owns the navigator. */
   'toggle-navigator': [];
   /** Human accept/reject decisions as recorded (and withdrawn again on undo). */
-  decisions: [records: DecisionRecord[]];
+  decisions: [records: DecisionRecord[], suggestionAuthor?: string];
   /** Focus mode (wp5) on or off; the parent hides its own chrome. */
   'focus-mode': [on: boolean];
   /** The current load error ('' when none, and on unmount); for a parent-hosted live region. */
@@ -789,6 +789,12 @@ watch(
   { immediate: true },
 );
 
+function suggestionAuthorForRecords(recs: DecisionRecord[]): string | undefined {
+  const last = recs[recs.length - 1];
+  if (!last) return undefined;
+  return suggestions.value.find((s) => s.id === last.id)?.author;
+}
+
 function refreshReview(e: Editor) {
   review.value = collectReviewItems(e.state.doc);
   const raw = listSuggestions(e.state.doc.toJSON() as DocNode);
@@ -797,7 +803,10 @@ function refreshReview(e: Editor) {
     outdatedIds.value,
   );
   // Undo/redo of a decision brings a suggestion back or removes it again: keep the log in step.
-  if (log.sync(suggestions.value)) emit('decisions', log.records());
+  if (log.sync(suggestions.value)) {
+    const recs = log.records();
+    emit('decisions', recs, suggestionAuthorForRecords(recs));
+  }
   const i = resolveCurrent(visible.value, currentKey.value, currentIndex);
   currentIndex = i;
   currentKey.value = i >= 0 ? visible.value[i]!.key : null;
@@ -1050,7 +1059,10 @@ function decide(targets: SuggestionTarget[], decision: Decision) {
     outdatedIds.value = next;
   }
   refreshReview(e);
-  emit('decisions', log.records());
+  {
+    const recs = log.records();
+    emit('decisions', recs, suggestionAuthorForRecords(recs));
+  }
   const key = currentKey.value;
   if (!key) return;
   if (continuousNav) {

@@ -6,6 +6,8 @@ import { draftHistory, draftRestore } from '../backend';
 const props = defineProps<{
   open: boolean;
   manuscriptId: string | null;
+  /** Close the editor session (discard pending) before SQLite is hydrated from git. */
+  beforeRestore?: () => void | Promise<void>;
 }>();
 
 const emit = defineEmits<{
@@ -57,6 +59,7 @@ function cancelRestore() {
 async function doRestore() {
   if (!props.manuscriptId || !confirmOid.value) return;
   try {
+    await props.beforeRestore?.();
     await draftRestore(props.manuscriptId, confirmOid.value);
     confirmOid.value = null;
     emit('restored');

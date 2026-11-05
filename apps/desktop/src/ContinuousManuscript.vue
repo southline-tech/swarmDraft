@@ -133,7 +133,7 @@ const emit = defineEmits<{
   'update:selectedId': [id: string];
   reload: [];
   'toggle-navigator': [];
-  decisions: [sectionId: string, records: DecisionRecord[]];
+  decisions: [sectionId: string, records: DecisionRecord[], suggestionAuthor?: string];
   'focus-mode': [on: boolean];
   'load-error': [message: string];
   layout: [layout: EditorLayout];
@@ -570,7 +570,7 @@ onBeforeUnmount(() => {
             @draft-import="emit('draft-import')"
             @draft-select="emit('draft-select', $event)"
             @draft-menu-open="emit('draft-menu-open')"
-            @decisions="(records) => emit('decisions', sec.id, records)"
+            @decisions="(records, author) => emit('decisions', sec.id, records, author)"
             @focus-mode="
               (on) => {
                 if (on && sec.id !== selectedId) return;

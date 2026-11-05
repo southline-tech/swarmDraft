@@ -309,3 +309,8 @@ Implementor: add one line here for every review, design or QA finding, in the sa
 - 2026-11-05 · #36 · PR #324 combined review @ 6661439634 · shell z-index literals; find count only on visible status · `--ct-z-find` + token z on `.sh-find`/`.sh-menu`/`.sh-scrim`/`.sh-esc`/`.sh-fwc`; persistent polite `find-count-live` throttled ~350ms; find spacing/type tokens
 - 2026-11-05 · #36 · PR #324 combined review @ 6661439634 · shortcuts scrim/menu stacking; sheet close glyph · `.sh-scrim` `--ct-z-modal`; `ShortcutsSheet` close uses `AppIcon` x
 - 2026-11-05 · #36 · PR #324 combined review @ 6661439634 · Track changes not in wp7 sheet · no chord in toolbar/review maps; note in PR (toolbar toggle only)
+- 2026-11-05 · #302 · PR #325 review bot · git open/restore only updated worktree; editor stayed on stale SQLite · `sync_worktree_to_store` after open/restore/unpack; `reloadOpenManuscript` after History restore; integration tests in `draft_git.rs`
+- 2026-11-05 · #302 · PR #325 review bot · concurrent draft pack/commit IPC could race · single `DraftService` op mutex around commit, pack, open, restore
+- 2026-11-05 · #302 · PR #325 review bot · accept/reject git commits used author as committer · review checkpoints sign git as bot name (`bot@swarmdraft.local`); merge still uses author
+- 2026-11-05 · #302 · PR #325 review bot · portable re-open flushed stale Yjs over hydrated SQLite · same-id Open skips flush; `reloadOpenManuscript` uses `discard`; History closes session before `draftRestore`
+- 2026-11-05 · #302 · PR #325 review bot · `draftReviewCommit` used `decidedBy` (human) as bot name · pass suggestion `author` from `ManuscriptEditor` through `decisions` emit

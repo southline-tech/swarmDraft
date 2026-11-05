@@ -407,6 +407,56 @@ impl Store {
         })
     }
 
+    /// Replace metadata fields stored in `book.json` when hydrating from git (#302).
+    pub fn update_manuscript_metadata(
+        &self,
+        manuscript_id: &str,
+        title: &str,
+        numbering_style: &str,
+        book_author: Option<&str>,
+    ) -> Result<(), StorageError> {
+        if !NUMBERING_STYLES.contains(&numbering_style) {
+            return Err(StorageError::Invalid(format!(
+                "unknown numbering style: {numbering_style}"
+            )));
+        }
+        self.with_conn(|c| {
+            let n = c.execute(
+                "UPDATE manuscripts SET title = ?2, numbering_style = ?3, book_author = ?4 WHERE id = ?1",
+                params![manuscript_id, title, numbering_style, book_author],
+            )?;
+            if n == 0 {
+                return Err(StorageError::NotFound(format!(
+                    "manuscript {manuscript_id}"
+                )));
+            }
+            Ok(())
+        })
+    }
+
+    /// Drop incremental updates and persist one full Yjs snapshot (git hydrate / restore).
+    pub fn replace_doc_state(&self, doc_id: &str, state: &[u8]) -> Result<(), StorageError> {
+        let decoded = Update::decode_v1(state)
+            .map_err(|e| StorageError::Invalid(format!("bad state: {e}")))?;
+        let doc = crate::content::new_doc();
+        doc.transact_mut()
+            .apply_update(decoded)
+            .map_err(|e| StorageError::Invalid(format!("bad state: {e}")))?;
+        validate_saved_doc(&doc)?;
+        self.with_conn(|c| {
+            let tx = c.unchecked_transaction()?;
+            tx.execute("DELETE FROM doc_updates WHERE doc_id = ?1", params![doc_id])?;
+            if state.len() > 2 {
+                tx.execute(
+                    "INSERT INTO doc_updates (doc_id, data) VALUES (?1, ?2)",
+                    params![doc_id, state],
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
     pub fn set_numbering_style(
         &self,
         manuscript_id: &str,
