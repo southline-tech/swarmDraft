@@ -1178,8 +1178,10 @@ pub fn run() {
             let draft_service = draft::DraftService::new(dir.clone(), version);
             if store.app_meta_get("draft_file_migration_v1")?.is_none() {
                 let drafts_dir = dir.join("drafts");
-                let _ = draft::migrate_legacy_books_to_draft(&store, &draft_service, &drafts_dir);
-                let _ = store.app_meta_set("draft_file_migration_v1", "done");
+                if draft::migrate_legacy_books_to_draft(&store, &draft_service, &drafts_dir).is_ok()
+                {
+                    let _ = store.app_meta_set("draft_file_migration_v1", "done");
+                }
             }
             app.manage(std::sync::Arc::new(draft_service));
             app.manage(store.clone());

@@ -87,10 +87,13 @@ pub fn pack_draft(
         zip.finish()?;
     }
     sync_file(&tmp)?;
+    let prev = dest.with_extension("draft.prev");
     if dest.exists() {
-        fs::remove_file(dest)?;
+        let _ = fs::remove_file(&prev);
+        fs::rename(dest, &prev)?;
     }
     fs::rename(&tmp, dest)?;
+    let _ = fs::remove_file(&prev);
     sync_dir(parent)?;
     Ok(())
 }

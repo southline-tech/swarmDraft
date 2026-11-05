@@ -580,14 +580,15 @@ function onSectionDecisions(sectionId: string, records: DecisionRecord[]) {
   const prev = decisionRecordsBySection.value[sectionId] ?? [];
   decisionRecordsBySection.value = { ...decisionRecordsBySection.value, [sectionId]: records };
   void saveSectionReviewDecisions(session.value.id, sectionId, records)
-    .then(() => {
+    .then(async () => {
       if (!isTauri() || records.length <= prev.length) return;
       const latest = records[records.length - 1];
       if (!latest) return;
+      await session.value?.flush();
       const chapter =
         session.value?.outline.value.find((s) => s.id === sectionId)?.title ?? 'chapter';
       const botName = latest.decidedBy || 'editor';
-      void draftReviewCommit({
+      await draftReviewCommit({
         manuscriptId: session.value!.id,
         accepted: latest.status === 'accepted',
         botName,
