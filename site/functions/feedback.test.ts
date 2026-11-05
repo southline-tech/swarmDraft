@@ -260,4 +260,19 @@ describe('validateFeedbackBody', () => {
     const { errors } = validateFeedbackBody({ ...validDesktopBody, extra: true });
     expect(errors?._unknown).toBeDefined();
   });
+
+  it('limits landing descriptions to 2000 characters', () => {
+    const long = 'a'.repeat(2001);
+    const { errors } = validateFeedbackBody({ ...validLandingBody, description: long });
+    expect(errors?.description).toEqual([
+      'The description may not be greater than 2000 characters.',
+    ]);
+  });
+
+  it('allows app descriptions up to 4000 characters', () => {
+    const long = 'a'.repeat(4000);
+    const { errors, payload } = validateFeedbackBody({ ...validDesktopBody, description: long });
+    expect(errors).toBeNull();
+    expect(payload?.description).toHaveLength(4000);
+  });
 });

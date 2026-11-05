@@ -23,7 +23,7 @@ Set in the Cloudflare Pages project for `swarmdraft` — never commit or embed i
 | Secret                     | Purpose                                        |
 | -------------------------- | ---------------------------------------------- |
 | `RESEND_API_KEY`           | Resend API key for outbound feedback email     |
-| `SWARMDRAFT_FEEDBACK_TO`   | Inbox (e.g. radiancelux@gmail.com)             |
+| `SWARMDRAFT_FEEDBACK_TO`   | Inbox (e.g. feedback@yourdomain.com)           |
 | `SWARMDRAFT_FEEDBACK_FROM` | Verified Resend sender (`Name <email@domain>`) |
 
 `POST /api/feedback` is implemented in `functions/api/feedback.ts`.

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  FEEDBACK_CONTACT_EMAIL,
+  MAX_MESSAGE_LENGTH,
+  MESSAGE_COUNTER_FROM,
   buildLandingPayload,
   feedbackErrorMessage,
+  formatMessageCounter,
   validateFeedbackForm,
 } from './feedback.js';
 
@@ -12,9 +14,22 @@ describe('landing feedback form helpers', () => {
       description: 'Please describe your feedback.',
     });
     expect(validateFeedbackForm('Hello', 'not-an-email')).toEqual({
-      replyEmail: 'Enter a valid email address or leave this blank.',
+      replyEmail: "That email doesn't look right.",
     });
     expect(validateFeedbackForm('Hello', 'writer@example.com')).toEqual({});
+  });
+
+  it('rejects messages over the landing limit', () => {
+    const long = 'x'.repeat(MAX_MESSAGE_LENGTH + 1);
+    expect(validateFeedbackForm(long, '')).toEqual({
+      description: `Feedback must be ${MAX_MESSAGE_LENGTH} characters or fewer.`,
+    });
+  });
+
+  it('shows the character counter from the threshold', () => {
+    expect(formatMessageCounter(MESSAGE_COUNTER_FROM)).toBe('200 characters left');
+    expect(formatMessageCounter(MAX_MESSAGE_LENGTH)).toBe('0 characters left');
+    expect(formatMessageCounter(MAX_MESSAGE_LENGTH - 1)).toBe('1 character left');
   });
 
   it('builds landing payload with fixed type and area', () => {
@@ -35,10 +50,6 @@ describe('landing feedback form helpers', () => {
   it('maps HTTP errors to writer copy', () => {
     expect(feedbackErrorMessage(429)).toMatch(/Too many/);
     expect(feedbackErrorMessage(502)).toMatch(/unavailable/);
-    expect(feedbackErrorMessage(0)).toMatch(/connection/);
-  });
-
-  it('exposes contact email for no-JS fallback', () => {
-    expect(FEEDBACK_CONTACT_EMAIL).toContain('@');
+    expect(feedbackErrorMessage(0)).toMatch(/Couldn't send/);
   });
 });

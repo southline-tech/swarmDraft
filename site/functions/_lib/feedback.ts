@@ -36,6 +36,7 @@ const ALLOWED_ORIGINS = new Set([
 export const MAX_BODY_BYTES = 2 * 1024 * 1024;
 export const MAX_EXCERPT = 2000;
 export const MAX_DESCRIPTION = 4000;
+export const MAX_LANDING_DESCRIPTION = 2000;
 export const MAX_SCREENSHOT_BYTES = Math.floor(1.5 * 1024 * 1024);
 
 export type ClientKind = 'desktop' | 'landing';
@@ -157,11 +158,14 @@ export function validateFeedbackBody(raw: Record<string, unknown>): {
     errors.type = ['The type must be one of: bug, idea, question.'];
   }
 
+  const sourceHint = typeof raw.source === 'string' ? raw.source.trim() : '';
+  const maxDescription = sourceHint === 'landing' ? MAX_LANDING_DESCRIPTION : MAX_DESCRIPTION;
+
   const description = typeof raw.description === 'string' ? stripControlChars(raw.description) : '';
   if (!description.trim()) {
     errors.description = ['The description field is required.'];
-  } else if (description.length > MAX_DESCRIPTION) {
-    errors.description = [`The description may not be greater than ${MAX_DESCRIPTION} characters.`];
+  } else if (description.length > maxDescription) {
+    errors.description = [`The description may not be greater than ${maxDescription} characters.`];
   }
 
   const appVersion = typeof raw.appVersion === 'string' ? raw.appVersion.trim() : '';
