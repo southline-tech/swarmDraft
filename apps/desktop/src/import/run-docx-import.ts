@@ -8,6 +8,7 @@ import * as Y from 'yjs';
 import DocxImportWorker from './docx-import.worker?worker';
 import type { WorkerImportErr, WorkerImportOk } from './docx-import.worker';
 import { ImportCancelledError } from './import-cancelled';
+import { devImportEvidenceDelay } from './dev-import-delay';
 
 export interface ParsedDocxImport {
   imported: ImportedManuscript;
@@ -97,8 +98,9 @@ export function runDocxImport(bytes: Uint8Array, options: ImportOptions = {}): D
       abort() {
         cancelled = true;
       },
-      done: Promise.resolve().then(() => {
+      done: Promise.resolve().then(async () => {
         if (cancelled) throw new ImportCancelledError();
+        await devImportEvidenceDelay();
         return parseSync(bytes, options);
       }),
     };

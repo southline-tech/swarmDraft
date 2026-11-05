@@ -43,7 +43,7 @@ export type ErrorContext = 'open' | 'import' | 'save' | 'export' | 'other';
 const COPY: Record<ErrorCode, Omit<MappedError, 'code'>> = {
   'not-word-file': {
     title: "This isn't a Word manuscript",
-    message: `${PRODUCT_NAME} can open books saved from Word. Try choosing a different file.`,
+    message: `${PRODUCT_NAME} can import Word manuscripts. Try choosing a different file.`,
     action: 'choose-another-file',
     actionLabel: 'Choose another file',
     tone: 'danger',
