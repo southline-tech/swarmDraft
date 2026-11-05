@@ -57,7 +57,7 @@
   "plugins": {
     "updater": {
       "requireSignedVersion": true,
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI4RUEwRUQ2NDQwNTYxQjYKUldTMllRVkUxZzdxdU80ZW5BaHU1clgrRk1JTzBhY3RzK2RMZzBZRER6R1IvTXFXYkNPYUh4WUUK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY3MkRCQjNCRkU0QjI1QzIKUldUQ0pVditPN3N0WiswM2N6SE1ZeTB1ZWwrOEc3WDhhRGF1WHcvUi83QnVuTko1U1VsYm43NlkK",
       "endpoints": [
         "https://github.com/southline-tech/swarmDraft/releases/latest/download/latest.json"
       ],
