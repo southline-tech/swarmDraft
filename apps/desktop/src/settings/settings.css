@@ -187,24 +187,3 @@
   text-transform: uppercase;
   vertical-align: middle;
 }
-/** Settings modal overlay + card (Backups confirm, MCP pairing ap1). */
-.st-dlg-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 10;
-  display: grid;
-  place-items: center;
-  padding: var(--ct-space-6);
-  background: var(--ct-scrim);
-}
-/* Pairing / backups / notes modals. Send feedback width: app.css .st-dlg--feedback. */
-.st-dlg {
-  width: min(560px, 100%);
-  min-width: min(100%, 480px);
-  padding: var(--ct-space-8);
-  border: 1px solid var(--ct-border);
-  border-radius: var(--ct-radius-lg);
-  background: var(--ct-surface-raised);
-  box-shadow: var(--ct-elevation-2);
-  line-height: 1.5;
-}

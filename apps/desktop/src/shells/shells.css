@@ -419,7 +419,7 @@
 .st-dlg-scrim {
   position: fixed;
   inset: 0;
-  z-index: 10;
+  z-index: var(--ct-z-modal);
   display: grid;
   place-items: center;
   padding: var(--ct-space-6);
