@@ -220,7 +220,7 @@ describe('review decision transaction', () => {
         e.state.doc.content.size - 1,
         e.state.schema.marks.format_change!.create({
           id: 'f1',
-          author: 'Kim',
+          author: 'Author',
           ts: '2026-10-25T00:00:00Z',
           target: 'bold',
           before: '0',
@@ -253,7 +253,7 @@ describe('review decision transaction', () => {
                   type: 'format_change',
                   attrs: {
                     id: 'f2',
-                    author: 'Kim',
+                    author: 'Author',
                     ts: '2026-10-25T00:00:00Z',
                     target: 'bold',
                     before: '0',

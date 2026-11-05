@@ -51,6 +51,8 @@ const emit = defineEmits<{
   /** A row was clicked: the parent should move focus into that section's text (#36). */
   activate: [id: string];
   numberingStyle: [style: NumberingStyle];
+  'split-chapter': [id: string];
+  'merge-chapter': [targetId: string, sourceId: string];
 }>();
 
 const KIND_LABELS: Record<SectionKind, string> = {
@@ -343,6 +345,39 @@ const partChoices = computed(() => {
   if (!id) return [] as Section[];
   return validParents(list.value, id).filter((p): p is Section => !!p && p.kind === 'part');
 });
+const menuChapterNeighbors = computed(() => {
+  const id = menuFor.value;
+  if (!id) return null;
+  const sec = list.value.find((s) => s.id === id);
+  if (sec?.kind !== 'chapter') return null;
+  const chapters = list.value.filter((s) => s.kind === 'chapter');
+  const i = chapters.findIndex((c) => c.id === id);
+  if (i < 0) return null;
+  return {
+    prev: i > 0 ? chapters[i - 1] : undefined,
+    next: i < chapters.length - 1 ? chapters[i + 1] : undefined,
+  };
+});
+function menuSplitChapter() {
+  const id = menuFor.value;
+  if (!id) return;
+  closeMenu();
+  emit('split-chapter', id);
+}
+function menuMergePrev() {
+  const id = menuFor.value;
+  const n = menuChapterNeighbors.value;
+  if (!id || !n?.prev) return;
+  closeMenu();
+  emit('merge-chapter', n.prev.id, id);
+}
+function menuMergeNext() {
+  const id = menuFor.value;
+  const n = menuChapterNeighbors.value;
+  if (!id || !n?.next) return;
+  closeMenu();
+  emit('merge-chapter', id, n.next.id);
+}
 
 function closeMenu() {
   const id = menuFor.value;
@@ -1296,6 +1331,41 @@ const rovingTabKey = computed(() => {
             </button>
           </div>
         </div>
+        <template v-if="menuChapterNeighbors">
+          <div class="sh-sep" role="separator" />
+          <button
+            v-if="menuChapterNeighbors.prev"
+            type="button"
+            role="menuitem"
+            tabindex="-1"
+            class="sh-mi"
+            data-test="outline-ctx-merge-prev"
+            @click="menuMergePrev"
+          >
+            Merge with previous chapter
+          </button>
+          <button
+            v-if="menuChapterNeighbors.next"
+            type="button"
+            role="menuitem"
+            tabindex="-1"
+            class="sh-mi"
+            data-test="outline-ctx-merge-next"
+            @click="menuMergeNext"
+          >
+            Merge with next chapter
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            tabindex="-1"
+            class="sh-mi"
+            data-test="outline-ctx-split-chapter"
+            @click="menuSplitChapter"
+          >
+            Split chapter…
+          </button>
+        </template>
         <div class="sh-sep" role="separator" />
         <button
           type="button"

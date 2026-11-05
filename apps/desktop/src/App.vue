@@ -65,6 +65,7 @@ import ShellsPreview from './shells/ShellsPreview.vue';
 import Rad60ReviewEvidence from './evidence/Rad60ReviewEvidence.vue';
 import Rad67EditorChromeEvidence from './evidence/Rad67EditorChromeEvidence.vue';
 import Rad55FocusModeEvidence from './evidence/Rad55FocusModeEvidence.vue';
+import Rad304ChapterEvidence from './evidence/Rad304ChapterEvidence.vue';
 import Rad38NotesEvidence from './evidence/Rad38NotesEvidence.vue';
 import Rad34InstallEvidence from './evidence/Rad34InstallEvidence.vue';
 import Rad310UpdateEvidence from './evidence/Rad310UpdateEvidence.vue';
@@ -79,6 +80,18 @@ import {
   type UpdatePromptState,
 } from './updater/app-updater';
 import { updatePromptEscapeAction } from './updater/update-prompt-logic';
+import MergeChapterConfirm from './chapter/MergeChapterConfirm.vue';
+import { chapterNeighbors } from './chapter/chapter-editor';
+import {
+  CHAPTER_TOAST_MS,
+  chapterToastUndoDisabled,
+  chapterToastUndoHint,
+  runChapterMerge,
+  runChapterSplit,
+  shouldConfirmMerge,
+  undoChapterToast,
+  type ChapterToastState,
+} from './chapter/chapter-app-handlers';
 import OpeningProgress from './shells/OpeningProgress.vue';
 import ErrorCard from './shells/ErrorCard.vue';
 import PairingPrompt from './PairingPrompt.vue';
@@ -362,6 +375,165 @@ const saveCopyOfOpen = () =>
 const reloads = ref(0);
 /** Refetch review comment rows without remounting section editors (#255). */
 const commentMetaVersion = ref(0);
+const chapterToast = ref<ChapterToastState | null>(null);
+let chapterToastTimer: ReturnType<typeof setTimeout> | undefined;
+let chapterToastDeadline = 0;
+const mergePending = ref<{
+  targetId: string;
+  sourceId: string;
+  targetTitle: string;
+  sourceTitle: string;
+} | null>(null);
+const mergeSkipConfirmSession = ref(false);
+const splitChapterHintId = ref<string | null>(null);
+const splitAcrossThreadIds = ref<string[]>([]);
+const chapterToastUndoBlocked = computed(() => {
+  const s = session.value;
+  const t = chapterToast.value;
+  if (!s || !t) return false;
+  return chapterToastUndoDisabled(s, t);
+});
+function scheduleChapterToast(toast: ChapterToastState) {
+  chapterToast.value = toast;
+  clearTimeout(chapterToastTimer);
+  chapterToastDeadline = Date.now() + CHAPTER_TOAST_MS;
+  chapterToastTimer = setTimeout(() => {
+    chapterToast.value = null;
+  }, CHAPTER_TOAST_MS);
+}
+
+function pauseChapterToastTimer() {
+  if (!chapterToast.value) return;
+  clearTimeout(chapterToastTimer);
+  chapterToastTimer = undefined;
+}
+
+function resumeChapterToastTimer() {
+  if (!chapterToast.value || chapterToastTimer) return;
+  const remaining = chapterToastDeadline - Date.now();
+  if (remaining <= 0) {
+    chapterToast.value = null;
+    return;
+  }
+  chapterToastTimer = setTimeout(() => {
+    chapterToast.value = null;
+  }, remaining);
+}
+
+function onChapterToastFocusOut(e: FocusEvent) {
+  const root = e.currentTarget;
+  if (
+    root instanceof HTMLElement &&
+    e.relatedTarget instanceof Node &&
+    root.contains(e.relatedTarget)
+  ) {
+    return;
+  }
+  resumeChapterToastTimer();
+}
+async function onEditorSplitChapter(payload: {
+  blockIndex: number;
+  title: string;
+  removeLine: boolean;
+}) {
+  const s = session.value;
+  const chapterId = selectedId.value;
+  if (!s || !chapterId) return;
+  const result = await runChapterSplit(
+    s,
+    s.id,
+    chapterId,
+    payload,
+    chapterId,
+    notesSession.value?.doc,
+  );
+  selectedId.value = result.newChapterId;
+  splitChapterHintId.value = null;
+  splitAcrossThreadIds.value = result.splitAcrossThreadIds;
+  scheduleChapterToast(result.toast);
+  void nextTick(() => editorPane.value?.focusSection(result.newChapterId));
+}
+async function commitChapterMerge(targetId: string, sourceId: string) {
+  const s = session.value;
+  if (!s || !selectedId.value) return;
+  const result = await runChapterMerge(
+    s,
+    targetId,
+    sourceId,
+    selectedId.value,
+    notesSession.value?.doc,
+  );
+  selectedId.value = result.targetId;
+  scheduleChapterToast(result.toast);
+  mergePending.value = null;
+}
+function requestChapterMerge(targetId: string, sourceId: string) {
+  const s = session.value;
+  if (!s) return;
+  const target = s.outline.value.find((x) => x.id === targetId);
+  const source = s.outline.value.find((x) => x.id === sourceId);
+  if (!target || !source) return;
+  if (shouldConfirmMerge(s, sourceId, mergeSkipConfirmSession.value)) {
+    mergePending.value = {
+      targetId,
+      sourceId,
+      targetTitle: target.title || 'Untitled',
+      sourceTitle: source.title || 'Untitled',
+    };
+    return;
+  }
+  void commitChapterMerge(targetId, sourceId);
+}
+function onMergeClose() {
+  mergePending.value = null;
+  const id = selectedId.value;
+  if (id) void nextTick(() => editorPane.value?.focusSection(id));
+}
+
+async function onMergeConfirm(dontAsk: boolean) {
+  if (dontAsk) mergeSkipConfirmSession.value = true;
+  const p = mergePending.value;
+  if (!p) return;
+  await commitChapterMerge(p.targetId, p.sourceId);
+}
+async function undoChapterAction() {
+  const s = session.value;
+  const t = chapterToast.value;
+  if (!s || !t || chapterToastUndoBlocked.value) return;
+  selectedId.value = await undoChapterToast(s, t, notesSession.value?.doc);
+  chapterToast.value = null;
+  clearTimeout(chapterToastTimer);
+}
+function dismissChapterToast() {
+  chapterToast.value = null;
+  clearTimeout(chapterToastTimer);
+}
+function onOutlineSplitChapter(id: string) {
+  selectedId.value = id;
+  splitChapterHintId.value = id;
+  void nextTick(() => editorPane.value?.focusSection(id));
+}
+function onEditorMergePrev() {
+  const s = session.value;
+  const id = selectedId.value;
+  if (!s || !id) return;
+  const { prev } = chapterNeighbors(s.outline.value, id);
+  if (!prev) return;
+  requestChapterMerge(prev.id, id);
+}
+const leadChapterOps = computed(() => {
+  const s = session.value;
+  const id = selectedId.value;
+  if (!s || !id) return null;
+  const sec = s.outline.value.find((x) => x.id === id);
+  if (sec?.kind !== 'chapter') return null;
+  const n = chapterNeighbors(s.outline.value, id);
+  return {
+    chapterNumber: n.index + 1,
+    canMergePrev: !!n.prev,
+    splitHint: splitChapterHintId.value === id,
+  };
+});
 /** Persisted accept/reject records per section (#51). */
 const decisionRecordsBySection = shallowRef<Record<string, DecisionRecord[]>>({});
 let decisionLoadGeneration = 0;
@@ -1378,6 +1550,7 @@ defineExpose({ open, closeSession });
   <Rad38NotesEvidence v-else-if="evidence === '38-notes'" class="shell" />
   <Rad67EditorChromeEvidence v-else-if="evidence === 'rad67'" class="shell" />
   <Rad55FocusModeEvidence v-else-if="evidence === 'rad55'" class="shell shell--focus-mode" />
+  <Rad304ChapterEvidence v-else-if="evidence === '304-chapter'" class="shell" />
   <ShellsPreview v-else-if="preview" class="shell" :initial="preview" @close="preview = null" />
   <main v-else class="shell" :class="{ 'shell--focus-mode': focusMode }">
     <div class="shell__main">
@@ -1756,20 +1929,70 @@ defineExpose({ open, closeSession });
             @dismiss="onUpdateDismissManual"
           />
         </div>
-        <div class="open-toast" data-test="open-toast" :style="toastStyle ?? undefined">
+        <div
+          class="open-toast"
+          data-test="open-toast"
+          :style="toastStyle ?? undefined"
+          @mouseenter="pauseChapterToastTimer"
+          @mouseleave="resumeChapterToastTimer"
+          @focusin="pauseChapterToastTimer"
+          @focusout="onChapterToastFocusOut"
+        >
           <!-- #98: the no-room cue shares this one polite region with the open-book toast. -->
           <AppToast
-            :open="(!!openToast || noRoomToast) && !!session"
+            :open="(!!openToast || noRoomToast) && !!session && !chapterToast"
             :lead="noRoomToast ? undefined : 'Your book is open.'"
             :message="noRoomToast ? NO_ROOM_COPY : openToast"
             :action="noRoomToast ? 'Hide notes' : undefined"
             :icon="noRoomToast ? 'alert' : 'check'"
             @dismiss="noRoomToast ? hideNotesForOutline() : dismissToast()"
           />
+          <AppToast
+            data-test="chapter-action-toast"
+            :open="!!chapterToast"
+            :message="chapterToast?.message ?? ''"
+            :detail="chapterToast?.detail"
+          >
+            <template #actions>
+              <p
+                v-if="chapterToastUndoBlocked"
+                class="chapter-toast__undo-hint"
+                data-test="chapter-toast-undo-hint"
+              >
+                {{ chapterToastUndoHint() }}
+              </p>
+              <button
+                type="button"
+                class="sh-btn"
+                data-test="chapter-toast-undo"
+                :disabled="chapterToastUndoBlocked"
+                :aria-disabled="chapterToastUndoBlocked ? 'true' : undefined"
+                @click="undoChapterAction"
+              >
+                Undo
+              </button>
+              <button
+                type="button"
+                class="sh-btn"
+                data-test="chapter-toast-dismiss"
+                @click="dismissChapterToast"
+              >
+                Dismiss
+              </button>
+            </template>
+          </AppToast>
         </div>
+        <MergeChapterConfirm
+          v-if="mergePending"
+          :target-title="mergePending.targetTitle"
+          :source-title="mergePending.sourceTitle"
+          :skip-ask-session="mergeSkipConfirmSession"
+          @close="onMergeClose"
+          @confirm="onMergeConfirm"
+        />
       </Teleport>
       <HomeScreen
-        v-if="(!session || choosingBook) && !openingVisible && !openingError"
+        v-if="(!session || choosingBook) && !showOpeningShell"
         ref="home"
         data-test="no-manuscript"
         :step="welcomed ? 'open' : 'welcome'"
@@ -1835,6 +2058,8 @@ defineExpose({ open, closeSession });
             @select="selectedId = $event"
             @activate="focusEditor"
             @numbering-style="onNumberingStyle"
+            @split-chapter="onOutlineSplitChapter"
+            @merge-chapter="(target, source) => requestChapterMerge(target, source)"
           />
           <OutlineRail v-show="!navigatorOpen && !focusMode" @expand="outlineAuto.toggleByHand()" />
           <div class="editor-stack min-h-0 min-w-0" data-test="editor-stack">
@@ -1872,7 +2097,11 @@ defineExpose({ open, closeSession });
               :draft-rows="draftRows"
               :current-draft-id="session.id"
               :comment-meta-version="commentMetaVersion"
+              :lead-chapter-ops="leadChapterOps"
+              :split-across-thread-ids="splitAcrossThreadIds"
               @update:selected-id="selectedId = $event"
+              @split-chapter="onEditorSplitChapter"
+              @merge-prev-chapter="onEditorMergePrev"
               @load-error="editorLoadError = $event"
               @reload="reloadSection"
               @toggle-navigator="outlineAuto.toggleByHand()"
@@ -1944,6 +2173,15 @@ defineExpose({ open, closeSession });
   z-index: var(--ct-z-toast);
   transform: translateX(-50%);
   pointer-events: auto;
+}
+.chapter-toast__undo-hint {
+  margin: 0;
+  flex: 1 1 100%;
+  font-size: var(--ct-text-sm);
+  color: var(--ct-text-muted);
+}
+.open-toast :deep(.toast) {
+  flex-wrap: wrap;
 }
 .opening-shell {
   flex: 1;

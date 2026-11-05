@@ -29,7 +29,7 @@ on Linux only.
 4. On a Windows test machine, install from the Release (`swarmDraft_<version>_x64-setup.exe`) and
    run [new-draft-checklist.md](./qa/new-draft-checklist.md) (New / import / switch / resume) before
    broader smoke-test and sharing with authors.
-5. Share [install-kim.md](./install-kim.md) for download → SmartScreen → Install → update → data.
+5. Share [install-author.md](./install-author.md) for download → SmartScreen → Install → update → data.
 
 Do **not** push a tag from a PR branch. Tags must match `pnpm version:check --tag vX.Y.Z`.
 

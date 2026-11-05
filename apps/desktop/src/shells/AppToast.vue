@@ -15,6 +15,7 @@ defineProps<{
   open: boolean;
   lead?: string;
   message: string;
+  detail?: string;
   action?: string;
   /** #98: 'alert' for a cue that explains why something didn't happen. */
   icon?: 'check' | 'alert';
@@ -40,10 +41,13 @@ onBeforeUnmount(() => cancelAnimationFrame(frame));
       <p class="toast__msg">
         <b v-if="lead">{{ lead }}</b
         ><span v-if="lead" aria-hidden="true">&nbsp;</span>{{ message }}
+        <span v-if="detail" class="toast__detail">{{ detail }}</span>
       </p>
-      <button type="button" class="sh-btn" data-test="toast-dismiss" @click="emit('dismiss')">
-        {{ action ?? 'Got it' }}
-      </button>
+      <slot name="actions">
+        <button type="button" class="sh-btn" data-test="toast-dismiss" @click="emit('dismiss')">
+          {{ action ?? 'Got it' }}
+        </button>
+      </slot>
     </div>
   </div>
 </template>
@@ -78,6 +82,12 @@ onBeforeUnmount(() => cancelAnimationFrame(frame));
 .toast__msg {
   flex: 1;
   margin: 0;
+  font-size: var(--ct-text-sm);
+}
+.toast__detail {
+  display: block;
+  margin-top: var(--ct-space-1);
+  color: var(--ct-text-muted);
   font-size: var(--ct-text-sm);
 }
 </style>

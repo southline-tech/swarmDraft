@@ -34,8 +34,10 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// Identifier the app used before the rename.
-pub const OLD_IDENTIFIER: &str = "com.radiancelux.coauthor";
+/// Bundle identifier for the pre-rename coAuthor app; migration must match this on disk.
+pub const LEGACY_COAUTHOR_IDENTIFIER: &str = "com.radiancelux.coauthor";
+/// Back-compat alias for tests and call sites predating #307 naming.
+pub const OLD_IDENTIFIER: &str = LEGACY_COAUTHOR_IDENTIFIER;
 
 const TEMP_PREFIX: &str = ".swarmdraft-migrating-";
 
@@ -45,8 +47,10 @@ pub const MARKER: &str = ".swarmdraft-migrated";
 /// Database file name in the new data folder (#198).
 pub const DB_FILE: &str = "swarmdraft.db";
 
-/// Database file name before the #198 rename; still used under the old identifier folder.
-pub const LEGACY_DB_FILE: &str = "coauthor.db";
+/// Database file name in the legacy coAuthor data folder (#43).
+pub const LEGACY_COAUTHOR_DB_FILE: &str = "coauthor.db";
+/// Back-compat alias for call sites predating #307 naming.
+pub const LEGACY_DB_FILE: &str = LEGACY_COAUTHOR_DB_FILE;
 
 /// SQLite side files that are never copied raw; the snapshot replaces them.
 const DB_SIDE_FILES: [&str; 3] = [

@@ -228,7 +228,7 @@ describe('decideSuggestions (reference model)', () => {
       content: [
         para({
           text: 'word',
-          marks: [fmt('f1', 'Kim', 'bold', '0', '1'), { type: 'bold' }],
+          marks: [fmt('f1', 'Author', 'bold', '0', '1'), { type: 'bold' }],
         }),
       ],
     };
@@ -252,7 +252,7 @@ describe('decideSuggestions (reference model)', () => {
             {
               type: 'text',
               text: 'Line',
-              marks: [fmt('p1', 'Kim', 'paragraph_style', 'body', 'centered')],
+              marks: [fmt('p1', 'Author', 'paragraph_style', 'body', 'centered')],
             },
           ],
         },

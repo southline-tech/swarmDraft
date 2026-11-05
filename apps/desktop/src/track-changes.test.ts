@@ -177,14 +177,14 @@ describe('Human track changes (#126)', () => {
 
   it('records insert, delete, and replace under the writer profile', async () => {
     const { w, editor } = await mountedEditor({
-      storage: trackingStore('Kim'),
+      storage: trackingStore('Author'),
       content: PLAIN as never,
     });
     editor.view.dispatch(editor.state.tr.insertText('!', editor.state.doc.content.size - 1));
     await flushPromises();
     let items = listSuggestions(editor.getJSON() as never);
     expect(items).toEqual([
-      expect.objectContaining({ author: 'Kim', kind: 'suggestion_insert', text: '!' }),
+      expect.objectContaining({ author: 'Author', kind: 'suggestion_insert', text: '!' }),
     ]);
     editor.commands.setTextSelection({ from: 7, to: 12 });
     editor.view.dispatch(editor.state.tr.deleteSelection());
@@ -195,11 +195,11 @@ describe('Human track changes (#126)', () => {
     editor.commands.setTextSelection({ from: 1, to: 6 });
     editor.view.dispatch(editor.state.tr.insertText('Howdy'));
     await flushPromises();
-    items = listSuggestions(editor.getJSON() as never).filter((i) => i.author === 'Kim');
+    items = listSuggestions(editor.getJSON() as never).filter((i) => i.author === 'Author');
     const howdy = items.find((i) => i.kind === 'suggestion_insert' && i.text === 'Howdy');
     expect(howdy).toBeDefined();
     expect(items.some((i) => i.kind === 'suggestion_delete' && i.id === howdy!.id)).toBe(true);
-    expect(w.find('[data-test="agent-name"]').text()).toContain('Kim');
+    expect(w.find('[data-test="agent-name"]').text()).toContain('Author');
     w.unmount();
   });
 

@@ -32,6 +32,31 @@ export function shortcutParts(chord: string): string[] {
   return chord.split('+').map((part) => KEY_LABELS[part] ?? part);
 }
 
+export function isMacPlatform(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const p = navigator.platform ?? '';
+  if (/Mac|iPhone|iPod|iPad/.test(p)) return true;
+  return (
+    (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ===
+    'macOS'
+  );
+}
+
+const MAC_KEY_LABELS: Record<string, string> = {
+  Ctrl: '⌘',
+  Shift: '⇧',
+  Alt: '⌥',
+  Enter: '↩',
+};
+
+/** Compact shortcut label for context menus (⌘⇧↩ on Mac). */
+export function menuShortcutLabel(chord: string): string {
+  if (!isMacPlatform()) return chord;
+  return shortcutParts(chord)
+    .map((part) => MAC_KEY_LABELS[part] ?? part)
+    .join('');
+}
+
 /** WAI-ARIA `aria-keyshortcuts` form (`Control` not `Ctrl`). */
 export function ariaKeyshortcuts(chord: string): string {
   return chord.replace(/\bCtrl\b/g, 'Control');

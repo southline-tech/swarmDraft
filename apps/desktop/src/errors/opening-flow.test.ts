@@ -32,8 +32,8 @@ describe('opening-flow (#80)', () => {
   });
 
   it('prefers the imported manuscript title over the file name (#215)', () => {
-    expect(openingTitleAfterImport('Lanterns', 'Kim Draft.docx')).toBe('Lanterns');
-    expect(openingTitleAfterImport('Untitled', 'Kim Draft.docx')).toBe('Kim Draft');
+    expect(openingTitleAfterImport('Lanterns', 'Author Draft.docx')).toBe('Lanterns');
+    expect(openingTitleAfterImport('Untitled', 'Author Draft.docx')).toBe('Author Draft');
   });
 
   it('picks icons for mapped error codes', () => {

@@ -28,10 +28,10 @@ describe('AuthorLabels format hover (#160)', () => {
         element: document.createElement('div'),
         content: plainDoc,
         extensions: [
-          HumanTrackChanges.configure({ active: () => true, author: () => 'Kim' }),
-          FormatTrackChanges.configure({ active: () => true, author: () => 'Kim' }),
+          HumanTrackChanges.configure({ active: () => true, author: () => 'Author' }),
+          FormatTrackChanges.configure({ active: () => true, author: () => 'Author' }),
           AuthorLabels.configure({
-            label: (a) => (a === 'Kim' ? 'Kim' : a),
+            label: (a) => (a === 'Author' ? 'Author' : a),
             authorVisible: () => true,
           }),
         ],
@@ -40,6 +40,6 @@ describe('AuthorLabels format hover (#160)', () => {
     editors.push(e);
     e.chain().focus().selectAll().toggleBold().run();
     const titled = e.view.dom.querySelector('[title]') as HTMLElement | null;
-    expect(titled?.getAttribute('title')).toBe('Add bold by Kim');
+    expect(titled?.getAttribute('title')).toBe('Add bold by Author');
   });
 });

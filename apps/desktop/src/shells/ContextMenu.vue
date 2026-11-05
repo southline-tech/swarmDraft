@@ -2,9 +2,9 @@
 /**
  * Editor context menu (wp4, #54). Keyboard: arrows, Enter/Space, Esc (stops propagation).
  */
-import { nextTick, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import AppIcon from '../icons/AppIcon.vue';
-import { MANUSCRIPT_SHORTCUTS } from './app-shortcuts';
+import { MANUSCRIPT_SHORTCUTS, menuShortcutLabel } from './app-shortcuts';
 import type { ContextMenuAction } from './context-menu';
 
 const props = defineProps<{
@@ -13,6 +13,9 @@ const props = defineProps<{
   disabled?: ReadonlySet<ContextMenuAction>;
   /** Current block paragraph style for the style submenu checkmarks. */
   activeStyle?: ContextMenuAction;
+  showChapterGroup?: boolean;
+  splitTitle?: string;
+  mergePrevTitle?: string;
 }>();
 const emit = defineEmits<{ close: []; select: [action: ContextMenuAction] }>();
 const root = ref<HTMLElement>();
@@ -29,6 +32,22 @@ const STYLES: { id: ContextMenuAction; label: string; keys: string }[] = [
   { id: 'block_quote', label: 'Block quote', keys: MANUSCRIPT_SHORTCUTS.blockQuote },
   { id: 'scene_break', label: 'Scene break', keys: '' },
 ];
+const CHAPTER: { id: ContextMenuAction; label: string; keys: string }[] = [
+  { id: 'split_chapter', label: 'Split chapter here', keys: 'Ctrl+Shift+Enter' },
+  { id: 'merge_prev_chapter', label: 'Merge with previous chapter', keys: '' },
+];
+const splitChapterKeys = computed(() => menuShortcutLabel('Ctrl+Shift+Enter'));
+
+function chapterDisabledReason(id: ContextMenuAction): string | undefined {
+  if (!isDisabled(id)) return undefined;
+  if (id === 'split_chapter') return props.splitTitle;
+  if (id === 'merge_prev_chapter') return props.mergePrevTitle;
+  return undefined;
+}
+
+function chapterReasonId(id: ContextMenuAction) {
+  return `ctx-reason-${id}`;
+}
 const AFTER: { id: ContextMenuAction; label: string; keys: string; icon?: 'sparkle' }[] = [
   { id: 'comment', label: 'Add comment', keys: MANUSCRIPT_SHORTCUTS.comment },
   { id: 'ask-bot', label: 'Ask bot to suggest…', keys: 'Ctrl+Alt+S', icon: 'sparkle' },
@@ -195,6 +214,37 @@ onMounted(() => nextTick(() => mainMenuItems()[0]?.focus()));
         </button>
       </div>
     </div>
+    <template v-if="showChapterGroup">
+      <div class="sh-sep" role="separator" />
+      <p class="ctx-group-label" role="presentation">Chapter</p>
+      <button
+        v-for="it in CHAPTER"
+        v-show="it.id !== 'merge_prev_chapter' || !isDisabled(it.id)"
+        :key="it.id"
+        type="button"
+        role="menuitem"
+        tabindex="-1"
+        class="sh-mi sh-mi--stack"
+        :data-test="`ctx-${it.id}`"
+        :data-action="it.id"
+        :aria-disabled="isDisabled(it.id) ? 'true' : undefined"
+        :aria-describedby="chapterDisabledReason(it.id) ? chapterReasonId(it.id) : undefined"
+        @click="pick(it.id)"
+      >
+        <span class="sh-mi-row">
+          {{ it.label
+          }}<span v-if="it.id === 'split_chapter' && it.keys" class="sh-k">{{
+            splitChapterKeys
+          }}</span></span
+        >
+        <span
+          v-if="chapterDisabledReason(it.id)"
+          :id="chapterReasonId(it.id)"
+          class="ctx-mi-reason"
+          >{{ chapterDisabledReason(it.id) }}</span
+        >
+      </button>
+    </template>
     <div class="sh-sep" role="separator" />
     <button
       v-for="it in AFTER"
@@ -217,6 +267,33 @@ onMounted(() => nextTick(() => mainMenuItems()[0]?.focus()));
 </template>
 
 <style scoped>
+.ctx-group-label {
+  margin: 0;
+  padding: var(--ct-space-1) var(--ct-space-3);
+  font-size: var(--ct-text-xs);
+  color: var(--ct-text-muted);
+}
+.sh-mi--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--ct-space-1);
+  height: auto;
+  min-height: var(--ct-space-8);
+  padding-top: var(--ct-space-2);
+  padding-bottom: var(--ct-space-2);
+}
+.sh-mi-row {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  gap: var(--ct-space-2);
+}
+.ctx-mi-reason {
+  font-size: var(--ct-text-xs);
+  color: var(--ct-text-muted);
+  text-align: left;
+  line-height: 1.3;
+}
 .sh-mi-lead {
   display: inline-flex;
   width: 16px;

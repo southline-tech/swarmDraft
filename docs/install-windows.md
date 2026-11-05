@@ -7,7 +7,7 @@ The P1 builds are **unsigned**. Code signing is deferred until a certificate is 
    install, no admin) or the `.msi`. Optionally verify the file against `SHA256SUMS.txt` on
    that release.
 
-   For a short walkthrough (including SmartScreen), see [install-kim.md](./install-kim.md).
+   For a short walkthrough (including SmartScreen), see [install-author.md](./install-author.md).
 
 2. Run the installer you downloaded. The app installs as `swarmdraft.exe`.
 

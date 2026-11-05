@@ -1,4 +1,4 @@
-# Installing swarmDraft (Kim)
+# Installing swarmDraft (Author)
 
 1. Download the latest installer from
    [Releases](https://github.com/southline-tech/swarmDraft/releases/latest) — file name like

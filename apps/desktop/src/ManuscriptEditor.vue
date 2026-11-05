@@ -58,11 +58,17 @@ import {
 import FindPanel from './shells/FindPanel.vue';
 import ContextMenu from './shells/ContextMenu.vue';
 import {
+  chapterSplitShortcut,
   contextMenuDisabled,
   runContextMenuAction,
   contextMenuActionForKey,
   type ContextMenuAction,
 } from './shells/context-menu';
+import SplitChapterPopover from './chapter/SplitChapterPopover.vue';
+import {
+  splitDisabledReason as chapterSplitDisabledReason,
+  splitPopoverDefaults,
+} from './chapter/chapter-editor';
 import { caretStyle } from './toolbar/toolbar';
 import ShortcutsSheet from './shells/ShortcutsSheet.vue';
 import NamePrompt from './shells/NamePrompt.vue';
@@ -229,6 +235,11 @@ const props = defineProps<{
   reviewFollow?: boolean;
   /** Book-wide author filter owned by ContinuousManuscript (#241). */
   authorFilter?: AuthorFilter | null;
+  chapterOpsEnabled?: boolean;
+  canMergePrevChapter?: boolean;
+  chapterNumber?: number;
+  splitChapterHint?: boolean;
+  splitAcrossThreadIds?: readonly string[];
 }>();
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
@@ -264,6 +275,8 @@ const emit = defineEmits<{
   'update:authorFilter': [filter: AuthorFilter];
   'comment-reply': [threadId: string, body: string];
   'comment-resolve': [threadId: string, resolved: boolean];
+  'split-chapter': [payload: { blockIndex: number; title: string; removeLine: boolean }];
+  'merge-prev-chapter': [];
 }>();
 
 const appFooterEditor = inject(APP_FOOTER_EDITOR_KEY, null);
@@ -471,7 +484,73 @@ async function onSpellDictionary() {
   await spellDictionaryAdd(props.manuscriptId, menu.issue.word);
   refreshSpellcheck(ed);
 }
-const menuDisabled = computed(() => contextMenuDisabled(editor.value));
+const splitDisabledReason = computed((): string | null => {
+  const e = editor.value;
+  if (!e || e.isDestroyed || !props.doc) return 'Read-only';
+  return chapterSplitDisabledReason(e, e.state.doc.toJSON() as DocNode);
+});
+const menuDisabled = computed(() =>
+  contextMenuDisabled(editor.value, {
+    splitBlocked: !!splitDisabledReason.value,
+    canMergePrev: !!props.canMergePrevChapter,
+  }),
+);
+const splitPopover = shallowRef<{
+  x: number;
+  y: number;
+  title: string;
+  removeLine: boolean;
+  blockIndex: number;
+} | null>(null);
+const splitShortcutStatus = ref<string | null>(null);
+let splitShortcutStatusTimer: ReturnType<typeof setTimeout> | undefined;
+const splitAcrossSet = computed(() => new Set(props.splitAcrossThreadIds ?? []));
+function openSplitPopover(anchor?: { x: number; y: number }) {
+  const e = editor.value;
+  if (!e || e.isDestroyed || !props.doc || splitDisabledReason.value) return;
+  const defaults = splitPopoverDefaults(e, toRaw(props.doc), props.chapterNumber ?? 1);
+  const rect = e.view.dom.getBoundingClientRect();
+  splitPopover.value = {
+    x: anchor?.x ?? rect.left + rect.width / 2 - 140,
+    y: anchor?.y ?? rect.top + 80,
+    title: defaults.title,
+    removeLine: defaults.removeLine,
+    blockIndex: defaults.blockIndex,
+  };
+}
+function editorReturnFocus() {
+  const e = editor.value;
+  if (e && !e.isDestroyed) e.view.focus();
+}
+
+function closeSplitPopover() {
+  splitPopover.value = null;
+  editorReturnFocus();
+}
+
+function confirmSplit(payload: { title: string; removeLine: boolean }) {
+  const pop = splitPopover.value;
+  splitPopover.value = null;
+  if (!pop) return;
+  emit('split-chapter', {
+    blockIndex: pop.blockIndex,
+    title: payload.title,
+    removeLine: payload.removeLine,
+  });
+  editorReturnFocus();
+}
+
+function flashSplitShortcutStatus(message: string) {
+  splitShortcutStatus.value = message;
+  clearTimeout(splitShortcutStatusTimer);
+  splitShortcutStatusTimer = setTimeout(() => {
+    splitShortcutStatus.value = null;
+  }, 4000);
+}
+function jumpToReviewAtSplit() {
+  reviewOpen.value = true;
+  collapsed.value = false;
+}
 const menuActiveStyle = computed((): ContextMenuAction | undefined => {
   const e = editor.value;
   if (!e || e.isDestroyed) return undefined;
@@ -480,7 +559,16 @@ const menuActiveStyle = computed((): ContextMenuAction | undefined => {
   return undefined;
 });
 async function onContextMenuSelect(action: ContextMenuAction) {
+  const at = menuAt.value;
   menuAt.value = null;
+  if (action === 'split_chapter') {
+    openSplitPopover(at ?? undefined);
+    return;
+  }
+  if (action === 'merge_prev_chapter') {
+    emit('merge-prev-chapter');
+    return;
+  }
   await runEditorContextAction(action);
 }
 async function runEditorContextAction(action: ContextMenuAction) {
@@ -490,6 +578,7 @@ async function runEditorContextAction(action: ContextMenuAction) {
     emit('ask-bot');
     return;
   }
+  if (action === 'split_chapter' || action === 'merge_prev_chapter') return;
   if (await runContextMenuAction(e, action)) {
     if (action === 'comment') refreshReview(e);
     void nextTick(() => e.view.focus());
@@ -574,6 +663,7 @@ function dismissContextOverlay() {
   spellMenu.value = null;
   menuAt.value = null;
   closeOverlapPopover();
+  if (splitPopover.value) closeSplitPopover();
 }
 const localAuthorFilter = shallowRef<AuthorFilter>(null);
 const filter = computed({
@@ -610,7 +700,11 @@ const marginChanges = computed(() => visibleItems(groupChanges(suggestions.value
 const commentThreads = computed((): CommentThread[] => {
   const e = editor.value;
   if (!e || e.isDestroyed) return [];
-  return buildThreads(e.state.doc.toJSON() as DocNode, [...(props.commentRows ?? [])]);
+  return buildThreads(
+    e.state.doc.toJSON() as DocNode,
+    [...(props.commentRows ?? [])],
+    splitAcrossSet.value.size ? splitAcrossSet.value : undefined,
+  );
 });
 
 function reviewListKey(item: ReviewListItem): string {
@@ -1039,6 +1133,21 @@ function onSelectView(author: string | null) {
 
 function onKeydown(ev: KeyboardEvent) {
   if (shortcutsOpen.value) return;
+  if (
+    chapterSplitShortcut(ev) &&
+    props.chapterOpsEnabled &&
+    !props.sliceMode &&
+    !inForeignInput(ev.target, editor.value?.view.dom ?? null)
+  ) {
+    const reason = splitDisabledReason.value;
+    if (!reason) {
+      ev.preventDefault();
+      openSplitPopover();
+      return;
+    }
+    ev.preventDefault();
+    flashSplitShortcutStatus(reason);
+  }
   const cycle = reviewViewCycleFor(ev);
   if (
     cycle &&
@@ -1696,6 +1805,38 @@ onBeforeUnmount(() => {
           <p v-if="chapterLabel" class="chapter-label" data-test="chapter-label" aria-hidden="true">
             {{ chapterLabel }}
           </p>
+          <p
+            v-if="splitChapterHint"
+            class="chapter-split-hint"
+            data-test="split-chapter-hint"
+            role="status"
+          >
+            Place the cursor where the new chapter should start, then choose Split chapter here.
+          </p>
+          <p
+            v-if="splitDisabledReason?.includes('Resolve')"
+            class="chapter-split-blocked"
+            data-test="split-chapter-blocked"
+            role="status"
+          >
+            Resolve the change at this spot first.
+            <button
+              type="button"
+              class="sh-btn sh-btn--link"
+              data-test="split-jump-review"
+              @click="jumpToReviewAtSplit"
+            >
+              Jump to change
+            </button>
+          </p>
+          <p
+            v-if="splitShortcutStatus"
+            class="chapter-split-blocked"
+            data-test="split-chapter-shortcut-status"
+            role="status"
+          >
+            {{ splitShortcutStatus }}
+          </p>
           <EditorContent
             :editor="editor"
             class="page"
@@ -1777,7 +1918,7 @@ onBeforeUnmount(() => {
       </Teleport>
     </div>
     <div
-      v-if="spellMenu || menuAt || overlapPopover"
+      v-if="spellMenu || menuAt || overlapPopover || splitPopover"
       class="fixed inset-0 z-30 context-dismiss"
       data-test="context-dismiss"
       @mousedown.self.prevent="dismissContextOverlay"
@@ -1803,12 +1944,25 @@ onBeforeUnmount(() => {
       @dictionary="onSpellDictionary"
       @close="spellMenu = null"
     />
+    <SplitChapterPopover
+      v-if="splitPopover"
+      :x="splitPopover.x"
+      :y="splitPopover.y"
+      :title="splitPopover.title"
+      :remove-line="splitPopover.removeLine"
+      :return-focus="editor?.view.dom ?? null"
+      @close="closeSplitPopover"
+      @confirm="confirmSplit"
+    />
     <ContextMenu
       v-if="menuAt"
       :x="menuAt.x"
       :y="menuAt.y"
       :disabled="menuDisabled"
       :active-style="menuActiveStyle"
+      :show-chapter-group="!!chapterOpsEnabled && !sliceMode"
+      :split-title="splitDisabledReason ?? undefined"
+      :merge-prev-title="!editor?.isEditable ? 'Read-only' : undefined"
       @select="onContextMenuSelect"
       @close="menuAt = null"
     />

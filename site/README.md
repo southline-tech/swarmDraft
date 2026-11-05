@@ -33,7 +33,7 @@ Set in the Cloudflare Pages project for `swarmdraft` — never commit or embed i
 - Manuscripts and settings are stored locally (SQLite under `%APPDATA%\com.radiancelux.swarmdraft\`).
 - Editor bots connect through the in-app localhost MCP server; each agent has its own token (never shown in the UI or API list responses).
 - UI uses shared `--ct-*` design tokens from the desktop app (`docs/design-system.md`).
-- Install link targets `docs/install-kim.md` until batch C renames it to `docs/install-author.md` (#307).
+- Install link targets `docs/install-author.md`.
 
 ## Evidence captures
 

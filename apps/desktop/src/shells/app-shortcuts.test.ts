@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { REVIEW_SHORTCUTS } from '../review/review-state';
 import { SHORTCUTS } from '../toolbar/toolbar';
 import {
   MANUSCRIPT_SHORTCUTS,
   SHORTCUT_SHEET_GROUPS,
   ariaKeyshortcuts,
+  menuShortcutLabel,
   shortcutParts,
 } from './app-shortcuts';
 
@@ -26,6 +27,12 @@ describe('app shortcuts (#56)', () => {
     expect(shortcutParts(REVIEW_SHORTCUTS.reject)).toEqual(['Ctrl', 'Shift', '⌫']);
     expect(shortcutParts(REVIEW_SHORTCUTS.next)).toEqual(['Alt', 'Shift', '→']);
     expect(shortcutParts('Esc')).toEqual(['Esc']);
+  });
+
+  it('formats menu shortcut labels for Mac chapter split', () => {
+    vi.stubGlobal('navigator', { platform: 'MacIntel' });
+    expect(menuShortcutLabel('Ctrl+Shift+Enter')).toBe('⌘⇧↩');
+    vi.unstubAllGlobals();
   });
 
   it('maps chords to aria-keyshortcuts', () => {
