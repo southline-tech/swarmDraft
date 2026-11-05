@@ -14,7 +14,7 @@ describe('site Prettier scope (#292)', () => {
   });
 
   it('prettier --check passes on site/**', () => {
-    execSync('pnpm exec prettier --check "site/**/*.{html,css,js,md}"', {
+    execSync('pnpm exec prettier --check "site/**/*.{html,css,js,md,ts}"', {
       cwd: repoRoot,
       stdio: 'pipe',
     });

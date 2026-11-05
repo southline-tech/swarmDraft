@@ -394,3 +394,115 @@ a:hover {
 .footer-copy {
   margin: 0;
 }
+
+.footer-maker {
+  margin: 0 0 var(--ct-space-2);
+}
+
+.footer-maker a {
+  color: var(--ct-text-muted);
+}
+
+.footer-maker a:hover {
+  color: var(--ct-accent);
+}
+
+.feedback {
+  padding: var(--ct-space-16) 0;
+  border-top: 1px solid var(--ct-border);
+}
+
+.feedback-noscript {
+  margin: 0 0 var(--ct-space-6);
+  padding: var(--ct-space-4);
+  background: var(--ct-surface);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-md);
+  color: var(--ct-text-muted);
+}
+
+.feedback-form {
+  max-width: 36rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-space-5);
+}
+
+.feedback-form[data-state='success'] .feedback-input,
+.feedback-form[data-state='success'] .feedback-input--area {
+  border-color: var(--ct-border);
+}
+
+.feedback-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-space-2);
+}
+
+.feedback-label {
+  font-weight: 500;
+  font-size: var(--ct-text-sm);
+}
+
+.feedback-optional {
+  font-weight: 400;
+  color: var(--ct-text-muted);
+}
+
+.feedback-input {
+  width: 100%;
+  padding: var(--ct-space-3) var(--ct-space-4);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-sm);
+  background: var(--ct-surface);
+  color: var(--ct-text);
+  font-family: inherit;
+  font-size: var(--ct-text-md);
+  line-height: var(--ct-leading-ui);
+}
+
+.feedback-input--area {
+  resize: vertical;
+  min-height: 8rem;
+}
+
+.feedback-input:focus-visible {
+  outline: var(--ct-focus-outline);
+  outline-offset: var(--ct-focus-offset);
+}
+
+.feedback-input[aria-invalid='true'] {
+  border-color: var(--ct-danger);
+}
+
+.feedback-error {
+  margin: 0;
+  min-height: 1.25em;
+  font-size: var(--ct-text-sm);
+  color: var(--ct-danger);
+}
+
+.feedback-honeypot {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.feedback-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ct-space-3);
+}
+
+.feedback-status {
+  margin: 0;
+  min-height: 1.5em;
+  font-size: var(--ct-text-sm);
+  color: var(--ct-text-muted);
+}
+
+.feedback-form[data-state='success'] .feedback-status {
+  color: var(--ct-text);
+}

@@ -16,7 +16,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "pnpm -r typecheck",
-    "test": "node --test scripts/version.test.mjs scripts/site-format.test.mjs && pnpm -r test",
+    "test": "node --test scripts/version.test.mjs scripts/site-format.test.mjs && vitest run --config site/vitest.config.ts && pnpm -r test",
     "version:set": "node scripts/set-version.mjs",
     "version:check": "node scripts/check-version.mjs"
   },
@@ -29,6 +29,7 @@
     "prettier": "3.9.10",
     "typescript": "~5.7.2",
     "typescript-eslint": "^8.18.2",
+    "vitest": "^3.2.4",
     "vue-eslint-parser": "^9.4.3"
   }
 }
