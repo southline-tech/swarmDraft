@@ -3,7 +3,12 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FEEDBACK_UI_TEMPLATE_ID, initFeedback, mountFeedbackUi } from './feedback.js';
+import {
+  FEEDBACK_UI_TEMPLATE_ID,
+  getFocusableElements,
+  initFeedback,
+  mountFeedbackUi,
+} from './feedback.js';
 
 const FEEDBACK_UI_TEMPLATE = `
       <div data-feedback-form-panel>
@@ -31,7 +36,7 @@ const FEEDBACK_UI_TEMPLATE = `
             />
             <p data-feedback-error="replyEmail" id="feedback-reply-error"></p>
           </div>
-          <div class="feedback-honeypot" aria-hidden="true">
+          <div class="visually-hidden" aria-hidden="true">
             <label for="feedback-website">Website</label>
             <input
               type="text"
@@ -75,9 +80,9 @@ function buildFeedbackDom({ withCss = false } = {}) {
   }
   document.body.dataset.siteVersion = '0.1.1';
   document.body.innerHTML = `
-      <button type="button" data-feedback-open id="cta-open">Send feedback</button>
-      <button type="button" data-feedback-open id="footer-open">Footer</button>
-      <dialog class="feedback-dialog" data-feedback-dialog aria-labelledby="feedback-modal-title">
+      <a href="#feedback" data-feedback-open id="cta-open">Send feedback</a>
+      <a href="#feedback" data-feedback-open id="footer-open">Footer feedback</a>
+      <dialog class="feedback-dialog" data-feedback-dialog aria-modal="true" aria-labelledby="feedback-modal-title">
         <div class="feedback-dialog__card">
           <button type="button" data-feedback-close aria-label="Close">Close</button>
           <div data-feedback-mount></div>
@@ -198,7 +203,7 @@ describe('landing feedback modal', () => {
     const root = buildFeedbackDom({ withCss: true });
     initFeedback(root);
     root.querySelector('#cta-open').click();
-    const honeypot = root.querySelector('.feedback-honeypot');
+    const honeypot = root.querySelector('.visually-hidden');
     const website = root.querySelector('[name="website"]');
     expect(honeypot?.getAttribute('aria-hidden')).toBe('true');
     expect(website?.getAttribute('tabindex')).toBe('-1');
@@ -214,7 +219,7 @@ describe('landing feedback modal', () => {
     const dir = dirname(fileURLToPath(import.meta.url));
     const mainCss = readFileSync(join(dir, '../css/main.css'), 'utf8');
     expect(mainCss).toMatch(
-      /@media \(max-width: 480px\)[\s\S]*\.feedback-actions[\s\S]*flex-direction: column-reverse/,
+      /@media \(max-width: 640px\)[\s\S]*\.feedback-actions[\s\S]*flex-direction: column-reverse/,
     );
 
     window.innerWidth = 375;
@@ -232,5 +237,73 @@ describe('landing feedback modal', () => {
     expect(getComputedStyle(field).flexDirection).toBe('column');
     expect(getComputedStyle(textarea).width).toBe('100%');
     expect(root.querySelector('.feedback-dialog').classList.contains('feedback-dialog')).toBe(true);
+  });
+
+  it('closes on Escape and backdrop click', () => {
+    const root = buildFeedbackDom();
+    initFeedback(root);
+    const dialog = root.querySelector('[data-feedback-dialog]');
+    root.querySelector('#cta-open').click();
+    expect(dialog.open).toBe(true);
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(dialog.open).toBe(false);
+    root.querySelector('#cta-open').click();
+    dialog.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(dialog.open).toBe(false);
+  });
+
+  it('keeps Tab focus inside the visible panel only', async () => {
+    fetch.mockResolvedValueOnce({ status: 202 });
+    const root = buildFeedbackDom();
+    initFeedback(root);
+    root.querySelector('#cta-open').click();
+    const card = root.querySelector('.feedback-dialog__card');
+    const formFocusables = getFocusableElements(card);
+    expect(formFocusables.some((el) => el.matches('[data-feedback-send-another]'))).toBe(false);
+    const last = formFocusables[formFocusables.length - 1];
+    last.focus();
+    last.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }),
+    );
+    expect(document.activeElement).toBe(formFocusables[0]);
+
+    const form = root.querySelector('[data-feedback-form]');
+    form.description.value = 'Done';
+    form.querySelector('[data-feedback-submit]').disabled = false;
+    form.requestSubmit();
+    await vi.waitFor(() => {
+      expect(root.querySelector('[data-feedback-success-panel]').hidden).toBe(false);
+    });
+    const successFocusables = getFocusableElements(card);
+    expect(successFocusables.some((el) => el.matches('[data-feedback-submit]'))).toBe(false);
+  });
+
+  it('resets counter aria-live after each throttled announcement', () => {
+    vi.useFakeTimers();
+    const root = buildFeedbackDom();
+    initFeedback(root);
+    root.querySelector('#cta-open').click();
+    const form = root.querySelector('[data-feedback-form]');
+    const counter = root.querySelector('[data-feedback-counter]');
+    form.description.value = 'x'.repeat(1800);
+    form.description.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(counter.getAttribute('aria-live')).toBe('polite');
+    form.description.value = 'x'.repeat(1801);
+    form.description.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(counter.getAttribute('aria-live')).toBe('polite');
+    vi.advanceTimersByTime(400);
+    expect(counter.getAttribute('aria-live')).toBe('off');
+    form.description.value = 'x'.repeat(1802);
+    form.description.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(counter.getAttribute('aria-live')).toBe('polite');
+    vi.useRealTimers();
+  });
+
+  it('opens the dialog when the page loads with #feedback', () => {
+    window.location.hash = '#feedback';
+    const root = buildFeedbackDom();
+    initFeedback(root);
+    expect(root.querySelector('[data-feedback-dialog]').open).toBe(true);
+    window.location.hash = '';
   });
 });

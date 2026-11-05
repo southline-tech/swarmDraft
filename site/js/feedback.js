@@ -67,10 +67,18 @@ export function buildLandingPayload({ description, replyEmail, installId, siteVe
   return payload;
 }
 
+function isExcludedFromFocusTrap(el) {
+  if (el.hasAttribute('hidden') || el.getAttribute('aria-hidden') === 'true') {
+    return true;
+  }
+  if (el.closest('[hidden], [inert]')) {
+    return true;
+  }
+  return false;
+}
+
 export function getFocusableElements(container) {
-  return [...container.querySelectorAll(FOCUSABLE)].filter(
-    (el) => !el.hasAttribute('hidden') && el.getAttribute('aria-hidden') !== 'true',
-  );
+  return [...container.querySelectorAll(FOCUSABLE)].filter((el) => !isExcludedFromFocusTrap(el));
 }
 
 export const FEEDBACK_UI_TEMPLATE_ID = 'feedback-ui-template';
@@ -131,6 +139,11 @@ function updateMessageCounter(form, counterState) {
     if (now - counterState.lastLiveAt >= COUNTER_ARIA_LIVE_THROTTLE_MS) {
       counter.setAttribute('aria-live', 'polite');
       counterState.lastLiveAt = now;
+      clearTimeout(counterState.liveResetId);
+      counterState.liveResetId = setTimeout(() => {
+        counter.setAttribute('aria-live', 'off');
+        counterState.lastLiveAt = 0;
+      }, COUNTER_ARIA_LIVE_THROTTLE_MS);
     }
   } else {
     counter.textContent = '';
@@ -309,12 +322,13 @@ export function initFeedback(documentRoot) {
   if (!dialog || !form) return;
 
   const siteVersion = documentRoot.dataset.siteVersion || '0.1.1';
-  const counterState = { lastLiveAt: 0 };
+  const counterState = { lastLiveAt: 0, liveResetId: undefined };
   let focusReturn = null;
   let removeTrap = () => {};
 
   const closeModal = () => {
     if (!dialog.open) return;
+    clearTimeout(counterState.liveResetId);
     removeTrap();
     dialog.close();
     showFormPanel(dialog);
@@ -334,8 +348,20 @@ export function initFeedback(documentRoot) {
   };
 
   documentRoot.querySelectorAll('[data-feedback-open]').forEach((trigger) => {
-    trigger.addEventListener('click', () => openModal(trigger));
+    trigger.addEventListener('click', (event) => {
+      if (
+        trigger instanceof HTMLAnchorElement &&
+        trigger.getAttribute('href')?.replace(/^.*#/, '#') === '#feedback'
+      ) {
+        event.preventDefault();
+      }
+      openModal(trigger);
+    });
   });
+
+  if (typeof window !== 'undefined' && window.location.hash === '#feedback') {
+    openModal(null);
+  }
 
   dialog.querySelectorAll('[data-feedback-close], [data-feedback-close-panel]').forEach((btn) => {
     btn.addEventListener('click', () => closeModal());

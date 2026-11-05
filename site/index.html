@@ -227,13 +227,13 @@
           </ul>
         </section>
 
-        <section class="feedback-cta" aria-labelledby="feedback-cta-title">
+        <section class="feedback-cta" id="feedback" aria-labelledby="feedback-cta-title">
           <h2 class="section-title" id="feedback-cta-title">Tell us what you think</h2>
           <p class="feedback-cta-lead">We read every message.</p>
           <noscript>
             <p class="feedback-noscript">Feedback needs JavaScript turned on.</p>
           </noscript>
-          <button type="button" class="btn btn--primary" data-feedback-open>Send feedback</button>
+          <a href="#feedback" class="btn btn--primary" data-feedback-open>Send feedback</a>
         </section>
       </main>
 
@@ -259,7 +259,7 @@
             >
           </li>
           <li>
-            <button type="button" class="footer-link-btn" data-feedback-open>Send feedback</button>
+            <a href="#feedback" data-feedback-open>Send feedback</a>
           </li>
         </ul>
         <p class="footer-maker">Made by <a href="https://radiancelux.tech">Radiance Lux</a></p>
@@ -267,7 +267,12 @@
       </footer>
     </div>
 
-    <dialog class="feedback-dialog" data-feedback-dialog aria-labelledby="feedback-modal-title">
+    <dialog
+      class="feedback-dialog"
+      data-feedback-dialog
+      aria-modal="true"
+      aria-labelledby="feedback-modal-title"
+    >
       <div class="feedback-dialog__card">
         <button type="button" class="feedback-dialog__close" data-feedback-close aria-label="Close">
           <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -333,7 +338,7 @@
               data-feedback-error="replyEmail"
             ></p>
           </div>
-          <div class="feedback-honeypot" aria-hidden="true">
+          <div class="visually-hidden" aria-hidden="true">
             <label for="feedback-website">Website</label>
             <input
               type="text"
