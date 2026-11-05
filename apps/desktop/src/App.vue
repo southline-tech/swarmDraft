@@ -574,7 +574,11 @@ async function loadDecisionRecords(manuscriptId: string) {
     decisionRecordsBySection.value = {};
   }
 }
-function onSectionDecisions(sectionId: string, records: DecisionRecord[]) {
+function onSectionDecisions(
+  sectionId: string,
+  records: DecisionRecord[],
+  suggestionAuthor?: string,
+) {
   if (!session.value) return;
   const prev = decisionRecordsBySection.value[sectionId] ?? [];
   decisionRecordsBySection.value = { ...decisionRecordsBySection.value, [sectionId]: records };
@@ -586,7 +590,7 @@ function onSectionDecisions(sectionId: string, records: DecisionRecord[]) {
       await session.value?.flush();
       const chapter =
         session.value?.outline.value.find((s) => s.id === sectionId)?.title ?? 'chapter';
-      const botName = latest.decidedBy || 'editor';
+      const botName = suggestionAuthor || 'editor';
       await draftReviewCommit({
         manuscriptId: session.value!.id,
         accepted: latest.status === 'accepted',
@@ -903,7 +907,12 @@ async function openDraftFromDialog() {
   try {
     const id = await draftOpen();
     if (!id) return;
-    if (session.value?.id === id) return;
+    if (session.value?.id === id) {
+      await reloadOpenManuscript();
+      closeBookMenu();
+      await refreshDraftRows();
+      return;
+    }
     await session.value?.flush().catch((e) => {
       console.error('Flush before open failed', e);
       throw e;
@@ -1259,6 +1268,36 @@ function closeSession() {
 /** A rejected close keeps that session open and retrying; just log it. */
 const closeQuietly = (s?: ManuscriptSession | null) =>
   void s?.close().catch((err: unknown) => console.error('Edits not saved yet; retrying', err));
+
+async function onHistoryBeforeRestore() {
+  await session.value
+    ?.close({ discard: true })
+    .catch((e) => console.error('Pre-restore close failed', e));
+  notesSession.value = null;
+}
+
+/** Reload the open book from SQLite after git hydrate (History restore / portable open). */
+async function reloadOpenManuscript() {
+  const id = session.value?.id;
+  if (!id) return;
+  await session.value
+    ?.close({ discard: true })
+    .catch((e) => console.error('Reload close failed', e));
+  notesSession.value = null;
+  try {
+    const stored = await loadManuscript(id);
+    if (!stored) {
+      openError.value = "Couldn't reload that draft.";
+      closeSession();
+      return;
+    }
+    open(openStored(stored, null, persistHooks));
+  } catch (e) {
+    console.error('Reload manuscript failed', e);
+    openError.value = errorLine(e, 'open');
+    closeSession();
+  }
+}
 
 function open(next: ManuscriptSession) {
   if (session.value !== next) {
@@ -2060,7 +2099,8 @@ defineExpose({ open, closeSession });
         :open="historyOpen"
         :manuscript-id="session?.id ?? null"
         @close="historyOpen = false"
-        @restored="() => void session?.flush()"
+        :before-restore="onHistoryBeforeRestore"
+        @restored="() => void reloadOpenManuscript()"
       />
       <!-- Always mounted so the live region exists before its text (#79). -->
       <Teleport to="#app-overlay-layer">

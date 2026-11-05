@@ -306,3 +306,8 @@ Implementor: add one line here for every review, design or QA finding, in the sa
 - 2026-11-05 · #304–#307 · PR #319 combined review @ f14fc3b · chapter toast dropped live region; no hover pause; undo reason in title only · always-mounted `AppToast` + `#actions`; pause 8s on hover/focus-within; visible `chapterToastUndoHint()` text
 - 2026-11-05 · #304–#307 · PR #319 combined review @ f14fc3b · context menu disabled reason title-only; Ctrl shortcut on Mac · muted `aria-describedby` reason line; `menuShortcutLabel` (⌘⇧↩); blocked split shortcut silent · `role=status` flash via `splitShortcutStatus`
 - 2026-11-05 · #304–#307 · PR #319 PM review @ f14fc3b · duplicated #317 App.vue/ErrorCard hunks · rebase on `main` after #317 merge; keep split/merge wiring only; rerun ErrorCard tests
+- 2026-11-05 · #302 · PR #325 review bot · git open/restore only updated worktree; editor stayed on stale SQLite · `sync_worktree_to_store` after open/restore/unpack; `reloadOpenManuscript` after History restore; integration tests in `draft_git.rs`
+- 2026-11-05 · #302 · PR #325 review bot · concurrent draft pack/commit IPC could race · single `DraftService` op mutex around commit, pack, open, restore
+- 2026-11-05 · #302 · PR #325 review bot · accept/reject git commits used author as committer · review checkpoints sign git as bot name (`bot@swarmdraft.local`); merge still uses author
+- 2026-11-05 · #302 · PR #325 review bot · portable re-open flushed stale Yjs over hydrated SQLite · same-id Open skips flush; `reloadOpenManuscript` uses `discard`; History closes session before `draftRestore`
+- 2026-11-05 · #302 · PR #325 review bot · `draftReviewCommit` used `decidedBy` (human) as bot name · pass suggestion `author` from `ManuscriptEditor` through `decisions` emit
