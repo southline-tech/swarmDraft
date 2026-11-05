@@ -79,11 +79,14 @@ describe('SaveFailureBanner', () => {
     const src = readFileSync(resolve(__dirname, 'SaveFailureBanner.vue'), 'utf8');
     expect(src).toMatch(/:key="`\$\{state\.error\.title\}\|/);
     const w = mountWith(async () => ({ status: 'cancelled' }));
-    await w.setProps({
-      state: { failing: true, error: mapError('os error 112', 'save') },
-    });
+    const diskFull = saveFailed(
+      SAVE_OK,
+      new Error('io: There is not enough space on the disk. (os error 112)'),
+    );
+    await w.setProps({ state: diskFull });
     await flushPromises();
-    expect(w.find('[data-test="save-failure-title"]').text()).toContain('almost full');
+    expect(diskFull.cause).toBe('disk-full');
+    expect(w.find('[data-test="save-failure-title"]').text()).toContain("aren't saved");
   });
 
   it('ignores a second click while a copy is being saved', async () => {
