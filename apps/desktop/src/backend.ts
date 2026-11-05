@@ -404,9 +404,7 @@ export async function draftRecoverWorktreeToFile(manuscriptId: string): Promise<
   await invoke('draft_recover_worktree_to_file', { manuscriptId });
 }
 
-export async function listenOpenDraftPath(
-  onPath: (path: string) => void,
-): Promise<UnlistenFn> {
+export async function listenOpenDraftPath(onPath: (path: string) => void): Promise<UnlistenFn> {
   if (!isTauri()) return () => {};
   try {
     const { listen } = await import('@tauri-apps/api/event');
