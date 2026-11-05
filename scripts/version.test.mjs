@@ -83,10 +83,18 @@ test('check-version CLI passes on repo and rejects tag mismatch', () => {
   });
   assert.notEqual(bad.status, 0);
 
-  const goodTag = spawnSync(process.execPath, ['scripts/check-version.mjs', '--tag', 'v0.1.0'], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-  });
+  const goodTag = spawnSync(
+    process.execPath,
+    [
+      'scripts/check-version.mjs',
+      '--tag',
+      `v${JSON.parse(readFileSync(resolve(repoRoot, 'package.json'), 'utf8')).version}`,
+    ],
+    {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    },
+  );
   assert.equal(goodTag.status, 0, goodTag.stderr);
 });
 
