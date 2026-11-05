@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** Small stroke icons used by the shells (book, sparkle, comment, alert, lock, disk, save, check). */
 defineProps<{
-  name: 'book' | 'sparkle' | 'comment' | 'alert' | 'lock' | 'disk' | 'save' | 'check';
+  name: 'book' | 'sparkle' | 'comment' | 'alert' | 'lock' | 'disk' | 'save' | 'check' | 'download';
 }>();
 </script>
 
@@ -20,6 +20,7 @@ defineProps<{
     <path v-else-if="name === 'lock'" d="M4 7h8v6.5H4V7Zm1.5 0V5a2.5 2.5 0 0 1 5 0v2" />
     <path v-else-if="name === 'disk'" d="M2 4.5h12v7H2v-7ZM4.5 9h7" />
     <path v-else-if="name === 'save'" d="M3 2.5h8l2 2v9H3v-11Zm2 0v3.5h5V2.5M5 13.5v-4h6v4" />
+    <path v-else-if="name === 'download'" d="M8 3v6M5.5 7.5 8 10l2.5-2.5M4 13h8" />
     <path v-else d="m3.5 8.5 3 3 6-7" />
   </svg>
 </template>

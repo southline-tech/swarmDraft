@@ -5,6 +5,7 @@ import {
   AUTO_CHECK_DELAY_MS,
   initialUpdatePromptState,
   onCheckFailed,
+  onInstallFailed,
   onDismissManualMessage,
   onDownloadProgress,
   onLater,
@@ -121,12 +122,21 @@ export function createAppUpdater(
     },
     installPending: async (flushDraft) => {
       if (!pending || installing) return;
+      const update = pending;
       installing = true;
       state = onStartDownload(state);
       emit();
       try {
         await flushDraft();
-        await deps.downloadAndInstall(pending, (progress) => {
+      } catch (err) {
+        installing = false;
+        state = onUpdateAvailable(state, update.version, true);
+        console.error('Update install aborted: draft flush failed', err);
+        emit();
+        return;
+      }
+      try {
+        await deps.downloadAndInstall(update, (progress) => {
           state = onDownloadProgress(state, progress);
           emit();
         });
@@ -134,7 +144,8 @@ export function createAppUpdater(
       } catch (err) {
         installing = false;
         pending = null;
-        state = onCheckFailed(state, true, classifyUpdaterError(err));
+        state = onInstallFailed(state);
+        console.error('Update install failed', err);
         emit();
       }
     },

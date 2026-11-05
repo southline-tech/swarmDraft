@@ -2,7 +2,7 @@
 
 export const AUTO_CHECK_DELAY_MS = 5000;
 
-export type ManualCheckMessage = 'up-to-date' | 'offline' | 'error';
+export type ManualCheckMessage = 'up-to-date' | 'offline' | 'error' | 'install-failed';
 
 export type UpdatePromptMode = 'hidden' | 'available' | 'downloading' | 'manual-message';
 
@@ -71,6 +71,16 @@ export function onCheckFailed(
   };
 }
 
+export function onInstallFailed(state: UpdatePromptState): UpdatePromptState {
+  return {
+    ...state,
+    mode: 'manual-message',
+    version: null,
+    progress: null,
+    manualMessage: 'install-failed',
+  };
+}
+
 export function onLater(state: UpdatePromptState): UpdatePromptState {
   return {
     ...state,
@@ -115,9 +125,22 @@ export function manualMessageCopy(message: ManualCheckMessage): string {
       return "Couldn't check for updates. Check your connection and try again.";
     case 'error':
       return "Couldn't check for updates. Try again in a few minutes.";
+    case 'install-failed':
+      return "Couldn't install the update. Your work is saved — try again later.";
   }
 }
 
-export function availableMessage(version: string): string {
-  return `swarmDraft ${version} is available`;
+export function availableTitle(version: string): string {
+  return `swarmDraft ${version} is ready to install.`;
+}
+
+export function availableBody(): string {
+  return 'swarmDraft will restart. Your work is saved first.';
+}
+
+/** Esc on the update toast: Later when an update is offered, Got it on result toasts. */
+export function updatePromptEscapeAction(mode: UpdatePromptMode): 'later' | 'dismiss' | null {
+  if (mode === 'available') return 'later';
+  if (mode === 'manual-message') return 'dismiss';
+  return null;
 }

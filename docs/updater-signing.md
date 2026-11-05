@@ -15,7 +15,13 @@ The desktop app checks GitHub Releases for `latest.json` and installs signed upd
    - `TAURI_SIGNING_PRIVATE_KEY` — contents of the **private** key file.
    - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — key password, if any.
 
-3. The **public** key in `prompts-2026-11-04-310-updater.md` (Wave 2 Batch D) must match `plugins.updater.pubkey` in `apps/desktop/src-tauri/tauri.conf.json`. That value is safe to commit.
+3. The **public** key must match `plugins.updater.pubkey` in `apps/desktop/src-tauri/tauri.conf.json` (safe to commit). Source of truth: `~/.tauri/swarmdraft-updater.key.pub` or the **Signing key (done)** section in `prompts-2026-11-04-310-updater.md`. Sync from either path:
+
+   ```sh
+   node scripts/sync-updater-pubkey.mjs
+   ```
+
+   Or set `SWARMDRAFT_UPDATER_PUBKEY_FILE=/path/to/swarmdraft-updater.key.pub` when the default paths are elsewhere.
 
 4. Back up the private key offline. If it is lost, existing installs cannot verify future updates.
 

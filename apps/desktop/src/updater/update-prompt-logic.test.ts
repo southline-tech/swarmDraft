@@ -1,15 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
-  availableMessage,
+  availableBody,
+  availableTitle,
   initialUpdatePromptState,
   manualMessageCopy,
   onCheckFailed,
   onDismissManualMessage,
   onDownloadProgress,
+  onInstallFailed,
   onLater,
   onNoUpdate,
   onStartDownload,
   onUpdateAvailable,
+  updatePromptEscapeAction,
 } from './update-prompt-logic';
 
 describe('update prompt logic (#310)', () => {
@@ -49,6 +52,14 @@ describe('update prompt logic (#310)', () => {
     );
   });
 
+  it('install failure uses distinct copy', () => {
+    const next = onInstallFailed(onStartDownload(initialUpdatePromptState()));
+    expect(next.manualMessage).toBe('install-failed');
+    expect(manualMessageCopy('install-failed')).toBe(
+      "Couldn't install the update. Your work is saved — try again later.",
+    );
+  });
+
   it('download progress updates the bar', () => {
     let state = onStartDownload(onUpdateAvailable(initialUpdatePromptState(), '0.2.0', true));
     state = onDownloadProgress(state, 42);
@@ -61,7 +72,15 @@ describe('update prompt logic (#310)', () => {
     );
   });
 
-  it('available copy includes version', () => {
-    expect(availableMessage('1.2.3')).toBe('swarmDraft 1.2.3 is available');
+  it('available copy matches Designer spec', () => {
+    expect(availableTitle('1.2.3')).toBe('swarmDraft 1.2.3 is ready to install.');
+    expect(availableBody()).toBe('swarmDraft will restart. Your work is saved first.');
+  });
+
+  it('Escape maps to Later or dismiss on result toasts', () => {
+    expect(updatePromptEscapeAction('available')).toBe('later');
+    expect(updatePromptEscapeAction('manual-message')).toBe('dismiss');
+    expect(updatePromptEscapeAction('downloading')).toBeNull();
+    expect(updatePromptEscapeAction('hidden')).toBeNull();
   });
 });

@@ -78,6 +78,7 @@ import {
   type AppUpdaterHandle,
   type UpdatePromptState,
 } from './updater/app-updater';
+import { updatePromptEscapeAction } from './updater/update-prompt-logic';
 import OpeningProgress from './shells/OpeningProgress.vue';
 import ErrorCard from './shells/ErrorCard.vue';
 import PairingPrompt from './PairingPrompt.vue';
@@ -720,6 +721,18 @@ const appMenuShortcuts = computed(() => ({
 const menuField = (t: EventTarget | null) =>
   t instanceof HTMLElement && !!t.closest('input, textarea, select, [contenteditable=true]');
 
+function onUpdatePromptEscape(e: KeyboardEvent) {
+  if (e.key !== 'Escape' || menuField(e.target)) return;
+  const action = updatePromptEscapeAction(updatePrompt.value.mode);
+  if (action === 'later') {
+    e.preventDefault();
+    onUpdateLater();
+  } else if (action === 'dismiss') {
+    e.preventDefault();
+    onUpdateDismissManual();
+  }
+}
+
 function onAppMenuKey(e: KeyboardEvent) {
   if (preview.value) return;
   if (menuField(e.target)) return;
@@ -758,8 +771,12 @@ onMounted(() => {
   window.addEventListener('drop', blockFileNavigation);
   window.addEventListener('focus', reloadAgents);
   window.addEventListener('keydown', onAppMenuKey);
+  window.addEventListener('keydown', onUpdatePromptEscape);
   void refreshAgents();
-  stopAppMenuKeys = () => window.removeEventListener('keydown', onAppMenuKey);
+  stopAppMenuKeys = () => {
+    window.removeEventListener('keydown', onAppMenuKey);
+    window.removeEventListener('keydown', onUpdatePromptEscape);
+  };
 });
 onBeforeUnmount(() => {
   window.removeEventListener('dragover', blockFileNavigation);
@@ -1483,7 +1500,7 @@ defineExpose({ open, closeSession });
                 @click="() => void checkForUpdatesManual()"
               >
                 <span class="sh-mi-lead" aria-hidden="true"
-                  ><AppIcon name="check" class="app-menu-icon"
+                  ><AppIcon name="refresh" class="app-menu-icon"
                 /></span>
                 Check for updates…
               </button>

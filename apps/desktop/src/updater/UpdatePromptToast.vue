@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import ShellIcon from '../shells/ShellIcon.vue';
 import {
-  availableMessage,
+  availableBody,
+  availableTitle,
   manualMessageCopy,
   type ManualCheckMessage,
   type UpdatePromptMode,
 } from './update-prompt-logic';
 
-defineProps<{
+const props = defineProps<{
   mode: UpdatePromptMode;
   version: string | null;
   progress: number | null;
@@ -29,6 +30,8 @@ onMounted(() => {
   });
 });
 onBeforeUnmount(() => cancelAnimationFrame(frame));
+
+const progressLabel = computed(() => `${props.progress ?? 0}%`);
 </script>
 
 <template>
@@ -38,8 +41,13 @@ onBeforeUnmount(() => cancelAnimationFrame(frame));
       class="update-toast"
       data-test="update-toast-available"
     >
-      <span class="update-toast__icon" aria-hidden="true"><ShellIcon name="check" /></span>
-      <p class="update-toast__msg">{{ availableMessage(version) }}</p>
+      <span class="update-toast__icon update-toast__icon--info" aria-hidden="true"
+        ><ShellIcon name="download"
+      /></span>
+      <div class="update-toast__copy">
+        <p class="update-toast__title">{{ availableTitle(version) }}</p>
+        <p class="update-toast__body">{{ availableBody() }}</p>
+      </div>
       <div class="update-toast__actions">
         <button
           type="button"
@@ -59,11 +67,15 @@ onBeforeUnmount(() => cancelAnimationFrame(frame));
       class="update-toast"
       data-test="update-toast-progress"
     >
-      <span class="update-toast__icon" aria-hidden="true"><ShellIcon name="check" /></span>
+      <span class="update-toast__icon update-toast__icon--info" aria-hidden="true"
+        ><ShellIcon name="download"
+      /></span>
       <p class="update-toast__msg">Downloading update…</p>
       <progress
         class="update-toast__bar"
         data-test="update-progress"
+        aria-label="Downloading update"
+        :aria-valuetext="progressLabel"
         :value="progress ?? 0"
         max="100"
       />
@@ -107,13 +119,32 @@ onBeforeUnmount(() => cancelAnimationFrame(frame));
   background: var(--ct-success-bg);
   color: var(--ct-success);
 }
+.update-toast__icon--info {
+  background: color-mix(in srgb, var(--ct-accent) 14%, var(--ct-surface-raised));
+  color: var(--ct-accent);
+}
 .update-toast__icon--alert {
   background: var(--ct-warning-bg);
   color: var(--ct-warning);
 }
+.update-toast__copy {
+  flex: 1;
+  min-width: 0;
+}
+.update-toast__title {
+  margin: 0;
+  font-size: var(--ct-text-sm);
+  font-weight: var(--ct-weight-medium);
+}
+.update-toast__body {
+  margin: var(--ct-space-1) 0 0;
+  font-size: var(--ct-text-sm);
+  color: var(--ct-text-muted);
+}
 .update-toast__msg {
   flex: 1;
   margin: 0;
+  font-size: var(--ct-text-sm);
 }
 .update-toast__actions {
   display: flex;

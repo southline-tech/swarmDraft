@@ -49,6 +49,41 @@ describe('createAppUpdater (#310)', () => {
     expect(latest.manualMessage).toBe('offline');
   });
 
+  it('flush failure restores available prompt without install-failed copy', async () => {
+    const update = mockUpdate('9.9.9');
+    const d = deps({
+      checkForUpdate: vi.fn(async () => update),
+    });
+    let latest = createAppUpdater(d, () => {}).state();
+    const handle = createAppUpdater(d, (s) => {
+      latest = s;
+    });
+    await handle.manualCheck();
+    await handle.installPending(vi.fn(async () => {
+      throw new Error('save failed');
+    }));
+    expect(latest.mode).toBe('available');
+    expect(latest.manualMessage).toBeNull();
+    expect(d.downloadAndInstall).not.toHaveBeenCalled();
+  });
+
+  it('install failure shows install-failed message', async () => {
+    const update = mockUpdate('9.9.9');
+    const d = deps({
+      checkForUpdate: vi.fn(async () => update),
+      downloadAndInstall: vi.fn(async () => {
+        throw new Error('signature invalid');
+      }),
+    });
+    let latest = createAppUpdater(d, () => {}).state();
+    const handle = createAppUpdater(d, (s) => {
+      latest = s;
+    });
+    await handle.manualCheck();
+    await handle.installPending(vi.fn(async () => {}));
+    expect(latest.manualMessage).toBe('install-failed');
+  });
+
   it('install flushes then relaunches', async () => {
     const update = mockUpdate('9.9.9');
     const d = deps({

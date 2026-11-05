@@ -87,6 +87,9 @@ Run this consolidated pass in order; do not hand off until every line that appli
 Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
 
 - 2026-11-05 · #314 · PR #316 · NSIS sidebar 72px mark used simplified small SVG · `generate.py` sidebar uses `render(72)` (full 5-hex); header stays `render_small(36)`
+- 2026-11-04 · #310 · PR #318 · install failure reused check-for-updates copy · `install-failed` manual message + `onInstallFailed`; distinct install copy in `manualMessageCopy`
+- 2026-11-04 · #310 · PR #318 · update-available toast used success check + old copy · accent/download icon; `availableTitle` / `availableBody`; progress `aria-label` + `aria-valuetext`; Esc via `updatePromptEscapeAction`; menu `refresh` icon
+- 2026-11-04 · #310 · PR #318 · committed updater pubkey from agent-generated dev key, not `~/.tauri/swarmdraft-updater.key.pub` · sync with `node scripts/sync-updater-pubkey.mjs` from Brett's `.pub` or batch D prompt; never `tauri signer generate` a new pair for CI secrets
 - 2026-11-04 · #208 · PR #297 · bot feedback Esc silently denied · defer hides queue (`deferred` ref) without `deny`; hint copy; restore focus to opener
 - 2026-11-04 · #208 · PR #297 · excerpt sent without author opt-in on bot approve · `includeExcerpt` IPC flag; strip excerpt in `approve_feedback` when false; preview + unchecked checkbox in `FeedbackPrompt`
 - 2026-11-04 · #208 · PR #297 · global 20/hour feedback rate · per-agent 24h bot limit + `BOT_FEEDBACK_RATE_MESSAGE`; app writer limit 20/hour on `principal_kind = human`
