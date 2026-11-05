@@ -43,7 +43,7 @@ function importDigest(bytes: Uint8Array): string {
 
 const FIXTURE_DIGESTS: Record<(typeof FIXTURE_FILES)[number], string> = {
   'mock-manuscript.docx': 'a0b6655d6721b29bcafec2fb075d9975ad1554a806bd94131c2923d1926c4f7a',
-  'edge-false-positives.docx': 'a763798b768ef74240996a1b797c87363aa833c6335c47addf26c58dc34b3eaa',
+  'edge-false-positives.docx': 'b72082bce075450b69941dd6140c76cf17a1a04f0c1c574ddf44902361e6695d',
   'edge-no-headings.docx': 'ea2bf7851044ed53393a39694d96f624abf35bc91d320518a2cee845b3ee29b0',
   'edge-soft-breaks-only.docx': '85a12d1ffc720e3b47e2ff3776ad65955ec3c2e142af5ebff6932f23239a731f',
 };

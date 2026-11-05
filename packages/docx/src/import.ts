@@ -974,7 +974,7 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
   ctx.story = newStory();
   const paras = collectParagraphs(body, ctx);
   finishStory(ctx);
-  const roles0 = paras.map((p) => classify(p, report, false));
+  const roles0 = paras.map((p) => classify(p, new ReportBuilder(), false));
   const firstStructural0 = roles0.findIndex(
     (r) => r.kind === 'part' || r.kind === 'chapter' || r.kind === 'back',
   );
@@ -982,14 +982,14 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
   const plainPool = hasChapters0 && firstStructural0 >= 0 ? paras.slice(firstStructural0) : paras;
   const plainChapterSplit = plainPool.filter(plainChapterLine).length >= 2;
   const roles = paras.map((p) => classify(p, report, plainChapterSplit));
-  for (const [i, r] of roles.entries())
-    if (r.kind === 'chapter' && r.weak)
-      report.add(
-        'warning',
-        'ambiguous_chapter',
-        'Plain bold "Chapter N" line treated as a chapter title; please confirm',
-        paras[i]!.text.trim(),
-      );
+  for (const [i, r] of roles.entries()) {
+    if (r.kind !== 'chapter' || !r.weak) continue;
+    const p = paras[i]!;
+    const message = p.allBold
+      ? 'Plain bold "Chapter N" line treated as a chapter title; please confirm'
+      : 'Plain "CHAPTER N" line treated as a chapter title; please confirm';
+    report.add('warning', 'ambiguous_chapter', message, p.text.trim());
+  }
 
   const sections: ImportedSection[] = [];
   let seq = 0;
