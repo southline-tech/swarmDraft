@@ -32,6 +32,13 @@ export const ICONS = {
     'M12.2 5.8A4.5 4.5 0 0 0 4.8 4.2',
     'M3.8 10.2A4.5 4.5 0 0 0 11.2 11.8',
   ],
+  /** Generic document with a small W (#332); not a trademarked product logo. */
+  'word-doc': [
+    'M4.5 2.5h7l2 2v9.5H4.5V2.5z',
+    'M11.5 2.5V4.5H13.5',
+    'M6.5 7.2h1.1l.6 2.1.6-2.1H10',
+    'M6.5 11.2h3',
+  ],
 } as const satisfies Record<string, readonly string[]>;
 
 export type IconName = keyof typeof ICONS;

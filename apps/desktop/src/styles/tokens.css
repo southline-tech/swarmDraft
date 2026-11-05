@@ -139,6 +139,7 @@
   --ct-z-dropdown: 45;
   --ct-z-flyout: 46;
   --ct-z-modal: 50;
+  --ct-z-settings: 48;
   --ct-z-toast: 55;
 
   /* Focus: 2px ring, >=3:1 vs adjacent colors (6.1:1 on paper) */

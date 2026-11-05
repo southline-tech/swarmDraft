@@ -40,6 +40,7 @@ import {
 import { CONTINUOUS_REVIEW_NAV, CONTINUOUS_SCROLL_ROOT } from './continuous-review-nav';
 import type { AuthorFilter, ReviewChange } from './review/review-state';
 import { restoreWindowScroll } from './shell-chrome';
+import { clampScrollTop, type ReadingPosition } from './reading-position';
 
 const REVIEW_RAIL = '#continuous-review-rail';
 import { docWordCount } from './status/wordcount';
@@ -152,6 +153,7 @@ const emit = defineEmits<{
   'comment-resolve': [sectionId: string, threadId: string, resolved: boolean];
   'split-chapter': [payload: { blockIndex: number; title: string; removeLine: boolean }];
   'merge-prev-chapter': [];
+  'reading-position': [pos: ReadingPosition];
 }>();
 
 const suggestionsBySection = shallowRef(new Map<string, SuggestionItem[]>());
@@ -197,6 +199,8 @@ const bookChapterGroups = computed(() =>
 
 const caretPlaced = ref(false);
 let scrollTimer: ReturnType<typeof setTimeout> | undefined;
+let readingTimer: ReturnType<typeof setTimeout> | undefined;
+let restoreScrollPending: ReadingPosition | null = null;
 
 function bookWordsBeforeSection(sectionId: string): number {
   let before = 0;
@@ -371,6 +375,13 @@ provide(CONTINUOUS_REVIEW_NAV, {
 
 function onManuscriptScroll() {
   scheduleScrollPageEstimate();
+  clearTimeout(readingTimer);
+  readingTimer = setTimeout(() => {
+    const root = scrollRoot.value;
+    const id = props.selectedId;
+    if (!root || !id) return;
+    emit('reading-position', { sectionId: id, scrollTop: root.scrollTop });
+  }, 400);
   if (syncRaf) return;
   syncRaf = requestAnimationFrame(() => {
     syncRaf = 0;
@@ -424,6 +435,12 @@ watch(
       spyFromScroll = false;
       return;
     }
+    if (restoreScrollPending && restoreScrollPending.sectionId === id) {
+      const pos = restoreScrollPending;
+      restoreScrollPending = null;
+      void nextTick(() => applyScrollTop(pos.scrollTop));
+      return;
+    }
     if (id !== prev) void nextTick(() => scrollToSection(id));
   },
 );
@@ -462,6 +479,14 @@ function feedbackExcerpt(): string {
   return editors.value.get(id)?.feedbackExcerpt?.() ?? '';
 }
 
+function applyScrollTop(scrollTop: number) {
+  const root = scrollRoot.value;
+  if (!root) return;
+  const max = root.scrollHeight - root.clientHeight;
+  root.scrollTop = clampScrollTop(scrollTop, max);
+  restoreWindowScroll();
+}
+
 defineExpose({
   focusBody() {
     if (props.selectedId) focusSection(props.selectedId);
@@ -470,6 +495,15 @@ defineExpose({
   setZoom,
   setScrollPaddingBottom,
   feedbackExcerpt,
+  restoreReadingPosition(pos: ReadingPosition) {
+    restoreScrollPending = pos;
+    if (pos.sectionId !== props.selectedId) {
+      emit('update:selectedId', pos.sectionId);
+      return;
+    }
+    restoreScrollPending = null;
+    void nextTick(() => applyScrollTop(pos.scrollTop));
+  },
 });
 
 onMounted(async () => {
@@ -487,6 +521,7 @@ watch(ordered, async () => {
 });
 
 onBeforeUnmount(() => {
+  clearTimeout(readingTimer);
   observer?.disconnect();
   scrollRoot.value?.removeEventListener('scroll', onManuscriptScroll);
   clearTimeout(scrollTimer);

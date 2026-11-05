@@ -1856,11 +1856,11 @@ describe('home screen', () => {
     const again = mount(App);
     await flushPromises();
     expect(again.find('[data-test="home-welcome"]').exists()).toBe(false);
-    expect(again.find('[data-test="open-manuscript"]').text()).toContain('Import Word manuscript');
+    expect(again.find('[data-test="open-manuscript"]').text()).toContain('Import Word .docx');
     again.unmount();
   });
 
-  it('"Import Word manuscript" opens the Word file picker', async () => {
+  it('"Import Word .docx" opens the Word file picker', async () => {
     localStorage.setItem('swarmdraft.welcomed', '1');
     const w = mount(App, { attachTo: document.body });
     await flushPromises();
