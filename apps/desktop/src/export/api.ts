@@ -1,4 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import { errorLine } from '../errors/map-error';
+import { exportCopy } from '../copy-deck';
 
 /** Mirrors `export::ExportJob` in Rust. */
 export interface ExportJob {
@@ -69,13 +71,14 @@ export async function revealExportInFolder(filePath: string): Promise<void> {
 
 export function pandocDownloadStatusLabel(status: PandocDownloadStatus): string {
   if (!status.active) return '';
-  if (status.message) {
-    if (status.percent != null && status.phase === 'downloading') {
-      return `${status.message} ${status.percent}%`;
-    }
-    return status.message;
+  const raw = status.message ?? '';
+  let label: string = exportCopy.preparingWordExport;
+  if (/download/i.test(raw)) label = exportCopy.downloadingWordExport;
+  else if (/install/i.test(raw)) label = exportCopy.installingWordExport;
+  if (status.percent != null && status.phase === 'downloading') {
+    return `${label} ${status.percent}%`;
   }
-  return 'Preparing Pandoc…';
+  return label;
 }
 
 /** Poll until the job leaves queued/running or `deadline` passes. */
@@ -101,11 +104,18 @@ export async function waitForExportJob(
   return getExportJob(jobId);
 }
 
+export function exportFormatLabel(format: ExportJob['format']): string {
+  if (format === 'docx') return exportCopy.exportFormatWord;
+  if (format === 'epub') return exportCopy.exportFormatEpub;
+  return exportCopy.pdfLabel;
+}
+
 export function exportStatusLabel(job: ExportJob): string {
   if (job.status === 'queued') return 'Waiting to start…';
   if (job.status === 'running') return 'Exporting…';
   if (job.status === 'succeeded') return job.filePath ? 'Export saved.' : 'Export finished.';
-  return job.errorMessage ?? 'Export failed.';
+  if (job.errorMessage) return errorLine({ message: job.errorMessage }, 'export');
+  return errorLine('export failed', 'export');
 }
 
 export function exportJobPathLabel(job: ExportJob): string {

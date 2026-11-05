@@ -53,7 +53,6 @@ pnpm build
 
 echo "== 4 evidence screenshots =="
 "$NODE" scripts/copy-34-41-evidence.mjs
-ls -la "$ROOT/pr-evidence/34-41"
 
 echo "== 5 commit and push =="
 git add -A

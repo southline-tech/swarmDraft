@@ -20,6 +20,7 @@ export type ErrorCode =
   | 'not-found'
   | 'save-failed'
   | 'export-failed'
+  | 'word-export-unavailable'
   | 'pandoc-offline'
   | 'pandoc-checksum'
   | 'unknown';
@@ -93,9 +94,10 @@ const RULES: [ErrorCode, RegExp][] = [
   ['not-found', /^not found:|os error (2|3)\b|ENOENT|cannot find the (file|path)|no such file/i],
   ['pandoc-offline', /pandoc: offline:/i],
   ['pandoc-checksum', /pandoc: checksum:/i],
+  ['word-export-unavailable', /pandoc is not available|pandoc is not installed/i],
   [
     'export-failed',
-    /pandoc is not available|pandoc is not installed|pandoc: extract:|pandoc: override:|pdf export is not in this build|export failed/i,
+    /pandoc: extract:|pandoc: override:|pdf export is not in this build|export failed/i,
   ],
 ];
 

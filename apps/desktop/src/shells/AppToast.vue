@@ -39,8 +39,9 @@ onBeforeUnmount(() => cancelAnimationFrame(frame));
         ><ShellIcon :name="icon ?? 'check'"
       /></span>
       <p class="toast__msg">
-        <b v-if="lead">{{ lead }}</b
-        ><span v-if="lead" aria-hidden="true">&nbsp;</span>{{ message }}
+        <template v-if="lead"
+          ><b>{{ lead }}</b> </template
+        >{{ message }}
         <span v-if="detail" class="toast__detail">{{ detail }}</span>
       </p>
       <slot name="actions">

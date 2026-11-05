@@ -6,6 +6,7 @@ import { computed, onUnmounted, ref, watch } from 'vue';
 import { isTauri } from '@tauri-apps/api/core';
 import {
   exportApi,
+  exportFormatLabel,
   exportJobPathLabel,
   exportStatusLabel,
   pandocDownloadStatusLabel,
@@ -39,7 +40,7 @@ async function browsePandoc() {
   if (!isTauri()) return;
   const { open } = await import('@tauri-apps/plugin-dialog');
   const picked = await open({
-    title: exportCopy.choosePandoc,
+    title: exportCopy.chooseWordExportProgram,
     multiple: false,
     filters: [{ name: 'Program', extensions: ['exe', ''] }],
   });
@@ -170,14 +171,14 @@ onUnmounted(() => {
           </button>
         </div>
       </section>
-      <section class="st-card" aria-labelledby="ex-pandoc-override">
-        <h2 id="ex-pandoc-override" class="st-h2">{{ exportCopy.pandocHeading }}</h2>
+      <section class="st-card" aria-labelledby="ex-word-export-override">
+        <h2 id="ex-word-export-override" class="st-h2">{{ exportCopy.wordExportHeading }}</h2>
         <p class="st-muted st-desc">
-          {{ exportCopy.pandocIntro() }}
+          {{ exportCopy.wordExportIntro() }}
         </p>
         <div class="ex__pandoc-row">
           <label class="ex__pandoc-label" for="ex-pandoc-path">{{
-            exportCopy.pandocPathLabel
+            exportCopy.wordExportPathLabel
           }}</label>
           <div class="ex__pandoc-controls">
             <input
@@ -188,7 +189,7 @@ onUnmounted(() => {
               data-test="export-pandoc-path"
               autocomplete="off"
               spellcheck="false"
-              :placeholder="exportCopy.pandocPlaceholder"
+              :placeholder="exportCopy.wordExportPlaceholder"
               @change="persistPandocPath"
             />
             <button
@@ -207,7 +208,7 @@ onUnmounted(() => {
         <h2 id="ex-recent" class="st-h2">{{ exportCopy.recentHeading }}</h2>
         <ul class="ex__list" data-test="export-jobs">
           <li v-for="j in jobs" :key="j.id" class="ex__row">
-            <span class="ex__fmt">{{ j.format.toUpperCase() }}</span>
+            <span class="ex__fmt">{{ exportFormatLabel(j.format) }}</span>
             <div class="ex__detail">
               <span class="ex__state" :data-status="j.status">{{ exportStatusLabel(j) }}</span>
               <span v-if="exportJobPathLabel(j)" class="ex__path" data-test="export-job-path">{{

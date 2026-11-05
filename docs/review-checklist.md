@@ -328,3 +328,8 @@ Implementor: add one line here for every review, design or QA finding, in the sa
 - 2026-11-05 · #34/#41 · PR #327 combined review @ d04efd3 · `AgentsSettings` + shortcuts sheet chrome still inline · `agentsSettings` + `shortcutSheet` close/subtitle/footer in `copy-deck.ts`; scope test lists both Vue files
 - 2026-11-05 · #34/#41 · PR #327 combined review @ d04efd3 · release checklist rows 6–7 named missing PNGs · evidence column says manual on pilot build (matches `pr-evidence/34-41/README.md`)
 - 2026-11-05 · #34/#41 · PR #327 combined review @ d04efd3 · `Closes #34` with signing still open · PR uses `Part of #34` until Designer release sign-off
+- 2026-11-05 · #34/#41 · PR #327 Designer review @ bbba72d · evidence copied old PR PNGs; wrong update shot · `?evidence=34-41` harness + `pr-evidence/34-41/capture.mjs` @ 1280×800; update frame uses `UpdatePromptToast`
+- 2026-11-05 · #34/#41 · PR #327 Designer review @ bbba72d · footer overlap on save-status · drop `.shell__status` padding-left; save-status frame uses full shell + `columnTracks`
+- 2026-11-05 · #34/#41 · PR #327 Designer review @ bbba72d · MCP/Pandoc/DOCX on screen · `Connected`, Word export copy in `copy-deck.ts`; map export errors; allow `.docx` in banned list; `copy:check` MCP test
+- 2026-11-05 · #34/#41 · PR #327 Designer review @ bbba72d · error-card bare line · ob9 card in opening-shell scrim; empty-states shows review + comments
+- 2026-11-05 · #34/#41 · PR #327 Designer review @ bbba72d · toast space after “Your book is open.” · trailing space inside `AppToast` bold lead

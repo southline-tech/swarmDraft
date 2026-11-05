@@ -82,6 +82,7 @@ import Rad36WpEvidence from './evidence/Rad36WpEvidence.vue';
 import Rad38NotesEvidence from './evidence/Rad38NotesEvidence.vue';
 import Rad34InstallEvidence from './evidence/Rad34InstallEvidence.vue';
 import Rad310UpdateEvidence from './evidence/Rad310UpdateEvidence.vue';
+import Rad3441PilotEvidence from './evidence/Rad3441PilotEvidence.vue';
 import { readEvidenceQuery } from './evidence/evidence-routes';
 import AppToast from './shells/AppToast.vue';
 import UpdatePromptToast from './updater/UpdatePromptToast.vue';
@@ -1761,6 +1762,7 @@ defineExpose({ open, closeSession });
   <p v-if="evidence === '34-c6'" class="ev34-c6-boot" data-test="ev34-c6-bootstrap">Loading…</p>
   <Rad34InstallEvidence v-else-if="evidence === '34-install'" class="shell" />
   <Rad310UpdateEvidence v-else-if="evidence === '310-updater'" class="shell" />
+  <Rad3441PilotEvidence v-else-if="evidence === '34-41'" />
   <Rad60ReviewEvidence v-else-if="evidence === 'rad60-review'" class="shell" />
   <Rad38NotesEvidence v-else-if="evidence === '38-notes'" class="shell" />
   <Rad67EditorChromeEvidence v-else-if="evidence === 'rad67'" class="shell" />
@@ -2514,9 +2516,6 @@ body {
 }
 .shell__desk {
   min-width: 0;
-}
-.shell__status {
-  padding-left: var(--ct-space-4);
 }
 .toolbar-row {
   flex: none;

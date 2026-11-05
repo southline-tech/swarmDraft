@@ -56,14 +56,6 @@ function extractVueTemplate(vueText) {
 function findBanned(content, file) {
   const hits = [];
   for (const term of BANNED) {
-    if (term === '.docx') {
-      let idx = content.indexOf(term);
-      while (idx !== -1) {
-        hits.push({ file, term, index: idx });
-        idx = content.indexOf(term, idx + term.length);
-      }
-      continue;
-    }
     const re = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
     let m;
     while ((m = re.exec(content)) !== null) {

@@ -26,4 +26,18 @@ describe('copy jargon check (#34)', () => {
     }
     assert.equal(failed, true);
   });
+
+  it('fails when MCP appears in copy-deck.ts', () => {
+    const backup = readFileSync(deckPath, 'utf8');
+    writeFileSync(deckPath, 'export const probe = "MCP connected";\n');
+    let failed = false;
+    try {
+      execSync(`node "${checker}"`, { cwd: repoRoot, stdio: 'pipe' });
+    } catch {
+      failed = true;
+    } finally {
+      writeFileSync(deckPath, backup);
+    }
+    assert.equal(failed, true);
+  });
 });
