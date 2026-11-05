@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="swarmDraft is an open-source manuscript editor for Windows. AI editors suggest edits — you decide what stays."
+    />
+    <title>swarmDraft — manuscript editor for writers</title>
+    <link rel="icon" href="assets/mark-simplified.svg" type="image/svg+xml" />
+    <link rel="icon" href="assets/favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+    <link rel="stylesheet" href="css/tokens.css" />
+    <link rel="stylesheet" href="css/main.css" />
+    <script src="js/theme.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div class="shell">
+      <header class="site-header">
+        <a class="brand" href="/">
+          <img
+            class="brand__mark"
+            src="assets/logo.svg"
+            width="40"
+            height="40"
+            alt=""
+            aria-hidden="true"
+          />
+          <span>swarmDraft</span>
+        </a>
+        <div class="header-actions header-actions--compact">
+          <a
+            class="btn btn--primary btn--small header-download"
+            href="https://github.com/southline-tech/swarmDraft/releases/latest"
+            rel="noopener noreferrer"
+          >
+            Download
+          </a>
+        </div>
+        <div class="header-actions header-actions--wide">
+          <button
+            type="button"
+            class="btn btn--ghost btn--icon theme-toggle"
+            id="theme-toggle"
+            aria-pressed="false"
+            aria-label="Switch to dark theme"
+            hidden
+          >
+            <svg
+              class="theme-toggle__icon theme-toggle__icon--moon"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path fill="currentColor" d="M21 14.5A8.5 8.5 0 0 1 9.5 3.2 8.5 8.5 0 1 0 21 14.5Z" />
+            </svg>
+            <svg
+              class="theme-toggle__icon theme-toggle__icon--sun"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                fill="currentColor"
+                d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Zm0-16h1.5v3H12V2Zm0 17h1.5v3H12v-3ZM2 11h3v1.5H2V11Zm17 0h3v1.5h-3V11ZM4.2 4.2l2.1 2.1-1.1 1.1-2.1-2.1 1.1-1.1Zm13.5 13.5 2.1 2.1-1.1 1.1-2.1-2.1 1.1-1.1ZM19.8 4.2l-1.1 1.1-2.1-2.1 1.1-1.1 2.1 2.1ZM6.3 17.7l-1.1 1.1-2.1-2.1 1.1-1.1 2.1 2.1Z"
+              />
+            </svg>
+          </button>
+          <a
+            class="btn btn--ghost"
+            href="https://github.com/southline-tech/swarmDraft"
+            rel="noopener noreferrer"
+          >
+            GitHub
+          </a>
+          <a
+            class="btn btn--primary header-download"
+            href="https://github.com/southline-tech/swarmDraft/releases/latest"
+            rel="noopener noreferrer"
+          >
+            Download
+          </a>
+        </div>
+      </header>
+      <div class="header-subnav" aria-label="Site tools">
+        <button
+          type="button"
+          class="btn btn--ghost btn--icon theme-toggle theme-toggle--mobile"
+          id="theme-toggle-mobile"
+          aria-pressed="false"
+          aria-label="Switch to dark theme"
+          hidden
+        >
+          <svg
+            class="theme-toggle__icon theme-toggle__icon--moon"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path fill="currentColor" d="M21 14.5A8.5 8.5 0 0 1 9.5 3.2 8.5 8.5 0 1 0 21 14.5Z" />
+          </svg>
+          <svg
+            class="theme-toggle__icon theme-toggle__icon--sun"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              fill="currentColor"
+              d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Zm0-16h1.5v3H12V2Zm0 17h1.5v3H12v-3ZM2 11h3v1.5H2V11Zm17 0h3v1.5h-3V11ZM4.2 4.2l2.1 2.1-1.1 1.1-2.1-2.1 1.1-1.1Zm13.5 13.5 2.1 2.1-1.1 1.1-2.1-2.1 1.1-1.1ZM19.8 4.2l-1.1 1.1-2.1-2.1 1.1-1.1 2.1 2.1ZM6.3 17.7l-1.1 1.1-2.1-2.1 1.1-1.1 2.1 2.1Z"
+            />
+          </svg>
+        </button>
+        <a
+          class="btn btn--ghost btn--icon"
+          href="https://github.com/southline-tech/swarmDraft"
+          rel="noopener noreferrer"
+          aria-label="GitHub repository"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M12 2C6.48 2 2 6.58 2 12.26c0 4.52 2.87 8.35 6.84 9.7.5.1.68-.22.68-.49 0-.24-.01-.87-.01-1.7-2.78.62-3.37-1.36-3.37-1.36-.45-1.17-1.12-1.48-1.12-1.48-.92-.64.07-.63.07-.63 1.02.07 1.55 1.06 1.55 1.06.9 1.56 2.36 1.11 2.94.85.09-.67.35-1.11.64-1.37-2.22-.26-4.56-1.13-4.56-5.02 0-1.11.39-2.01 1.03-2.72-.1-.26-.45-1.31.1-2.73 0 0 .84-.27 2.75 1.04A9.3 9.3 0 0 1 12 6.84c.85.004 1.71.12 2.51.34 1.91-1.31 2.75-1.04 2.75-1.04.55 1.42.2 2.47.1 2.73.64.71 1.03 1.61 1.03 2.72 0 3.9-2.34 4.76-4.57 5.02.36.32.68.94.68 1.9 0 1.37-.01 2.47-.01 2.8 0 .27.18.59.69.49A10.03 10.03 0 0 0 22 12.26C22 6.58 17.52 2 12 2Z"
+            />
+          </svg>
+        </a>
+      </div>
+
+      <main id="main">
+        <section class="hero" aria-labelledby="hero-title">
+          <div class="hero__copy">
+            <p class="hero__eyebrow">Open source · Windows</p>
+            <h1 class="hero__title" id="hero-title">
+              Write your book. Let AI editors suggest — you decide.
+            </h1>
+            <p class="hero__lead">
+              swarmDraft keeps your book on your machine. AI editors suggest edits you accept or
+              reject — nothing silently changes your text.
+            </p>
+            <div class="hero__cta">
+              <a
+                class="btn btn--primary"
+                href="https://github.com/southline-tech/swarmDraft/releases/latest"
+                rel="noopener noreferrer"
+              >
+                Download latest release
+              </a>
+              <a
+                class="btn btn--ghost"
+                href="https://github.com/southline-tech/swarmDraft"
+                rel="noopener noreferrer"
+              >
+                View source
+              </a>
+            </div>
+            <p class="hero__note">
+              <strong>Unsigned Windows build:</strong> SmartScreen may show “Windows protected your
+              PC.” Click <strong>More info</strong>, then <strong>Run anyway</strong>.
+              <a
+                href="https://github.com/southline-tech/swarmDraft/blob/main/docs/install-kim.md"
+                rel="noopener noreferrer"
+                >Full install steps</a
+              >
+            </p>
+          </div>
+          <figure class="hero-preview" aria-label="Example manuscript with editor suggestions">
+            <div class="hero-preview__chrome">Track changes on</div>
+            <div class="hero-preview__page">
+              <p class="hero-preview__chapter">Chapter three</p>
+              <h2 class="hero-preview__h1">The lamp room</h2>
+              <p class="hero-preview__p">
+                Mara closed the door against the wind and
+                <span class="suggest-delete">stepped</span>
+                <span class="suggest-insert"> slipped</span>
+                into the warm hush of the lamp room.
+              </p>
+              <p class="hero-preview__p">
+                Three AI editors had left suggestions overnight —
+                <span class="suggest-insert">each one waiting for her yes or no</span>.
+              </p>
+            </div>
+          </figure>
+        </section>
+
+        <section class="features" aria-labelledby="features-title">
+          <h2 class="section-title" id="features-title">Made for long-form writing</h2>
+          <p class="section-lead">
+            Chapters, outline and review stay together while AI editors leave suggestions you can
+            keep or skip.
+          </p>
+          <ul class="feature-grid">
+            <li class="feature-card">
+              <h3>Suggestions, never rewrites</h3>
+              <p>
+                Every AI edit shows up as a tracked suggestion. Accept what helps, reject what
+                doesn’t — your manuscript only changes when you say so.
+              </p>
+            </li>
+            <li class="feature-card">
+              <h3>Your book stays on your computer</h3>
+              <p>
+                Saves as you go; the original Word file is never changed. Your chapters and settings
+                stay on your PC, not in someone else’s cloud.
+              </p>
+            </li>
+            <li class="feature-card">
+              <h3>Bring your own AI editor</h3>
+              <p>
+                Connect editor bots safely; each gets its own key, nothing leaves your machine. You
+                choose which tools work on your book.
+              </p>
+            </li>
+            <li class="feature-card">
+              <h3>Free and open source</h3>
+              <p>
+                Download, inspect, and improve the app on GitHub. Installers ship from Releases;
+                this site links there instead of hosting large files.
+              </p>
+            </li>
+          </ul>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <ul class="footer-links">
+          <li>
+            <a
+              href="https://github.com/southline-tech/swarmDraft/releases/latest"
+              rel="noopener noreferrer"
+              >Download</a
+            >
+          </li>
+          <li>
+            <a href="https://github.com/southline-tech/swarmDraft" rel="noopener noreferrer"
+              >GitHub</a
+            >
+          </li>
+          <li>
+            <a
+              href="https://github.com/southline-tech/swarmDraft/blob/main/docs/install-kim.md"
+              rel="noopener noreferrer"
+              >Install guide</a
+            >
+          </li>
+          <li>
+            <a
+              href="https://github.com/southline-tech/swarmDraft/issues/new"
+              rel="noopener noreferrer"
+              >Send feedback (GitHub issue)</a
+            >
+          </li>
+        </ul>
+        <p class="footer-copy">© Radiance Lux Technologies LLC. swarmDraft is open source.</p>
+      </footer>
+    </div>
+  </body>
+</html>
