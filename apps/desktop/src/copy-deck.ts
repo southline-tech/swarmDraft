@@ -274,6 +274,51 @@ export const agentConnection = {
   lastActiveDays: (days: number) => `Last active ${days} d ago`,
 } as const;
 
+/** Settings › Agents page (#99, #187, #192). */
+export const agentsSettings = {
+  pageTitle: 'Agents',
+  lede: 'Agents are helpers that work on your book through a key you give them. They can read, comment and suggest — accepting or rejecting suggestions is always up to you.',
+  newKeyForPrefix: 'New key for',
+  tokenDescBold: "Copy this key now. This key won't be shown again.",
+  tokenDescRest: "Paste it into the agent's setup.",
+  newAgentKeyAria: 'New agent key',
+  copy: 'Copy',
+  copied: 'Copied',
+  copyFailed: "Couldn't copy automatically. The key is selected above; press Ctrl+C to copy it.",
+  done: 'Done',
+  addAgentHeading: 'Add an agent',
+  agentNameAria: 'Agent name',
+  agentColorAria: 'Agent color',
+  addAgentButton: 'Add agent',
+  newKeysCanLegend: 'New keys can',
+  scopeHint: {
+    read: 'see your books',
+    comment: 'leave comments',
+    suggest: 'propose edits',
+  },
+  yourAgentsHeading: 'Your agents',
+  noAgentsYet: 'No agents yet.',
+  newKeyButton: 'New key',
+  removeAgent: 'Remove agent',
+  lastUsedNever: 'never',
+  tokenMetaMid: ' · last used ',
+  turnedOff: 'Turned off',
+  turnOffKey: 'Turn off key',
+  removedAgentsToggle: (count: number) => `Removed agents (${count})`,
+  removedHelp:
+    'Removed agents stay listed only while they still have suggestions or comments in your books. Name and color stay so old marks keep their attribution.',
+  removedFallback: 'Removed',
+} as const;
+
+/** User-facing "Removed Oct 30" from an ISO revoked_at timestamp (#192). */
+export function formatAgentRemovedDate(revokedAt: string | null): string {
+  if (!revokedAt) return agentsSettings.removedFallback;
+  const ms = Date.parse(revokedAt);
+  if (Number.isNaN(ms)) return agentsSettings.removedFallback;
+  const label = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(ms);
+  return `${agentsSettings.removedFallback} ${label}`;
+}
+
 export const profileSave = {
   genericError: "Couldn't save your name and color on this computer. Try again.",
 } as const;
@@ -336,7 +381,12 @@ export const shortcutSheet = {
   focusMode: 'Focus mode',
   exitFocusMode: 'Exit focus mode',
   toggleSidebars: 'Toggle sidebars',
-  escToClose: 'Press Esc to close',
+  escClosePrefix: 'Press ',
+  escKeyLabel: 'Esc',
+  escCloseSuffix: ' to close',
+  closeAriaLabel: 'Close keyboard shortcuts',
+  windowsConventionsLead: 'Windows conventions. Press ',
+  windowsConventionsTrail: ' any time to open this sheet.',
   sheetTitle: 'Keyboard shortcuts',
 } as const;
 

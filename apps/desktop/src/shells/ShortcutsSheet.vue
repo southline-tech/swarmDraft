@@ -49,7 +49,7 @@ onBeforeUnmount(() => opener?.focus?.());
           type="button"
           class="sh-tbtn sh-icon"
           style="margin-left: auto"
-          aria-label="Close keyboard shortcuts"
+          :aria-label="shortcutSheet.closeAriaLabel"
           data-test="shortcuts-close"
           @click="emit('close')"
         >
@@ -57,8 +57,9 @@ onBeforeUnmount(() => opener?.focus?.());
         </button>
       </div>
       <p class="sh-subt">
-        Windows conventions. Press {{ MANUSCRIPT_SHORTCUTS.shortcutsSheet }} any time to open this
-        sheet.
+        {{ shortcutSheet.windowsConventionsLead
+        }}<kbd class="sh-kbd">{{ MANUSCRIPT_SHORTCUTS.shortcutsSheet }}</kbd
+        >{{ shortcutSheet.windowsConventionsTrail }}
       </p>
       <div class="sh-cols">
         <section v-for="g in GROUPS" :key="g.title">
@@ -71,7 +72,10 @@ onBeforeUnmount(() => opener?.focus?.());
           </div>
         </section>
       </div>
-      <p class="sh-foot">{{ shortcutSheet.escToClose }}</p>
+      <p class="sh-foot">
+        {{ shortcutSheet.escClosePrefix }}<kbd class="sh-kbd">{{ shortcutSheet.escKeyLabel }}</kbd
+        >{{ shortcutSheet.escCloseSuffix }}
+      </p>
     </div>
   </div>
 </template>

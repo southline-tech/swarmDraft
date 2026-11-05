@@ -224,7 +224,7 @@ defineExpose({ focusOpen, focusWelcome });
   box-sizing: border-box;
   min-height: var(--ct-space-12);
   margin-top: var(--ct-space-2);
-  padding: 28px;
+  padding: var(--ct-space-8);
   border: 2px dashed var(--ct-border-strong);
   border-radius: var(--ct-radius-lg);
   color: var(--ct-text-muted);

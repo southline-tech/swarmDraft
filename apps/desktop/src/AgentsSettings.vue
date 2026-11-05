@@ -17,6 +17,7 @@ import {
   type AgentsApi,
   type TokenInfo,
 } from './backend';
+import { agentsSettings, formatAgentRemovedDate } from './copy-deck';
 
 const props = withDefaults(
   defineProps<{
@@ -117,17 +118,7 @@ async function refresh() {
 const activeAgents = computed(() => agents.value.filter((a) => !a.revokedAt));
 const removedAgents = computed(() => agents.value.filter((a) => a.revokedAt));
 
-const REMOVED_HELP =
-  'Removed agents stay listed only while they still have suggestions or comments in your books. Name and color stay so old marks keep their attribution.';
-
-/** User-facing "Removed Oct 30" from an ISO revoked_at timestamp (#192). */
-function formatRemovedDate(revokedAt: string | null): string {
-  if (!revokedAt) return 'Removed';
-  const ms = Date.parse(revokedAt);
-  if (Number.isNaN(ms)) return 'Removed';
-  const label = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(ms);
-  return `Removed ${label}`;
-}
+const SCOPE_HINT = agentsSettings.scopeHint;
 
 const create = () =>
   guard(async () => {
@@ -170,12 +161,6 @@ const revokeAgent = (id: string) =>
     await refresh();
   });
 
-const SCOPE_HINT: Record<AgentScope, string> = {
-  read: 'see your books',
-  comment: 'leave comments',
-  suggest: 'propose edits',
-};
-
 /** Tick every 30s so relative MCP times stay fresh (#188 ap2). */
 const statusTick = ref(0);
 let statusTimer: ReturnType<typeof setInterval> | undefined;
@@ -217,10 +202,9 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="agents">
-    <h1 class="st-h1">Agents</h1>
+    <h1 class="st-h1">{{ agentsSettings.pageTitle }}</h1>
     <p class="st-muted st-sub">
-      Agents are helpers that work on your book through a key you give them. They can read, comment
-      and suggest — accepting or rejecting suggestions is always up to you.
+      {{ agentsSettings.lede }}
     </p>
     <section
       v-if="shownToken"
@@ -229,17 +213,18 @@ onBeforeUnmount(() => {
       data-test="token-once"
     >
       <h2 id="ag-once" class="st-h2">
-        New key for <bdi dir="auto">{{ shownToken.agentName }}</bdi>
+        {{ agentsSettings.newKeyForPrefix }}
+        <bdi dir="auto">{{ shownToken.agentName }}</bdi>
       </h2>
       <p class="st-desc">
-        <b>Copy this key now. This key won't be shown again.</b> Paste it into the agent's setup.
+        <b>{{ agentsSettings.tokenDescBold }}</b> {{ agentsSettings.tokenDescRest }}
       </p>
       <div class="ag__keyrow">
         <input
           ref="tokenInput"
           class="st-inp st-mono token-value"
           data-test="token-value"
-          aria-label="New agent key"
+          :aria-label="agentsSettings.newAgentKeyAria"
           readonly
           autocomplete="off"
           autocapitalize="off"
@@ -255,38 +240,51 @@ onBeforeUnmount(() => {
           data-test="copy-token"
           @click="copyToken"
         >
-          Copy
+          {{ agentsSettings.copy }}
         </button>
         <span role="status" class="ag__copied">
           <template v-if="copied">
             <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
               <path d="m3.5 8.5 3 3 6-7" />
             </svg>
-            <span data-test="copied">Copied</span>
+            <span data-test="copied">{{ agentsSettings.copied }}</span>
           </template>
         </span>
       </div>
       <p v-if="copyFailed" class="ag__error" role="alert" data-test="copy-failed">
-        Couldn't copy automatically. The key is selected above; press Ctrl+C to copy it.
+        {{ agentsSettings.copyFailed }}
       </p>
       <div class="ag__done">
         <button type="button" class="st-btn" data-test="token-done" @click="clearToken">
-          Done
+          {{ agentsSettings.done }}
         </button>
       </div>
     </section>
     <section class="st-card" aria-labelledby="ag-add">
-      <h2 id="ag-add" class="st-h2">Add an agent</h2>
+      <h2 id="ag-add" class="st-h2">{{ agentsSettings.addAgentHeading }}</h2>
       <form class="ag__form" data-test="create-agent" @submit.prevent="create">
-        <input v-model="name" class="st-inp" aria-label="Agent name" maxlength="64" required />
-        <input v-model="color" class="ag__color" aria-label="Agent color" type="color" />
-        <button type="submit" class="st-btn st-btn--primary">Add agent</button>
+        <input
+          v-model="name"
+          class="st-inp"
+          :aria-label="agentsSettings.agentNameAria"
+          maxlength="64"
+          required
+        />
+        <input
+          v-model="color"
+          class="ag__color"
+          :aria-label="agentsSettings.agentColorAria"
+          type="color"
+        />
+        <button type="submit" class="st-btn st-btn--primary">
+          {{ agentsSettings.addAgentButton }}
+        </button>
       </form>
       <p role="alert" class="ag__error">
         <span v-if="error" data-test="error">{{ error }}</span>
       </p>
       <fieldset class="ag__scopes">
-        <legend class="ag__legend">New keys can</legend>
+        <legend class="ag__legend">{{ agentsSettings.newKeysCanLegend }}</legend>
         <label v-for="s in AGENT_SCOPES" :key="s" class="ag__cb">
           <input v-model="scopes" type="checkbox" :value="s" />
           <span
@@ -296,9 +294,9 @@ onBeforeUnmount(() => {
       </fieldset>
     </section>
     <section class="st-card" aria-labelledby="ag-list">
-      <h2 id="ag-list" class="st-h2">Your agents</h2>
+      <h2 id="ag-list" class="st-h2">{{ agentsSettings.yourAgentsHeading }}</h2>
       <p v-if="!activeAgents.length && !removedAgents.length" class="st-muted st-desc">
-        No agents yet.
+        {{ agentsSettings.noAgentsYet }}
       </p>
       <ul class="ag__list">
         <li v-for="a in activeAgents" :key="a.id" class="ag__agent" data-test="agent">
@@ -318,7 +316,7 @@ onBeforeUnmount(() => {
               <span>{{ agentMcpStatus(a).text }}</span>
             </p>
             <button type="button" class="st-btn st-btn--s" data-test="mint" @click="mint(a.id)">
-              New key
+              {{ agentsSettings.newKeyButton }}
             </button>
             <button
               type="button"
@@ -326,15 +324,18 @@ onBeforeUnmount(() => {
               data-test="revoke-agent"
               @click="revokeAgent(a.id)"
             >
-              Remove agent
+              {{ agentsSettings.removeAgent }}
             </button>
           </div>
           <ul class="ag__tokens">
             <li v-for="t in tokens[a.id] ?? []" :key="t.id" class="ag__tok" data-test="token">
               <code class="st-mono">{{ t.prefix }}…</code>
-              <span>{{ t.scopes.join(', ') }} · last used {{ t.lastUsedAt ?? 'never' }}</span>
+              <span
+                >{{ t.scopes.join(', ') }}{{ agentsSettings.tokenMetaMid
+                }}{{ t.lastUsedAt ?? agentsSettings.lastUsedNever }}</span
+              >
               <span class="ag__sp"></span>
-              <em v-if="t.revokedAt">Turned off</em>
+              <em v-if="t.revokedAt">{{ agentsSettings.turnedOff }}</em>
               <button
                 v-else
                 type="button"
@@ -342,7 +343,7 @@ onBeforeUnmount(() => {
                 data-test="revoke-token"
                 @click="revokeToken(t.id)"
               >
-                Turn off key
+                {{ agentsSettings.turnOffKey }}
               </button>
             </li>
           </ul>
@@ -361,7 +362,7 @@ onBeforeUnmount(() => {
           @keydown.space.prevent="removedOpen = !removedOpen"
         >
           <span class="ag__removed-chevron" aria-hidden="true">{{ removedOpen ? '▾' : '▸' }}</span>
-          Removed agents ({{ removedAgents.length }})
+          {{ agentsSettings.removedAgentsToggle(removedAgents.length) }}
         </button>
         <div
           v-if="removedOpen"
@@ -384,11 +385,13 @@ onBeforeUnmount(() => {
                 <b class="ag__name"
                   ><bdi dir="auto">{{ a.name }}</bdi></b
                 >
-                <span class="st-muted ag__removed-date">{{ formatRemovedDate(a.revokedAt) }}</span>
+                <span class="st-muted ag__removed-date">{{
+                  formatAgentRemovedDate(a.revokedAt)
+                }}</span>
               </div>
             </li>
           </ul>
-          <p class="st-muted st-desc ag__removed-help">{{ REMOVED_HELP }}</p>
+          <p class="st-muted st-desc ag__removed-help">{{ agentsSettings.removedHelp }}</p>
         </div>
       </div>
     </section>

@@ -12,20 +12,20 @@ Designer and PM sign-off before the author receives a pilot build. Record sign-o
 
 Capture one screenshot per row in `pr-evidence/34-41/` (no mockups). Compare each screen to its mockup frame where the issue links one.
 
-| #   | Check                                  | Evidence                         |
-| --- | -------------------------------------- | -------------------------------- |
-| 1   | Home welcome (first run)               | `welcome.png`                    |
-| 2   | Import / open book                     | `import.png`                     |
-| 3   | Opening progress while import runs     | `opening-progress.png`           |
-| 4   | Editor with manuscript loaded          | `editor.png`                     |
-| 5   | Autosave / save status in footer       | `save-status.png`                |
-| 6   | Reopen last book after restart         | `reopen.png` (manual note in PR) |
-| 7   | Save and reopen a `.draft`             | `draft.png` (manual note in PR)  |
-| 8   | In-app update prompt (#310)            | `update-prompt.png`              |
-| 9   | Error cards (plain language, ob9)      | `error-card.png`                 |
-| 10  | Empty states (review, comments, notes) | `empty-states.png`               |
-| 11  | Settings › Export (EPUB / Word)        | `export-settings.png`            |
-| 12  | Pairing / Agents settings              | `agents.png`                     |
+| #   | Check                                  | Evidence                       |
+| --- | -------------------------------------- | ------------------------------ |
+| 1   | Home welcome (first run)               | `welcome.png`                  |
+| 2   | Import / open book                     | `import.png`                   |
+| 3   | Opening progress while import runs     | `opening-progress.png`         |
+| 4   | Editor with manuscript loaded          | `editor.png`                   |
+| 5   | Autosave / save status in footer       | `save-status.png`              |
+| 6   | Reopen last book after restart         | Manual on pilot build (see PR) |
+| 7   | Save and reopen a `.draft`             | Manual on pilot build (see PR) |
+| 8   | In-app update prompt (#310)            | `update-prompt.png`            |
+| 9   | Error cards (plain language, ob9)      | `error-card.png`               |
+| 10  | Empty states (review, comments, notes) | `empty-states.png`             |
+| 11  | Settings › Export (EPUB / Word)        | `export-settings.png`          |
+| 12  | Pairing / Agents settings              | `agents.png`                   |
 
 ## Install and data safety
 

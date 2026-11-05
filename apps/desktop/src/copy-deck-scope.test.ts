@@ -18,6 +18,8 @@ const MUST_IMPORT = [
   'comments/CommentsPanel.vue',
   'notes/StoryNotesPanel.vue',
   'PairingPrompt.vue',
+  'AgentsSettings.vue',
+  'shells/ShortcutsSheet.vue',
 ];
 
 describe('copy-deck wiring (#34)', () => {

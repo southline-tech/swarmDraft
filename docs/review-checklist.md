@@ -325,3 +325,6 @@ Implementor: add one line here for every review, design or QA finding, in the sa
 - 2026-11-05 · #302 · PR #325 combined review @ 1de1ff4 · History restore discarded unsaved edits · flush + save-before-restore; confirm copy; error says book unchanged
 - 2026-11-05 · #302 · PR #325 combined review @ 1de1ff4 · restore commit message raw unix · `format_when_human` on restored oid; test `restore_commit_message_uses_human_datetime`
 - 2026-11-05 · #302 · PR #325 combined review @ 1de1ff4 · History panel inline dialog a11y · Teleport `st-dlg-scrim`, focus trap, Esc, return focus to File → History trigger
+- 2026-11-05 · #34/#41 · PR #327 combined review @ d04efd3 · `AgentsSettings` + shortcuts sheet chrome still inline · `agentsSettings` + `shortcutSheet` close/subtitle/footer in `copy-deck.ts`; scope test lists both Vue files
+- 2026-11-05 · #34/#41 · PR #327 combined review @ d04efd3 · release checklist rows 6–7 named missing PNGs · evidence column says manual on pilot build (matches `pr-evidence/34-41/README.md`)
+- 2026-11-05 · #34/#41 · PR #327 combined review @ d04efd3 · `Closes #34` with signing still open · PR uses `Part of #34` until Designer release sign-off

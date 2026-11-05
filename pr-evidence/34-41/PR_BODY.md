@@ -7,7 +7,7 @@
 
 ## Linked issues
 
-Closes #34
+Part of #34 (copy deck, jargon CI, release checklist, and pilot evidence; code signing / SmartScreen remains on #34)
 
 Part of #41 (pilot flow + release gate docs; **template marketplace** and **self-hosted relay** remain After MVP — leave #41 open for those)
 
