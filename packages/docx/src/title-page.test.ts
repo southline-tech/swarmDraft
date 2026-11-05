@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { displayTitleFromManuscriptLine, headingsMatch, parseTitlePageMeta } from './title-page';
+import {
+  displayTitleFromManuscriptLine,
+  headingsMatch,
+  parseTitlePageMeta,
+  titlePageOpeningEnd,
+} from './title-page';
 
 describe('title page (#235)', () => {
   it('reads centered all-caps title, not contact block', () => {
@@ -22,5 +27,20 @@ describe('title page (#235)', () => {
 
   it('matches chapter headings case-insensitively', () => {
     expect(headingsMatch('Chapter One', 'CHAPTER ONE')).toBe(true);
+  });
+
+  it('titlePageOpeningEnd stops at first body paragraph (#309)', () => {
+    const paras = [
+      { text: 'TITLE', centered: true, maxSize: 32, allBold: true, indLeft: 0 },
+      { text: 'by Name', centered: true, maxSize: 24, allBold: false, indLeft: 0 },
+      {
+        text: 'First chapter prose starts here with a long enough sentence to count as body.',
+        centered: false,
+        maxSize: 24,
+        allBold: false,
+        indLeft: 0,
+      },
+    ];
+    expect(titlePageOpeningEnd(paras)).toBe(2);
   });
 });
