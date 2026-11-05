@@ -12,10 +12,10 @@ const BASE = 'http://127.0.0.1:1420';
 const SHOTS = [
   ['c5-welcome', 'light', 'c5-first-run-welcome-light.png'],
   ['c5-welcome', 'dark', 'c5-first-run-welcome-dark.png'],
-  ['c6-open', 'light', 'c6-second-launch-open-light.png'],
+  ['c6', 'light', 'c6-second-launch-open-light.png', '34-c6'],
   ['c7-review-empty', 'light', 'c7-empty-review-light.png'],
-  ['c8-save-failure', 'light', 'c8-save-failure-light.png'],
-  ['c8-save-failure', 'dark', 'c8-save-failure-dark.png'],
+  ['c8-editor-save-failure', 'light', 'c8-save-failure-light.png'],
+  ['c8-editor-save-failure', 'dark', 'c8-save-failure-dark.png'],
   ['status-saved', 'light', 'status-saved-just-now-light.png'],
   ['error-not-word', 'light', 'error-not-word-light.png'],
   ['error-file-locked', 'light', 'error-file-locked-light.png'],
@@ -48,6 +48,13 @@ async function waitForServer(maxMs = 120_000) {
   throw new Error(`Dev server missing at ${BASE}`);
 }
 
+function shotUrl(frame, theme, evidenceRoute) {
+  if (evidenceRoute === '34-c6') {
+    return `${BASE}/?evidence=34-c6&theme=${theme}`;
+  }
+  return `${BASE}/?evidence=34-install&frame=${frame}&theme=${theme}`;
+}
+
 function shot(chrome, url, outPath) {
   return new Promise((ok, fail) => {
     const child = spawn(
@@ -57,6 +64,7 @@ function shot(chrome, url, outPath) {
         '--disable-gpu',
         '--hide-scrollbars',
         '--window-size=1280,800',
+        '--virtual-time-budget=8000',
         `--screenshot=${outPath}`,
         url,
       ],
@@ -78,9 +86,9 @@ const dev = spawn('pnpm', ['dev:web'], {
 try {
   await waitForServer();
   const chrome = chromeBin();
-  for (const [frame, theme, file] of SHOTS) {
-    const url = `${BASE}/?evidence=34-install&frame=${frame}&theme=${theme}`;
-    await shot(chrome, url, resolve(ROOT, file));
+  for (const row of SHOTS) {
+    const [frame, theme, file, route] = row;
+    await shot(chrome, shotUrl(frame, theme, route), resolve(ROOT, file));
     console.log('wrote', file);
   }
 } finally {

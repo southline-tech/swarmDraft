@@ -37,6 +37,7 @@ async function onSaveCopy() {
 <template>
   <div v-if="state.failing && state.error" class="save-failure" data-test="save-failure">
     <ErrorCard
+      :key="`${state.error.title}|${state.error.message}`"
       variant="banner"
       role="alert"
       icon="save"

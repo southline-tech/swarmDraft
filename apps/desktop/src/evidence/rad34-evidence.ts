@@ -1,9 +1,8 @@
 /** Designer / PM evidence (#34 Batch B): `?evidence=34-install&frame=…&theme=light|dark`. */
 export const RAD34_FRAMES = [
   'c5-welcome',
-  'c6-open',
   'c7-review-empty',
-  'c8-save-failure',
+  'c8-editor-save-failure',
   'status-saved',
   'error-not-word',
   'error-file-locked',

@@ -52,7 +52,7 @@ async function focusWelcome() {
 }
 function onWelcomeEnter(e: KeyboardEvent) {
   if (props.step !== 'welcome' || e.key !== 'Enter' || e.repeat) return;
-  if (e.target instanceof HTMLButtonElement || e.target instanceof HTMLAnchorElement) return;
+  if (e.target !== e.currentTarget) return;
   e.preventDefault();
   emit('get-started');
 }
