@@ -2,14 +2,33 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$ROOT/../.." && pwd)"
-SITE="$REPO/site/index.html"
+BASE="http://127.0.0.1:${CAPTURE_PORT:-8770}/"
 CHROME="${CHROME:-google-chrome}"
 if ! command -v "$CHROME" >/dev/null 2>&1; then CHROME=chromium-browser; fi
 if ! command -v "$CHROME" >/dev/null 2>&1; then CHROME=chromium; fi
+
+rm -f "$ROOT"/landing-*.png
+
 shot() {
-  local size=$1 out=$2
+  local url=$1 w=$2 h=$3 out=$4
   "$CHROME" --headless=new --disable-gpu --hide-scrollbars \
-    --window-size="$size" --screenshot="$ROOT/$out" "file://${SITE}" 2>/dev/null
+    --force-device-scale-factor=1 \
+    --window-size="$w,$h" \
+    --screenshot="$ROOT/$out" "$url" 2>/dev/null
 }
-shot 1280,800 landing-desktop-light.png
-shot 390,844 landing-mobile-light.png
+
+(
+  cd "$REPO/site"
+  python3 -m http.server "${CAPTURE_PORT:-8770}" >/dev/null
+) &
+srv=$!
+trap 'kill "$srv" 2>/dev/null || true' EXIT
+sleep 0.8
+
+shot "${BASE}#light" 1280 3600 landing-desktop-light.png
+shot "${BASE}#dark" 1280 3600 landing-desktop-dark.png
+shot "${BASE}#light" 390 4200 landing-mobile-light.png
+shot "${BASE}#dark" 390 4200 landing-mobile-dark.png
+shot "${BASE}?focus=download#light" 1280 720 landing-download-focus.png
+
+echo "Wrote pr-evidence/292/landing-*.png"

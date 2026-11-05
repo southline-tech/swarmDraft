@@ -1,8 +1,23 @@
 /** Toggle light/dark for this page only (no cookies or storage). */
 (function () {
   const root = document.documentElement;
-  const toggle = document.getElementById('theme-toggle');
-  if (!toggle) return;
+  const toggles = [
+    document.getElementById('theme-toggle'),
+    document.getElementById('theme-toggle-mobile'),
+  ].filter(Boolean);
+
+  function applyCaptureHints() {
+    const hash = location.hash.replace('#', '');
+    if (hash === 'dark' || hash === 'light') {
+      root.setAttribute('data-theme', hash);
+    }
+    if (location.search.includes('focus=download')) {
+      const target = document.querySelector('.header-download');
+      if (target instanceof HTMLElement) {
+        requestAnimationFrame(() => target.focus());
+      }
+    }
+  }
 
   function systemDark() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -15,24 +30,35 @@
     return systemDark();
   }
 
-  function syncLabel() {
+  function syncToggle(btn) {
     const dark = effectiveDark();
-    toggle.setAttribute('aria-pressed', dark ? 'true' : 'false');
-    toggle.textContent = dark ? 'Light theme' : 'Dark theme';
+    btn.setAttribute('aria-pressed', dark ? 'true' : 'false');
+    btn.setAttribute('aria-label', dark ? 'Switch to light theme' : 'Switch to dark theme');
+    btn.classList.toggle('is-dark', dark);
   }
 
-  toggle.addEventListener('click', () => {
+  function syncAll() {
+    for (const btn of toggles) syncToggle(btn);
+  }
+
+  function flipTheme() {
     const dark = effectiveDark();
     root.setAttribute('data-theme', dark ? 'light' : 'dark');
-    syncLabel();
-  });
+    syncAll();
+  }
+
+  applyCaptureHints();
+
+  for (const btn of toggles) {
+    btn.hidden = false;
+    btn.addEventListener('click', flipTheme);
+  }
 
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-    if (root.getAttribute('data-theme') === 'light' || root.getAttribute('data-theme') === 'dark') {
-      return;
-    }
-    syncLabel();
+    const explicit = root.getAttribute('data-theme');
+    if (explicit === 'light' || explicit === 'dark') return;
+    syncAll();
   });
 
-  syncLabel();
+  syncAll();
 })();

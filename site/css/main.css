@@ -63,8 +63,9 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--ct-space-4);
+  gap: var(--ct-space-3);
   padding: var(--ct-space-6) 0;
+  flex-wrap: nowrap;
 }
 
 .brand {
@@ -75,6 +76,8 @@ a:hover {
   color: var(--ct-text);
   font-weight: 600;
   font-size: var(--ct-text-lg);
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .brand__mark {
@@ -88,7 +91,42 @@ a:hover {
   display: flex;
   align-items: center;
   gap: var(--ct-space-2);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+
+.header-actions--compact {
+  display: none;
+}
+
+.header-actions--wide {
+  display: flex;
+}
+
+.header-subnav {
+  display: none;
+  align-items: center;
+  gap: var(--ct-space-2);
+  padding-bottom: var(--ct-space-4);
+  margin-top: calc(-1 * var(--ct-space-2));
+}
+
+@media (max-width: 640px) {
+  .header-actions--wide {
+    display: none;
+  }
+
+  .header-actions--compact {
+    display: flex;
+  }
+
+  .header-subnav {
+    display: flex;
+  }
+
+  .shell {
+    padding: 0 var(--ct-space-4);
+  }
 }
 
 .btn {
@@ -131,6 +169,24 @@ a:hover {
   font-size: var(--ct-text-xs);
 }
 
+.btn--icon {
+  padding: var(--ct-space-2);
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+}
+
+.theme-toggle__icon--sun {
+  display: none;
+}
+
+.theme-toggle.is-dark .theme-toggle__icon--moon {
+  display: none;
+}
+
+.theme-toggle.is-dark .theme-toggle__icon--sun {
+  display: block;
+}
+
 .hero {
   display: grid;
   gap: var(--ct-space-10);
@@ -169,6 +225,12 @@ a:hover {
   max-width: 42ch;
 }
 
+@media (max-width: 640px) {
+  .hero__lead {
+    font-size: var(--ct-text-md);
+  }
+}
+
 .hero__cta {
   display: flex;
   flex-wrap: wrap;
@@ -180,7 +242,7 @@ a:hover {
   margin: 0;
   padding: var(--ct-space-4);
   font-size: var(--ct-text-sm);
-  color: var(--ct-text-muted);
+  color: var(--ct-text);
   background: var(--ct-warning-bg);
   border-radius: var(--ct-radius-md);
   border: 1px solid var(--ct-border);
@@ -189,6 +251,11 @@ a:hover {
 
 .hero__note strong {
   color: var(--ct-warning);
+}
+
+.hero__note a {
+  color: var(--ct-accent);
+  font-weight: 500;
 }
 
 .hero-preview {
@@ -200,20 +267,10 @@ a:hover {
 }
 
 .hero-preview__chrome {
-  display: flex;
-  align-items: center;
-  gap: var(--ct-space-2);
   padding: var(--ct-space-3) var(--ct-space-4);
   border-bottom: 1px solid var(--ct-border);
   font-size: var(--ct-text-xs);
   color: var(--ct-text-muted);
-}
-
-.hero-preview__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: var(--ct-radius-full);
-  background: var(--ct-border);
 }
 
 .hero-preview__page {
