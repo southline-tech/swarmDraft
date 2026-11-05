@@ -371,6 +371,60 @@ export async function saveManuscriptCopy(title: string, bytes: Uint8Array): Prom
   return invoke<string | null>('save_manuscript_copy', { title, bytes: Array.from(bytes) });
 }
 
+export interface DraftCommitEntry {
+  oid: string;
+  timeUnix: number;
+  committerName: string;
+  message: string;
+}
+
+export async function draftOpen(): Promise<string | null> {
+  if (!isTauri()) return null;
+  return invoke<string | null>('draft_open', {});
+}
+
+export async function draftSaveAs(manuscriptId: string): Promise<string | null> {
+  if (!isTauri()) return null;
+  return invoke<string | null>('draft_save_as', { manuscriptId });
+}
+
+export async function draftSave(manuscriptId: string, message?: string): Promise<string | null> {
+  if (!isTauri()) return null;
+  return invoke<string | null>('draft_save', { manuscriptId, message: message ?? null });
+}
+
+export async function draftCheckpoint(
+  manuscriptId: string,
+  message: string,
+): Promise<string | null> {
+  if (!isTauri()) return null;
+  return invoke<string | null>('draft_checkpoint', { manuscriptId, message });
+}
+
+export async function draftHistory(
+  manuscriptId: string,
+  limit = 50,
+  skip = 0,
+): Promise<DraftCommitEntry[]> {
+  if (!isTauri()) return [];
+  return invoke<DraftCommitEntry[]>('draft_history', { manuscriptId, limit, skip });
+}
+
+export async function draftRestore(manuscriptId: string, oid: string): Promise<string> {
+  if (!isTauri()) return Promise.reject(new Error('History restore requires the desktop app'));
+  return invoke<string>('draft_restore', { manuscriptId, oid });
+}
+
+export async function draftReviewCommit(args: {
+  manuscriptId: string;
+  accepted: boolean;
+  botName: string;
+  chapterTitle: string;
+}): Promise<string | null> {
+  if (!isTauri()) return null;
+  return invoke<string | null>('draft_review_commit', args);
+}
+
 /** Open comments and saved agent names for the active section's review sidebar (#47). */
 export interface SectionReviewMeta {
   comments: import('@swarmdraft/editor').CommentRow[];

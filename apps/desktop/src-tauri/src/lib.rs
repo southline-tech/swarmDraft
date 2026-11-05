@@ -13,6 +13,7 @@ pub mod anchor;
 pub mod backup;
 pub mod content;
 pub mod dictionary;
+pub mod draft;
 pub mod export;
 pub mod feedback;
 pub mod manuscripts;
@@ -991,6 +992,143 @@ async fn section_dismiss_outdated_suggestions(
     .await
 }
 
+#[tauri::command]
+async fn draft_open(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+) -> Result<Option<String>, String> {
+    let app = app.clone();
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    tauri::async_runtime::spawn_blocking(move || drafts.open_dialog(&app, &store))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn draft_save_as(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+) -> Result<Option<String>, String> {
+    let app = app.clone();
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        drafts.save_as_dialog(&app, &store, &manuscript_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn draft_save(
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+    message: Option<String>,
+) -> Result<Option<String>, String> {
+    let msg = message.unwrap_or_else(|| "Saved".into());
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        drafts.commit_now(
+            &store,
+            &manuscript_id,
+            &msg,
+            &draft_author_name(&store),
+            "author@swarmdraft.local",
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn draft_checkpoint(
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+    message: String,
+) -> Result<Option<String>, String> {
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        drafts.checkpoint_if_due(&store, &manuscript_id, &message)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn draft_history(
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+    limit: Option<usize>,
+    skip: Option<usize>,
+) -> Result<Vec<draft::CommitEntry>, String> {
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    let lim = limit.unwrap_or(50);
+    let sk = skip.unwrap_or(0);
+    tauri::async_runtime::spawn_blocking(move || drafts.history(&store, &manuscript_id, lim, sk))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn draft_restore(
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+    oid: String,
+) -> Result<String, String> {
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        drafts.restore(&store, &manuscript_id, &oid, &draft_author_name(&store))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn draft_review_commit(
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+    accepted: bool,
+    bot_name: String,
+    chapter_title: String,
+) -> Result<Option<String>, String> {
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        drafts.commit_review_decision(
+            &store,
+            &manuscript_id,
+            accepted,
+            &bot_name,
+            &chapter_title,
+            &draft_author_name(&store),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn draft_author_name(store: &storage::Store) -> String {
+    store
+        .user_display_name()
+        .ok()
+        .flatten()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "Author".to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
@@ -1036,6 +1174,14 @@ pub fn run() {
                 report.unsaved_notices,
             )));
             let store = storage::Store::open(&dir)?;
+            let version = app.package_info().version.to_string();
+            let draft_service = draft::DraftService::new(dir.clone(), version);
+            if store.app_meta_get("draft_file_migration_v1")?.is_none() {
+                let drafts_dir = dir.join("drafts");
+                let _ = draft::migrate_legacy_books_to_draft(&store, &draft_service, &drafts_dir);
+                let _ = store.app_meta_set("draft_file_migration_v1", "done");
+            }
+            app.manage(std::sync::Arc::new(draft_service));
             app.manage(store.clone());
             app.manage(export::PandocDownloadState::default());
             app.manage(backup::OpLock::default());
@@ -1141,7 +1287,14 @@ pub fn run() {
             export_get,
             export_list,
             export_save_via_dialog,
-            export_reveal_in_folder
+            export_reveal_in_folder,
+            draft_open,
+            draft_save_as,
+            draft_save,
+            draft_checkpoint,
+            draft_history,
+            draft_restore,
+            draft_review_commit
         ])
         .run(tauri::generate_context!())
         .expect("error while running swarmDraft");

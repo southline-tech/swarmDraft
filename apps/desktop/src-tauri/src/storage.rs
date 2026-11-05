@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 /// `app_meta` key holding the id of the restore that produced the live db.
 pub(crate) const RESTORE_ID_KEY: &str = "last_restore_id";
@@ -246,6 +246,7 @@ const MIGRATIONS: &[&str] = &[
         resolved_at TEXT
      );
      CREATE INDEX IF NOT EXISTS feedback_pending_status ON feedback_pending(status, expires_at);",
+    DRAFT_FILE_PATH_MIGRATION,
 ];
 
 /// Sentinel for the #259 trailing repair; not executed as SQL.
@@ -253,6 +254,9 @@ const BOOK_AUTHOR_REPAIR_MIGRATION: &str = "__swarmdraft_repair_book_author__";
 
 /// Sentinel for #280; real work is `ensure_manuscripts_last_opened_at` in `migrate_with`.
 const LAST_OPENED_AT_MIGRATION: &str = "__swarmdraft_add_last_opened_at__";
+
+/// Sentinel for #302; real work is `ensure_manuscripts_draft_file_path` in `migrate_with`.
+const DRAFT_FILE_PATH_MIGRATION: &str = "__swarmdraft_add_draft_file_path__";
 
 /// SHA-256 of the 14 migrations before #259 (length-prefixed). Update only when appending.
 #[cfg(test)]
@@ -544,6 +548,27 @@ impl Store {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.pragma_query_value(None, "user_version", |r| r.get(0))?)
     }
+
+    pub fn app_meta_get(&self, key: &str) -> Result<Option<String>, StorageError> {
+        self.with_conn(|c| {
+            Ok(
+                c.query_row("SELECT value FROM app_meta WHERE key = ?1", [key], |r| {
+                    r.get(0)
+                })
+                .optional()?,
+            )
+        })
+    }
+
+    pub fn app_meta_set(&self, key: &str, value: &str) -> Result<(), StorageError> {
+        self.with_conn(|c| {
+            c.execute(
+                "INSERT OR REPLACE INTO app_meta (key, value) VALUES (?1, ?2)",
+                rusqlite::params![key, value],
+            )?;
+            Ok(())
+        })
+    }
 }
 
 fn migrate(conn: &mut Connection) -> Result<(), StorageError> {
@@ -559,6 +584,8 @@ fn migrate_with(conn: &mut Connection, migrations: &[&str]) -> Result<(), Storag
             ensure_manuscripts_book_author(&tx)?;
         } else if *sql == LAST_OPENED_AT_MIGRATION {
             ensure_manuscripts_last_opened_at(&tx)?;
+        } else if *sql == DRAFT_FILE_PATH_MIGRATION {
+            ensure_manuscripts_draft_file_path(&tx)?;
         } else {
             tx.execute_batch(sql)?;
         }
@@ -580,6 +607,18 @@ fn ensure_manuscripts_book_author(tx: &rusqlite::Transaction<'_>) -> Result<(), 
     drop(stmt);
     if !has {
         tx.execute_batch("ALTER TABLE manuscripts ADD COLUMN book_author TEXT;")?;
+    }
+    Ok(())
+}
+
+fn ensure_manuscripts_draft_file_path(tx: &rusqlite::Transaction<'_>) -> Result<(), StorageError> {
+    let mut stmt = tx.prepare("PRAGMA table_info(manuscripts)")?;
+    let has = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .filter_map(|c| c.ok())
+        .any(|name| name == "draft_file_path");
+    if !has {
+        tx.execute_batch("ALTER TABLE manuscripts ADD COLUMN draft_file_path TEXT;")?;
     }
     Ok(())
 }

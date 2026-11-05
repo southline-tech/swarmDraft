@@ -31,7 +31,13 @@ import {
   type RecoveryNotice,
   type MigrationNotice,
   type StoredManuscriptRow,
+  draftOpen,
+  draftSave,
+  draftSaveAs,
+  draftCheckpoint,
+  draftReviewCommit,
 } from './backend';
+import HistoryPanel from './history/HistoryPanel.vue';
 import SettingsScreen from './settings/SettingsScreen.vue';
 import AgentsWindow from './agents/AgentsWindow.vue';
 import { agentDirectory, markAuthorLabel, refreshAgents, reloadOnFocus } from './agent-names';
@@ -348,6 +354,14 @@ const persistHooks = {
     saveDirty.value = false;
     lastSavedAt.value = Date.now();
     saveStatusShown.value = true;
+    const id = session.value?.id;
+    const title =
+      session.value?.outline.value.find((s) => s.id === selectedId.value)?.title ?? 'chapter';
+    if (id && isTauri()) {
+      void draftCheckpoint(id, `Edited ${title}`).catch((err) =>
+        console.error('Draft checkpoint failed', err),
+      );
+    }
   },
 };
 const manuscriptSave = computed((): ManuscriptSaveView | undefined => {
@@ -562,11 +576,27 @@ async function loadDecisionRecords(manuscriptId: string) {
 }
 function onSectionDecisions(sectionId: string, records: DecisionRecord[]) {
   if (!session.value) return;
+  const prev = decisionRecordsBySection.value[sectionId] ?? [];
   decisionRecordsBySection.value = { ...decisionRecordsBySection.value, [sectionId]: records };
-  void saveSectionReviewDecisions(session.value.id, sectionId, records).catch((err) => {
-    console.error('Review decision save failed; next change will retry', err);
-    saveFailure.value = saveFailed(saveFailure.value, err);
-  });
+  void saveSectionReviewDecisions(session.value.id, sectionId, records)
+    .then(() => {
+      if (!isTauri() || records.length <= prev.length) return;
+      const latest = records[records.length - 1];
+      if (!latest) return;
+      const chapter =
+        session.value?.outline.value.find((s) => s.id === sectionId)?.title ?? 'chapter';
+      const botName = latest.decidedBy || 'editor';
+      void draftReviewCommit({
+        manuscriptId: session.value!.id,
+        accepted: latest.status === 'accepted',
+        botName,
+        chapterTitle: chapter,
+      }).catch((err) => console.error('Draft review commit failed', err));
+    })
+    .catch((err) => {
+      console.error('Review decision save failed; next change will retry', err);
+      saveFailure.value = saveFailed(saveFailure.value, err);
+    });
 }
 async function onCommentReply(sectionId: string, threadId: string, body: string) {
   if (!session.value) return;
@@ -833,6 +863,7 @@ async function refreshRecentBooks() {
 }
 const appMenu = ref<HTMLDetailsElement | null>(null);
 const bookMenuOpen = ref(false);
+const historyOpen = ref(false);
 const bookMenuTrigger = shallowRef<HTMLElement | null>(null);
 const recentTrigger = shallowRef<HTMLButtonElement | null>(null);
 function closeBookMenu() {
@@ -862,10 +893,63 @@ function onAppMenuToggle(e: Event) {
   if (open) void refreshRecentBooks();
   else recentOpen.value = false;
 }
-// TODO(#302): Ctrl+O / Open should pick an existing .draft once #302 lands; until then Open → Home (Import Word).
+async function openDraftFromDialog() {
+  if (!isTauri()) {
+    openBookPicker();
+    return;
+  }
+  openError.value = '';
+  try {
+    const id = await draftOpen();
+    if (!id) return;
+    if (session.value?.id === id) return;
+    await session.value?.flush().catch((e) => {
+      console.error('Flush before open failed', e);
+      throw e;
+    });
+    const stored = await loadManuscript(id);
+    if (!stored) {
+      openError.value = "Couldn't open that draft.";
+      return;
+    }
+    const next = openStored(stored, null, persistHooks);
+    open(next);
+    showOpenToast(next);
+    closeBookMenu();
+    await refreshDraftRows();
+  } catch (e) {
+    console.error('Open draft failed', e);
+    openError.value = errorLine(e, 'open');
+  }
+}
+
 function openBookPicker() {
   if (session.value) choosingBook.value = true;
   else void getStarted();
+}
+
+async function onMenuSave() {
+  if (!session.value || !isTauri()) return;
+  closeBookMenu();
+  try {
+    await session.value.flush();
+    await draftSave(session.value.id);
+  } catch (e) {
+    console.error('Save draft failed', e);
+    saveFailure.value = saveFailed(saveFailure.value, e);
+  }
+}
+
+async function onMenuSaveAs() {
+  if (!session.value || !isTauri()) return;
+  closeBookMenu();
+  try {
+    await session.value.flush();
+    await draftSaveAs(session.value.id);
+  } catch (e) {
+    console.error('Save As failed', e);
+    saveFailure.value = saveFailed(saveFailure.value, e);
+  }
 }
 let openingRecent = false;
 async function openRecentBook(id: string) {
@@ -932,6 +1016,8 @@ const chooseFile = () => {
 const appMenuShortcuts = computed(() => ({
   new: importing.value ? undefined : 'Ctrl+N',
   open: 'Ctrl+O',
+  importWord: 'Ctrl+Shift+O',
+  save: session.value && isTauri() ? 'Ctrl+S' : undefined,
   settings: 'Ctrl+,',
   quit: isTauri() ? 'Ctrl+Q' : undefined,
 }));
@@ -955,14 +1041,22 @@ function onAppMenuKey(e: KeyboardEvent) {
   if (preview.value) return;
   if (menuField(e.target)) return;
   const mod = e.ctrlKey || e.metaKey;
-  if (!mod || e.shiftKey || e.altKey) return;
   const k = e.key.toLowerCase();
+  if (mod && e.shiftKey && k === 'o' && !e.altKey) {
+    e.preventDefault();
+    if (!importing.value) chooseFile();
+    return;
+  }
+  if (!mod || e.shiftKey || e.altKey) return;
   if (k === 'n' && !importing.value) {
     e.preventDefault();
     void onToolbarDraftNew();
   } else if (k === 'o') {
     e.preventDefault();
-    openBookPicker();
+    void openDraftFromDialog();
+  } else if (k === 's' && session.value && isTauri()) {
+    e.preventDefault();
+    void onMenuSave();
   } else if (e.key === ',') {
     e.preventDefault();
     settingsOpen.value = !settingsOpen.value;
@@ -1618,7 +1712,7 @@ defineExpose({ open, closeSession });
                 data-test="app-menu-open"
                 @click="
                   () => {
-                    openBookPicker();
+                    void openDraftFromDialog();
                     closeBookMenu();
                   }
                 "
@@ -1626,7 +1720,35 @@ defineExpose({ open, closeSession });
                 <span class="sh-mi-lead" aria-hidden="true"
                   ><AppIcon name="folder" class="app-menu-icon"
                 /></span>
-                Open<span class="sh-k">{{ appMenuShortcuts.open }}</span>
+                Open…<span class="sh-k">{{ appMenuShortcuts.open }}</span>
+              </button>
+              <button
+                v-if="session && isTauri()"
+                type="button"
+                class="sh-mi"
+                role="menuitem"
+                data-test="app-menu-save"
+                @click="() => void onMenuSave()"
+              >
+                <span class="sh-mi-lead" aria-hidden="true"
+                  ><AppIcon name="check" class="app-menu-icon"
+                /></span>
+                Save<span v-if="appMenuShortcuts.save" class="sh-k">{{
+                  appMenuShortcuts.save
+                }}</span>
+              </button>
+              <button
+                v-if="session && isTauri()"
+                type="button"
+                class="sh-mi"
+                role="menuitem"
+                data-test="app-menu-save-as"
+                @click="() => void onMenuSaveAs()"
+              >
+                <span class="sh-mi-lead" aria-hidden="true"
+                  ><AppIcon name="folder" class="app-menu-icon"
+                /></span>
+                Save As…
               </button>
               <button
                 type="button"
@@ -1645,7 +1767,27 @@ defineExpose({ open, closeSession });
                 <span class="sh-mi-lead" aria-hidden="true"
                   ><AppIcon name="book" class="app-menu-icon"
                 /></span>
-                Import…
+                Import Word manuscript…<span v-if="appMenuShortcuts.importWord" class="sh-k">{{
+                  appMenuShortcuts.importWord
+                }}</span>
+              </button>
+              <button
+                v-if="session && isTauri()"
+                type="button"
+                class="sh-mi"
+                role="menuitem"
+                data-test="app-menu-history"
+                @click="
+                  () => {
+                    historyOpen = true;
+                    closeBookMenu();
+                  }
+                "
+              >
+                <span class="sh-mi-lead" aria-hidden="true"
+                  ><AppIcon name="clock" class="app-menu-icon"
+                /></span>
+                History
               </button>
               <div
                 class="topbar__recent"
@@ -1911,6 +2053,13 @@ defineExpose({ open, closeSession });
         data-test="save-error"
         :state="saveFailure"
         :save-copy="saveCopyOfOpen"
+      />
+      <HistoryPanel
+        v-if="isTauri()"
+        :open="historyOpen"
+        :manuscript-id="session?.id ?? null"
+        @close="historyOpen = false"
+        @restored="() => void session?.flush()"
       />
       <!-- Always mounted so the live region exists before its text (#79). -->
       <Teleport to="#app-overlay-layer">
