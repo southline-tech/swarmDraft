@@ -4,17 +4,29 @@ Plain HTML/CSS for [Cloudflare Pages](https://developers.cloudflare.com/pages/).
 
 ## Cloudflare Pages settings
 
-| Setting           | Value                         |
-| ----------------- | ----------------------------- |
-| Production branch | `main`                        |
-| Root directory    | `site`                        |
-| Build watch paths | `site/**`                     |
-| Build command     | _(empty — static files only)_ |
-| Build output dir  | `/` (site root)               |
+| Setting           | Value                                                                           |
+| ----------------- | ------------------------------------------------------------------------------- |
+| Production branch | `main`                                                                          |
+| Root directory    | `site`                                                                          |
+| Build watch paths | `site/**`                                                                       |
+| Build command     | _(empty — static assets; Pages Functions in `functions/` deploy automatically)_ |
+| Build output dir  | `/` (site root)                                                                 |
 
 Custom domain: attach `swarmdraft.ai` (and optional `www` → apex redirect) on the Pages project.
 
 Installers are linked from GitHub Releases, not hosted here (Pages 25 MB file limit).
+
+## Pages secrets (production only)
+
+Set in the Cloudflare Pages project for `swarmdraft` — never commit or embed in client code:
+
+| Secret                     | Purpose                                        |
+| -------------------------- | ---------------------------------------------- |
+| `RESEND_API_KEY`           | Resend API key for outbound feedback email     |
+| `SWARMDRAFT_FEEDBACK_TO`   | Inbox (e.g. feedback@yourdomain.com)           |
+| `SWARMDRAFT_FEEDBACK_FROM` | Verified Resend sender (`Name <email@domain>`) |
+
+`POST /api/feedback` is implemented in `functions/api/feedback.ts`.
 
 ## Technical notes (not on the public page)
 

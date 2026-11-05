@@ -1,4 +1,4 @@
-//! In-app and bot feedback (#208): POST to the Radiance Lux collector with install idempotency.
+//! In-app and bot feedback (#208): POST to swarmdraft.ai with install idempotency.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -15,7 +15,7 @@ pub const INSTALL_ID_KEY: &str = "install_id";
 
 pub const FEEDBACK_ENDPOINT: &str = match option_env!("FEEDBACK_ENDPOINT") {
     Some(url) => url,
-    None => "https://radiancelux.tech/api/swarmdraft-feedback",
+    None => "https://swarmdraft.ai/api/feedback",
 };
 
 const FEEDBACK_TTL_SECS: i64 = 300;
@@ -681,6 +681,11 @@ mod tests {
             }
         });
         (format!("http://{addr}"), handle)
+    }
+
+    #[test]
+    fn default_feedback_endpoint_is_swarmdraft() {
+        assert_eq!(FEEDBACK_ENDPOINT, "https://swarmdraft.ai/api/feedback");
     }
 
     #[test]

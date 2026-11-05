@@ -75,6 +75,10 @@
   --ct-selected-bg: #e4ecf8;
   --ct-warning-bg: #fff3dc;
   --ct-warning: #8a5300;
+  --ct-danger: #b3261e;
+  --ct-danger-bg: #fbe9e7;
+  --ct-success: #2e6b3f;
+  --ct-success-bg: #e6f2e8;
   --ct-elevation-1: 0 1px 2px rgb(43 38 32 / 0.08), 0 1px 1px rgb(43 38 32 / 0.04);
   --ct-elevation-2: 0 4px 12px rgb(43 38 32 / 0.1), 0 1px 3px rgb(43 38 32 / 0.06);
   --ct-focus-ring-color: #2f5da8;
@@ -101,6 +105,10 @@
   --ct-selected-bg: #25324a;
   --ct-warning-bg: #3a2e15;
   --ct-warning: #e8c06a;
+  --ct-danger: #f2a39c;
+  --ct-danger-bg: #3a1f1c;
+  --ct-success: #8fd0a0;
+  --ct-success-bg: #1c3324;
   --ct-elevation-1: 0 1px 2px rgb(0 0 0 / 0.5);
   --ct-elevation-2: 0 4px 12px rgb(0 0 0 / 0.5);
   --ct-focus-ring-color: #8db2f2;
@@ -125,6 +133,10 @@
     --ct-selected-bg: #25324a;
     --ct-warning-bg: #3a2e15;
     --ct-warning: #e8c06a;
+    --ct-danger: #f2a39c;
+    --ct-danger-bg: #3a1f1c;
+    --ct-success: #8fd0a0;
+    --ct-success-bg: #1c3324;
     --ct-elevation-1: 0 1px 2px rgb(0 0 0 / 0.5);
     --ct-elevation-2: 0 4px 12px rgb(0 0 0 / 0.5);
     --ct-focus-ring-color: #8db2f2;
