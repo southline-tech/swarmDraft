@@ -974,6 +974,14 @@ async function onFile(e: Event) {
 const NOT_WORD_FILE = "That file isn't a Word manuscript. Please choose a Word file.";
 const isWordFile = (f: File) => f.name.toLowerCase().endsWith('.docx');
 
+async function restoreAfterImportCancelled(current?: ManuscriptSession | null) {
+  if (current?.closed) {
+    await reopenAfterFailure();
+    return;
+  }
+  if (current && !current.closed && session.value === current) current.resumeLive?.();
+}
+
 async function importBytes(fileName: string, bytes: Uint8Array) {
   if (importing.value) return;
   openError.value = '';
@@ -981,8 +989,8 @@ async function importBytes(fileName: string, bytes: Uint8Array) {
   startImportOpening(titleFromDocxName(fileName));
   importing.value = true;
   importAbort = new AbortController();
+  const current = session.value;
   try {
-    const current = session.value;
     try {
       const next = await importAndOpen(bytes, persistHooks, current, {
         fileName,
@@ -1011,6 +1019,7 @@ async function importBytes(fileName: string, bytes: Uint8Array) {
       showOpenToast(next);
     } catch (err) {
       if (err instanceof ImportCancelledError) {
+        await restoreAfterImportCancelled(current);
         finishOpening();
         return;
       }
@@ -1026,6 +1035,7 @@ async function importBytes(fileName: string, bytes: Uint8Array) {
     }
   } catch (err) {
     if (err instanceof ImportCancelledError) {
+      await restoreAfterImportCancelled(current);
       finishOpening();
       return;
     }
@@ -1625,8 +1635,9 @@ defineExpose({ open, closeSession });
         @drop-file="importFile"
       />
       <div
-        v-if="(!session || choosingBook) && (openingVisible || openingError)"
+        v-if="(!session || choosingBook || importing) && (openingVisible || openingError)"
         class="opening-shell"
+        :class="{ 'opening-shell--overlay': !!session && !choosingBook && importing }"
         data-test="opening-shell"
         @keydown.esc="openingVisible && opening?.kind === 'import' && cancelImportOpening()"
       >
@@ -1801,12 +1812,19 @@ body {
   grid-template-rows: minmax(0, 1fr);
 }
 .shell__main {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
   overscroll-behavior: none;
+}
+.opening-shell--overlay {
+  position: absolute;
+  inset: 0;
+  z-index: calc(var(--ct-z-chrome) + 1);
+  background: var(--ct-bg);
 }
 .shell__chrome {
   position: relative;

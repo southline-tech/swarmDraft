@@ -7,6 +7,7 @@ import * as runImport from './import/run-docx-import';
 import { setForceSyncDocxImport } from './import/run-docx-import';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { sessionFromDocx } from './manuscript-session';
 
 const mockDocx = readFileSync(
   resolve(import.meta.dirname, '../../../fixtures/manuscripts/docx-import/mock-manuscript.docx'),
@@ -62,6 +63,24 @@ describe('import progress (#299)', () => {
     expect(w.find('[data-test="opening-progress"]').exists()).toBe(false);
     expect(w.find('[data-test="home-open"]').exists()).toBe(true);
     expect(w.findAll('.row')).toHaveLength(0);
+    w.unmount();
+  });
+
+  it('shows the import overlay while a manuscript is already open', async () => {
+    vi.spyOn(runImport, 'runDocxImport').mockReturnValue({
+      abort: vi.fn(),
+      done: new Promise(() => {}),
+    });
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    const open = sessionFromDocx(bytes(), 'open-book');
+    (w.vm as unknown as { open: (s: typeof open) => void }).open(open);
+    await settle();
+    await chooseFile(w);
+    await settle();
+    expect(w.find('[data-test="shell-desk"]').exists()).toBe(true);
+    expect(w.find('[data-test="opening-shell"]').exists()).toBe(true);
+    expect(w.get('[data-test="opening-shell"]').classes()).toContain('opening-shell--overlay');
     w.unmount();
   });
 });

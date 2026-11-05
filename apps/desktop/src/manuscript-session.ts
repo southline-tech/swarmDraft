@@ -600,12 +600,15 @@ export async function importAndOpen(
   } finally {
     importMeta?.signal?.removeEventListener('abort', onAbort);
   }
+  if (importMeta?.signal?.aborted) throw new ImportCancelledError();
   importMeta?.onParsedTitle?.(parsed.imported.title);
   importMeta?.onParsed?.(parsed.imported);
   const payload = importPayload(parsed.imported);
+  if (importMeta?.signal?.aborted) throw new ImportCancelledError();
   await current?.close();
   if (importMeta?.signal?.aborted) throw new ImportCancelledError();
   const saved = await persistImport(payload);
+  if (importMeta?.signal?.aborted) throw new ImportCancelledError();
   return saved
     ? openStored(saved, parsed.imported.report, persistHooks)
     : sessionFromParsedImport(parsed, id);
