@@ -103,6 +103,7 @@ export function parseTitlePageMeta(paras: TitlePagePara[]): TitlePageMeta {
 /** Paragraph indices to drop from stored title-page / pre-chapter body (#235). */
 export function titlePageSkipIndices(paras: TitlePagePara[]): Set<number> {
   const skip = new Set<number>();
+  const meta = parseTitlePageMeta(paras);
   paras.forEach((p, i) => {
     const t = norm(p.text);
     if (!t) {
@@ -112,7 +113,6 @@ export function titlePageSkipIndices(paras: TitlePagePara[]): Set<number> {
     if (isContactOrMeta(t, p)) skip.add(i);
     if (BYLINE_RE.test(t)) skip.add(i);
     if (NOVEL_RE.test(t)) skip.add(i);
-    const meta = parseTitlePageMeta(paras);
     if (meta.title && headingsMatch(p.text, meta.title)) skip.add(i);
   });
   return skip;

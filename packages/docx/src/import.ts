@@ -415,11 +415,13 @@ function extractParagraph(p: XmlElement, ctx: Ctx): Para {
     hasNote: false,
   };
   let sawText = false;
-  const sample = () => (para.text || plainText(para.inline)).trim().slice(0, 40);
+  const textParts: string[] = [];
+  const sample = () =>
+    (textParts.length ? textParts.join('') : plainText(para.inline)).trim().slice(0, 40);
 
   const pushText = (text: string, marks: Mark[], visible: boolean) => {
     para.inline.push(marks.length ? { type: 'text', text, marks } : { type: 'text', text });
-    if (visible) para.text += text;
+    if (visible) textParts.push(text);
   };
 
   const walkRun = (r: XmlElement, extra: Mark[], deleted: boolean) => {
@@ -485,7 +487,7 @@ function extractParagraph(p: XmlElement, ctx: Ctx): Para {
             else para.breakBefore = true;
           } else {
             para.inline.push({ type: 'hard_break' });
-            if (!deleted) para.text += '\n';
+            if (!deleted) textParts.push('\n');
           }
           break;
         case 'w:commentReference': {
@@ -658,7 +660,7 @@ function extractParagraph(p: XmlElement, ctx: Ctx): Para {
     first.text = first.text.replace(/^[\t ]+/, '');
     ctx.report.add('info', 'typed_indent', 'Typed indent (tab/spaces) removed; theme indents');
   }
-  para.text = para.text.replace(/^[\t ]+/, '');
+  para.text = textParts.join('').replace(/^[\t ]+/, '');
   para.inline = normalizeInline(para.inline);
   const st = ctx.story;
   if (st.pending.size) {
@@ -711,7 +713,19 @@ function isEmpty(p: Para): boolean {
   return p.text.trim() === '' && !p.hasNote && !p.inline.some((n) => n.type === 'image');
 }
 
-function classify(p: Para, report: ReportBuilder): Role {
+/** Plain typed "CHAPTER ONE" line (no heading style / display cues). */
+function plainChapterLine(p: Para): boolean {
+  if (isEmpty(p)) return false;
+  const raw = p.text.replace(/\s+/g, ' ').trim();
+  if (raw !== raw.toUpperCase()) return false;
+  const short = raw.length <= 80 && !/\n/.test(p.text.trim());
+  if (!short || !CHAPTER_RE.test(raw)) return false;
+  const display = p.centered || p.maxSize >= 28 || p.level === 1;
+  if (display || p.level > 0 || p.allBold) return false;
+  return true;
+}
+
+function classify(p: Para, report: ReportBuilder, plainChapterSplit: boolean): Role {
   const text = p.text.replace(/\s+/g, ' ').trim();
   const sid = p.styleId.toLowerCase();
   if (sid === 'scenebreak') return { kind: 'scene_break', marker: text };
@@ -728,6 +742,7 @@ function classify(p: Para, report: ReportBuilder): Role {
   if (short && CHAPTER_RE.test(text)) {
     if (display || p.level > 0) return { kind: 'chapter' };
     if (p.allBold) return { kind: 'chapter', weak: true };
+    if (plainChapterSplit) return { kind: 'chapter', weak: true };
   }
   if (p.level === 1) return { kind: 'chapter' };
   if (p.level > 1) return { kind: 'heading', level: p.level };
@@ -959,7 +974,14 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
   ctx.story = newStory();
   const paras = collectParagraphs(body, ctx);
   finishStory(ctx);
-  const roles = paras.map((p) => classify(p, report));
+  const roles0 = paras.map((p) => classify(p, report, false));
+  const firstStructural0 = roles0.findIndex(
+    (r) => r.kind === 'part' || r.kind === 'chapter' || r.kind === 'back',
+  );
+  const hasChapters0 = roles0.some((r) => r.kind === 'chapter');
+  const plainPool = hasChapters0 && firstStructural0 >= 0 ? paras.slice(firstStructural0) : paras;
+  const plainChapterSplit = plainPool.filter(plainChapterLine).length >= 2;
+  const roles = paras.map((p) => classify(p, report, plainChapterSplit));
   for (const [i, r] of roles.entries())
     if (r.kind === 'chapter' && r.weak)
       report.add(
@@ -1217,12 +1239,33 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
     );
   }
 
+  const commentSectionById = new Map<string, string>();
+  const walkCommentAnchors = (nodes: unknown[] | undefined, sectionId: string): void => {
+    for (const n of nodes ?? []) {
+      const node = n as {
+        type?: string;
+        marks?: Mark[];
+        content?: unknown[];
+        attrs?: { content?: unknown[] };
+      };
+      for (const m of node.marks ?? []) {
+        if (m.type === 'comment_anchor') {
+          const anchorId = String((m.attrs as { id?: unknown } | undefined)?.id ?? '');
+          if (anchorId && !commentSectionById.has(anchorId))
+            commentSectionById.set(anchorId, sectionId);
+        }
+      }
+      walkCommentAnchors(node.content, sectionId);
+      if (Array.isArray(node.attrs?.content)) walkCommentAnchors(node.attrs.content, sectionId);
+    }
+  };
+  for (const s of doc.sections) walkCommentAnchors(s.content.content, s.id);
+
   // Comments: attach to the section whose content carries the anchor mark.
   const comments: ImportedComment[] = [];
   for (const [id, def] of commentDefs) {
-    const owner = doc.sections.find((s) =>
-      JSON.stringify(s.content).includes(`"comment_anchor","attrs":{"id":${JSON.stringify(id)}}`),
-    );
+    const ownerId = commentSectionById.get(id);
+    const owner = ownerId ? doc.sections.find((s) => s.id === ownerId) : undefined;
     if (owner) {
       comments.push({ id, sectionId: owner.id, ...def });
       continue;
