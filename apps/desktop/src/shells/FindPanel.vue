@@ -128,6 +128,7 @@ onMounted(() =>
     if (props.focusReplace) replaceInput.value?.focus();
     else findInput.value?.focus();
     syncHighlight();
+    if (label.value) announceCount(true);
   }),
 );
 onBeforeUnmount(() => {
