@@ -32,11 +32,8 @@ pub fn migrate_legacy_books_to_draft(
             continue;
         }
         let m = store.get_manuscript(&id).map_err(|e| e.to_string())?;
-        let file_name = format!("{}.draft", sanitize_filename(&m.title));
+        let file_name = format!("{}-{}.draft", sanitize_filename(&m.title), &id[..8.min(id.len())]);
         let path = drafts_dir.join(file_name);
-        store
-            .set_draft_file_path(&id, &path.to_string_lossy())
-            .map_err(|e| e.to_string())?;
         drafts
             .commit_now(
                 store,
@@ -46,6 +43,10 @@ pub fn migrate_legacy_books_to_draft(
                 "author@swarmdraft.local",
             )
             .map_err(|e| e.to_string())?;
+        store
+            .set_draft_file_path(&id, &path.to_string_lossy())
+            .map_err(|e| e.to_string())?;
+        drafts.pack_if_linked(store, &id).map_err(|e| e.to_string())?;
         out.push(DraftMigrationNotice {
             manuscript_id: id,
             title: m.title,
