@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="css/tokens.css" />
     <link rel="stylesheet" href="css/main.css" />
     <script src="js/theme.js" defer></script>
-    <script src="js/feedback.js" type="module"></script>
+    <script src="js/feedback.js?v=0.1.1" type="module"></script>
   </head>
   <body data-site-version="0.1.1">
     <a class="skip-link" href="#main">Skip to content</a>
@@ -226,15 +226,6 @@
             </li>
           </ul>
         </section>
-
-        <section class="feedback-cta" id="feedback" aria-labelledby="feedback-cta-title">
-          <h2 class="section-title" id="feedback-cta-title">Tell us what you think</h2>
-          <p class="feedback-cta-lead">We read every message.</p>
-          <noscript>
-            <p class="feedback-noscript">Feedback needs JavaScript turned on.</p>
-          </noscript>
-          <a href="#feedback" class="btn btn--primary" data-feedback-open>Send feedback</a>
-        </section>
       </main>
 
       <footer class="site-footer">
@@ -259,7 +250,10 @@
             >
           </li>
           <li>
-            <a href="#feedback" data-feedback-open>Send feedback</a>
+            <a href="#feedback" id="feedback" data-feedback-open>Send feedback</a>
+            <noscript>
+              <span class="feedback-noscript">Feedback needs JavaScript turned on.</span>
+            </noscript>
           </li>
         </ul>
         <p class="footer-maker">Made by <a href="https://radiancelux.tech">Radiance Lux</a></p>

@@ -8,6 +8,7 @@ import {
   getFocusableElements,
   initFeedback,
   mountFeedbackUi,
+  scheduleFeedbackInit,
 } from './feedback.js';
 
 const FEEDBACK_UI_TEMPLATE = `
@@ -80,8 +81,9 @@ function buildFeedbackDom({ withCss = false } = {}) {
   }
   document.body.dataset.siteVersion = '0.1.1';
   document.body.innerHTML = `
-      <a href="#feedback" data-feedback-open id="cta-open">Send feedback</a>
-      <a href="#feedback" data-feedback-open id="footer-open">Footer feedback</a>
+      <footer>
+        <a href="#feedback" id="feedback" data-feedback-open>Send feedback</a>
+      </footer>
       <dialog class="feedback-dialog" data-feedback-dialog aria-modal="true" aria-labelledby="feedback-modal-title">
         <div class="feedback-dialog__card">
           <button type="button" data-feedback-close aria-label="Close">Close</button>
@@ -109,21 +111,21 @@ describe('landing feedback modal', () => {
   it('opens the dialog, focuses the message field, and returns focus on close', () => {
     const root = buildFeedbackDom();
     initFeedback(root);
-    const cta = root.querySelector('#cta-open');
+    const trigger = root.querySelector('#feedback');
     const dialog = root.querySelector('[data-feedback-dialog]');
-    cta.focus();
-    cta.click();
+    trigger.focus();
+    trigger.click();
     expect(dialog.open).toBe(true);
     expect(document.activeElement?.id).toBe('feedback-description');
     root.querySelector('[data-feedback-close]').click();
     expect(dialog.open).toBe(false);
-    expect(document.activeElement).toBe(cta);
+    expect(document.activeElement).toBe(trigger);
   });
 
   it('shows validation errors without submitting', async () => {
     const root = buildFeedbackDom();
     initFeedback(root);
-    root.querySelector('#cta-open').click();
+    root.querySelector('#feedback').click();
     const form = root.querySelector('[data-feedback-form]');
     form.requestSubmit();
     expect(fetch).not.toHaveBeenCalled();
@@ -137,7 +139,7 @@ describe('landing feedback modal', () => {
     fetch.mockResolvedValueOnce({ status: 202 });
     const root = buildFeedbackDom();
     initFeedback(root);
-    root.querySelector('#footer-open').click();
+    root.querySelector('#feedback').click();
     const form = root.querySelector('[data-feedback-form]');
     form.description.value = 'Great app';
     form.querySelector('[data-feedback-submit]').disabled = false;
@@ -152,7 +154,7 @@ describe('landing feedback modal', () => {
     fetch.mockResolvedValueOnce({ status: 502 });
     const root = buildFeedbackDom();
     initFeedback(root);
-    root.querySelector('#cta-open').click();
+    root.querySelector('#feedback').click();
     const form = root.querySelector('[data-feedback-form]');
     form.description.value = 'Still here';
     form.querySelector('[data-feedback-submit]').disabled = false;
@@ -167,7 +169,7 @@ describe('landing feedback modal', () => {
   it('does not submit or show success when the honeypot is filled', async () => {
     const root = buildFeedbackDom();
     initFeedback(root);
-    root.querySelector('#cta-open').click();
+    root.querySelector('#feedback').click();
     const form = root.querySelector('[data-feedback-form]');
     form.description.value = 'Bot';
     form.website.value = 'spam';
@@ -182,7 +184,7 @@ describe('landing feedback modal', () => {
     fetch.mockResolvedValueOnce({ status: 202 });
     const root = buildFeedbackDom();
     initFeedback(root);
-    root.querySelector('#cta-open').click();
+    root.querySelector('#feedback').click();
     const form = root.querySelector('[data-feedback-form]');
     form.description.value = 'First note';
     form.querySelector('[data-feedback-submit]').disabled = false;
@@ -202,7 +204,7 @@ describe('landing feedback modal', () => {
     window.dispatchEvent(new Event('resize'));
     const root = buildFeedbackDom({ withCss: true });
     initFeedback(root);
-    root.querySelector('#cta-open').click();
+    root.querySelector('#feedback').click();
     const honeypot = root.querySelector('.visually-hidden');
     const website = root.querySelector('[name="website"]');
     expect(honeypot?.getAttribute('aria-hidden')).toBe('true');
@@ -227,7 +229,7 @@ describe('landing feedback modal', () => {
     window.dispatchEvent(new Event('resize'));
     const root = buildFeedbackDom({ withCss: true });
     initFeedback(root);
-    root.querySelector('#footer-open').click();
+    root.querySelector('#feedback').click();
     const card = root.querySelector('.feedback-dialog__card');
     const field = root.querySelector('.feedback-field');
     const textarea = root.querySelector('textarea.feedback-input--area');
@@ -243,11 +245,11 @@ describe('landing feedback modal', () => {
     const root = buildFeedbackDom();
     initFeedback(root);
     const dialog = root.querySelector('[data-feedback-dialog]');
-    root.querySelector('#cta-open').click();
+    root.querySelector('#feedback').click();
     expect(dialog.open).toBe(true);
     dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(dialog.open).toBe(false);
-    root.querySelector('#cta-open').click();
+    root.querySelector('#feedback').click();
     dialog.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(dialog.open).toBe(false);
   });
@@ -256,7 +258,7 @@ describe('landing feedback modal', () => {
     fetch.mockResolvedValueOnce({ status: 202 });
     const root = buildFeedbackDom();
     initFeedback(root);
-    root.querySelector('#cta-open').click();
+    root.querySelector('#feedback').click();
     const card = root.querySelector('.feedback-dialog__card');
     const formFocusables = getFocusableElements(card);
     expect(formFocusables.some((el) => el.matches('[data-feedback-send-another]'))).toBe(false);
@@ -282,7 +284,7 @@ describe('landing feedback modal', () => {
     vi.useFakeTimers();
     const root = buildFeedbackDom();
     initFeedback(root);
-    root.querySelector('#cta-open').click();
+    root.querySelector('#feedback').click();
     const form = root.querySelector('[data-feedback-form]');
     const counter = root.querySelector('[data-feedback-counter]');
     form.description.value = 'x'.repeat(1800);
@@ -305,5 +307,24 @@ describe('landing feedback modal', () => {
     initFeedback(root);
     expect(root.querySelector('[data-feedback-dialog]').open).toBe(true);
     window.location.hash = '';
+  });
+
+  it('scheduleFeedbackInit runs immediately when document is already ready', () => {
+    expect(document.readyState).not.toBe('loading');
+    const root = buildFeedbackDom();
+    scheduleFeedbackInit(root);
+    const dialog = root.querySelector('[data-feedback-dialog]');
+    root.querySelector('#feedback').click();
+    expect(dialog.open).toBe(true);
+  });
+
+  it('index.html exposes only the footer Send feedback entry with #feedback', () => {
+    const dir = dirname(fileURLToPath(import.meta.url));
+    const html = readFileSync(join(dir, '../index.html'), 'utf8');
+    expect(html).not.toMatch(/Tell us what you think/);
+    expect(html).not.toMatch(/feedback-cta/);
+    expect(html).toMatch(/<a href="#feedback" id="feedback" data-feedback-open>Send feedback<\/a>/);
+    expect(html).toMatch(/Feedback needs JavaScript turned on/);
+    expect(html.match(/data-feedback-open/g)?.length).toBe(1);
   });
 });

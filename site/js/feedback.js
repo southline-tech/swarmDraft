@@ -387,8 +387,20 @@ export function initFeedback(documentRoot) {
   wireFeedbackForm(form, dialog, siteVersion, counterState, closeModal);
 }
 
+/** Run init now, or wait for DOMContentLoaded if the document is still loading. */
+export function scheduleFeedbackInit(
+  documentRoot = typeof document !== 'undefined' ? document.body : null,
+) {
+  if (!documentRoot || typeof document === 'undefined') return;
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      initFeedback(documentRoot);
+    });
+    return;
+  }
+  initFeedback(documentRoot);
+}
+
 if (typeof document !== 'undefined') {
-  document.addEventListener('DOMContentLoaded', () => {
-    initFeedback(document.body);
-  });
+  scheduleFeedbackInit(document.body);
 }

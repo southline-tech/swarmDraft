@@ -438,23 +438,9 @@ a:hover {
   border: 0;
 }
 
-.feedback-cta {
-  padding: var(--ct-space-16) 0;
-  border-top: 1px solid var(--ct-border);
-  text-align: center;
-  max-width: 36rem;
-  margin: 0 auto;
-}
-
-.feedback-cta-lead {
-  margin: var(--ct-space-2) 0 var(--ct-space-6);
-  color: var(--ct-text-muted);
-  font-size: var(--ct-text-md);
-  line-height: var(--ct-leading-ui);
-}
-
 .feedback-noscript {
-  margin: 0 0 var(--ct-space-6);
+  display: block;
+  margin: var(--ct-space-2) 0 0;
   color: var(--ct-text-muted);
   font-size: var(--ct-text-sm);
 }
@@ -609,6 +595,7 @@ a:hover {
 }
 
 .feedback-dialog[open] {
+  display: block;
   opacity: 1;
   transform: scale(1);
 }
