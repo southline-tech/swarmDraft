@@ -16,7 +16,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "pnpm -r typecheck",
-    "test": "node --test scripts/version.test.mjs && pnpm -r test",
+    "test": "node --test scripts/version.test.mjs scripts/site-format.test.mjs && pnpm -r test",
     "version:set": "node scripts/set-version.mjs",
     "version:check": "node scripts/check-version.mjs"
   },

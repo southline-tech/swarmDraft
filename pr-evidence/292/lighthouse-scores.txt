@@ -1,0 +1,2 @@
+desktop a11y: 100
+mobile a11y: 100

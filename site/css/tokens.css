@@ -1,0 +1,136 @@
+/* Design tokens aligned with apps/desktop/src/styles/tokens.css (light + dark). */
+@font-face {
+  font-family: 'Literata';
+  src: url('../fonts/literata/literata-latin-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Literata';
+  src: url('../fonts/literata/literata-latin-700.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Inter';
+  src: url('../fonts/inter/inter-latin-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Inter';
+  src: url('../fonts/inter/inter-latin-500.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Inter';
+  src: url('../fonts/inter/inter-latin-600.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light;
+  --ct-font-manuscript: 'Literata', Georgia, serif;
+  --ct-font-ui: 'Inter', system-ui, 'Segoe UI', sans-serif;
+  --ct-text-xs: 0.694rem;
+  --ct-text-sm: 0.833rem;
+  --ct-text-md: 1rem;
+  --ct-text-lg: 1.2rem;
+  --ct-text-xl: 1.44rem;
+  --ct-text-2xl: 1.728rem;
+  --ct-text-3xl: 2.074rem;
+  --ct-leading-tight: 1.25;
+  --ct-leading-ui: 1.45;
+  --ct-leading-body: 1.6;
+  --ct-space-1: 4px;
+  --ct-space-2: 8px;
+  --ct-space-3: 12px;
+  --ct-space-4: 16px;
+  --ct-space-5: 20px;
+  --ct-space-6: 24px;
+  --ct-space-8: 32px;
+  --ct-space-10: 40px;
+  --ct-space-12: 48px;
+  --ct-space-16: 64px;
+  --ct-radius-sm: 4px;
+  --ct-radius-md: 8px;
+  --ct-radius-lg: 12px;
+  --ct-radius-full: 999px;
+  --ct-bg: #f3efe8;
+  --ct-surface: #ffffff;
+  --ct-paper: #fbf8f3;
+  --ct-border: #ddd5c9;
+  --ct-text: #2b2620;
+  --ct-text-muted: #6b6157;
+  --ct-accent: #2f5da8;
+  --ct-accent-contrast: #ffffff;
+  --ct-hover-bg: #ece8e2;
+  --ct-selected-bg: #e4ecf8;
+  --ct-warning-bg: #fff3dc;
+  --ct-warning: #8a5300;
+  --ct-elevation-1: 0 1px 2px rgb(43 38 32 / 0.08), 0 1px 1px rgb(43 38 32 / 0.04);
+  --ct-elevation-2: 0 4px 12px rgb(43 38 32 / 0.1), 0 1px 3px rgb(43 38 32 / 0.06);
+  --ct-focus-ring-color: #2f5da8;
+  --ct-focus-outline: 2px solid var(--ct-focus-ring-color);
+  --ct-focus-offset: 2px;
+  --ct-collab-1: #2f5da8;
+  --ct-collab-2: #a1452a;
+  --ct-collab-3: #2d794d;
+  --ct-collab-4: #7a4bb0;
+  --ct-max-content: 72rem;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --ct-bg: #141210;
+  --ct-surface: #1f1c19;
+  --ct-paper: #1c1a17;
+  --ct-border: #3a342d;
+  --ct-text: #e8e2d8;
+  --ct-text-muted: #a69c90;
+  --ct-accent: #8db2f2;
+  --ct-accent-contrast: #141210;
+  --ct-hover-bg: #2a2622;
+  --ct-selected-bg: #25324a;
+  --ct-warning-bg: #3a2e15;
+  --ct-warning: #e8c06a;
+  --ct-elevation-1: 0 1px 2px rgb(0 0 0 / 0.5);
+  --ct-elevation-2: 0 4px 12px rgb(0 0 0 / 0.5);
+  --ct-focus-ring-color: #8db2f2;
+  --ct-collab-1: #8db2f2;
+  --ct-collab-2: #f0a07f;
+  --ct-collab-3: #7fd1a0;
+  --ct-collab-4: #c7a6f2;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --ct-bg: #141210;
+    --ct-surface: #1f1c19;
+    --ct-paper: #1c1a17;
+    --ct-border: #3a342d;
+    --ct-text: #e8e2d8;
+    --ct-text-muted: #a69c90;
+    --ct-accent: #8db2f2;
+    --ct-accent-contrast: #141210;
+    --ct-hover-bg: #2a2622;
+    --ct-selected-bg: #25324a;
+    --ct-warning-bg: #3a2e15;
+    --ct-warning: #e8c06a;
+    --ct-elevation-1: 0 1px 2px rgb(0 0 0 / 0.5);
+    --ct-elevation-2: 0 4px 12px rgb(0 0 0 / 0.5);
+    --ct-focus-ring-color: #8db2f2;
+    --ct-collab-1: #8db2f2;
+    --ct-collab-2: #f0a07f;
+    --ct-collab-3: #7fd1a0;
+    --ct-collab-4: #c7a6f2;
+  }
+}
