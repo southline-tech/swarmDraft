@@ -15,7 +15,7 @@ Part of #41 (pilot flow + release gate docs; **template marketplace** and **self
 
 | Item                                                       | Status                                                                                          |
 | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Copy deck centralized                                      | **Done here** — `copy-deck.ts` + scope test; shortcuts sheet chrome strings still deferred      |
+| Copy deck centralized                                      | **Done here** — `copy-deck.ts` + scope test (incl. AgentsSettings, ShortcutsSheet chrome)       |
 | Banned list (`.docx`, sync, database, MCP; import allowed) | **Done here** — `docs/copy-deck-banned.txt`                                                     |
 | Jargon CI                                                  | **Done here** — `pnpm copy:check`, workflow step, `copy-jargon.test.mjs`                        |
 | Release checklist                                          | **Done here** — `docs/release-checklist.md`                                                     |
@@ -36,7 +36,7 @@ Part of #41 (pilot flow + release gate docs; **template marketplace** and **self
 | Release checklist           | Done                         | `docs/release-checklist.md`                                                               |
 | Evidence screenshots        | Done                         | `pr-evidence/34-41/*.png` (10 files)                                                      |
 | No real person names        | Done                         | review of changed files                                                                   |
-| Full Vue string migration   | Partial                      | shortcuts sheet chrome deferred                                                           |
+| Full Vue string migration   | Done (gate surfaces)         | `copy-deck.ts`; `copy-deck-scope.test.ts` incl. AgentsSettings + ShortcutsSheet           |
 
 ### #41 — pilot
 
@@ -108,4 +108,4 @@ Checked via `gh pr list --state open` before push — coordinate if another PR t
 
 ## Follow-ups (non-blocking)
 
-- Shortcuts sheet chrome strings still outside `copy-deck.ts`.
+- Designer screenshot refresh for `agents.png` / `error-card.png` optional before pilot tag.
