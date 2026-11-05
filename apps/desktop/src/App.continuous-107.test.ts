@@ -29,6 +29,8 @@ vi.mock('./backend', async (importOriginal) => {
     openLatestManuscript: async () => null,
     peekResumeManuscript: async () => null,
     listenOpeningProgress: async () => () => {},
+    listenOpenDraftPath: async () => () => {},
+    draftTakeLaunchPath: async () => null,
     spellLintParagraph: async () => [],
     sectionReviewMeta: async () => ({
       comments: [],

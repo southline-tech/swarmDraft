@@ -1076,6 +1076,16 @@ vi.mock('./backend', async (orig) => ({
   loadNotesState: vi.fn(async () => null),
   pollUpdates: vi.fn(async () => ({ updates: [], cursor: 0 })),
   notesApplyUpdate: vi.fn(async () => {}),
+  draftOpen: vi.fn(async () => null),
+  draftOpenPath: vi.fn(async () => null),
+  draftSave: vi.fn(async () => ({ status: 'committed' as const, oid: null })),
+  listenOpenDraftPath: vi.fn(async () => () => {}),
+  draftTakeLaunchPath: vi.fn(async () => null),
+  draftSaveAs: vi.fn(async () => null),
+  draftCheckpoint: vi.fn(async () => null),
+  draftHistory: vi.fn(async () => []),
+  draftRestore: vi.fn(async () => 'oid'),
+  draftReviewCommit: vi.fn(async () => null),
 }));
 
 describe('save-failure banner', () => {

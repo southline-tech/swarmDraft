@@ -54,6 +54,7 @@ pub struct Manuscript {
     pub numbering_style: String,
     pub book_author: Option<String>,
     pub last_opened_at: Option<String>,
+    pub draft_file_path: Option<String>,
 }
 
 /// `app_meta` key for the manuscript id the writer last opened (#280).
@@ -77,10 +78,12 @@ fn row_manuscript(r: &rusqlite::Row<'_>) -> rusqlite::Result<Manuscript> {
         numbering_style: r.get(3)?,
         book_author: r.get(4)?,
         last_opened_at: r.get(5)?,
+        draft_file_path: r.get(6)?,
     })
 }
 
-const MANUSCRIPT_COLS: &str = "id, title, created_at, numbering_style, book_author, last_opened_at";
+const MANUSCRIPT_COLS: &str =
+    "id, title, created_at, numbering_style, book_author, last_opened_at, draft_file_path";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -292,7 +295,14 @@ pub(crate) const SUGGESTION_COLS: &str =
 
 impl Store {
     pub fn create_manuscript(&self, title: &str) -> Result<Manuscript, StorageError> {
-        let id = new_id();
+        self.create_manuscript_with_id(&new_id(), title)
+    }
+
+    pub fn create_manuscript_with_id(
+        &self,
+        id: &str,
+        title: &str,
+    ) -> Result<Manuscript, StorageError> {
         self.with_conn(|c| {
             c.execute(
                 &format!(
@@ -303,9 +313,57 @@ impl Store {
             )?;
             Ok(c.query_row(
                 &format!("SELECT {MANUSCRIPT_COLS} FROM manuscripts WHERE id = ?1"),
-                [&id],
+                [id],
                 row_manuscript,
             )?)
+        })
+    }
+
+    pub fn draft_file_path(&self, manuscript_id: &str) -> Result<Option<String>, StorageError> {
+        self.with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT draft_file_path FROM manuscripts WHERE id = ?1",
+                [manuscript_id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten())
+        })
+    }
+
+    pub fn set_draft_file_path(&self, manuscript_id: &str, path: &str) -> Result<(), StorageError> {
+        self.with_conn(|c| {
+            let n = c.execute(
+                "UPDATE manuscripts SET draft_file_path = ?2 WHERE id = ?1",
+                params![manuscript_id, path],
+            )?;
+            if n == 0 {
+                return Err(StorageError::NotFound(format!(
+                    "manuscript {manuscript_id}"
+                )));
+            }
+            Ok(())
+        })
+    }
+
+    pub fn manuscript_id_for_draft_path(&self, path: &str) -> Result<Option<String>, StorageError> {
+        self.with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT id FROM manuscripts WHERE draft_file_path = ?1 LIMIT 1",
+                [path],
+                |r| r.get(0),
+            )
+            .optional()?)
+        })
+    }
+
+    pub fn list_manuscript_ids(&self) -> Result<Vec<String>, StorageError> {
+        self.with_conn(|c| {
+            let mut st = c.prepare("SELECT id FROM manuscripts ORDER BY created_at")?;
+            let rows = st
+                .query_map([], |r| r.get(0))?
+                .collect::<Result<Vec<String>, _>>()?;
+            Ok(rows)
         })
     }
     /// Blank in-app draft (#243): #109 title-page row plus one empty chapter ready to type.
@@ -346,6 +404,56 @@ impl Store {
             )
             .optional()?
             .ok_or_else(|| StorageError::NotFound(format!("manuscript {id}")))
+        })
+    }
+
+    /// Replace metadata fields stored in `book.json` when hydrating from git (#302).
+    pub fn update_manuscript_metadata(
+        &self,
+        manuscript_id: &str,
+        title: &str,
+        numbering_style: &str,
+        book_author: Option<&str>,
+    ) -> Result<(), StorageError> {
+        if !NUMBERING_STYLES.contains(&numbering_style) {
+            return Err(StorageError::Invalid(format!(
+                "unknown numbering style: {numbering_style}"
+            )));
+        }
+        self.with_conn(|c| {
+            let n = c.execute(
+                "UPDATE manuscripts SET title = ?2, numbering_style = ?3, book_author = ?4 WHERE id = ?1",
+                params![manuscript_id, title, numbering_style, book_author],
+            )?;
+            if n == 0 {
+                return Err(StorageError::NotFound(format!(
+                    "manuscript {manuscript_id}"
+                )));
+            }
+            Ok(())
+        })
+    }
+
+    /// Drop incremental updates and persist one full Yjs snapshot (git hydrate / restore).
+    pub fn replace_doc_state(&self, doc_id: &str, state: &[u8]) -> Result<(), StorageError> {
+        let decoded = Update::decode_v1(state)
+            .map_err(|e| StorageError::Invalid(format!("bad state: {e}")))?;
+        let doc = crate::content::new_doc();
+        doc.transact_mut()
+            .apply_update(decoded)
+            .map_err(|e| StorageError::Invalid(format!("bad state: {e}")))?;
+        validate_saved_doc(&doc)?;
+        self.with_conn(|c| {
+            let tx = c.unchecked_transaction()?;
+            tx.execute("DELETE FROM doc_updates WHERE doc_id = ?1", params![doc_id])?;
+            if state.len() > 2 {
+                tx.execute(
+                    "INSERT INTO doc_updates (doc_id, data) VALUES (?1, ?2)",
+                    params![doc_id, state],
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
         })
     }
 

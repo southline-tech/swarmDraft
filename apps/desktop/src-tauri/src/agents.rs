@@ -379,6 +379,17 @@ impl Store {
 
     /// Persist the writer display name from Settings (#45). Rejects names that collide with an
     /// active agent or a reserved label; normalization matches agent naming ([`name_key`]).
+    pub fn user_display_name(&self) -> Result<Option<String>, StorageError> {
+        self.with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT value FROM app_meta WHERE key = ?1",
+                [USER_DISPLAY_NAME_META_KEY],
+                |r| r.get(0),
+            )
+            .optional()?)
+        })
+    }
+
     pub fn set_user_display_name(&self, name: &str) -> Result<String, StorageError> {
         let name = clean_name(name);
         let name = name.as_str();
