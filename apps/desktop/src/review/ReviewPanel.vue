@@ -9,6 +9,7 @@
  */
 import EmptyState from '../shells/EmptyState.vue';
 import PanelRail from '../desk/PanelRail.vue';
+import { emptyStates } from '../copy-deck';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { Decision, SuggestionItem } from '@swarmdraft/editor';
 import {
@@ -502,8 +503,8 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
       data-test="empty"
       icon="sparkle"
       tone="success"
-      title="Nothing to review"
-      text="When your writing assistant suggests a change, it will show up here for you to keep or skip."
+      :title="emptyStates.reviewTitle"
+      :text="emptyStates.reviewText"
     />
     <p
       v-if="filter && !visibleSuggestions.length && !listRows.some((r) => r.kind === 'comment')"

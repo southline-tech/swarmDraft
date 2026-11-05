@@ -72,7 +72,7 @@ import {
 } from './errors/map-error';
 import { saveCopy } from './errors/save-copy';
 import { BUSY_NOTICE } from './errors/busy';
-import { PRODUCT_NAME } from './lib/brand';
+import { appShell, PRODUCT_NAME } from './copy-deck';
 import ShellsPreview from './shells/ShellsPreview.vue';
 import Rad60ReviewEvidence from './evidence/Rad60ReviewEvidence.vue';
 import Rad67EditorChromeEvidence from './evidence/Rad67EditorChromeEvidence.vue';
@@ -82,6 +82,7 @@ import Rad36WpEvidence from './evidence/Rad36WpEvidence.vue';
 import Rad38NotesEvidence from './evidence/Rad38NotesEvidence.vue';
 import Rad34InstallEvidence from './evidence/Rad34InstallEvidence.vue';
 import Rad310UpdateEvidence from './evidence/Rad310UpdateEvidence.vue';
+import Rad3441PilotEvidence from './evidence/Rad3441PilotEvidence.vue';
 import { readEvidenceQuery } from './evidence/evidence-routes';
 import AppToast from './shells/AppToast.vue';
 import UpdatePromptToast from './updater/UpdatePromptToast.vue';
@@ -1416,7 +1417,7 @@ async function reopenAfterFailure(delays = REOPEN_BACKOFF_MS): Promise<Manuscrip
     }
   }
   session.value = null;
-  fatalError.value = `Couldn't reopen the manuscript. Please restart ${PRODUCT_NAME}.`;
+  fatalError.value = appShell.reopenFailed(PRODUCT_NAME);
   return null;
 }
 
@@ -1464,7 +1465,7 @@ async function onFile(e: Event) {
 }
 
 /** Word manuscripts only; checked before anything (including the open book) is touched. */
-const isWordFile = (f: File) => f.name.toLowerCase().endsWith('.docx');
+const isWordFile = (f: File) => f.name.toLowerCase().split('.').pop() === 'docx';
 
 async function restoreAfterImportCancelled(current?: ManuscriptSession | null) {
   if (current?.closed) {
@@ -1565,7 +1566,7 @@ async function importFile(file: File) {
   if (importing.value) return;
   if (!isWordFile(file)) {
     openError.value = '';
-    failOpening(new Error('Not a valid .docx (zip directory not found)'), 'import');
+    failOpening(new Error('Not a valid Word manuscript (zip directory not found)'), 'import');
     return;
   }
   let bytes: Uint8Array;
@@ -1761,6 +1762,7 @@ defineExpose({ open, closeSession });
   <p v-if="evidence === '34-c6'" class="ev34-c6-boot" data-test="ev34-c6-bootstrap">Loading…</p>
   <Rad34InstallEvidence v-else-if="evidence === '34-install'" class="shell" />
   <Rad310UpdateEvidence v-else-if="evidence === '310-updater'" class="shell" />
+  <Rad3441PilotEvidence v-else-if="evidence === '34-41'" />
   <Rad60ReviewEvidence v-else-if="evidence === 'rad60-review'" class="shell" />
   <Rad38NotesEvidence v-else-if="evidence === '38-notes'" class="shell" />
   <Rad67EditorChromeEvidence v-else-if="evidence === 'rad67'" class="shell" />
@@ -2164,7 +2166,7 @@ defineExpose({ open, closeSession });
         class="visually-hidden"
         data-test="open-docx"
         type="file"
-        accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        accept="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         tabindex="-1"
         aria-hidden="true"
         :disabled="importing"
@@ -2514,9 +2516,6 @@ body {
 }
 .shell__desk {
   min-width: 0;
-}
-.shell__status {
-  padding-left: var(--ct-space-4);
 }
 .toolbar-row {
   flex: none;

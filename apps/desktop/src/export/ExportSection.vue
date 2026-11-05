@@ -1,11 +1,12 @@
 <script setup lang="ts">
 /**
- * Settings → Export (#39, #186, #242): EPUB / .docx with a native Save dialog.
+ * Settings → Export (#39, #186, #242): EPUB / Word with a native Save dialog.
  */
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { isTauri } from '@tauri-apps/api/core';
 import {
   exportApi,
+  exportFormatLabel,
   exportJobPathLabel,
   exportStatusLabel,
   pandocDownloadStatusLabel,
@@ -13,6 +14,7 @@ import {
   type ExportJob,
 } from './api';
 import { errorLine } from '../errors/map-error';
+import { exportCopy } from '../copy-deck';
 import { loadPandocPath, savePandocPath } from '../settings/prefs';
 
 const props = defineProps<{
@@ -38,7 +40,7 @@ async function browsePandoc() {
   if (!isTauri()) return;
   const { open } = await import('@tauri-apps/plugin-dialog');
   const picked = await open({
-    title: 'Choose Pandoc',
+    title: exportCopy.chooseWordExportProgram,
     multiple: false,
     filters: [{ name: 'Program', extensions: ['exe', ''] }],
   });
@@ -72,11 +74,11 @@ async function start(format: ExportFormat) {
       pandocPath: pandocPath.value,
     });
     if (!job) {
-      status.value = 'Export is only available in the desktop app.';
+      status.value = exportCopy.desktopOnly;
       return;
     }
     await refresh();
-    status.value = 'Export started…';
+    status.value = exportCopy.exportStarted;
     const done = await exportApi.wait(job.id, {
       deadlineMs: 600_000,
       onTick: (_j, pandoc) => {
@@ -86,7 +88,7 @@ async function start(format: ExportFormat) {
       },
     });
     if (!done) {
-      status.value = 'Still working… check again in a moment.';
+      status.value = exportCopy.exportStillWorking;
       return;
     }
     if (done.status === 'failed') {
@@ -96,7 +98,7 @@ async function start(format: ExportFormat) {
     }
     const saved = await exportApi.saveToDialog(done.id);
     if (saved === null) {
-      status.value = 'Export cancelled.';
+      status.value = exportCopy.exportCancelled;
     } else if (saved) {
       status.value = exportStatusLabel({ ...done, filePath: saved });
     } else {
@@ -135,20 +137,19 @@ onUnmounted(() => {
 
 <template>
   <div data-test="export-section">
-    <h1 class="st-h1">Export</h1>
+    <h1 class="st-h1">{{ exportCopy.sectionTitle }}</h1>
     <p class="st-muted st-sub">
-      Build a reader-ready EPUB 3 or .docx from the accepted manuscript text (suggestions and
-      comments are not included). Choose where to save the file when export finishes.
+      {{ exportCopy.sectionIntro }}
     </p>
     <p v-if="!manuscriptId" class="st-muted" data-test="export-no-book">
-      Open a book to export it.
+      {{ exportCopy.openBookToExport }}
     </p>
     <template v-else>
       <section class="st-card" :aria-labelledby="'ex-' + manuscriptId">
         <h2 :id="'ex-' + manuscriptId" class="st-h2">
-          {{ bookTitle || 'This book' }}
+          {{ bookTitle || exportCopy.thisBook }}
         </h2>
-        <p class="st-muted st-desc">PDF print export is coming in a later update.</p>
+        <p class="st-muted st-desc">{{ exportCopy.pdfPrintLater }}</p>
         <div class="ex__actions">
           <button
             type="button"
@@ -157,7 +158,7 @@ onUnmounted(() => {
             :disabled="!!busy"
             @click="start('epub')"
           >
-            Export EPUB
+            {{ exportCopy.exportEpub }}
           </button>
           <button
             type="button"
@@ -166,18 +167,19 @@ onUnmounted(() => {
             :disabled="!!busy"
             @click="start('docx')"
           >
-            Export .docx
+            {{ exportCopy.exportWord }}
           </button>
         </div>
       </section>
-      <section class="st-card" aria-labelledby="ex-pandoc-override">
-        <h2 id="ex-pandoc-override" class="st-h2">Pandoc</h2>
+      <section class="st-card" aria-labelledby="ex-word-export-override">
+        <h2 id="ex-word-export-override" class="st-h2">{{ exportCopy.wordExportHeading }}</h2>
         <p class="st-muted st-desc">
-          On first export, swarmDraft can download Pandoc into your app data folder. To use an
-          existing install instead, pick its program here (otherwise PATH is used when present).
+          {{ exportCopy.wordExportIntro() }}
         </p>
         <div class="ex__pandoc-row">
-          <label class="ex__pandoc-label" for="ex-pandoc-path">Program path (optional)</label>
+          <label class="ex__pandoc-label" for="ex-pandoc-path">{{
+            exportCopy.wordExportPathLabel
+          }}</label>
           <div class="ex__pandoc-controls">
             <input
               id="ex-pandoc-path"
@@ -187,7 +189,7 @@ onUnmounted(() => {
               data-test="export-pandoc-path"
               autocomplete="off"
               spellcheck="false"
-              placeholder="Leave blank for automatic setup"
+              :placeholder="exportCopy.wordExportPlaceholder"
               @change="persistPandocPath"
             />
             <button
@@ -197,16 +199,16 @@ onUnmounted(() => {
               :disabled="!!busy"
               @click="browsePandoc"
             >
-              Browse…
+              {{ exportCopy.browse }}
             </button>
           </div>
         </div>
       </section>
       <section v-if="jobs.length" class="st-card" aria-labelledby="ex-recent">
-        <h2 id="ex-recent" class="st-h2">Recent exports</h2>
+        <h2 id="ex-recent" class="st-h2">{{ exportCopy.recentHeading }}</h2>
         <ul class="ex__list" data-test="export-jobs">
           <li v-for="j in jobs" :key="j.id" class="ex__row">
-            <span class="ex__fmt">{{ j.format.toUpperCase() }}</span>
+            <span class="ex__fmt">{{ exportFormatLabel(j.format) }}</span>
             <div class="ex__detail">
               <span class="ex__state" :data-status="j.status">{{ exportStatusLabel(j) }}</span>
               <span v-if="exportJobPathLabel(j)" class="ex__path" data-test="export-job-path">{{
@@ -219,7 +221,7 @@ onUnmounted(() => {
                 data-test="export-open-folder"
                 @click="reveal(exportJobPathLabel(j))"
               >
-                Open folder
+                {{ exportCopy.openFolder }}
               </button>
             </div>
           </li>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Global MCP pairing approval (#188, #269): one dialog lists all pending requests.
+ * Global assistant pairing approval (#188, #269): one dialog lists all pending requests.
  */
 import { isTauri } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -9,6 +9,7 @@ import { errorLine, rawErrorText } from './errors/map-error';
 import type { Agent } from './backend';
 import { pairingApi, type PairingApi, type PairingSummary } from './pairing-client';
 import { pairingAccessChips } from './pairing-copy';
+import { pairing } from './copy-deck';
 import { pairingNameCollisionMessage } from './pairing-errors';
 import { trapTab } from './settings/focus-trap';
 import { APP_OVERLAY_LAYER } from './overlay/layer';
@@ -217,13 +218,12 @@ onBeforeUnmount(() => {
         <h2 id="pair-title" class="st-h2 pair__title">
           {{
             queue.length === 1
-              ? `Allow ${queue[0]!.name} to connect?`
-              : `Allow ${queue.length} bots to connect?`
+              ? pairing.dialogTitleSingle(queue[0]!.name)
+              : pairing.dialogTitleBulk(queue.length)
           }}
         </h2>
         <p id="pair-body" class="st-desc pair__body">
-          Bots on this computer are asking to pair over MCP. Each gets a key with the access shown.
-          You can revoke keys later in Settings › Agents.
+          {{ pairing.dialogBody }}
         </p>
         <ul class="pair__list">
           <li
@@ -248,7 +248,7 @@ onBeforeUnmount(() => {
                 :disabled="!!busyId || bulkBusy"
                 @click="onDenied(p.id)"
               >
-                Deny
+                {{ pairing.deny }}
               </button>
               <button
                 type="button"
@@ -257,13 +257,13 @@ onBeforeUnmount(() => {
                 :disabled="!!busyId || bulkBusy"
                 @click="onAllowed(p.id)"
               >
-                Allow
+                {{ pairing.allow }}
               </button>
             </div>
           </li>
         </ul>
         <p id="pair-hint" class="st-muted pair__hint">
-          Esc denies all pending requests. Focus returns to the app when the queue is empty.
+          {{ pairing.dialogHint }}
         </p>
         <p v-if="inlineError" class="pair__error" role="alert" data-test="pairing-error">
           {{ inlineError }}
@@ -277,7 +277,7 @@ onBeforeUnmount(() => {
             :disabled="!!busyId || bulkBusy"
             @click="denyAll()"
           >
-            Deny all
+            {{ pairing.denyAll }}
           </button>
           <button
             type="button"
@@ -286,7 +286,7 @@ onBeforeUnmount(() => {
             :disabled="!!busyId || bulkBusy"
             @click="allowAll()"
           >
-            Allow all
+            {{ pairing.allowAll }}
           </button>
         </div>
       </div>

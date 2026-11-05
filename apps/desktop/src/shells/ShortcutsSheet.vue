@@ -6,6 +6,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import AppIcon from '../icons/AppIcon.vue';
 import { MANUSCRIPT_SHORTCUTS, SHORTCUT_SHEET_GROUPS, shortcutParts } from './app-shortcuts';
+import { shortcutSheet } from '../copy-deck';
 
 const emit = defineEmits<{ close: [] }>();
 const closeBtn = ref<HTMLButtonElement>();
@@ -42,13 +43,13 @@ onBeforeUnmount(() => opener?.focus?.());
       @keydown="trap"
     >
       <div class="sh-row sh-sheet__head">
-        <h2 id="sh-shortcuts-title">Keyboard shortcuts</h2>
+        <h2 id="sh-shortcuts-title">{{ shortcutSheet.sheetTitle }}</h2>
         <button
           ref="closeBtn"
           type="button"
           class="sh-tbtn sh-icon"
           style="margin-left: auto"
-          aria-label="Close keyboard shortcuts"
+          :aria-label="shortcutSheet.closeAriaLabel"
           data-test="shortcuts-close"
           @click="emit('close')"
         >
@@ -56,8 +57,9 @@ onBeforeUnmount(() => opener?.focus?.());
         </button>
       </div>
       <p class="sh-subt">
-        Windows conventions. Press {{ MANUSCRIPT_SHORTCUTS.shortcutsSheet }} any time to open this
-        sheet.
+        {{ shortcutSheet.windowsConventionsLead
+        }}<kbd class="sh-kbd">{{ MANUSCRIPT_SHORTCUTS.shortcutsSheet }}</kbd
+        >{{ shortcutSheet.windowsConventionsTrail }}
       </p>
       <div class="sh-cols">
         <section v-for="g in GROUPS" :key="g.title">
@@ -70,7 +72,10 @@ onBeforeUnmount(() => opener?.focus?.());
           </div>
         </section>
       </div>
-      <p class="sh-foot">Press <kbd class="sh-kbd">Esc</kbd> to close</p>
+      <p class="sh-foot">
+        {{ shortcutSheet.escClosePrefix }}<kbd class="sh-kbd">{{ shortcutSheet.escKeyLabel }}</kbd
+        >{{ shortcutSheet.escCloseSuffix }}
+      </p>
     </div>
   </div>
 </template>

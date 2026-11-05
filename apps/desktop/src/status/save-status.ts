@@ -1,34 +1,29 @@
-/**
- * Manuscript save copy for the status footer (#204, story-notes ap5 / #185).
- * Labels update with time since the last successful persist.
- */
+import { footerSave } from '../copy-deck';
+
+export const FOOTER_SAVE_ERROR_LABEL = footerSave.errorLabel;
 
 export type ManuscriptSaveView =
   | { phase: 'idle' }
   | { phase: 'saving' }
-  | { phase: 'saved'; savedAt: number }
-  | { phase: 'error'; message: string };
+  | { phase: 'error'; message: string }
+  | { phase: 'saved'; savedAt: number };
 
-/** Footer copy while save retries (story-notes ap5 / #185); not mapError title. */
-export const FOOTER_SAVE_ERROR_LABEL = "Couldn't save. Retrying…";
-
-/** Relative "Saved …" line; pass `now` in tests. */
 export function formatSavedAt(savedAt: number, now = Date.now()): string {
-  const sec = Math.floor((now - savedAt) / 1000);
+  const sec = Math.max(0, Math.floor((now - savedAt) / 1000));
   if (sec < 60) return 'Saved just now';
   const min = Math.floor(sec / 60);
-  return min === 1 ? 'Saved 1 min ago' : `Saved ${min} min ago`;
+  return `Saved ${min} min ago`;
 }
 
 export function saveStatusLabel(view: ManuscriptSaveView, now = Date.now()): string {
   switch (view.phase) {
+    case 'idle':
+      return '';
     case 'saving':
       return 'Saving…';
-    case 'saved':
-      return formatSavedAt(view.savedAt, now);
     case 'error':
       return FOOTER_SAVE_ERROR_LABEL;
-    default:
-      return '';
+    case 'saved':
+      return formatSavedAt(view.savedAt, now);
   }
 }

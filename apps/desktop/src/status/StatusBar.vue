@@ -240,6 +240,7 @@ const segGridColumn = (track: 1 | 2 | 3) =>
   gap: var(--ct-space-4);
   padding: 0 var(--ct-space-3) 0 var(--ct-space-4);
   padding-right: 12px;
+  flex-shrink: 0;
 }
 .status-bar__cluster {
   display: inline-flex;

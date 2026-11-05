@@ -8,6 +8,7 @@ import { loadPandocPath } from '../settings/prefs';
 import AppIcon from '../icons/AppIcon.vue';
 import OverlayAnchoredMenu from '../overlay/OverlayAnchoredMenu.vue';
 import { useToolbarMenu } from './menu';
+import { exportCopy } from '../copy-deck';
 
 const props = defineProps<{
   manuscriptId?: string;
@@ -29,7 +30,7 @@ function setStatus(message: string) {
 async function runDocx() {
   if (!props.manuscriptId || busy.value) return;
   if (!isTauri()) {
-    setStatus('Export is only available in the desktop app.');
+    setStatus(exportCopy.desktopOnly);
     close(false);
     return;
   }
@@ -48,11 +49,7 @@ async function runDocx() {
 function runComingLater(kind: 'pdf' | 'md') {
   if (!props.manuscriptId || busy.value) return;
   savedPath.value = null;
-  setStatus(
-    kind === 'pdf'
-      ? 'PDF export is coming in a later update.'
-      : 'Markdown export is coming in a later update.',
-  );
+  setStatus(kind === 'pdf' ? exportCopy.pdfLater : exportCopy.markdownLater);
   close(false);
 }
 
@@ -62,7 +59,7 @@ async function openSavedFolder() {
   try {
     await exportApi.revealInFolder(path);
   } catch {
-    setStatus('Could not open that folder.');
+    setStatus(exportCopy.couldNotOpenFolder);
   }
 }
 
@@ -77,21 +74,21 @@ const btn =
       type="button"
       :class="btn"
       data-test="toolbar-export"
-      aria-label="Export"
+      :aria-label="exportCopy.exportLabel"
       aria-haspopup="menu"
       :aria-expanded="open"
-      title="Export manuscript"
+      :title="exportCopy.exportManuscriptTitle"
       :disabled="!manuscriptId || busy"
       @click="toggle()"
     >
-      Export
+      {{ exportCopy.exportLabel }}
       <AppIcon name="chevron-down" class="h-4 w-4 opacity-70" aria-hidden="true" />
     </button>
     <OverlayAnchoredMenu :open="open" :trigger="trigger" placement="bottom-end">
       <div
         ref="menuEl"
         role="menu"
-        aria-label="Export formats"
+        :aria-label="exportCopy.exportFormatsAria"
         data-test="export-menu"
         class="min-w-44 rounded-md border border-border bg-surface p-1.5 shadow-3"
         @keydown="onMenuKey"
@@ -104,7 +101,7 @@ const btn =
           data-test="export-docx"
           @click="runDocx()"
         >
-          Word (.docx)
+          {{ exportCopy.wordManuscript }}
         </button>
         <button
           type="button"
@@ -114,10 +111,10 @@ const btn =
           data-test="export-pdf"
           disabled
           aria-disabled="true"
-          title="PDF export is coming in a later update."
+          :title="exportCopy.pdfLater"
         >
-          <span class="tb-menu-item__label">PDF</span>
-          <span class="tb-menu-item__hint">Coming later</span>
+          <span class="tb-menu-item__label">{{ exportCopy.pdfLabel }}</span>
+          <span class="tb-menu-item__hint">{{ exportCopy.comingLater }}</span>
         </button>
         <button
           type="button"
@@ -127,7 +124,7 @@ const btn =
           data-test="export-md"
           @click="runComingLater('md')"
         >
-          Markdown
+          {{ exportCopy.markdownLabel }}
         </button>
       </div>
     </OverlayAnchoredMenu>
@@ -142,7 +139,7 @@ const btn =
         data-test="toolbar-export-open-folder"
         @click="openSavedFolder()"
       >
-        Open folder
+        {{ exportCopy.openFolder }}
       </button>
     </div>
   </div>

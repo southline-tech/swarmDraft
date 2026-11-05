@@ -16,7 +16,7 @@ describe('Prettier in CI (#252)', () => {
 
   it('runs pnpm format:check in the Lint and test job after lint', () => {
     expect(ciYml).toMatch(
-      /- run: pnpm lint\n\s+- run: pnpm format:check\n\s+- run: pnpm typecheck/s,
+      /- run: pnpm lint\n\s+- run: pnpm copy:check\n\s+- run: pnpm format:check\n\s+- run: pnpm typecheck/s,
     );
   });
 

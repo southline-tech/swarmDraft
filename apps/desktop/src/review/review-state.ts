@@ -167,8 +167,9 @@ export function changeTypeLabel(
   return 'Insert';
 }
 
-export const OUTDATED_CARD_EXPLANATION =
-  'This suggestion no longer applies after another change was accepted.';
+import { reviewCopy } from '../copy-deck';
+
+export const OUTDATED_CARD_EXPLANATION = reviewCopy.outdatedExplanation;
 
 export function outdatedCardAriaLabel(
   authorName: string,

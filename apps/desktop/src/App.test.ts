@@ -1868,7 +1868,9 @@ describe('home screen', () => {
     const click = vi.spyOn(input, 'click').mockImplementation(() => {});
     await w.find('[data-test="open-manuscript"]').trigger('click');
     expect(click).toHaveBeenCalledTimes(1);
-    expect(input.accept).toContain('.docx');
+    expect(input.accept).toContain(
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    );
     w.unmount();
   });
 

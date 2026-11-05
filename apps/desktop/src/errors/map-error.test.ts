@@ -27,6 +27,7 @@ describe('mapError', () => {
     ['io: The system cannot find the file specified. (os error 2)', 'open', 'not-found'],
     ['pandoc: offline: could not download Pandoc', 'export', 'pandoc-offline'],
     ['pandoc: checksum: bad zip', 'export', 'pandoc-checksum'],
+    ['Pandoc is not available for export', 'export', 'word-export-unavailable'],
     ['weird failure', 'save', 'save-failed'],
     ['weird failure', 'export', 'export-failed'],
     ['weird failure', 'import', 'file-damaged'],

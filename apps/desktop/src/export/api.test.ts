@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { exportStatusLabel, pandocDownloadStatusLabel } from './api';
 
 describe('exportStatusLabel', () => {
-  it('maps failed jobs to the backend error message', () => {
+  it('maps failed jobs to plain-language copy', () => {
     expect(
       exportStatusLabel({
         id: 'j1',
@@ -16,7 +16,21 @@ describe('exportStatusLabel', () => {
         createdAt: 't',
         finishedAt: 't2',
       }),
-    ).toContain('offline');
+    ).toContain("Couldn't set up Word export");
+    expect(
+      exportStatusLabel({
+        id: 'j2',
+        manuscriptId: 'm1',
+        format: 'docx',
+        trim: null,
+        status: 'failed',
+        filePath: null,
+        errorMessage: 'Pandoc is not available for export',
+        log: null,
+        createdAt: 't',
+        finishedAt: 't2',
+      }),
+    ).toContain("Word export isn't available on this computer yet");
   });
 });
 
@@ -29,7 +43,7 @@ describe('pandocDownloadStatusLabel', () => {
         percent: 42,
         message: 'Downloading Pandoc…',
       }),
-    ).toBe('Downloading Pandoc… 42%');
+    ).toBe('Downloading Word export… 42%');
   });
 });
 

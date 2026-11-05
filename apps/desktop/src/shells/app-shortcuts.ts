@@ -5,6 +5,7 @@
  */
 import { SHORTCUTS } from '../toolbar/toolbar';
 import { REVIEW_SHORTCUTS } from '../review/review-state';
+import { shortcutSheet } from '../copy-deck';
 
 /** Editor/manuscript shortcuts not covered by {@link SHORTCUTS} or {@link REVIEW_SHORTCUTS}. */
 export const MANUSCRIPT_SHORTCUTS = {
@@ -68,42 +69,42 @@ export type ShortcutSheetGroup = { title: string; rows: ShortcutSheetRow[] };
 /** Ordered groups for {@link ShortcutsSheet.vue} (wp7). */
 export const SHORTCUT_SHEET_GROUPS: ShortcutSheetGroup[] = [
   {
-    title: 'Formatting',
+    title: shortcutSheet.formatting,
     rows: [
-      { label: 'Bold', chord: SHORTCUTS.bold },
-      { label: 'Italic', chord: SHORTCUTS.italic },
-      { label: 'Underline', chord: SHORTCUTS.underline },
-      { label: 'Heading', chord: MANUSCRIPT_SHORTCUTS.heading },
-      { label: 'Block quote', chord: MANUSCRIPT_SHORTCUTS.blockQuote },
-      { label: 'Body text', chord: MANUSCRIPT_SHORTCUTS.body },
+      { label: shortcutSheet.bold, chord: SHORTCUTS.bold },
+      { label: shortcutSheet.italic, chord: SHORTCUTS.italic },
+      { label: shortcutSheet.underline, chord: SHORTCUTS.underline },
+      { label: shortcutSheet.heading, chord: MANUSCRIPT_SHORTCUTS.heading },
+      { label: shortcutSheet.blockQuote, chord: MANUSCRIPT_SHORTCUTS.blockQuote },
+      { label: shortcutSheet.bodyText, chord: MANUSCRIPT_SHORTCUTS.body },
     ],
   },
   {
-    title: 'Editing',
+    title: shortcutSheet.editing,
     rows: [
-      { label: 'Undo', chord: SHORTCUTS.undo },
-      { label: 'Redo', chord: SHORTCUTS.redo },
-      { label: 'Find', chord: MANUSCRIPT_SHORTCUTS.find },
-      { label: 'Replace', chord: MANUSCRIPT_SHORTCUTS.replace },
-      { label: 'Add comment', chord: MANUSCRIPT_SHORTCUTS.comment },
+      { label: shortcutSheet.undo, chord: SHORTCUTS.undo },
+      { label: shortcutSheet.redo, chord: SHORTCUTS.redo },
+      { label: shortcutSheet.find, chord: MANUSCRIPT_SHORTCUTS.find },
+      { label: shortcutSheet.replace, chord: MANUSCRIPT_SHORTCUTS.replace },
+      { label: shortcutSheet.addComment, chord: MANUSCRIPT_SHORTCUTS.comment },
     ],
   },
   {
-    title: 'Review',
+    title: shortcutSheet.review,
     rows: [
-      { label: 'Next change', chord: REVIEW_SHORTCUTS.next },
-      { label: 'Previous change', chord: REVIEW_SHORTCUTS.prev },
-      { label: 'Accept change', chord: REVIEW_SHORTCUTS.accept },
-      { label: 'Reject change', chord: REVIEW_SHORTCUTS.reject },
+      { label: shortcutSheet.nextChange, chord: REVIEW_SHORTCUTS.next },
+      { label: shortcutSheet.previousChange, chord: REVIEW_SHORTCUTS.prev },
+      { label: shortcutSheet.acceptChange, chord: REVIEW_SHORTCUTS.accept },
+      { label: shortcutSheet.rejectChange, chord: REVIEW_SHORTCUTS.reject },
     ],
   },
   {
-    title: 'View',
+    title: shortcutSheet.view,
     rows: [
-      { label: 'Keyboard shortcuts', chord: MANUSCRIPT_SHORTCUTS.shortcutsSheet },
-      { label: 'Focus mode', chord: MANUSCRIPT_SHORTCUTS.focusMode },
-      { label: 'Exit focus mode', chord: MANUSCRIPT_SHORTCUTS.focusModeExit },
-      { label: 'Toggle sidebars', chord: REVIEW_SHORTCUTS.toggle },
+      { label: shortcutSheet.shortcutsSheet, chord: MANUSCRIPT_SHORTCUTS.shortcutsSheet },
+      { label: shortcutSheet.focusMode, chord: MANUSCRIPT_SHORTCUTS.focusMode },
+      { label: shortcutSheet.exitFocusMode, chord: MANUSCRIPT_SHORTCUTS.focusModeExit },
+      { label: shortcutSheet.toggleSidebars, chord: REVIEW_SHORTCUTS.toggle },
     ],
   },
 ];

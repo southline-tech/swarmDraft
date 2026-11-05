@@ -5,9 +5,10 @@ import {
   availableBody,
   availableTitle,
   manualMessageCopy,
+  updater,
   type ManualCheckMessage,
-  type UpdatePromptMode,
-} from './update-prompt-logic';
+} from '../copy-deck';
+import type { UpdatePromptMode } from './update-prompt-logic';
 
 const props = defineProps<{
   mode: UpdatePromptMode;
@@ -55,10 +56,10 @@ const progressLabel = computed(() => `${props.progress ?? 0}%`);
           data-test="update-now"
           @click="emit('update-now')"
         >
-          Update now
+          {{ updater.updateNow }}
         </button>
         <button type="button" class="sh-btn" data-test="update-later" @click="emit('later')">
-          Later
+          {{ updater.later }}
         </button>
       </div>
     </div>
@@ -70,11 +71,11 @@ const progressLabel = computed(() => `${props.progress ?? 0}%`);
       <span class="update-toast__icon update-toast__icon--info" aria-hidden="true"
         ><ShellIcon name="download"
       /></span>
-      <p class="update-toast__msg">Downloading update…</p>
+      <p class="update-toast__msg">{{ updater.downloadingMessage }}</p>
       <progress
         class="update-toast__bar"
         data-test="update-progress"
-        aria-label="Downloading update"
+        :aria-label="updater.downloadingAria"
         :aria-valuetext="progressLabel"
         :value="progress ?? 0"
         max="100"
@@ -90,7 +91,7 @@ const progressLabel = computed(() => `${props.progress ?? 0}%`);
       /></span>
       <p class="update-toast__msg">{{ manualMessageCopy(manualMessage) }}</p>
       <button type="button" class="sh-btn" data-test="update-dismiss" @click="emit('dismiss')">
-        Got it
+        {{ updater.gotIt }}
       </button>
     </div>
   </div>
