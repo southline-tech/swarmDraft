@@ -31,4 +31,8 @@ shot "${BASE}#light" 390 4200 landing-mobile-light.png
 shot "${BASE}#dark" 390 4200 landing-mobile-dark.png
 shot "${BASE}?focus=download#light" 1280 720 landing-download-focus.png
 
-echo "Wrote pr-evidence/292/landing-*.png"
+for f in landing-desktop-light.png landing-desktop-dark.png landing-mobile-light.png landing-mobile-dark.png; do
+  python3 "$ROOT/crop-screenshots.py" "$ROOT/$f"
+done
+
+echo "Wrote pr-evidence/292/landing-*.png (full-page crops above)"
