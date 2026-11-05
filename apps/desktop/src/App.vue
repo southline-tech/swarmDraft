@@ -183,12 +183,16 @@ function startImportOpening(title: string) {
   opening.value = openingUiForImport(title);
   openingVisible.value = true;
 }
+/** Monotonic id so an older import's cleanup cannot clear a newer job's cancel handle (#306). */
+let importJobSeq = 0;
 let importAbort: AbortController | undefined;
 function cancelImportOpening() {
+  const job = importJobSeq;
   importAbort?.abort();
-  importAbort = undefined;
+  if (importJobSeq !== job) return;
   importing.value = false;
   finishOpening();
+  importAbort = undefined;
 }
 function finishOpening() {
   clearTimeout(openingRevealTimer);
@@ -620,6 +624,7 @@ function onAppMenuToggle(e: Event) {
   if (open) void refreshRecentBooks();
   else recentOpen.value = false;
 }
+// TODO(#302): Ctrl+O / Open should pick an existing .draft once #302 lands; until then Open → Home (Import Word).
 function openBookPicker() {
   if (session.value) choosingBook.value = true;
   else void getStarted();
@@ -988,13 +993,15 @@ async function importBytes(fileName: string, bytes: Uint8Array) {
   openingRetry.value = { kind: 'import', name: fileName, bytes: bytes.slice() };
   startImportOpening(titleFromDocxName(fileName));
   importing.value = true;
-  importAbort = new AbortController();
+  const job = ++importJobSeq;
+  const abort = new AbortController();
+  importAbort = abort;
   const current = session.value;
   try {
     try {
       const next = await importAndOpen(bytes, persistHooks, current, {
         fileName,
-        signal: importAbort.signal,
+        signal: abort.signal,
         onParsedTitle: (title) => {
           if (opening.value) {
             opening.value = {
@@ -1052,8 +1059,10 @@ async function importBytes(fileName: string, bytes: Uint8Array) {
       }
     }
   } finally {
-    importAbort = undefined;
-    importing.value = false;
+    if (importJobSeq === job) {
+      importAbort = undefined;
+      importing.value = false;
+    }
   }
 }
 

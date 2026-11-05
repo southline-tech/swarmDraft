@@ -9,6 +9,11 @@ const mockDocx = resolve(
   '../../../../fixtures/manuscripts/docx-import/mock-manuscript.docx',
 );
 
+const largeSyntheticDocx = resolve(
+  import.meta.dirname,
+  '../../../../fixtures/manuscripts/large-synthetic/large-synthetic.docx',
+);
+
 afterEach(() => {
   setForceSyncDocxImport(import.meta.env.MODE === 'test');
 });
@@ -55,4 +60,26 @@ describe('runDocxImport (#299)', () => {
     job.abort();
     await expect(job.done).rejects.toBeInstanceOf(ImportCancelledError);
   });
+
+  it('imports large synthetic docx in worker while main thread keeps ticking', async () => {
+    setForceSyncDocxImport(false);
+    const bytes = readFileSync(largeSyntheticDocx);
+    let ticks = 0;
+    const timer = setInterval(() => {
+      ticks++;
+    }, 1);
+    const started = performance.now();
+    try {
+      const job = runDocxImport(bytes, { manuscriptId: 'm-large' });
+      await new Promise((r) => setTimeout(r, 25));
+      const parsed = await job.done;
+      const elapsedMs = Math.round(performance.now() - started);
+      expect(parsed.imported.sections.length).toBeGreaterThanOrEqual(350);
+      expect(parsed.ydocs.sectionUpdates.size).toBeGreaterThanOrEqual(350);
+      expect(ticks).toBeGreaterThan(0);
+      expect(elapsedMs).toBeGreaterThan(0);
+    } finally {
+      clearInterval(timer);
+    }
+  }, 180_000);
 });

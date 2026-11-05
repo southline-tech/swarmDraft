@@ -2,7 +2,7 @@
 
 Designer review: import loading card (ob6), home Import copy, book menu Import vs Open, cancel and error states.
 
-Captured at **1280×800** from static scenes that use production tokens and shell styles (`capture.mjs`).
+**Real captures** at **1280×800** from the running app (`pnpm dev:web` or `pnpm tauri dev`) via Chrome DevTools (`scripts/evidence-299-real.mjs`), importing `fixtures/manuscripts/large-synthetic/large-synthetic.docx` (350+ chapter sections).
 
 | File                        | Scene                                  |
 | --------------------------- | -------------------------------------- |
@@ -12,4 +12,8 @@ Captured at **1280×800** from static scenes that use production tokens and shel
 | `error-state.png`           | Opening error card with Try again      |
 | `book-menu-import-open.png` | Book menu: Open vs Import…             |
 
-Re-capture: `node pr-evidence/299/capture.mjs` (requires Chrome).
+Re-capture:
+
+1. `node fixtures/manuscripts/large-synthetic/build-docx.mjs` (if the fixture is missing)
+2. Start the app: `pnpm dev:web` (or `pnpm tauri dev`)
+3. `node scripts/evidence-299-real.mjs` (requires Chrome)

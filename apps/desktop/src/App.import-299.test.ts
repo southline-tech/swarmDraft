@@ -83,4 +83,30 @@ describe('import progress (#299)', () => {
     expect(w.get('[data-test="opening-shell"]').classes()).toContain('opening-shell--overlay');
     w.unmount();
   });
+
+  it('cancel still works when a second import starts right after the first was cancelled', async () => {
+    localStorage.setItem('swarmdraft.welcomed', '1');
+    const aborts: ReturnType<typeof vi.fn>[] = [];
+    vi.spyOn(runImport, 'runDocxImport').mockImplementation(() => {
+      const abort = vi.fn();
+      aborts.push(abort);
+      return { abort, done: new Promise(() => {}) };
+    });
+
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    await chooseFile(w);
+    await settle();
+    await w.get('[data-test="opening-cancel"]').trigger('click');
+    await settle();
+    expect(aborts[0]).toHaveBeenCalled();
+
+    await chooseFile(w);
+    await settle();
+    expect(w.find('[data-test="opening-progress"]').exists()).toBe(true);
+    await w.get('[data-test="opening-cancel"]').trigger('click');
+    await settle();
+    expect(aborts[1]).toHaveBeenCalled();
+    w.unmount();
+  });
 });
