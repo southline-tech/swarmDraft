@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en" data-scene="empty">
+  <head>
+    <meta charset="utf-8" />
+    <title>Feedback empty</title>
+    <link rel="stylesheet" href="../../apps/desktop/src/styles/tokens.css" />
+    <link rel="stylesheet" href="../../apps/desktop/src/styles/app.css" />
+    <link rel="stylesheet" href="../../apps/desktop/src/settings/settings.css" />
+    <link rel="stylesheet" href="./evidence-shared.css" />
+  </head>
+  <body>
+    <div class="stage">
+      <div class="st-dlg-scrim">
+        <div class="st-dlg st-dlg--feedback" role="dialog">
+          <h2 class="st-h2">Send feedback</h2>
+          <p class="st-muted st-desc st-flush">
+            Tell us what happened or what you'd like. Version 0.1.0 is included automatically.
+          </p>
+          <label class="st-row st-row--stack">
+            <span class="st-row__k">Area</span>
+            <select class="st-inp">
+              <option>Editor</option>
+            </select>
+          </label>
+          <fieldset class="st-fieldset">
+            <legend class="st-row__k">Type</legend>
+            <div class="st__seg" role="radiogroup">
+              <button type="button" class="st__segb st__segb--on">Something broke</button>
+              <button type="button" class="st__segb">Idea</button>
+              <button type="button" class="st__segb">Question</button>
+            </div>
+          </fieldset>
+          <label class="st-row st-row--stack">
+            <span class="st-row__k"
+              >Description<span aria-hidden="true"> *</span
+              ><span class="visually-hidden">required</span></span
+            >
+            <textarea class="st-inp st-inp--area" rows="6" required aria-required="true"></textarea>
+          </label>
+          <label class="st-row st-row--stack">
+            <span class="st-row__k">Reply email <span class="st-muted">(optional)</span></span>
+            <input type="email" class="st-inp" />
+          </label>
+          <label class="st-row st-row--check">
+            <input type="checkbox" />
+            <span>Include diagnostics (version, OS, recent errors)</span>
+          </label>
+          <div class="st-dlg__actions">
+            <button type="button" class="st-btn">Cancel</button>
+            <button type="button" class="st-btn st-btn--primary" disabled>Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

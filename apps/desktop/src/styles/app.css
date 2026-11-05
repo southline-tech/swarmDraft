@@ -27,6 +27,125 @@
   .app-overlay-layer .st-dlg-scrim {
     z-index: var(--ct-z-modal);
   }
+  .st-fieldset {
+    margin: var(--ct-space-3) 0 0;
+    padding: 0;
+    border: 0;
+  }
+  .st-fieldset .st-row__k {
+    width: auto;
+    margin-bottom: var(--ct-space-1);
+    color: var(--ct-text);
+    font-weight: var(--ct-weight-semibold);
+  }
+  .st-row--stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ct-space-1);
+    padding: var(--ct-space-3) 0 0;
+  }
+  .st-row--check {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--ct-space-2);
+    padding: var(--ct-space-3) 0 0;
+    border-top: 0;
+    cursor: pointer;
+  }
+  .st-inp--area {
+    box-sizing: border-box;
+    flex: none;
+    width: 100%;
+    min-height: calc(var(--ct-space-12) * 3);
+    height: auto;
+    padding: var(--ct-space-2) var(--ct-space-3);
+    resize: vertical;
+  }
+  .st__seg {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ct-space-1);
+  }
+  .st__segb {
+    flex: 1 1 auto;
+    min-height: var(--ct-space-10);
+    padding: 0 var(--ct-space-3);
+    border: 1px solid var(--ct-border-strong);
+    border-radius: var(--ct-radius-md);
+    background: var(--ct-bg);
+    color: var(--ct-text);
+    font: inherit;
+    font-size: var(--ct-text-sm);
+    cursor: pointer;
+  }
+  .st__segb--on {
+    border-color: var(--ct-accent);
+    background: var(--ct-selected-bg);
+    color: var(--ct-accent);
+  }
+  .st__segb:focus-visible {
+    outline: 0;
+    box-shadow: var(--ct-focus-ring);
+  }
+  .st-flush {
+    margin-bottom: 0;
+  }
+  .st-dlg__actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--ct-space-3);
+    margin-top: var(--ct-space-5);
+  }
+  .st-btn:disabled,
+  .st-btn--primary:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .st-field-error {
+    margin: var(--ct-space-1) 0 0;
+    color: var(--ct-danger);
+    font-size: var(--ct-text-sm);
+  }
+  .st-field-error--block {
+    margin-top: var(--ct-space-3);
+  }
+}
+
+/* Teleported feedback (#208): unlayered so we beat settings.css .st-row / .st-row__k load order. */
+.st-row.st-row--stack {
+  align-items: stretch;
+  text-align: left;
+  flex-wrap: nowrap;
+  border-top: 0;
+}
+.st-row.st-row--stack .st-row__k {
+  width: auto;
+  flex: none;
+  color: var(--ct-text);
+  font-weight: var(--ct-weight-semibold);
+  text-align: left;
+}
+.st-row.st-row--stack .st-inp {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+/* Send feedback card (#208): beat settings.css .st-dlg when modal imports load later. */
+.st-dlg.st-dlg--feedback,
+.st-dlg--feedback {
+  box-sizing: border-box;
+  width: min(560px, 100%);
+  min-width: min(100%, 480px);
+  max-width: 560px;
+}
+fieldset.st-fieldset legend.st-row__k {
+  width: auto;
+  padding: 0;
+  margin: 0 0 var(--ct-space-1);
+  color: var(--ct-text);
+  font-weight: var(--ct-weight-semibold);
+  text-align: left;
 }
 
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));

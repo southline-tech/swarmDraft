@@ -14,6 +14,10 @@ use serde_json::{json, Value};
 
 use crate::agents::AgentPrincipal;
 use crate::content;
+use crate::feedback::{
+    FeedbackArea, FeedbackSendError, FeedbackType, SendFeedbackInput, BOT_FEEDBACK_RATE_MESSAGE,
+    MAX_DESCRIPTION, MAX_EXCERPT,
+};
 use crate::manuscripts::AgentWrite;
 use crate::notes::{self, NoteEntry};
 use crate::storage::{StorageError, Store};
@@ -101,6 +105,7 @@ pub(crate) enum Output {
 pub struct SwarmdraftMcp {
     pub(crate) store: Store,
     pairing_hook: Option<crate::mcp::PairingRequestedHook>,
+    feedback_hook: Option<crate::mcp::FeedbackRequestedHook>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -218,6 +223,39 @@ pub struct GetExportArgs {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SendFeedbackArea {
+    Editor,
+    Review,
+    Export,
+    Agents,
+    Install,
+    Other,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SendFeedbackKind {
+    Bug,
+    Idea,
+    Question,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SendFeedbackArgs {
+    pub area: SendFeedbackArea,
+    #[serde(rename = "type")]
+    pub feedback_type: SendFeedbackKind,
+    pub description: String,
+    #[serde(default)]
+    pub reply_email: Option<String>,
+    #[serde(default)]
+    pub include_text: bool,
+    #[serde(default)]
+    pub excerpt: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct RequestPairingArgs {
     pub name: String,
     pub color: Option<String>,
@@ -275,10 +313,15 @@ fn pairing_access(parts: &Parts) -> Result<(), ErrorData> {
 }
 
 impl SwarmdraftMcp {
-    pub fn new(store: Store, pairing_hook: Option<crate::mcp::PairingRequestedHook>) -> Self {
+    pub fn new(
+        store: Store,
+        pairing_hook: Option<crate::mcp::PairingRequestedHook>,
+        feedback_hook: Option<crate::mcp::FeedbackRequestedHook>,
+    ) -> Self {
         Self {
             store,
             pairing_hook,
+            feedback_hook,
             tool_router: Self::tool_router(),
         }
     }
@@ -1194,6 +1237,98 @@ Use this instead of cramming new scenes into suggest_edit replacements."
     }
 
     #[tool(
+        description = "Send product feedback to the swarmDraft team on the author's behalf. Batch notes into one digest (bulleted description, max 4000 chars); at most one send_feedback call per agent per day. The author previews and Allow/Deny in the app before anything is sent."
+    )]
+    async fn send_feedback(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(a): Parameters<SendFeedbackArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        check_len("description", &a.description, MAX_DESCRIPTION)
+            .map_err(|e| ErrorData::invalid_params(e.message, None))?;
+        if a.include_text {
+            if let Some(ex) = &a.excerpt {
+                check_len("excerpt", ex, MAX_EXCERPT)
+                    .map_err(|e| ErrorData::invalid_params(e.message, None))?;
+            }
+        }
+        let p = principal(&parts)?;
+        if !p.has_scope("comment") {
+            return Ok(CallToolResult::error(vec![ContentBlock::text(
+                "token lacks the 'comment' scope",
+            )]));
+        }
+        let area = match a.area {
+            SendFeedbackArea::Editor => FeedbackArea::Editor,
+            SendFeedbackArea::Review => FeedbackArea::Review,
+            SendFeedbackArea::Export => FeedbackArea::Export,
+            SendFeedbackArea::Agents => FeedbackArea::Agents,
+            SendFeedbackArea::Install => FeedbackArea::Install,
+            SendFeedbackArea::Other => FeedbackArea::Other,
+        };
+        let feedback_type = match a.feedback_type {
+            SendFeedbackKind::Bug => FeedbackType::Bug,
+            SendFeedbackKind::Idea => FeedbackType::Idea,
+            SendFeedbackKind::Question => FeedbackType::Question,
+        };
+        let include_text = a.include_text;
+        let input = SendFeedbackInput {
+            area,
+            feedback_type,
+            description: a.description,
+            reply_email: a.reply_email,
+            include_text,
+            excerpt: a.excerpt,
+            screenshot_png: None,
+            include_diagnostics: false,
+        };
+        let store = self.store.clone();
+        let feedback_id = match store.enqueue_bot_feedback(&p.agent_id, &p.name, input) {
+            Ok(id) => id,
+            Err(FeedbackSendError::RateLimited) => {
+                return Ok(CallToolResult::error(vec![ContentBlock::text(
+                    BOT_FEEDBACK_RATE_MESSAGE,
+                )]));
+            }
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![ContentBlock::text(
+                    e.to_string(),
+                )]));
+            }
+        };
+        if let Some(hook) = &self.feedback_hook {
+            hook(feedback_id.clone());
+        }
+        let wait = store.wait_bot_feedback(&feedback_id).await;
+        let payload = json!({
+            "tokenId": p.token_id,
+            "feedbackId": feedback_id,
+            "args": {
+                "area": area.as_str(),
+                "type": feedback_type.as_str(),
+                "includeText": include_text,
+            },
+        });
+        let outcome = if wait.is_ok() { "ok" } else { "error" };
+        self.store
+            .audit(
+                "agent",
+                &p.agent_id,
+                None,
+                "send_feedback",
+                outcome,
+                &payload,
+            )
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        match wait {
+            Ok(()) => Ok(CallToolResult::structured(json!({ "status": "sent" }))),
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                e.to_string(),
+            )])),
+        }
+    }
+
+    #[tool(
         description = "Request author approval to connect as an agent. Returns a pairing id and secret; poll with poll_pairing until approved or denied."
     )]
     async fn request_pairing(
@@ -1471,7 +1606,7 @@ impl ServerHandler for SwarmdraftMcp {
 read_chapter (markdown with block ids) and search_text before edits; suggest_edit to replace or \
 delete an exact quote; suggest_insert for new paragraphs or scenes; suggest_style for paragraph \
 format; add_comment and write_note for comments; list_suggestions to see pending work; \
-trigger_export/get_export only when the author asks. Pair with request_pairing/poll_pairing. \
+trigger_export/get_export only when the author asks; send_feedback to report bugs or ideas (batch into one daily digest per agent, max 4000 chars; author approves first). Pair with request_pairing/poll_pairing. \
 Accepting or rejecting suggestions is human-only in the app."
             ),
         )
@@ -1714,7 +1849,7 @@ mod tests {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let mcp = SwarmdraftMcp::new(store.clone(), None);
+        let mcp = SwarmdraftMcp::new(store.clone(), None, None);
         let before = counts(&store);
         for tool in 0..3 {
             // A fresh, valid token for each call: auth passes and the tool runs its checks.
@@ -1817,7 +1952,7 @@ mod tests {
         let scopes = vec!["read".to_string(), "suggest".to_string()];
         let tok = store.create_token(&agent.id, Some(&scopes)).unwrap();
         let principal = store.authenticate(&tok.token).unwrap().unwrap();
-        let mcp = SwarmdraftMcp::new(store.clone(), None);
+        let mcp = SwarmdraftMcp::new(store.clone(), None, None);
         let edit = |quote: &str| {
             let (mut parts, ()) = axum::http::Request::new(()).into_parts();
             parts.extensions.insert(principal.clone());

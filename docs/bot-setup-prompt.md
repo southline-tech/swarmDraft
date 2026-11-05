@@ -75,8 +75,15 @@ Body shape:
 `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"<tool>","arguments":{...}}}`
 
 Tools include: `list_documents`, `list_chapters`, `read_chapter`, `search_text`, `suggest_edit`,
-`suggest_insert`, `suggest_style`, `add_comment`, `list_suggestions`, `trigger_export`, `get_export`. Run
-`tools/list` first for the exact argument names.
+`suggest_insert`, `suggest_style`, `add_comment`, `list_suggestions`, `trigger_export`, `get_export`,
+`send_feedback`. Run `tools/list` first for the exact argument names.
+
+`send_feedback` queues product feedback for the author to preview and Allow or Deny in the app (same
+fields as **Send feedback** in Settings). **Batch** product notes into one digest (bulleted
+`description`, max **4000** characters). Call `send_feedback` **at most once per agent per day**; if
+you hit the limit, fold items into tomorrow's digest instead of sending again. The paired agent
+record supplies `botName` automatically — never put a bot name in the tool args. Never include
+manuscript text unless the author opts in on the preview.
 
 - Read before you suggest. Quote the exact text you're changing.
 - One suggestion at a time per passage **from another bot**. Overlapping another author's pending

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Bot feedback queue</title>
+    <link rel="stylesheet" href="../../apps/desktop/src/styles/tokens.css" />
+    <link rel="stylesheet" href="../../apps/desktop/src/styles/app.css" />
+    <link rel="stylesheet" href="../../apps/desktop/src/settings/settings.css" />
+    <link rel="stylesheet" href="./evidence-shared.css" />
+  </head>
+  <body>
+    <div class="stage">
+      <div class="st-dlg-scrim">
+        <div class="st-dlg fb-batch" role="alertdialog">
+          <h2 class="st-h2 fb-batch__title">Send feedback from 2 bots?</h2>
+          <p class="st-muted st-desc st-flush">
+            Esc closes for now; pending requests stay until you Allow or Deny.
+          </p>
+          <ul class="fb-batch__list">
+            <li class="fb-batch__row">
+              <div class="fb-batch__head">
+                <bdi class="fb-batch__name">Line Bot</bdi>
+                <span class="st-tag">Bot</span>
+              </div>
+              <p class="fb-batch__desc">Bug: export menu greyed out</p>
+              <div class="fb-batch__row-actions">
+                <button type="button" class="st-btn st-btn--s">Deny</button>
+                <button type="button" class="st-btn st-btn--primary st-btn--s">Allow</button>
+              </div>
+            </li>
+            <li class="fb-batch__row">
+              <div class="fb-batch__head">
+                <bdi class="fb-batch__name">Continuity Bot</bdi>
+                <span class="st-tag">Bot</span>
+              </div>
+              <p class="fb-batch__desc">Idea: timeline view in outline</p>
+              <div class="fb-batch__row-actions">
+                <button type="button" class="st-btn st-btn--s">Deny</button>
+                <button type="button" class="st-btn st-btn--primary st-btn--s">Allow</button>
+              </div>
+            </li>
+          </ul>
+          <div class="fb-batch__actions">
+            <button type="button" class="st-btn ev-focus-ring">Deny all</button>
+            <button type="button" class="st-btn st-btn--primary">Allow all</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

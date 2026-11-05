@@ -71,6 +71,8 @@ import AppToast from './shells/AppToast.vue';
 import OpeningProgress from './shells/OpeningProgress.vue';
 import ErrorCard from './shells/ErrorCard.vue';
 import PairingPrompt from './PairingPrompt.vue';
+import FeedbackPrompt from './FeedbackPrompt.vue';
+import SendFeedbackModal from './SendFeedbackModal.vue';
 import OverlayAnchoredMenu from './overlay/OverlayAnchoredMenu.vue';
 import {
   OPENING_REVEAL_MS,
@@ -430,6 +432,9 @@ async function getStarted() {
 /** "Open another book" from inside an open manuscript shows the open screen over it. */
 const choosingBook = ref(false);
 const settingsOpen = ref(false);
+const feedbackOpen = ref(false);
+const feedbackFocusReturn = ref<HTMLElement | null>(null);
+const feedbackExcerpt = ref<string | null>(null);
 const agentsOpen = ref(false);
 const newlyPairedAgentIds = ref<string[]>([]);
 const agentsBatchBanner = computed(() => newlyPairedAgentIds.value.length >= 5);
@@ -450,6 +455,21 @@ function openToolbarSettings() {
   settingsFocusReturn.value =
     document.querySelector<HTMLElement>('[data-test="toolbar-settings"]') ?? null;
   settingsOpen.value = true;
+}
+function openFeedback(from?: HTMLElement | null) {
+  feedbackFocusReturn.value =
+    from ??
+    document.querySelector<HTMLElement>('[data-test="toolbar-settings"]') ??
+    (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  feedbackExcerpt.value = editorPane.value?.feedbackExcerpt?.()?.trim() || null;
+  feedbackOpen.value = true;
+}
+function closeFeedbackModal() {
+  feedbackOpen.value = false;
+  void nextTick(() => {
+    feedbackFocusReturn.value?.focus();
+    feedbackFocusReturn.value = null;
+  });
 }
 function openToolbarAgents() {
   agentsFocusReturn.value =
@@ -1201,6 +1221,13 @@ defineExpose({ open, closeSession });
         :context-manuscript-id="session?.id ?? null"
         @approved="onPairingApproved"
       />
+      <FeedbackPrompt v-if="info && isTauri()" />
+      <SendFeedbackModal
+        v-if="feedbackOpen && isTauri()"
+        :info="info"
+        :excerpt="feedbackExcerpt"
+        @close="closeFeedbackModal"
+      />
       <div v-show="!focusMode" class="shell__chrome" data-test="shell-chrome">
         <header class="topbar">
           <details
@@ -1286,6 +1313,24 @@ defineExpose({ open, closeSession });
                 </button>
               </div>
               <div class="sh-sep" role="separator" />
+              <button
+                v-if="isTauri()"
+                type="button"
+                class="sh-mi"
+                role="menuitem"
+                data-test="app-menu-feedback"
+                @click="
+                  () => {
+                    openFeedback(settingsButton);
+                    closeBookMenu();
+                  }
+                "
+              >
+                <span class="sh-mi-lead" aria-hidden="true"
+                  ><AppIcon name="pencil" class="app-menu-icon"
+                /></span>
+                Send feedback
+              </button>
               <button
                 v-if="session && !choosingBook && isTauri()"
                 type="button"
@@ -1397,6 +1442,12 @@ defineExpose({ open, closeSession });
         :numbering-style="session?.numberingStyle.value"
         :manuscript-id="session?.id"
         @close="settingsOpen = false"
+        @open-feedback="
+          () => {
+            openFeedback();
+            settingsOpen = false;
+          }
+        "
         @numbering-style="onNumberingStyle"
         @open-previews="openPreview('all')"
         @backup="onBackup"

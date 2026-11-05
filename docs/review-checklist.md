@@ -86,6 +86,13 @@ Run this consolidated pass in order; do not hand off until every line that appli
 
 Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
 
+- 2026-11-04 · #208 · PR #297 · bot feedback Esc silently denied · defer hides queue (`deferred` ref) without `deny`; hint copy; restore focus to opener
+- 2026-11-04 · #208 · PR #297 · excerpt sent without author opt-in on bot approve · `includeExcerpt` IPC flag; strip excerpt in `approve_feedback` when false; preview + unchecked checkbox in `FeedbackPrompt`
+- 2026-11-04 · #208 · PR #297 · global 20/hour feedback rate · per-agent 24h bot limit + `BOT_FEEDBACK_RATE_MESSAGE`; app writer limit 20/hour on `principal_kind = human`
+- 2026-11-04 · #208 · PR #297 · teleported feedback dialog missing settings.css layout · global dialog form classes in `app.css`; `st-dlg` width 480–560px
+- 2026-11-04 · #208 · PR #297 · `send_feedback`/`approve_feedback` blocked IPC on 10s HTTP · `spawn_blocking` async Tauri commands
+- 2026-11-04 · #208 · PR #297 · HTTP errors mapped to unavailable only · 400/422 validation, 429 rate_limited, 403/503 unavailable in `post_feedback`
+- 2026-11-04 · #208 · PR #297 · bot feedback batch UI copied pairing heading not per-row · `#269/#270` queue rows with Bot pill + Allow all/Deny all
 - 2026-11-04 · #288 · relay PR shipped `services/relay` scaffold and lockfile churn while #195 is deferred post-pilot · docs-only `docs/relay-design.md`; no workspace package until relay resumes; `Refs #195` not `Closes`
 - 2026-11-02 · #261 · outline section scroll used `scrollIntoView`, scrolling the document and pushing `shell__chrome` off-screen (toolbar looked “gone”) · scroll only `.continuous-manuscript` via `scrollSectionAnchorToTop`; `focus({ preventScroll: true })`; `restoreWindowScroll()`; test asserts `shellChromeViewportTop() >= 0` and no `scrollIntoView` on outline click
 - 2026-10-31 · #200 · name save errors used muted `.st-status` and no invalid input a11y · validation errors use `var(--ct-danger)`, `role="alert"`, and `aria-invalid`/`aria-describedby` on the name field

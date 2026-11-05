@@ -448,6 +448,12 @@ function setScrollPaddingBottom(px: number) {
   root.style.paddingBottom = px > 0 ? `${px}px` : '';
 }
 
+function feedbackExcerpt(): string {
+  const id = props.selectedId;
+  if (!id) return '';
+  return editors.value.get(id)?.feedbackExcerpt?.() ?? '';
+}
+
 defineExpose({
   focusBody() {
     if (props.selectedId) focusSection(props.selectedId);
@@ -455,6 +461,7 @@ defineExpose({
   focusSection,
   setZoom,
   setScrollPaddingBottom,
+  feedbackExcerpt,
 });
 
 onMounted(async () => {

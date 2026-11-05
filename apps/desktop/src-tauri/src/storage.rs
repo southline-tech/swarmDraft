@@ -235,6 +235,17 @@ const MIGRATIONS: &[&str] = &[
     BOOK_AUTHOR_REPAIR_MIGRATION,
     // #280: reopen the draft the writer last had open, not merely the newest created row.
     LAST_OPENED_AT_MIGRATION,
+    "CREATE TABLE IF NOT EXISTS feedback_pending (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        agent_name TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending','denied','expired','sent')),
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        resolved_at TEXT
+     );
+     CREATE INDEX IF NOT EXISTS feedback_pending_status ON feedback_pending(status, expires_at);",
 ];
 
 /// Sentinel for the #259 trailing repair; not executed as SQL.
