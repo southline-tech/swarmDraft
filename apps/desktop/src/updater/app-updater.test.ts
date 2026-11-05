@@ -59,9 +59,11 @@ describe('createAppUpdater (#310)', () => {
       latest = s;
     });
     await handle.manualCheck();
-    await handle.installPending(vi.fn(async () => {
-      throw new Error('save failed');
-    }));
+    await handle.installPending(
+      vi.fn(async () => {
+        throw new Error('save failed');
+      }),
+    );
     expect(latest.mode).toBe('available');
     expect(latest.manualMessage).toBeNull();
     expect(d.downloadAndInstall).not.toHaveBeenCalled();
