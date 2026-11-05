@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>First-run welcome (ob4)</title>
+    <link rel="stylesheet" href="../../apps/desktop/src/styles/tokens.css" />
+    <link rel="stylesheet" href="../../apps/desktop/src/styles/app.css" />
+    <link rel="stylesheet" href="./evidence-shared.css" />
+    <style>
+      .home {
+        min-height: 720px;
+        display: grid;
+        place-items: center;
+      }
+      .home__inner {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        max-width: 37.5rem;
+        gap: var(--ct-space-4);
+      }
+      .home__title {
+        margin: 0;
+        font-family: var(--ct-font-manuscript);
+        font-weight: var(--ct-weight-regular);
+        font-size: calc(var(--ct-text-3xl) * 1.2);
+      }
+      .home__lede,
+      .home__note {
+        margin: 0;
+        color: var(--ct-text-muted);
+        font-size: var(--ct-text-lg);
+      }
+      .home__primary {
+        min-height: var(--ct-space-16);
+        padding: 0 var(--ct-space-8);
+        border: 0;
+        border-radius: var(--ct-radius-lg);
+        background: var(--ct-accent);
+        color: var(--ct-accent-contrast);
+        font-size: var(--ct-text-lg);
+        font-weight: var(--ct-weight-semibold);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="stage">
+      <section class="home" data-test="home-welcome">
+        <div class="home__inner">
+          <img src="../../apps/desktop/src-tauri/icons/128x128.png" alt="" width="64" height="64" />
+          <h1 class="home__title">Welcome to swarmDraft</h1>
+          <p class="home__lede">
+            A calm place to write and revise your book. Your writing assistant can only suggest
+            changes — you decide what stays.
+          </p>
+          <button type="button" class="home__primary">Get started</button>
+          <p class="home__note">
+            Your book stays on this computer. swarmDraft saves your work as you go.
+          </p>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>

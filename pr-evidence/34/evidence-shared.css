@@ -1,0 +1,13 @@
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--ct-bg);
+  color: var(--ct-text);
+  font-family: var(--ct-font-ui);
+}
+.stage {
+  box-sizing: border-box;
+  min-height: 800px;
+  width: 1280px;
+  padding: var(--ct-space-8);
+}
