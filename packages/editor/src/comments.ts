@@ -33,6 +33,7 @@ export interface CommentThread {
   resolved: boolean;
   /** Anchor in the doc but no comment rows, or rows whose anchor no longer exists. */
   orphan: 'none' | 'no_comments' | 'no_anchor';
+  splitAcrossChapters?: boolean;
 }
 
 export interface NewComment {
@@ -71,7 +72,11 @@ export function listCommentAnchors(doc: DocNode): { id: string; text: string }[]
   return [...byId.values()];
 }
 
-export function buildThreads(doc: DocNode, rows: CommentRow[]): CommentThread[] {
+export function buildThreads(
+  doc: DocNode,
+  rows: CommentRow[],
+  splitAcrossIds?: ReadonlySet<string>,
+): CommentThread[] {
   const anchors = listCommentAnchors(doc);
   const rowsByThread = new Map<string, CommentRow[]>();
   for (const r of rows) {
@@ -97,6 +102,7 @@ export function buildThreads(doc: DocNode, rows: CommentRow[]): CommentThread[] 
       comments: list,
       resolved: resolvedOf(list),
       orphan: list.length ? 'none' : 'no_comments',
+      splitAcrossChapters: splitAcrossIds?.has(a.id),
     };
   });
   for (const [id, list] of rowsByThread) {

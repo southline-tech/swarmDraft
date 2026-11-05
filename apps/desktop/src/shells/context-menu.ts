@@ -14,6 +14,8 @@ export type ContextMenuAction =
   | 'heading'
   | 'block_quote'
   | 'scene_break'
+  | 'split_chapter'
+  | 'merge_prev_chapter'
   | 'comment'
   | 'ask-bot';
 
@@ -48,8 +50,16 @@ function defaultClipboard(): ContextMenuClipboard | undefined {
   return { readText: () => c.readText(), writeText: (text) => c.writeText(text) };
 }
 
+export function chapterSplitShortcut(ev: KeyboardEvent): boolean {
+  const ctrl = ev.ctrlKey || ev.metaKey;
+  return ctrl && ev.shiftKey && !ev.altKey && ev.key === 'Enter';
+}
+
 /** Which menu entries are inactive for the current editor state. */
-export function contextMenuDisabled(editor: Editor | undefined): ReadonlySet<ContextMenuAction> {
+export function contextMenuDisabled(
+  editor: Editor | undefined,
+  chapter?: { splitBlocked: boolean; canMergePrev: boolean },
+): ReadonlySet<ContextMenuAction> {
   const out = new Set<ContextMenuAction>();
   const empty = !editor || editor.state.selection.empty;
   if (empty) {
@@ -62,7 +72,11 @@ export function contextMenuDisabled(editor: Editor | undefined): ReadonlySet<Con
     out.add('paste');
     out.add('comment');
     for (const id of STYLE_ACTIONS) out.add(id);
+    out.add('split_chapter');
+    out.add('merge_prev_chapter');
   }
+  if (chapter?.splitBlocked) out.add('split_chapter');
+  if (!chapter?.canMergePrev) out.add('merge_prev_chapter');
   return out;
 }
 

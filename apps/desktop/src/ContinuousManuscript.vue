@@ -76,6 +76,12 @@ const props = defineProps<{
   currentDraftId?: string;
   /** Bumped after comment reply/resolve saves (#255); does not remount editors. */
   commentMetaVersion?: number;
+  leadChapterOps?: {
+    chapterNumber: number;
+    canMergePrev: boolean;
+    splitHint: boolean;
+  } | null;
+  splitAcrossThreadIds?: readonly string[];
 }>();
 
 const commentRows = shallowRef<readonly CommentRow[]>([]);
@@ -144,6 +150,8 @@ const emit = defineEmits<{
   'draft-menu-open': [];
   'comment-reply': [sectionId: string, threadId: string, body: string];
   'comment-resolve': [sectionId: string, threadId: string, resolved: boolean];
+  'split-chapter': [payload: { blockIndex: number; title: string; removeLine: boolean }];
+  'merge-prev-chapter': [];
 }>();
 
 const suggestionsBySection = shallowRef(new Map<string, SuggestionItem[]>());
@@ -542,7 +550,18 @@ onBeforeUnmount(() => {
             :draft-label="draftLabel"
             :draft-rows="sec.id === selectedId ? draftRows : undefined"
             :current-draft-id="sec.id === selectedId ? currentDraftId : undefined"
+            :chapter-ops-enabled="
+              sec.id === selectedId && sec.kind === 'chapter' && !!leadChapterOps
+            "
+            :can-merge-prev-chapter="
+              sec.id === selectedId ? leadChapterOps?.canMergePrev : undefined
+            "
+            :chapter-number="sec.id === selectedId ? leadChapterOps?.chapterNumber : undefined"
+            :split-chapter-hint="sec.id === selectedId && !!leadChapterOps?.splitHint"
+            :split-across-thread-ids="sec.id === selectedId ? splitAcrossThreadIds : undefined"
             @update:author-filter="authorFilter = $event"
+            @split-chapter="emit('split-chapter', $event)"
+            @merge-prev-chapter="emit('merge-prev-chapter')"
             @reload="emit('reload')"
             @toggle-navigator="emit('toggle-navigator')"
             @open-settings="emit('open-settings')"

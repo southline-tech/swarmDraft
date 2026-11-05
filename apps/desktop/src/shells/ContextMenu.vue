@@ -13,6 +13,9 @@ const props = defineProps<{
   disabled?: ReadonlySet<ContextMenuAction>;
   /** Current block paragraph style for the style submenu checkmarks. */
   activeStyle?: ContextMenuAction;
+  showChapterGroup?: boolean;
+  splitTitle?: string;
+  mergePrevTitle?: string;
 }>();
 const emit = defineEmits<{ close: []; select: [action: ContextMenuAction] }>();
 const root = ref<HTMLElement>();
@@ -28,6 +31,10 @@ const STYLES: { id: ContextMenuAction; label: string; keys: string }[] = [
   { id: 'heading', label: 'Heading', keys: MANUSCRIPT_SHORTCUTS.heading },
   { id: 'block_quote', label: 'Block quote', keys: MANUSCRIPT_SHORTCUTS.blockQuote },
   { id: 'scene_break', label: 'Scene break', keys: '' },
+];
+const CHAPTER: { id: ContextMenuAction; label: string; keys: string }[] = [
+  { id: 'split_chapter', label: 'Split chapter here', keys: 'Ctrl+Shift+Enter' },
+  { id: 'merge_prev_chapter', label: 'Merge with previous chapter', keys: '' },
 ];
 const AFTER: { id: ContextMenuAction; label: string; keys: string; icon?: 'sparkle' }[] = [
   { id: 'comment', label: 'Add comment', keys: MANUSCRIPT_SHORTCUTS.comment },
@@ -195,6 +202,26 @@ onMounted(() => nextTick(() => mainMenuItems()[0]?.focus()));
         </button>
       </div>
     </div>
+    <template v-if="showChapterGroup">
+      <div class="sh-sep" role="separator" />
+      <p class="ctx-group-label" role="presentation">Chapter</p>
+      <button
+        v-for="it in CHAPTER"
+        v-show="it.id !== 'merge_prev_chapter' || !isDisabled(it.id)"
+        :key="it.id"
+        type="button"
+        role="menuitem"
+        tabindex="-1"
+        class="sh-mi"
+        :data-test="`ctx-${it.id}`"
+        :data-action="it.id"
+        :aria-disabled="isDisabled(it.id) ? 'true' : undefined"
+        :title="it.id === 'split_chapter' ? splitTitle : mergePrevTitle"
+        @click="pick(it.id)"
+      >
+        {{ it.label }}<span v-if="it.keys" class="sh-k">{{ it.keys }}</span>
+      </button>
+    </template>
     <div class="sh-sep" role="separator" />
     <button
       v-for="it in AFTER"
@@ -217,6 +244,12 @@ onMounted(() => nextTick(() => mainMenuItems()[0]?.focus()));
 </template>
 
 <style scoped>
+.ctx-group-label {
+  margin: 0;
+  padding: var(--ct-space-1) var(--ct-space-3);
+  font-size: var(--ct-text-xs);
+  color: var(--ct-text-muted);
+}
 .sh-mi-lead {
   display: inline-flex;
   width: 16px;

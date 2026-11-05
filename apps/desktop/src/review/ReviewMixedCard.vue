@@ -198,6 +198,9 @@ const tip = (text: string, keys: string) => `${text} (${keys})`;
           commentName(rootComment()!).note
         }}</span>
         <span class="pill comment-pill">Comment</span>
+        <span v-if="item.thread.splitAcrossChapters" class="pill" data-test="split-across-pill"
+          >Split across chapters</span
+        >
       </div>
       <blockquote class="comment-quote" data-test="comment-quote">
         {{ item.thread.anchorText || (item.thread.orphan === 'no_anchor' ? '(removed)' : '') }}
