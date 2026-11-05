@@ -14,4 +14,4 @@ pub use format::{
 };
 pub use migrate::{migrate_legacy_books_to_draft, DraftMigrationNotice};
 pub use repo::{CommitEntry, DraftRepoError};
-pub use service::DraftService;
+pub use service::{DraftRecoveryOffer, DraftSaveOutcome, DraftService, OpenDraftResult};

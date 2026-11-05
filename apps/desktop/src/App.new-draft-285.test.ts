@@ -101,7 +101,7 @@ vi.mock('./backend', async (orig) => ({
   notesApplyUpdate: vi.fn(async () => {}),
   listenOpeningProgress: vi.fn(async () => () => {}),
   draftOpen: vi.fn(async () => null),
-  draftSave: vi.fn(async () => null),
+  draftSave: vi.fn(async () => ({ status: 'committed' as const, oid: null })),
   draftSaveAs: vi.fn(async () => null),
   draftCheckpoint: vi.fn(async () => null),
   draftHistory: vi.fn(async () => []),

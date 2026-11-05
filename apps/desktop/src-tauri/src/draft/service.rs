@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use chrono::{Local, TimeZone};
+use serde::Serialize;
 use tauri_plugin_dialog::DialogExt;
 
 use crate::storage::Store;
@@ -14,12 +16,39 @@ use super::sync;
 
 const CHECKPOINT_DEBOUNCE_MS: u128 = 5000;
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftRecoveryOffer {
+    pub manuscript_id: String,
+    pub draft_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenDraftResult {
+    pub manuscript_id: String,
+    pub recovery: Option<DraftRecoveryOffer>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase", tag = "status")]
+pub enum DraftSaveOutcome {
+    Committed { oid: Option<String> },
+    NeedsSaveAs,
+}
+
+struct BotSession {
+    branch: String,
+}
+
 pub struct DraftService {
     store_data_dir: PathBuf,
     app_version: String,
     /// manuscript id → working repo path
     working: Mutex<HashMap<String, PathBuf>>,
     last_checkpoint: Mutex<HashMap<String, u128>>,
+    /// (manuscript id, bot id) → active bot branch session
+    bot_sessions: Mutex<HashMap<(String, String), BotSession>>,
     /// Serialize pack, commit, open, restore (git2 + SQLite hydrate).
     op: Mutex<()>,
 }
@@ -31,6 +60,7 @@ impl DraftService {
             app_version,
             working: Mutex::new(HashMap::new()),
             last_checkpoint: Mutex::new(HashMap::new()),
+            bot_sessions: Mutex::new(HashMap::new()),
             op: Mutex::new(()),
         }
     }
@@ -167,6 +197,7 @@ impl DraftService {
         Ok(oid)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn commit_review_decision(
         &self,
         store: &Store,
@@ -175,28 +206,134 @@ impl DraftService {
         bot_name: &str,
         chapter_title: &str,
         _decided_by: &str,
+        bot_agent_id: Option<&str>,
     ) -> Result<Option<String>, String> {
         self.with_op(|| {
             let verb = if accepted { "Accepted" } else { "Rejected" };
             let msg = format!("{verb} {bot_name}'s change in {chapter_title}");
-            // Git committer is the bot for review checkpoints (#116 slice); author remains human in SQLite.
-            let oid = self.commit_now_inner(
-                store,
-                manuscript_id,
-                &msg,
-                bot_name,
-                "bot@swarmdraft.local",
-            )?;
+            let bot_email = bot_agent_id
+                .map(bot_committer_email)
+                .unwrap_or_else(|| "bot@swarmdraft.local".into());
+            let oid = self.commit_now_inner(store, manuscript_id, &msg, bot_name, &bot_email)?;
             if accepted {
-                if let Some(branch) = bot_branch_name(bot_name) {
+                if let Some(branch) = self.active_bot_branch(manuscript_id, bot_agent_id, bot_name)
+                {
                     let dir = self.ensure_open_inner(store, manuscript_id)?;
                     let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
-                    if repo.ensure_bot_branch(&branch).is_ok() {
-                        let _ = repo.merge_bot_branch(&branch, &author_name(store));
-                    }
+                    repo.merge_bot_branch(&branch, &author_name(store))
+                        .map_err(|e| format!("Couldn't merge bot changes: {e}"))?;
+                    self.end_bot_session(manuscript_id, bot_agent_id, bot_name);
                 }
             }
             Ok(oid)
+        })
+    }
+
+    /// Start or reuse `bot/{bot}/{session}` from main and commit bot-side suggestions on it.
+    pub fn commit_bot_suggestion(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        bot_agent_id: &str,
+        bot_display_name: &str,
+        message: &str,
+    ) -> Result<Option<String>, String> {
+        self.with_op(|| {
+            let branch = self.ensure_bot_session_inner(store, manuscript_id, bot_agent_id)?;
+            let dir = self.ensure_open_inner(store, manuscript_id)?;
+            let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+            repo.checkout_branch(&branch)
+                .map_err(|e| format!("checkout bot branch: {e}"))?;
+            sync::sync_store_to_worktree(store, manuscript_id, &dir)
+                .map_err(|e| format!("sync: {e}"))?;
+            let email = bot_committer_email(bot_agent_id);
+            let oid = repo
+                .commit_all(message, bot_display_name, &email)
+                .map_err(|e| format!("commit: {e}"))?;
+            repo.checkout_main()
+                .map_err(|e| format!("checkout main: {e}"))?;
+            Ok(oid)
+        })
+    }
+
+    pub fn bot_branch_exists(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        bot_agent_id: &str,
+        bot_name: &str,
+    ) -> Result<bool, String> {
+        self.with_op(|| {
+            let branch = self
+                .active_bot_branch(manuscript_id, Some(bot_agent_id), bot_name)
+                .ok_or_else(|| "no bot session".to_string())?;
+            let dir = self.ensure_open_inner(store, manuscript_id)?;
+            let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+            Ok(repo.has_branch(&branch))
+        })
+    }
+
+    pub fn save_linked_or_needs_as(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        message: &str,
+    ) -> Result<DraftSaveOutcome, String> {
+        self.with_op(|| {
+            if store
+                .draft_file_path(manuscript_id)
+                .map_err(|e| e.to_string())?
+                .is_none()
+            {
+                return Ok(DraftSaveOutcome::NeedsSaveAs);
+            }
+            let oid = self.commit_now_inner(
+                store,
+                manuscript_id,
+                message,
+                &author_name(store),
+                "author@swarmdraft.local",
+            )?;
+            Ok(DraftSaveOutcome::Committed { oid })
+        })
+    }
+
+    pub fn after_word_import(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        source_file_name: &str,
+    ) -> Result<String, String> {
+        self.with_op(|| {
+            let _manuscript = store
+                .get_manuscript(manuscript_id)
+                .map_err(|e| e.to_string())?;
+            let drafts_dir = self.store_data_dir.join("drafts");
+            std::fs::create_dir_all(&drafts_dir).map_err(|e| e.to_string())?;
+            let base = sanitize_filename(source_file_name.trim_end_matches(".docx"));
+            let path = unique_draft_path(&drafts_dir, &base);
+            store
+                .set_draft_file_path(manuscript_id, &path.to_string_lossy())
+                .map_err(|e| e.to_string())?;
+            let label = Path::new(source_file_name)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(source_file_name);
+            self.commit_now_inner(
+                store,
+                manuscript_id,
+                &format!("Imported {label}"),
+                &author_name(store),
+                "author@swarmdraft.local",
+            )?;
+            Ok(path.to_string_lossy().into_owned())
+        })
+    }
+
+    pub fn pack_recovery_if_newer(&self, store: &Store, manuscript_id: &str) -> Result<(), String> {
+        self.with_op(|| {
+            self.pack_if_linked_inner(store, manuscript_id)?;
+            Ok(())
         })
     }
 
@@ -252,7 +389,7 @@ impl DraftService {
             let Some(file) = picked else {
                 return Ok(None);
             };
-            let path = file.to_string();
+            let path = path_with_draft_extension(&file.to_string());
             store
                 .set_draft_file_path(manuscript_id, &path)
                 .map_err(|e| e.to_string())?;
@@ -265,7 +402,8 @@ impl DraftService {
         &self,
         app: &tauri::AppHandle,
         store: &Store,
-    ) -> Result<Option<String>, String> {
+        force_discard_recovery: bool,
+    ) -> Result<Option<OpenDraftResult>, String> {
         let picked = app
             .dialog()
             .file()
@@ -275,17 +413,54 @@ impl DraftService {
             return Ok(None);
         };
         let path = file.to_string();
-        self.open_draft_path(store, &path)
+        self.open_draft_path(store, &path, force_discard_recovery)
     }
 
-    pub fn open_draft_path(&self, store: &Store, path: &str) -> Result<Option<String>, String> {
-        self.with_op(|| self.open_draft_path_inner(store, path))
+    pub fn open_draft_path(
+        &self,
+        store: &Store,
+        path: &str,
+        force_discard_recovery: bool,
+    ) -> Result<Option<OpenDraftResult>, String> {
+        self.with_op(|| self.open_draft_path_inner(store, path, force_discard_recovery))
     }
 
-    fn open_draft_path_inner(&self, store: &Store, path: &str) -> Result<Option<String>, String> {
+    fn open_draft_path_inner(
+        &self,
+        store: &Store,
+        path: &str,
+        force_discard_recovery: bool,
+    ) -> Result<Option<OpenDraftResult>, String> {
+        let archive_path = format::resolve_draft_archive(Path::new(path));
+        if !archive_path.is_file() {
+            return Err("That file isn't a swarmDraft draft.".into());
+        }
+        let file_head = head_oid_from_archive(&archive_path)?;
+        let id_preview = if let Some(existing) = store
+            .manuscript_id_for_draft_path(path)
+            .map_err(|e| e.to_string())?
+        {
+            existing
+        } else {
+            let unpacked = tempfile::tempdir().map_err(|e| e.to_string())?;
+            let manifest =
+                format::unpack_draft(&archive_path, unpacked.path()).map_err(|e| e.to_string())?;
+            manifest.book_id
+        };
+        let work = self.work_dir(&id_preview);
+        if !force_discard_recovery {
+            if let Some(recovery) =
+                recovery_offer_if_worktree_newer(&work, path, &id_preview, &file_head)?
+            {
+                return Ok(Some(OpenDraftResult {
+                    manuscript_id: id_preview,
+                    recovery: Some(recovery),
+                }));
+            }
+        }
         let unpacked = tempfile::tempdir().map_err(|e| e.to_string())?;
         let manifest =
-            format::unpack_draft(Path::new(path), unpacked.path()).map_err(|e| e.to_string())?;
+            format::unpack_draft(&archive_path, unpacked.path()).map_err(|e| e.to_string())?;
         let id = if let Some(existing) = store
             .manuscript_id_for_draft_path(path)
             .map_err(|e| e.to_string())?
@@ -318,7 +493,10 @@ impl DraftService {
             .lock()
             .expect("draft working")
             .insert(id.clone(), work);
-        Ok(Some(id))
+        Ok(Some(OpenDraftResult {
+            manuscript_id: id,
+            recovery: None,
+        }))
     }
 
     pub fn history(
@@ -347,12 +525,8 @@ impl DraftService {
         self.with_op(|| {
             let dir = self.ensure_open_inner(store, manuscript_id)?;
             let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
-            let time = repo
-                .list_main_commits(1, 0)
-                .ok()
-                .and_then(|v| v.first().map(|c| c.time_unix))
-                .unwrap_or(0);
-            let msg = format!("Restored version from {time}");
+            let time = repo.commit_time_unix(oid).unwrap_or(0);
+            let msg = format!("Restored version from {}", format_when_human(time));
             let new_oid = repo
                 .restore_as_new_commit(oid, committer_name, "author@swarmdraft.local", &msg)
                 .map_err(|e| e.to_string())?;
@@ -392,16 +566,174 @@ fn author_name(store: &Store) -> String {
         .unwrap_or_else(|| "Author".to_string())
 }
 
-fn bot_branch_name(bot_name: &str) -> Option<String> {
-    let slug: String = bot_name
+fn bot_slug(bot_id: &str) -> String {
+    let slug: String = bot_id
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
     if slug.is_empty() {
-        None
+        "bot".into()
     } else {
-        Some(format!("bot/{slug}/session"))
+        slug
     }
+}
+
+fn bot_branch_name(bot_id: &str, session_id: &str) -> String {
+    format!("bot/{}/{}", bot_slug(bot_id), session_id)
+}
+
+fn bot_committer_email(bot_id: &str) -> String {
+    format!("bot-{}@swarmdraft.local", bot_slug(bot_id))
+}
+
+fn new_bot_session_id() -> String {
+    format!("s{}", crate::manuscripts::new_id())
+}
+
+impl DraftService {
+    fn ensure_bot_session_inner(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        bot_agent_id: &str,
+    ) -> Result<String, String> {
+        let key = (manuscript_id.to_string(), bot_agent_id.to_string());
+        let sessions = self.bot_sessions.lock().expect("bot sessions");
+        if let Some(s) = sessions.get(&key) {
+            return Ok(s.branch.clone());
+        }
+        drop(sessions);
+        let session_id = new_bot_session_id();
+        let branch = bot_branch_name(bot_agent_id, &session_id);
+        let dir = self.ensure_open_inner(store, manuscript_id)?;
+        let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+        repo.ensure_bot_branch(&branch)
+            .map_err(|e| format!("create bot branch: {e}"))?;
+        self.bot_sessions.lock().expect("bot sessions").insert(
+            key,
+            BotSession {
+                branch: branch.clone(),
+            },
+        );
+        Ok(branch)
+    }
+
+    fn active_bot_branch(
+        &self,
+        manuscript_id: &str,
+        bot_agent_id: Option<&str>,
+        bot_name: &str,
+    ) -> Option<String> {
+        if let Some(id) = bot_agent_id {
+            let key = (manuscript_id.to_string(), id.to_string());
+            return self
+                .bot_sessions
+                .lock()
+                .expect("bot sessions")
+                .get(&key)
+                .map(|s| s.branch.clone());
+        }
+        let slug = bot_slug(bot_name);
+        self.bot_sessions
+            .lock()
+            .expect("bot sessions")
+            .iter()
+            .find(|((mid, _), _)| mid == manuscript_id)
+            .map(|(_, s)| s.branch.clone())
+            .filter(|b| b.starts_with(&format!("bot/{slug}/")))
+    }
+
+    fn end_bot_session(&self, manuscript_id: &str, bot_agent_id: Option<&str>, bot_name: &str) {
+        let mut sessions = self.bot_sessions.lock().expect("bot sessions");
+        if let Some(id) = bot_agent_id {
+            sessions.remove(&(manuscript_id.to_string(), id.to_string()));
+            return;
+        }
+        let slug = bot_slug(bot_name);
+        sessions.retain(|(mid, _), s| {
+            !(mid == manuscript_id && s.branch.starts_with(&format!("bot/{slug}/")))
+        });
+    }
+}
+
+pub(crate) fn path_with_draft_extension(path: &str) -> String {
+    let p = Path::new(path);
+    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if ext.eq_ignore_ascii_case("draft") {
+        return path.to_string();
+    }
+    let stem = p
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Untitled draft");
+    match p.parent() {
+        Some(parent) if parent.as_os_str().is_empty() => format!("{stem}.draft"),
+        Some(parent) => parent
+            .join(format!("{stem}.draft"))
+            .to_string_lossy()
+            .into_owned(),
+        None => format!("{stem}.draft"),
+    }
+}
+
+fn unique_draft_path(dir: &Path, base: &str) -> PathBuf {
+    let first = dir.join(format!("{base}.draft"));
+    if !first.exists() {
+        return first;
+    }
+    for n in 2..1000 {
+        let p = dir.join(format!("{base} ({n}).draft"));
+        if !p.exists() {
+            return p;
+        }
+    }
+    dir.join(format!("{base}-{}.draft", now_ms()))
+}
+
+fn format_when_human(unix: i64) -> String {
+    Local
+        .timestamp_opt(unix, 0)
+        .single()
+        .map(|dt| dt.format("%b %d, %Y, %I:%M %p").to_string())
+        .unwrap_or_else(|| "unknown time".into())
+}
+
+fn head_oid_from_archive(archive: &Path) -> Result<Option<String>, String> {
+    let unpacked = tempfile::tempdir().map_err(|e| e.to_string())?;
+    format::unpack_draft(archive, unpacked.path()).map_err(|e| e.to_string())?;
+    let bare = unpacked.path().join(REPO_DIR);
+    let work = unpacked.path().join("work");
+    copy_bare_to_working(&bare, &work).map_err(|e| e.to_string())?;
+    DraftRepo::open_working(&work)
+        .map_err(|e| e.to_string())?
+        .head_oid()
+        .map_err(|e| e.to_string())
+}
+
+fn recovery_offer_if_worktree_newer(
+    work: &Path,
+    draft_path: &str,
+    manuscript_id: &str,
+    file_head: &Option<String>,
+) -> Result<Option<DraftRecoveryOffer>, String> {
+    let Some(file_oid) = file_head else {
+        return Ok(None);
+    };
+    if !work.join(".git").is_dir() {
+        return Ok(None);
+    }
+    let repo = DraftRepo::open_working(work).map_err(|e| e.to_string())?;
+    let Some(work_oid) = repo.head_oid().map_err(|e| e.to_string())? else {
+        return Ok(None);
+    };
+    if work_oid == *file_oid {
+        return Ok(None);
+    }
+    Ok(Some(DraftRecoveryOffer {
+        manuscript_id: manuscript_id.to_string(),
+        draft_path: draft_path.to_string(),
+    }))
 }
 
 fn sanitize_filename(title: &str) -> String {
@@ -428,4 +760,19 @@ fn now_ms() -> u128 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::path_with_draft_extension;
+
+    #[test]
+    fn save_as_appends_draft_extension() {
+        assert!(path_with_draft_extension("/tmp/My Book").ends_with("My Book.draft"));
+        assert!(path_with_draft_extension("/tmp/book.txt").ends_with("book.draft"));
+        assert_eq!(
+            path_with_draft_extension("/tmp/book.draft"),
+            "/tmp/book.draft"
+        );
+    }
 }

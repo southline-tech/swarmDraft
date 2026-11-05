@@ -104,6 +104,7 @@ pub(crate) enum Output {
 #[derive(Clone)]
 pub struct SwarmdraftMcp {
     pub(crate) store: Store,
+    pub(crate) drafts: std::sync::Arc<crate::draft::DraftService>,
     pairing_hook: Option<crate::mcp::PairingRequestedHook>,
     feedback_hook: Option<crate::mcp::FeedbackRequestedHook>,
     tool_router: ToolRouter<Self>,
@@ -315,11 +316,13 @@ fn pairing_access(parts: &Parts) -> Result<(), ErrorData> {
 impl SwarmdraftMcp {
     pub fn new(
         store: Store,
+        drafts: std::sync::Arc<crate::draft::DraftService>,
         pairing_hook: Option<crate::mcp::PairingRequestedHook>,
         feedback_hook: Option<crate::mcp::FeedbackRequestedHook>,
     ) -> Self {
         Self {
             store,
+            drafts,
             pairing_hook,
             feedback_hook,
             tool_router: Self::tool_router(),
@@ -913,6 +916,14 @@ overlaps another bot's pending suggestion on the same passage."
                         suggestion: Some(&x),
                     },
                 )?;
+                let bot = author(p);
+                let _ = self.drafts.commit_bot_suggestion(
+                    &self.store,
+                    &a.manuscript_id,
+                    &p.agent_id,
+                    &bot.name,
+                    "Bot suggestions",
+                );
                 Ok(Output::Json(json!({ "suggestion": x })))
             },
         )
@@ -1042,6 +1053,14 @@ Use this instead of cramming new scenes into suggest_edit replacements."
                         suggestion: Some(&x),
                     },
                 )?;
+                let bot = author(p);
+                let _ = self.drafts.commit_bot_suggestion(
+                    &self.store,
+                    &a.manuscript_id,
+                    &p.agent_id,
+                    &bot.name,
+                    "Bot suggestions",
+                );
                 Ok(Output::Json(json!({ "suggestion": x, "blockIds": block_ids })))
             },
         )
@@ -1161,6 +1180,14 @@ Use this instead of cramming new scenes into suggest_edit replacements."
                         suggestion: Some(&x),
                     },
                 )?;
+                let bot = author(p);
+                let _ = self.drafts.commit_bot_suggestion(
+                    &self.store,
+                    &a.manuscript_id,
+                    &p.agent_id,
+                    &bot.name,
+                    "Bot suggestions",
+                );
                 Ok(Output::Json(json!({ "suggestion": x })))
             },
         )
@@ -1849,7 +1876,15 @@ mod tests {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let mcp = SwarmdraftMcp::new(store.clone(), None, None);
+        let mcp = SwarmdraftMcp::new(
+            store.clone(),
+            std::sync::Arc::new(crate::draft::DraftService::new(
+                store.data_dir().to_path_buf(),
+                "0.1.1".into(),
+            )),
+            None,
+            None,
+        );
         let before = counts(&store);
         for tool in 0..3 {
             // A fresh, valid token for each call: auth passes and the tool runs its checks.
@@ -1952,7 +1987,15 @@ mod tests {
         let scopes = vec!["read".to_string(), "suggest".to_string()];
         let tok = store.create_token(&agent.id, Some(&scopes)).unwrap();
         let principal = store.authenticate(&tok.token).unwrap().unwrap();
-        let mcp = SwarmdraftMcp::new(store.clone(), None, None);
+        let mcp = SwarmdraftMcp::new(
+            store.clone(),
+            std::sync::Arc::new(crate::draft::DraftService::new(
+                store.data_dir().to_path_buf(),
+                "0.1.1".into(),
+            )),
+            None,
+            None,
+        );
         let edit = |quote: &str| {
             let (mut parts, ()) = axum::http::Request::new(()).into_parts();
             parts.extensions.insert(principal.clone());
