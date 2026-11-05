@@ -4,8 +4,8 @@ Designer and PM sign-off before the author receives a pilot build. Record sign-o
 
 ## Pre-flight
 
-- [ ] Latest `main` merged; `pnpm lint`, `format:check`, `typecheck`, `test`, `build`, and Rust checks green on the release commit.
-- [ ] `pnpm copy:check` (jargon gate) passes.
+- [x] Latest `main` merged; `pnpm lint`, `format:check`, `typecheck`, `test`, `build`, and Rust checks green on the release commit.
+- [x] `pnpm copy:check` (jargon gate) passes.
 - [ ] Copy deck reviewed: `apps/desktop/src/copy-deck.ts` matches mockups and issue copy decisions.
 
 ## Screen and flow checks (1280×800 or larger, real app — `pnpm tauri dev`)
