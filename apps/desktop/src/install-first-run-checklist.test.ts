@@ -95,6 +95,8 @@ describe('docs/qa/install-first-run-checklist.md (#34 Batch B)', () => {
     expect(nsi).toContain('CreateOrUpdateDesktopShortcut');
     expect(nsi).toContain('ObWelcomeCreate');
     expect(nsi).toContain('ObFinishCreate');
+    expect(nsi).toContain('Install swarmDraft');
+    expect(nsi).toContain('${NSD_Check} $ObRunCheckbox');
   });
 
   it('toolbar has no writer Save control (autosave only)', () => {

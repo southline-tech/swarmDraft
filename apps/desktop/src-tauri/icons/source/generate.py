@@ -126,15 +126,15 @@ def main():
     mark = render(128)
     tile.paste(mark, (0, 0), mark)
     tile.save(win / "ob-logo.bmp")
-    # Stock MUI header (150x57): mark + name.
+    # Stock MUI header (150x57): simplified mark only (under 40px tall, #314).
     hdr = Image.new("RGB", (150, 57), SURFACE)
-    mark = render(40)
-    hdr.paste(mark, (6, 8), mark)
+    mark = render_small(36)
+    hdr.paste(mark, (6, 10), mark)
     ImageDraw.Draw(hdr).text((52, 28), "swarmDraft", font=ImageFont.truetype(literata, 15), fill=TEXT, anchor="lm")
     hdr.save(win / "nsis-header.bmp")
-    # Stock MUI sidebar (164x314): mark, name, accent rule.
+    # Stock MUI sidebar (164x314): simplified mark, name, accent rule.
     sb = Image.new("RGB", (164, 314), SURFACE)
-    mark = render(72)
+    mark = render_small(72)
     sb.paste(mark, (46, 64), mark)
     d = ImageDraw.Draw(sb)
     d.text((82, 168), "swarmDraft", font=ImageFont.truetype(literata, 26), fill=TEXT, anchor="mm")

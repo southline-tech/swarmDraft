@@ -580,6 +580,16 @@ function onToolbarDraftSelect(id: string) {
 // UI-shell previews (Part of #36): `?preview=<id|all>`, or Settings → Preview new screens.
 applyThemeParam(window.location.search, document.documentElement);
 const evidence = ref(readEvidenceQuery(window.location.search));
+onMounted(() => {
+  if (evidence.value !== '34-c6') return;
+  try {
+    globalThis.localStorage?.setItem('swarmdraft.welcomed', '1');
+  } catch {
+    /* storage blocked in some test envs */
+  }
+  const theme = new URLSearchParams(location.search).get('theme');
+  location.replace(theme ? `/?theme=${theme}` : '/');
+});
 const preview = ref(readPreview(window.location.search));
 function openPreview(id: 'all') {
   settingsOpen.value = false;
@@ -1266,7 +1276,8 @@ defineExpose({ open, closeSession });
 </script>
 
 <template>
-  <Rad34InstallEvidence v-if="evidence === '34-install'" class="shell" />
+  <p v-if="evidence === '34-c6'" class="ev34-c6-boot" data-test="ev34-c6-bootstrap">Loading…</p>
+  <Rad34InstallEvidence v-else-if="evidence === '34-install'" class="shell" />
   <Rad60ReviewEvidence v-else-if="evidence === 'rad60-review'" class="shell" />
   <Rad38NotesEvidence v-else-if="evidence === '38-notes'" class="shell" />
   <Rad67EditorChromeEvidence v-else-if="evidence === 'rad67'" class="shell" />
@@ -1809,6 +1820,11 @@ defineExpose({ open, closeSession });
 }
 body {
   margin: 0;
+}
+.ev34-c6-boot {
+  margin: var(--ct-space-8);
+  color: var(--ct-text-muted);
+  font-family: var(--ct-font-ui);
 }
 .shell {
   box-sizing: border-box;

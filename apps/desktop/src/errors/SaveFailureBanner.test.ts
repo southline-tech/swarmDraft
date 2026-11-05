@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import SaveFailureBanner from './SaveFailureBanner.vue';
@@ -71,6 +73,17 @@ describe('SaveFailureBanner', () => {
       'Your computer is almost full',
     );
     expect(w.text()).not.toContain('os error');
+  });
+
+  it('keys ErrorCard on the mapped error (#314)', async () => {
+    const src = readFileSync(resolve(__dirname, 'SaveFailureBanner.vue'), 'utf8');
+    expect(src).toMatch(/:key="`\$\{state\.error\.title\}\|/);
+    const w = mountWith(async () => ({ status: 'cancelled' }));
+    await w.setProps({
+      state: { failing: true, error: mapError('os error 112', 'save') },
+    });
+    await flushPromises();
+    expect(w.find('[data-test="save-failure-title"]').text()).toContain('almost full');
   });
 
   it('ignores a second click while a copy is being saved', async () => {

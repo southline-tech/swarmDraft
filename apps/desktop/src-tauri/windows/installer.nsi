@@ -632,7 +632,7 @@ Function ObWelcomeCreate
   SetCtlColors $ObDialog "" "${OB_SURFACE}"
   StrCpy $0 "ob-logo.bmp"
   Call ObTile
-  StrCpy $0 "Welcome to swarmDraft"
+  StrCpy $0 "Install swarmDraft"
   StrCpy $1 "This will put swarmDraft on your computer. It takes about a minute, and you don't need to change anything."
   Call ObTitleLead
   ; Primary button reads "Install"; there is nothing to go back to.
