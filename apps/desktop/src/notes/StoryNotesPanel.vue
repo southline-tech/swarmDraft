@@ -6,6 +6,7 @@ import { computed, ref, shallowRef, watch } from 'vue';
 import type { Section } from '@swarmdraft/schema';
 import type * as Y from 'yjs';
 import EmptyState from '../shells/EmptyState.vue';
+import { emptyStates } from '../copy-deck';
 import AppIcon from '../icons/AppIcon.vue';
 import { noteBodyPreview } from './body-preview';
 import { listNotes, observeNotes, NOTE_TYPES, type NoteMeta, type NoteType } from './doc';
@@ -114,8 +115,8 @@ function onCardDblclick(note: NoteMeta, el: EventTarget | null) {
       v-if="!filtered.length"
       data-test="empty"
       icon="sparkle"
-      :title="notes.length ? 'No notes match this filter' : 'No story notes yet'"
-      text="Capture planning notes, character reminders, or research beside your draft."
+      :title="notes.length ? emptyStates.notesFilterTitle : emptyStates.notesEmptyTitle"
+      :text="emptyStates.notesText"
     />
     <ul v-else class="story-notes__list" data-test="note-list">
       <li v-for="n in filtered" :key="n.id">

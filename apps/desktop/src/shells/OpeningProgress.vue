@@ -2,6 +2,7 @@
 /** ob6: opening / import progress card (#80, #299). Visual only; the caller supplies the numbers. */
 import { nextTick, onMounted, ref } from 'vue';
 import ShellIcon from './ShellIcon.vue';
+import { opening } from '../copy-deck';
 
 const props = defineProps<{
   title: string;
@@ -20,7 +21,7 @@ onMounted(async () => {
   card.value?.focus();
 });
 
-const verb = () => (props.kind === 'import' ? 'Importing' : 'Opening');
+const verb = () => (props.kind === 'import' ? opening.verbImport : opening.verbOpen);
 </script>
 
 <template>
@@ -40,17 +41,13 @@ const verb = () => (props.kind === 'import' ? 'Importing' : 'Opening');
       >”…
     </h2>
     <p class="op__text">
-      {{
-        kind === 'import'
-          ? 'Getting your chapters ready from Word. This can take a minute for a long book.'
-          : 'Getting your chapters ready. This usually takes a few seconds.'
-      }}
+      {{ kind === 'import' ? opening.importHint : opening.openHint }}
     </p>
     <div
       class="op__bar"
       :class="{ 'op__bar--indeterminate': indeterminate }"
       :role="indeterminate ? undefined : 'progressbar'"
-      :aria-label="indeterminate ? undefined : `${verb()} progress`"
+      :aria-label="indeterminate ? undefined : opening.progressLabel(verb())"
       :aria-valuemin="indeterminate ? undefined : 0"
       :aria-valuemax="indeterminate ? undefined : 100"
       :aria-valuenow="indeterminate ? undefined : Math.round(progress * 100)"
@@ -61,7 +58,7 @@ const verb = () => (props.kind === 'import' ? 'Importing' : 'Opening');
         :style="{ width: `${Math.round(progress * 100)}%` }"
       />
     </div>
-    <p v-if="found > 0" class="op__count">Found {{ found }} chapters so far</p>
+    <p v-if="found > 0" class="op__count">{{ opening.chaptersFound(found) }}</p>
     <button
       v-if="cancellable"
       type="button"
@@ -69,7 +66,7 @@ const verb = () => (props.kind === 'import' ? 'Importing' : 'Opening');
       data-test="opening-cancel"
       @click="emit('cancel')"
     >
-      Cancel
+      {{ opening.cancel }}
     </button>
   </section>
 </template>
@@ -78,7 +75,7 @@ const verb = () => (props.kind === 'import' ? 'Importing' : 'Opening');
 .op {
   max-width: 560px;
   margin: 0 auto;
-  padding: 44px;
+  padding: calc(var(--ct-space-10) + var(--ct-space-1));
   border: 1px solid var(--ct-border);
   border-radius: var(--ct-radius-lg);
   background: var(--ct-surface-raised);
@@ -111,7 +108,7 @@ const verb = () => (props.kind === 'import' ? 'Importing' : 'Opening');
   font-size: var(--ct-text-sm);
 }
 .op__bar {
-  height: 10px;
+  height: var(--ct-progress-track-height);
   margin: var(--ct-space-6) 0 var(--ct-space-3);
   border-radius: var(--ct-radius-full);
   background: var(--ct-border);

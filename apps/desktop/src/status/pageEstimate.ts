@@ -15,7 +15,8 @@ export function estimatedCurrentPage(
   return Math.min(total, Math.max(1, raw || 1));
 }
 
-export const PAGE_ESTIMATE_TOOLTIP = 'Estimated manuscript page (~250 words). Not print layout.';
+/** Estimated manuscript page (~250 words). Not print layout. */
+export { pageEstimateTooltip as PAGE_ESTIMATE_TOOLTIP } from '../copy-deck';
 
 export function pageStatusLabel(
   current: number,

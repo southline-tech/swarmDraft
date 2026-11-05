@@ -4,6 +4,7 @@
  */
 import { SWATCHES } from '../shells/colors';
 import { applyThemeParam } from '../shells/preview';
+import { profileSave } from '../copy-deck';
 
 export type Theme = 'light' | 'dark';
 export const THEME_KEY = 'swarmdraft.theme';
@@ -75,9 +76,7 @@ export function profileNameSaveError(err: unknown): string {
         : err && typeof err === 'object' && 'message' in err
           ? String((err as { message: unknown }).message)
           : '';
-  return PROFILE_NAME_RULE.test(raw.trim())
-    ? raw.trim()
-    : "Couldn't save your name and color on this computer. Try again.";
+  return PROFILE_NAME_RULE.test(raw.trim()) ? raw.trim() : profileSave.genericError;
 }
 
 export function loadProfile(storage: Store = globalThis.localStorage): Profile {

@@ -7,10 +7,10 @@
  */
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { PRODUCT_NAME } from './lib/brand';
+import { closeFlush as closeFlushCopy, PRODUCT_NAME } from './copy-deck';
 
 export const CLOSE_FLUSH_TIMEOUT_MS = 3000;
-export const UNSAVED_QUIT_PROMPT = "Some edits aren't saved. Quit anyway?";
+export const UNSAVED_QUIT_PROMPT = closeFlushCopy.unsavedQuitPrompt;
 
 /** 'saved', or 'unsaved' if the flush failed or didn't finish within `ms`; never rejects. */
 export function flushWithTimeout(

@@ -7,7 +7,7 @@
  */
 import { computed } from 'vue';
 import type { MigrationNotice } from '../backend';
-import { PRODUCT_NAME } from '../lib/brand';
+import { PRODUCT_NAME } from '../copy-deck';
 
 const props = defineProps<{ notices: MigrationNotice[] }>();
 const emit = defineEmits<{ dismiss: [ids: string[]] }>();

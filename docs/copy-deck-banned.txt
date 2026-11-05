@@ -1,4 +1,5 @@
-# Writer-facing UI must not use these terms (#34 copy deck, pending full deck + CI).
+# Writer-facing UI must not use these terms (#34 copy deck + `pnpm copy:check`).
+# Scanned: apps/desktop/src/copy-deck.ts (no comments) and Vue <template> blocks only.
 # "import" is allowed (book menu uses Import for Word manuscripts).
 .docx
 sync

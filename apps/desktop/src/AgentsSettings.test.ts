@@ -404,7 +404,7 @@ describe('AgentsSettings', () => {
       expect(row.element.compareDocumentPosition(help.element)).toBe(
         Node.DOCUMENT_POSITION_FOLLOWING,
       );
-      expect(row.find('[data-test="mcp-status"]').exists()).toBe(false);
+      expect(row.find('[data-test="agent-connection-status"]').exists()).toBe(false);
       expect(row.find('[data-test="mint"]').exists()).toBe(false);
     });
 
@@ -445,22 +445,22 @@ describe('AgentsSettings', () => {
 
     it('shows MCP connected within two minutes', async () => {
       const w = await mountWithAgent('2026-06-01T11:59:00.000Z');
-      const row = w.get('[data-test="mcp-status"]');
-      expect(row.text()).toBe('MCP connected');
+      const row = w.get('[data-test="agent-connection-status"]');
+      expect(row.text()).toBe('Assistant connected');
       expect(row.classes()).toContain('ag__mcp--connected');
       expect(row.classes()).not.toContain('ag__mcp--muted');
     });
 
     it('shows last active minutes when older than two minutes', async () => {
       const w = await mountWithAgent('2026-06-01T11:30:00.000Z');
-      const row = w.get('[data-test="mcp-status"]');
+      const row = w.get('[data-test="agent-connection-status"]');
       expect(row.text()).toBe('Last active 30 min ago');
       expect(row.classes()).toContain('ag__mcp--muted');
     });
 
     it('shows not connected when last_seen_at is null', async () => {
       const w = await mountWithAgent(null);
-      const row = w.get('[data-test="mcp-status"]');
+      const row = w.get('[data-test="agent-connection-status"]');
       expect(row.text()).toBe('Not connected');
       expect(row.classes()).toContain('ag__mcp--muted');
     });

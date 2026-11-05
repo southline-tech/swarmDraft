@@ -6,6 +6,7 @@
  */
 import { ref } from 'vue';
 import EmptyState from '../shells/EmptyState.vue';
+import { emptyStates } from '../copy-deck';
 import { type CommentRow, type CommentThread } from '@swarmdraft/editor';
 import { agentIdOf, agentName } from '../agent-names';
 import { collabColor } from '../author-colors';
@@ -53,8 +54,8 @@ const visible = () => props.threads.filter((t) => props.showResolved || !t.resol
       v-else-if="!visible().length"
       data-test="empty"
       icon="comment"
-      title="No comments yet"
-      text="Select some text and choose Comment to leave yourself a note."
+      :title="emptyStates.commentsTitle"
+      :text="emptyStates.commentsText"
     />
     <article
       v-for="t in visible()"

@@ -1,8 +1,15 @@
 /** Pure update-prompt state (#310). Updater I/O stays injectable for tests. */
 
-export const AUTO_CHECK_DELAY_MS = 5000;
+import type { ManualCheckMessage } from '../copy-deck';
 
-export type ManualCheckMessage = 'up-to-date' | 'offline' | 'error' | 'install-failed';
+export {
+  availableBody,
+  availableTitle,
+  manualMessageCopy,
+  type ManualCheckMessage,
+} from '../copy-deck';
+
+export const AUTO_CHECK_DELAY_MS = 5000;
 
 export type UpdatePromptMode = 'hidden' | 'available' | 'downloading' | 'manual-message';
 
@@ -115,27 +122,6 @@ export function onDownloadProgress(state: UpdatePromptState, progress: number): 
     mode: 'downloading',
     progress: Math.max(0, Math.min(100, progress)),
   };
-}
-
-export function manualMessageCopy(message: ManualCheckMessage): string {
-  switch (message) {
-    case 'up-to-date':
-      return "You're up to date.";
-    case 'offline':
-      return "Couldn't check for updates. Check your connection and try again.";
-    case 'error':
-      return "Couldn't check for updates. Try again in a few minutes.";
-    case 'install-failed':
-      return "Couldn't install the update. Your work is saved — try again later.";
-  }
-}
-
-export function availableTitle(version: string): string {
-  return `swarmDraft ${version} is ready to install.`;
-}
-
-export function availableBody(): string {
-  return 'swarmDraft will restart. Your work is saved first.';
 }
 
 /** Esc on the update toast: Later when an update is offered, Got it on result toasts. */

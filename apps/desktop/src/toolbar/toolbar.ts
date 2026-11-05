@@ -3,7 +3,8 @@
  * Kept free of Vue so the state and the commands can be unit-tested against a real editor.
  */
 import type { Editor } from '@tiptap/core';
-import { PARAGRAPH_STYLE_LABELS, type ParagraphStyle } from '@swarmdraft/editor';
+import type { ParagraphStyle } from '@swarmdraft/editor';
+import { styleLabels } from '../copy-deck';
 
 /** The four styles in the toolbar dropdown (epic RAD-253, WP 1). */
 export const TOOLBAR_STYLES = ['body', 'heading', 'scene_break', 'block_quote'] as const;
@@ -11,16 +12,7 @@ export type ToolbarStyle = (typeof TOOLBAR_STYLES)[number];
 /** Any other paragraph style the caret can be in (shown, but set from the overflow menu). */
 export type CaretStyle = ToolbarStyle | Exclude<ParagraphStyle, 'body' | 'block_quote'> | '';
 
-export const STYLE_LABELS: Record<Exclude<CaretStyle, ''>, string> = {
-  body: 'Body',
-  heading: 'Heading',
-  scene_break: 'Scene break',
-  block_quote: 'Block quote',
-  first: PARAGRAPH_STYLE_LABELS.first,
-  epigraph: PARAGRAPH_STYLE_LABELS.epigraph,
-  verse: PARAGRAPH_STYLE_LABELS.verse,
-  centered: PARAGRAPH_STYLE_LABELS.centered,
-};
+export const STYLE_LABELS = styleLabels;
 
 /**
  * Windows shortcuts that are actually bound (verified): B/I/U by the manuscript marks

@@ -72,7 +72,7 @@ import {
 } from './errors/map-error';
 import { saveCopy } from './errors/save-copy';
 import { BUSY_NOTICE } from './errors/busy';
-import { PRODUCT_NAME } from './lib/brand';
+import { appShell, PRODUCT_NAME } from './copy-deck';
 import ShellsPreview from './shells/ShellsPreview.vue';
 import Rad60ReviewEvidence from './evidence/Rad60ReviewEvidence.vue';
 import Rad67EditorChromeEvidence from './evidence/Rad67EditorChromeEvidence.vue';
@@ -1416,7 +1416,7 @@ async function reopenAfterFailure(delays = REOPEN_BACKOFF_MS): Promise<Manuscrip
     }
   }
   session.value = null;
-  fatalError.value = `Couldn't reopen the manuscript. Please restart ${PRODUCT_NAME}.`;
+  fatalError.value = appShell.reopenFailed(PRODUCT_NAME);
   return null;
 }
 
@@ -1464,7 +1464,7 @@ async function onFile(e: Event) {
 }
 
 /** Word manuscripts only; checked before anything (including the open book) is touched. */
-const isWordFile = (f: File) => f.name.toLowerCase().endsWith('.docx');
+const isWordFile = (f: File) => f.name.toLowerCase().split('.').pop() === 'docx';
 
 async function restoreAfterImportCancelled(current?: ManuscriptSession | null) {
   if (current?.closed) {
@@ -1565,7 +1565,7 @@ async function importFile(file: File) {
   if (importing.value) return;
   if (!isWordFile(file)) {
     openError.value = '';
-    failOpening(new Error('Not a valid .docx (zip directory not found)'), 'import');
+    failOpening(new Error('Not a valid Word manuscript (zip directory not found)'), 'import');
     return;
   }
   let bytes: Uint8Array;
@@ -2164,7 +2164,7 @@ defineExpose({ open, closeSession });
         class="visually-hidden"
         data-test="open-docx"
         type="file"
-        accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        accept="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         tabindex="-1"
         aria-hidden="true"
         :disabled="importing"

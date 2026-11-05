@@ -6,6 +6,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import AppIcon from '../icons/AppIcon.vue';
 import { MANUSCRIPT_SHORTCUTS, SHORTCUT_SHEET_GROUPS, shortcutParts } from './app-shortcuts';
+import { shortcutSheet } from '../copy-deck';
 
 const emit = defineEmits<{ close: [] }>();
 const closeBtn = ref<HTMLButtonElement>();
@@ -42,7 +43,7 @@ onBeforeUnmount(() => opener?.focus?.());
       @keydown="trap"
     >
       <div class="sh-row sh-sheet__head">
-        <h2 id="sh-shortcuts-title">Keyboard shortcuts</h2>
+        <h2 id="sh-shortcuts-title">{{ shortcutSheet.sheetTitle }}</h2>
         <button
           ref="closeBtn"
           type="button"
@@ -70,7 +71,7 @@ onBeforeUnmount(() => opener?.focus?.());
           </div>
         </section>
       </div>
-      <p class="sh-foot">Press <kbd class="sh-kbd">Esc</kbd> to close</p>
+      <p class="sh-foot">{{ shortcutSheet.escToClose }}</p>
     </div>
   </div>
 </template>

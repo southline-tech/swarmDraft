@@ -7,6 +7,7 @@
  * is never part of the result; keep it for logs via `rawErrorText`.
  */
 
+import { errorCopyBlocks, sectionLoadErrorCopy as sectionLoadErrorCopyFn } from '../copy-deck';
 import { PRODUCT_NAME } from '../lib/brand';
 
 export type ErrorCode =
@@ -40,94 +41,7 @@ export interface MappedError {
 /** Where the error happened; changes the fallback when the cause is not recognised. */
 export type ErrorContext = 'open' | 'import' | 'save' | 'export' | 'other';
 
-const COPY: Record<ErrorCode, Omit<MappedError, 'code'>> = {
-  'not-word-file': {
-    title: "This isn't a Word manuscript",
-    message: `${PRODUCT_NAME} can import Word manuscripts. Try choosing a different file.`,
-    action: 'choose-another-file',
-    actionLabel: 'Choose another file',
-    tone: 'danger',
-  },
-  'file-damaged': {
-    title: "We couldn't read this file",
-    message: 'It may be damaged. If you have another copy, try opening that one.',
-    action: 'choose-another-file',
-    actionLabel: 'Choose another file',
-    tone: 'danger',
-  },
-  'file-too-large': {
-    title: 'This file is too big to open',
-    message: 'Try saving the manuscript without large pictures, then open it again.',
-    action: 'choose-another-file',
-    actionLabel: 'Choose another file',
-    tone: 'warning',
-  },
-  'file-locked': {
-    title: 'This book is open in another program',
-    message: 'Close it in the other program, then try again.',
-    action: 'try-again',
-    actionLabel: 'Try again',
-    tone: 'warning',
-  },
-  'disk-full': {
-    title: 'Your computer is almost full',
-    message: "There isn't enough room to save your book. Free up some space, then try again.",
-    action: 'try-again',
-    actionLabel: 'Try again',
-    tone: 'warning',
-  },
-  'no-permission': {
-    title: `${PRODUCT_NAME} isn't allowed to use this file`,
-    message: 'Try a file in your Documents folder, or save a copy somewhere else.',
-    action: 'choose-another-file',
-    actionLabel: 'Choose another file',
-    tone: 'warning',
-  },
-  'not-found': {
-    title: "We couldn't find that file",
-    message: 'It may have been moved or deleted. Try opening it again.',
-    action: 'choose-another-file',
-    actionLabel: 'Choose another file',
-    tone: 'warning',
-  },
-  'save-failed': {
-    title: "Your latest changes aren't saved yet",
-    message: `Don't close ${PRODUCT_NAME}. We'll keep trying, or save a copy somewhere else now.`,
-    action: 'save-a-copy',
-    actionLabel: 'Save a copy',
-    tone: 'danger',
-  },
-  'export-failed': {
-    title: "We couldn't make your book file",
-    message: 'Your manuscript is safe. Try again, and if it keeps happening, try another format.',
-    action: 'try-again',
-    actionLabel: 'Try again',
-    tone: 'danger',
-  },
-  'pandoc-offline': {
-    title: "Couldn't download Pandoc",
-    message:
-      'Export needs a one-time Pandoc download. Connect to the internet and try again, or choose an existing Pandoc program in Export settings.',
-    action: 'try-again',
-    actionLabel: 'Try again',
-    tone: 'warning',
-  },
-  'pandoc-checksum': {
-    title: "Pandoc download didn't verify",
-    message:
-      'The download may have been interrupted. Try again, or choose an existing Pandoc program in Export settings.',
-    action: 'try-again',
-    actionLabel: 'Try again',
-    tone: 'warning',
-  },
-  unknown: {
-    title: 'Something went wrong',
-    message: 'Your writing is safe. Try again in a moment.',
-    action: 'try-again',
-    actionLabel: 'Try again',
-    tone: 'warning',
-  },
-};
+const COPY = errorCopyBlocks(PRODUCT_NAME) as Record<ErrorCode, Omit<MappedError, 'code'>>;
 
 /** Best-effort raw text of any thrown value, for logs only. Never show this to the user. */
 export function rawErrorText(err: unknown): string {
@@ -259,4 +173,4 @@ export function errorLine(err: unknown, context: ErrorContext = 'other'): string
  * Writer copy for a section whose content the editor can't load (#89). The parser's own
  * message (e.g. `Unknown node type: ...`) goes to the console only, never into this line.
  */
-export const SECTION_LOAD_ERROR_COPY = `Part of this section uses formatting ${PRODUCT_NAME} can't edit yet, so it's open read-only and changes won't be saved.`;
+export const SECTION_LOAD_ERROR_COPY = sectionLoadErrorCopyFn(PRODUCT_NAME);

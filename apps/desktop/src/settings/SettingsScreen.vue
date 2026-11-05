@@ -10,7 +10,7 @@ import { nextTick, onMounted, ref } from 'vue';
 import AgentsSettings from '../AgentsSettings.vue';
 import type { AppInfo } from '../backend';
 import AppLogo from '../AppLogo.vue';
-import { PRODUCT_NAME } from '../lib/brand';
+import { PRODUCT_NAME, settingsAbout } from '../copy-deck';
 import BackupsSection from './BackupsSection.vue';
 import NameColorSection from './NameColorSection.vue';
 import DictionarySection from '../spellcheck/DictionarySection.vue';
@@ -183,7 +183,7 @@ onMounted(() => root.value?.focus());
                 <span class="st-row__v st-mono">{{ info.dataDir }}</span>
               </div>
               <div class="st-row">
-                <span class="st-row__k">Database version</span>
+                <span class="st-row__k">{{ settingsAbout.dataVersion }}</span>
                 <span class="st-row__v">{{ info.schemaVersion }}</span>
               </div>
             </section>

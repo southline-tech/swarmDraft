@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { PRODUCT_NAME } from './lib/brand';
 import AppLogo from './AppLogo.vue';
+import { home, PRODUCT_NAME } from './copy-deck';
 import { nextTick, onMounted, ref, watch } from 'vue';
 
 const props = defineProps<{
@@ -77,10 +77,9 @@ defineExpose({ focusOpen, focusWelcome });
       @keydown="onWelcomeEnter"
     >
       <AppLogo class="home__mark" :size="64" />
-      <h1 class="home__title">Welcome to {{ PRODUCT_NAME }}</h1>
+      <h1 class="home__title">{{ home.welcomeTitle(PRODUCT_NAME) }}</h1>
       <p class="home__lede">
-        A calm place to write and revise your book. Your writing assistant can only suggest changes
-        — you decide what stays.
+        {{ home.welcomeLede }}
       </p>
       <button
         ref="getStartedButton"
@@ -89,17 +88,16 @@ defineExpose({ focusOpen, focusWelcome });
         data-test="get-started"
         @click="emit('get-started')"
       >
-        Get started
+        {{ home.getStarted }}
       </button>
       <p class="home__note">
-        Your book stays on this computer. {{ PRODUCT_NAME }} saves your work as you go.
+        {{ home.welcomeNote(PRODUCT_NAME) }}
       </p>
     </div>
     <div v-else class="home__inner" data-test="home-open">
-      <h1 class="home__title">Let's import your book</h1>
+      <h1 class="home__title">{{ home.openTitle }}</h1>
       <p class="home__lede">
-        Choose the Word manuscript you've been working on. We'll make a working copy — your original
-        file is never changed.
+        {{ home.openLede }}
       </p>
       <button
         ref="openButton"
@@ -113,13 +111,13 @@ defineExpose({ focusOpen, focusWelcome });
           <path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z" />
           <path d="M4 21V5" />
         </svg>
-        {{ busy ? 'Importing your book…' : 'Import Word manuscript' }}
+        {{ busy ? home.importingButton : home.importButton }}
       </button>
       <div
         class="home__drop"
         :class="{ 'home__drop--active': dragging }"
         role="region"
-        aria-label="Drop a Word manuscript here to import it"
+        :aria-label="home.dropAria"
         data-test="drop-zone"
         @dragenter.prevent="onEnter"
         @dragover.prevent
@@ -130,7 +128,7 @@ defineExpose({ focusOpen, focusWelcome });
         <svg class="home__icon" viewBox="0 0 16 16" aria-hidden="true">
           <path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M3 13.5h10" />
         </svg>
-        <span>Or drag your manuscript here from a folder</span>
+        <span>{{ home.dropHint }}</span>
       </div>
       <button
         v-if="canCancel"
@@ -139,7 +137,7 @@ defineExpose({ focusOpen, focusWelcome });
         data-test="open-cancel"
         @click="emit('cancel')"
       >
-        Back to my book
+        {{ home.backToBook }}
       </button>
     </div>
   </section>
@@ -260,5 +258,9 @@ defineExpose({ focusOpen, focusWelcome });
   color: var(--ct-text);
   font: inherit;
   cursor: pointer;
+}
+.home__secondary:focus-visible {
+  outline: none;
+  box-shadow: var(--ct-focus-ring);
 }
 </style>

@@ -114,7 +114,7 @@ describe('PairingPrompt', () => {
     await flushPromises();
     const dialog = overlayWrap('[data-test="pairing-dialog"]');
     expect(dialog.text()).toContain('Allow Helper to connect?');
-    expect(dialog.text()).toContain('Bots on this computer are asking to pair over MCP');
+    expect(dialog.text()).toContain('Bots on this computer are asking to connect');
     expect(dialog.text()).toContain('Comment');
     expect(dialog.text()).toContain('Esc denies all pending requests');
   });
@@ -197,7 +197,7 @@ describe('mcpAgentStatus', () => {
   it('formats connected, relative, and missing states', async () => {
     const { mcpAgentStatus } = await import('./mcp-agent-status');
     const now = Date.parse('2026-06-01T12:00:00.000Z');
-    expect(mcpAgentStatus('2026-06-01T11:59:00.000Z', now).text).toBe('MCP connected');
+    expect(mcpAgentStatus('2026-06-01T11:59:00.000Z', now).text).toBe('Assistant connected');
     expect(mcpAgentStatus('2026-06-01T11:15:00.000Z', now).text).toBe('Last active 45 min ago');
     expect(mcpAgentStatus(null, now).text).toBe('Not connected');
   });

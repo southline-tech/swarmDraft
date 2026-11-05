@@ -309,7 +309,11 @@ onBeforeUnmount(() => {
             <b class="ag__name"
               ><bdi dir="auto">{{ a.name }}</bdi></b
             >
-            <p class="ag__mcp" :class="`ag__mcp--${agentMcpStatus(a).tone}`" data-test="mcp-status">
+            <p
+              class="ag__mcp"
+              :class="`ag__mcp--${agentMcpStatus(a).tone}`"
+              data-test="agent-connection-status"
+            >
               <span class="ag__mcp-dot" aria-hidden="true" />
               <span>{{ agentMcpStatus(a).text }}</span>
             </p>

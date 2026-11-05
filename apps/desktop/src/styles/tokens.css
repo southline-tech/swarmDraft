@@ -77,6 +77,8 @@
   --ct-space-10: 40px;
   --ct-space-12: 48px;
   --ct-space-16: 64px;
+  /** Opening / import progress track (#80, Designer ob6). */
+  --ct-progress-track-height: 10px;
 
   /* Panel widths (#90) */
   --ct-panel-w: 400px;
