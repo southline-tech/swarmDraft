@@ -5,6 +5,7 @@ import {
   buildLandingPayload,
   feedbackErrorMessage,
   formatMessageCounter,
+  getFocusableElements,
   validateFeedbackForm,
 } from './feedback.js';
 
@@ -51,5 +52,23 @@ describe('landing feedback form helpers', () => {
     expect(feedbackErrorMessage(429)).toMatch(/Too many/);
     expect(feedbackErrorMessage(502)).toMatch(/unavailable/);
     expect(feedbackErrorMessage(0)).toMatch(/Couldn't send/);
+  });
+});
+
+// @vitest-environment happy-dom
+describe('getFocusableElements', () => {
+  it('ignores controls inside hidden panels', () => {
+    document.body.innerHTML = `
+      <div id="scope">
+        <button type="button" id="visible">Visible</button>
+        <div hidden>
+          <button type="button" id="hidden-panel">Hidden panel</button>
+        </div>
+      </div>
+    `;
+    const scope = document.getElementById('scope');
+    const focusables = getFocusableElements(scope);
+    expect(focusables.map((el) => el.id)).toEqual(['visible']);
+    document.body.innerHTML = '';
   });
 });

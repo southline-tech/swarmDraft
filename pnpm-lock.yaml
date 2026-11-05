@@ -23,6 +23,9 @@ importers:
       globals:
         specifier: ^15.14.0
         version: 15.15.0
+      happy-dom:
+        specifier: ^15.11.7
+        version: 15.11.7
       prettier:
         specifier: 3.9.10
         version: 3.9.10

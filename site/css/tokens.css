@@ -81,6 +81,8 @@
   --ct-success-bg: #e6f2e8;
   --ct-elevation-1: 0 1px 2px rgb(43 38 32 / 0.08), 0 1px 1px rgb(43 38 32 / 0.04);
   --ct-elevation-2: 0 4px 12px rgb(43 38 32 / 0.1), 0 1px 3px rgb(43 38 32 / 0.06);
+  --ct-scrim: rgb(30 25 20 / 0.4);
+  --ct-z-modal: 50;
   --ct-focus-ring-color: #2f5da8;
   --ct-focus-outline: 2px solid var(--ct-focus-ring-color);
   --ct-focus-offset: 2px;
@@ -111,6 +113,7 @@
   --ct-success-bg: #1c3324;
   --ct-elevation-1: 0 1px 2px rgb(0 0 0 / 0.5);
   --ct-elevation-2: 0 4px 12px rgb(0 0 0 / 0.5);
+  --ct-scrim: rgb(0 0 0 / 0.6);
   --ct-focus-ring-color: #8db2f2;
   --ct-collab-1: #8db2f2;
   --ct-collab-2: #f0a07f;
@@ -139,6 +142,7 @@
     --ct-success-bg: #1c3324;
     --ct-elevation-1: 0 1px 2px rgb(0 0 0 / 0.5);
     --ct-elevation-2: 0 4px 12px rgb(0 0 0 / 0.5);
+    --ct-scrim: rgb(0 0 0 / 0.6);
     --ct-focus-ring-color: #8db2f2;
     --ct-collab-1: #8db2f2;
     --ct-collab-2: #f0a07f;
