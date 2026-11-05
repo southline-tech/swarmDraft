@@ -5,14 +5,28 @@
  * this card inside it, so the region exists before the error text (#79).
  */
 import ShellIcon from './ShellIcon.vue';
-defineProps<{
-  icon: 'alert' | 'lock' | 'disk' | 'save';
-  tone: 'danger' | 'warning';
-  title: string;
-  text: string;
-  action: string;
-  variant?: 'card' | 'banner';
-}>();
+
+withDefaults(
+  defineProps<{
+    icon: 'alert' | 'lock' | 'disk' | 'save';
+    tone: 'danger' | 'warning';
+    title: string;
+    text: string;
+    action: string;
+    variant?: 'card' | 'banner';
+    role?: 'alert' | undefined;
+    actionDataTest?: string;
+    actionDisabled?: boolean;
+    actionAriaBusy?: boolean;
+  }>(),
+  {
+    variant: 'card',
+    role: undefined,
+    actionDataTest: undefined,
+    actionDisabled: false,
+    actionAriaBusy: false,
+  },
+);
 const emit = defineEmits<{ action: [] }>();
 </script>
 
@@ -20,14 +34,24 @@ const emit = defineEmits<{ action: [] }>();
   <section
     class="ec"
     :class="[`ec--${tone}`, variant === 'banner' ? 'ec--banner' : '']"
+    :role="role ?? (variant === 'banner' ? 'alert' : undefined)"
     :data-test="variant === 'banner' ? 'save-failure-banner' : 'error-card'"
   >
     <span class="ec__icon"><ShellIcon :name="icon" /></span>
     <div class="ec__body">
-      <h3 class="ec__title">{{ title }}</h3>
+      <h3 class="ec__title" :data-test="variant === 'banner' ? 'save-failure-title' : undefined">
+        {{ title }}
+      </h3>
       <p class="ec__text">{{ text }}</p>
     </div>
-    <button type="button" class="sh-btn sh-btn--primary" @click="emit('action')">
+    <button
+      type="button"
+      class="sh-btn sh-btn--primary"
+      :data-test="actionDataTest"
+      :disabled="actionDisabled"
+      :aria-busy="actionAriaBusy || undefined"
+      @click="emit('action')"
+    >
       {{ action }}
     </button>
   </section>
