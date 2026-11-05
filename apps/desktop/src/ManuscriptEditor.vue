@@ -226,6 +226,14 @@ const props = defineProps<{
   decisionRecords?: readonly DecisionRecord[];
   /** Designer evidence (#55 / wp5): start in focus mode for screenshot harness. */
   initialFocusMode?: boolean;
+  /** Dev evidence (#36): open find / replace / shortcuts / context menu / tracking on mount. */
+  initialFindOpen?: boolean;
+  initialFindReplace?: boolean;
+  initialShortcutsOpen?: boolean;
+  initialContextMenu?: boolean;
+  initialTracking?: boolean;
+  /** Dev evidence (#36): prefilled find query for screenshots. */
+  evidenceFindQuery?: string;
   /** Section id for continuous book-wide review (#210). */
   sectionId?: string;
   /** Book-wide merged changes for the review rail (lead section only). */
@@ -285,16 +293,18 @@ const continuousScroll = inject(CONTINUOUS_SCROLL_ROOT, null);
 
 /* UI shells for the audit review (Part of #36). Local view state only: none of these change the
    manuscript, the Y.Doc, the selection or the undo history. */
-const findOpen = shallowRef(false);
-const findFocusReplace = shallowRef(false);
+const findOpen = shallowRef(Boolean(import.meta.env.DEV && props.initialFindOpen));
+const findFocusReplace = shallowRef(Boolean(import.meta.env.DEV && props.initialFindReplace));
 const menuAt = shallowRef<{ x: number; y: number } | null>(null);
 const spellMenu = shallowRef<{ x: number; y: number; issue: SpellIssue } | null>(null);
 const spellPrefs = ref(loadSpellPrefs());
-const shortcutsOpen = shallowRef(false);
+const shortcutsOpen = shallowRef(Boolean(import.meta.env.DEV && props.initialShortcutsOpen));
 const focusMode = shallowRef(Boolean(import.meta.env.DEV && props.initialFocusMode));
 const prefStore = () => props.storage ?? globalThis.localStorage;
 /** Track changes (#57): persisted on/off; first enable may show the tc3 name prompt. */
-const tracking = shallowRef(loadTracking(prefStore()));
+const tracking = shallowRef(
+  loadTracking(prefStore()) || Boolean(import.meta.env.DEV && props.initialTracking),
+);
 watch(tracking, (on) => saveTracking(on, prefStore()));
 const writerProfile = shallowRef<Profile>(loadProfile(prefStore()));
 const namePromptOpen = shallowRef(false);
@@ -1310,6 +1320,11 @@ onMounted(() => {
   });
   deskObserver.observe(deskEl.value);
   void nextTick(measureMarginNotes);
+  if (import.meta.env.DEV && props.initialContextMenu) {
+    void nextTick(() => {
+      menuAt.value = { x: 420, y: 280 };
+    });
+  }
 });
 onBeforeUnmount(() => {
   hostMounted.value = false;
@@ -1775,6 +1790,7 @@ onBeforeUnmount(() => {
           v-if="findOpen && !sliceMode"
           :editor="editor"
           :focus-replace="findFocusReplace"
+          :initial-query="evidenceFindQuery"
           @close="closeFind"
         />
         <div v-if="namePromptOpen && !sliceMode" class="me-track-prompt" data-test="track-prompt">

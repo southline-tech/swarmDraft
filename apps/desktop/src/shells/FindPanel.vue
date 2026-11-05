@@ -14,10 +14,10 @@ import {
 } from '@swarmdraft/editor';
 import AppIcon from '../icons/AppIcon.vue';
 
-const props = defineProps<{ editor?: Editor; focusReplace?: boolean }>();
+const props = defineProps<{ editor?: Editor; focusReplace?: boolean; initialQuery?: string }>();
 const emit = defineEmits<{ close: [] }>();
 
-const query = ref('');
+const query = ref(props.initialQuery ?? '');
 const replacement = ref('');
 const matchCase = ref(false);
 const wholeWord = ref(false);
@@ -43,6 +43,23 @@ const label = computed(() =>
       : 'No matches',
 );
 
+/** Screen-reader match count: always mounted; ~350ms throttle while typing (#36). */
+const liveCount = ref('');
+const FIND_COUNT_LIVE_MS = 350;
+let liveCountTimer: ReturnType<typeof setTimeout> | undefined;
+
+function announceCount(immediate: boolean) {
+  clearTimeout(liveCountTimer);
+  const text = label.value;
+  if (immediate) {
+    liveCount.value = text;
+    return;
+  }
+  liveCountTimer = setTimeout(() => {
+    liveCount.value = text;
+  }, FIND_COUNT_LIVE_MS);
+}
+
 function syncHighlight() {
   const e = props.editor && toRaw(props.editor);
   if (!e) return;
@@ -63,6 +80,7 @@ function focusMatch(index: number) {
 function step(d: 1 | -1) {
   if (!total.value) return;
   focusMatch(current.value + d);
+  announceCount(true);
 }
 
 function onQueryChange() {
@@ -84,7 +102,10 @@ function replace(mode: 'one' | 'all') {
   );
   syncHighlight();
   if (listFindMatches(e.state.doc, query.value, opts.value).length) focusMatch(current.value);
+  announceCount(true);
 }
+
+watch(label, () => announceCount(false));
 
 watch(matches, () => {
   if (current.value >= total.value) current.value = Math.max(0, total.value - 1);
@@ -107,9 +128,11 @@ onMounted(() =>
     if (props.focusReplace) replaceInput.value?.focus();
     else findInput.value?.focus();
     syncHighlight();
+    if (label.value) announceCount(true);
   }),
 );
 onBeforeUnmount(() => {
+  clearTimeout(liveCountTimer);
   const e = props.editor && toRaw(props.editor);
   if (e) updateFindHighlight(e, [], 0);
 });
@@ -123,6 +146,9 @@ onBeforeUnmount(() => {
     data-test="find-panel"
     @keydown.esc.stop="emit('close')"
   >
+    <p class="visually-hidden" role="status" aria-live="polite" data-test="find-count-live">
+      {{ liveCount }}
+    </p>
     <div class="sh-row">
       <input
         ref="findInput"
@@ -135,7 +161,7 @@ onBeforeUnmount(() => {
         @keydown.enter.prevent="step($event.shiftKey ? -1 : 1)"
         @keydown.esc.stop="emit('close')"
       />
-      <span class="sh-count" role="status" data-test="find-count">{{ label }}</span>
+      <span class="sh-count" aria-hidden="true" data-test="find-count">{{ label }}</span>
       <button
         type="button"
         class="sh-tbtn sh-icon"

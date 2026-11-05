@@ -4,6 +4,7 @@
  * Takes focus, closes on Esc or the close button, and the opener gets focus back.
  */
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import AppIcon from '../icons/AppIcon.vue';
 import { MANUSCRIPT_SHORTCUTS, SHORTCUT_SHEET_GROUPS, shortcutParts } from './app-shortcuts';
 
 const emit = defineEmits<{ close: [] }>();
@@ -51,7 +52,7 @@ onBeforeUnmount(() => opener?.focus?.());
           data-test="shortcuts-close"
           @click="emit('close')"
         >
-          ×
+          <AppIcon name="x" />
         </button>
       </div>
       <p class="sh-subt">

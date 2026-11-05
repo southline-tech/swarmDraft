@@ -35,7 +35,7 @@ const props = withDefaults(
     /** Whether the chapter navigator is showing (owned by App.vue). */
     navigatorOpen?: boolean;
     navigatorControls?: string;
-    /** Comments and Find land in later issues (RAD-257/259); until wired they show disabled. */
+    /** Comment button stays off until margin comments ship from the toolbar (#52 slice). */
     commentEnabled?: boolean;
     /** Why the editor is read-only (e.g. 'document failed to load', 'restore in progress'). */
     readOnlyReason?: string;

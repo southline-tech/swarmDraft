@@ -128,11 +128,12 @@
   --ct-elevation-2: 0 4px 12px rgb(43 38 32 / 0.1), 0 1px 3px rgb(43 38 32 / 0.06);
   --ct-elevation-3: 0 16px 40px rgb(43 38 32 / 0.18), 0 4px 12px rgb(43 38 32 / 0.08);
 
-  /* Stacking (ascending): panel < chrome < dropdown/flyout < modal < toast */
+  /* Stacking (ascending): panel < chrome < find < dropdown/flyout < modal < toast */
   --ct-z-panel: 30;
   --ct-z-sheet: 38;
   --ct-z-chrome: 40;
   --ct-z-overlay: 41;
+  --ct-z-find: 42;
   --ct-z-dropdown: 45;
   --ct-z-flyout: 46;
   --ct-z-modal: 50;
