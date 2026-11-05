@@ -73,6 +73,21 @@ export function getFocusableElements(container) {
   );
 }
 
+export const FEEDBACK_UI_TEMPLATE_ID = 'feedback-ui-template';
+
+/** Mount shared form + success markup from `#feedback-ui-template` into the modal shell. */
+export function mountFeedbackUi(documentRoot) {
+  const template =
+    documentRoot.querySelector?.(`#${FEEDBACK_UI_TEMPLATE_ID}`) ??
+    documentRoot.getElementById?.(FEEDBACK_UI_TEMPLATE_ID);
+  if (!template) return;
+
+  const dialogMount = documentRoot.querySelector('[data-feedback-dialog] [data-feedback-mount]');
+  if (dialogMount && !dialogMount.querySelector('[data-feedback-form]')) {
+    dialogMount.appendChild(template.content.cloneNode(true));
+  }
+}
+
 function setFieldError(form, name, message) {
   const el = form.querySelector(`[data-feedback-error="${name}"]`);
   const input = form.querySelector(`[name="${name}"]`);
@@ -288,6 +303,7 @@ function wireFeedbackForm(form, dialog, siteVersion, counterState, closeModal) {
 }
 
 export function initFeedback(documentRoot) {
+  mountFeedbackUi(documentRoot);
   const dialog = documentRoot.querySelector('[data-feedback-dialog]');
   const form = dialog?.querySelector('[data-feedback-form]');
   if (!dialog || !form) return;

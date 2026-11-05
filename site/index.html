@@ -277,104 +277,108 @@
             />
           </svg>
         </button>
-
-        <div data-feedback-form-panel>
-          <h2 class="feedback-dialog__title" id="feedback-modal-title">Send feedback</h2>
-          <form
-            class="feedback-form"
-            data-feedback-form
-            data-state="idle"
-            novalidate
-            aria-labelledby="feedback-modal-title"
-          >
-            <div class="feedback-field">
-              <label class="feedback-label" for="feedback-description">Your message</label>
-              <textarea
-                class="feedback-input feedback-input--area"
-                id="feedback-description"
-                name="description"
-                rows="6"
-                required
-                autocomplete="off"
-                maxlength="2000"
-              ></textarea>
-              <p
-                class="feedback-counter"
-                data-feedback-counter
-                aria-live="off"
-                aria-atomic="true"
-                hidden
-              ></p>
-              <p
-                class="feedback-error"
-                id="feedback-description-error"
-                data-feedback-error="description"
-              ></p>
-            </div>
-            <div class="feedback-field">
-              <label class="feedback-label" for="feedback-email">Email (optional)</label>
-              <p class="feedback-hint" id="feedback-email-hint">Only if you'd like a reply.</p>
-              <input
-                class="feedback-input"
-                type="email"
-                id="feedback-email"
-                name="replyEmail"
-                autocomplete="email"
-                inputmode="email"
-                aria-describedby="feedback-email-hint"
-              />
-              <p
-                class="feedback-error"
-                id="feedback-reply-error"
-                data-feedback-error="replyEmail"
-              ></p>
-            </div>
-            <div class="visually-hidden" aria-hidden="true">
-              <label for="feedback-website">Website</label>
-              <input
-                type="text"
-                id="feedback-website"
-                name="website"
-                tabindex="-1"
-                autocomplete="off"
-              />
-            </div>
-            <p class="feedback-alert" data-feedback-alert role="alert" hidden></p>
-            <div class="feedback-actions">
-              <button type="button" class="btn btn--ghost" data-feedback-cancel>Cancel</button>
-              <button type="submit" class="btn btn--primary" data-feedback-submit disabled>
-                <span class="feedback-submit__label">Send feedback</span>
-                <span
-                  class="feedback-submit__spinner"
-                  data-feedback-spinner
-                  hidden
-                  aria-hidden="true"
-                ></span>
-              </button>
-            </div>
-          </form>
-        </div>
-
-        <div class="feedback-success" data-feedback-success-panel hidden>
-          <p class="feedback-success__row" role="status" tabindex="-1" data-feedback-success-status>
-            <svg
-              class="feedback-success__icon"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              focusable="false"
-            >
-              <path fill="currentColor" d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z" />
-            </svg>
-            <span>Thanks, your feedback is on its way.</span>
-          </p>
-          <div class="feedback-actions feedback-actions--success">
-            <button type="button" class="btn btn--ghost" data-feedback-close-panel>Close</button>
-            <button type="button" class="btn btn--primary" data-feedback-send-another>
-              Send another
-            </button>
-          </div>
-        </div>
+        <div data-feedback-mount></div>
       </div>
     </dialog>
+
+    <template id="feedback-ui-template">
+      <div data-feedback-form-panel>
+        <h2 class="feedback-dialog__title" id="feedback-modal-title">Send feedback</h2>
+        <form
+          class="feedback-form"
+          data-feedback-form
+          data-state="idle"
+          novalidate
+          aria-labelledby="feedback-modal-title"
+        >
+          <div class="feedback-field">
+            <label class="feedback-label" for="feedback-description">Your message</label>
+            <textarea
+              class="feedback-input feedback-input--area"
+              id="feedback-description"
+              name="description"
+              rows="6"
+              required
+              autocomplete="off"
+              maxlength="2000"
+            ></textarea>
+            <p
+              class="feedback-counter"
+              data-feedback-counter
+              aria-live="off"
+              aria-atomic="true"
+              hidden
+            ></p>
+            <p
+              class="feedback-error"
+              id="feedback-description-error"
+              data-feedback-error="description"
+            ></p>
+          </div>
+          <div class="feedback-field">
+            <label class="feedback-label" for="feedback-email">Email (optional)</label>
+            <p class="feedback-hint" id="feedback-email-hint">Only if you'd like a reply.</p>
+            <input
+              class="feedback-input"
+              type="email"
+              id="feedback-email"
+              name="replyEmail"
+              autocomplete="email"
+              inputmode="email"
+              aria-describedby="feedback-email-hint"
+            />
+            <p
+              class="feedback-error"
+              id="feedback-reply-error"
+              data-feedback-error="replyEmail"
+            ></p>
+          </div>
+          <div class="feedback-honeypot" aria-hidden="true">
+            <label for="feedback-website">Website</label>
+            <input
+              type="text"
+              id="feedback-website"
+              name="website"
+              tabindex="-1"
+              autocomplete="off"
+              aria-hidden="true"
+            />
+          </div>
+          <p class="feedback-alert" data-feedback-alert role="alert" hidden></p>
+          <div class="feedback-actions">
+            <button type="button" class="btn btn--ghost" data-feedback-cancel>Cancel</button>
+            <button type="submit" class="btn btn--primary" data-feedback-submit disabled>
+              <span class="feedback-submit__label">Send feedback</span>
+              <span
+                class="feedback-submit__spinner"
+                data-feedback-spinner
+                hidden
+                aria-hidden="true"
+              ></span>
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div class="feedback-success" data-feedback-success-panel hidden>
+        <p class="feedback-success__row" role="status" tabindex="-1" data-feedback-success-status>
+          <svg
+            class="feedback-success__icon"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path fill="currentColor" d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z" />
+          </svg>
+          <span>Thanks, your feedback is on its way.</span>
+        </p>
+        <div class="feedback-actions feedback-actions--success">
+          <button type="button" class="btn btn--ghost" data-feedback-close-panel>Close</button>
+          <button type="button" class="btn btn--primary" data-feedback-send-another>
+            Send another
+          </button>
+        </div>
+      </div>
+    </template>
   </body>
 </html>
