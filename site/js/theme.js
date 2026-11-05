@@ -12,7 +12,11 @@
       root.setAttribute('data-theme', hash);
     }
     if (location.search.includes('focus=download')) {
-      const target = document.querySelector('.header-download');
+      const mobile = window.matchMedia('(max-width: 640px)').matches;
+      const selector = mobile
+        ? '.header-actions--compact .header-download'
+        : '.header-actions--wide .header-download';
+      const target = document.querySelector(selector);
       if (target instanceof HTMLElement) {
         requestAnimationFrame(() => target.focus());
       }
