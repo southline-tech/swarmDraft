@@ -100,11 +100,37 @@ export function parseTitlePageMeta(paras: TitlePagePara[]): TitlePageMeta {
   return { title, author };
 }
 
+/** Max paragraphs scanned for title-page skip on whole-book (no chapter) imports (#309). */
+export const TITLE_PAGE_OPENING_MAX = 20;
+
+/** Whole-manuscript slices above this only scan the opening window (safety net). */
+const WHOLE_BOOK_PARA_THRESHOLD = 64;
+
+/**
+ * Exclusive end index for title-page heuristics: opening front matter only, not the full book (#309).
+ */
+export function titlePageOpeningEnd(paras: TitlePagePara[]): number {
+  const cap = Math.min(paras.length, TITLE_PAGE_OPENING_MAX);
+  for (let i = 0; i < cap; i++) {
+    const p = paras[i]!;
+    const t = norm(p.text);
+    if (!t) continue;
+    if (isContactOrMeta(t, p)) continue;
+    if (BYLINE_RE.test(t) || NOVEL_RE.test(t)) continue;
+    if (isDisplayLine(p)) continue;
+    if (t.length >= 80) return i;
+    if (t.length >= 48 && !p.centered && p.maxSize < 28 && !p.allBold) return i;
+  }
+  return cap;
+}
+
 /** Paragraph indices to drop from stored title-page / pre-chapter body (#235). */
 export function titlePageSkipIndices(paras: TitlePagePara[]): Set<number> {
+  const scan =
+    paras.length > WHOLE_BOOK_PARA_THRESHOLD ? paras.slice(0, titlePageOpeningEnd(paras)) : paras;
   const skip = new Set<number>();
-  const meta = parseTitlePageMeta(paras);
-  paras.forEach((p, i) => {
+  const meta = parseTitlePageMeta(scan);
+  scan.forEach((p, i) => {
     const t = norm(p.text);
     if (!t) {
       skip.add(i);

@@ -25,6 +25,7 @@ import {
   displayTitleFromManuscriptLine,
   headingsMatch,
   parseTitlePageMeta,
+  titlePageOpeningEnd,
   titlePageSkipIndices,
   type TitlePagePara,
 } from './title-page';
@@ -974,6 +975,7 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
   ctx.story = newStory();
   const paras = collectParagraphs(body, ctx);
   finishStory(ctx);
+  // Probe pass (throwaway report) finds structural boundaries before plain-CHAPTER split.
   const roles0 = paras.map((p) => classify(p, new ReportBuilder(), false));
   const firstStructural0 = roles0.findIndex(
     (r) => r.kind === 'part' || r.kind === 'chapter' || r.kind === 'back',
@@ -1083,12 +1085,7 @@ export function importDocx(bytes: Uint8Array, options: ImportOptions = {}): Impo
     ...(p.inline.length ? { content: p.inline } : {}),
   });
 
-  const skipRegionEnd = hasChapters
-    ? bodyStart
-    : (() => {
-        const i = roles.findIndex((r) => r.kind === 'chapter');
-        return i >= 0 ? i : paras.length;
-      })();
+  const skipRegionEnd = hasChapters ? bodyStart : titlePageOpeningEnd(paras.map(paraTitleSignals));
   const preChapterSkip = new Set<number>();
   titlePageSkipIndices(paras.slice(0, skipRegionEnd).map(paraTitleSignals)).forEach((idx) =>
     preChapterSkip.add(idx),
