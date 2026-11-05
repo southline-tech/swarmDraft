@@ -132,9 +132,9 @@ def main():
     hdr.paste(mark, (6, 10), mark)
     ImageDraw.Draw(hdr).text((52, 28), "swarmDraft", font=ImageFont.truetype(literata, 15), fill=TEXT, anchor="lm")
     hdr.save(win / "nsis-header.bmp")
-    # Stock MUI sidebar (164x314): simplified mark, name, accent rule.
+    # Stock MUI sidebar (164x314): full mark at 72px, name, accent rule (#314).
     sb = Image.new("RGB", (164, 314), SURFACE)
-    mark = render_small(72)
+    mark = render(72)
     sb.paste(mark, (46, 64), mark)
     d = ImageDraw.Draw(sb)
     d.text((82, 168), "swarmDraft", font=ImageFont.truetype(literata, 26), fill=TEXT, anchor="mm")
