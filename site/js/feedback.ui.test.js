@@ -326,5 +326,34 @@ describe('landing feedback modal', () => {
     expect(html).toMatch(/<a href="#feedback" id="feedback" data-feedback-open>Send feedback<\/a>/);
     expect(html).toMatch(/Feedback needs JavaScript turned on/);
     expect(html.match(/data-feedback-open/g)?.length).toBe(1);
+    expect(html).toMatch(/css\/main\.css\?v=0\.1\.1/);
+    expect(html).toMatch(/css\/tokens\.css\?v=0\.1\.1/);
+  });
+
+  it('hides the success panel and honeypot while the form is open', () => {
+    const root = buildFeedbackDom({ withCss: true });
+    initFeedback(root);
+    root.querySelector('#feedback').click();
+    const success = root.querySelector('[data-feedback-success-panel]');
+    const honey = root.querySelector('.visually-hidden');
+    expect(success?.hidden).toBe(true);
+    expect(getComputedStyle(success).display).toBe('none');
+    expect(getComputedStyle(honey).clipPath).toBe('inset(50%)');
+    expect(honey?.offsetWidth).toBeLessThanOrEqual(1);
+    const card = root.querySelector('.feedback-dialog__card');
+    const dialog = root.querySelector('.feedback-dialog');
+    expect(['0px', 'initial']).toContain(getComputedStyle(dialog).borderTopWidth);
+    expect(parseFloat(getComputedStyle(card).borderRadius)).toBeGreaterThan(0);
+  });
+
+  it('main.css forces [hidden] panels off and styles the dialog card', () => {
+    const dir = dirname(fileURLToPath(import.meta.url));
+    const css = readFileSync(join(dir, '../css/main.css'), 'utf8');
+    expect(css).toMatch(/display:\s*none\s*!important/);
+    expect(css).toMatch(/\.feedback-dialog\s*\{[\s\S]*?border:\s*none\s*!important/);
+    expect(css).toMatch(
+      /\.feedback-dialog__card\s*\{[\s\S]*?border-radius:\s*var\(--ct-radius-lg\)/,
+    );
+    expect(css).toMatch(/\.feedback-dialog::backdrop\s*\{[\s\S]*?--ct-scrim/);
   });
 });
