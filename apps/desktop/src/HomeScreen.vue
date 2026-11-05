@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { PRODUCT_NAME } from './lib/brand';
 import AppLogo from './AppLogo.vue';
-import { nextTick, ref } from 'vue';
+import { nextTick, onMounted, ref, watch } from 'vue';
 
-defineProps<{
+const props = defineProps<{
   /** 'welcome' on the very first launch (shown once), then 'open'. */
   step: 'welcome' | 'open';
   /** True while a manuscript is being imported; the button is disabled. */
@@ -39,18 +39,43 @@ function onDrop(e: DragEvent) {
   if (file) emit('drop-file', file);
 }
 
+const getStartedButton = ref<HTMLButtonElement | null>(null);
 const openButton = ref<HTMLButtonElement | null>(null);
 /** Focus the open button (after Get started, so keyboard users land on the next step). */
 async function focusOpen() {
   await nextTick();
   openButton.value?.focus();
 }
-defineExpose({ focusOpen });
+async function focusWelcome() {
+  await nextTick();
+  getStartedButton.value?.focus();
+}
+function onWelcomeEnter(e: KeyboardEvent) {
+  if (props.step !== 'welcome' || e.key !== 'Enter' || e.repeat) return;
+  if (e.target instanceof HTMLButtonElement || e.target instanceof HTMLAnchorElement) return;
+  e.preventDefault();
+  emit('get-started');
+}
+onMounted(() => {
+  if (props.step === 'welcome') void focusWelcome();
+});
+watch(
+  () => props.step,
+  (step) => {
+    if (step === 'welcome') void focusWelcome();
+  },
+);
+defineExpose({ focusOpen, focusWelcome });
 </script>
 
 <template>
   <section class="home" data-test="home">
-    <div v-if="step === 'welcome'" class="home__inner" data-test="home-welcome">
+    <div
+      v-if="step === 'welcome'"
+      class="home__inner home__inner--welcome"
+      data-test="home-welcome"
+      @keydown="onWelcomeEnter"
+    >
       <AppLogo class="home__mark" :size="64" />
       <h1 class="home__title">Welcome to {{ PRODUCT_NAME }}</h1>
       <p class="home__lede">
@@ -58,6 +83,7 @@ defineExpose({ focusOpen });
         — you decide what stays.
       </p>
       <button
+        ref="getStartedButton"
         type="button"
         class="home__primary"
         data-test="get-started"
@@ -153,6 +179,9 @@ defineExpose({ focusOpen });
   font-size: var(--ct-text-lg);
   line-height: var(--ct-leading-ui);
 }
+.home__inner--welcome .home__note {
+  margin: var(--ct-space-6) 0 0;
+}
 .home__note {
   margin: var(--ct-space-2) 0 0;
   color: var(--ct-text-muted);
@@ -185,8 +214,8 @@ defineExpose({ focusOpen });
   cursor: progress;
 }
 .home__primary:focus-visible {
-  outline: 3px solid var(--ct-focus-ring-color);
-  outline-offset: 3px;
+  outline: none;
+  box-shadow: var(--ct-focus-ring);
 }
 .home__drop {
   display: flex;

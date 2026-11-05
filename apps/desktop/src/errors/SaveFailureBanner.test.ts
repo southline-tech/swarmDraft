@@ -11,7 +11,7 @@ const mountWith = (saveCopy: () => Promise<SaveCopyResult>, state = failing) =>
 describe('SaveFailureBanner', () => {
   it('shows the plain save-failed copy and a Save a copy button, never raw error text', () => {
     const w = mountWith(async () => ({ status: 'cancelled' }));
-    expect(w.attributes('role')).toBe('alert');
+    expect(w.find('[data-test="save-failure-banner"]').attributes('role')).toBe('alert');
     expect(w.find('[data-test="save-failure-title"]').text()).toBe(
       "Your latest changes aren't saved yet",
     );
@@ -57,7 +57,7 @@ describe('SaveFailureBanner', () => {
     expect(r.text()).toBe(
       'A backup, restore, or copy is already running. Wait for it to finish, then try again.',
     );
-    expect(r.classes()).toContain('failed');
+    expect(r.classes()).toContain('save-failure__result--failed');
   });
 
   it('reports a failed copy with mapped copy', async () => {

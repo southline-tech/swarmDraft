@@ -66,6 +66,7 @@ import Rad60ReviewEvidence from './evidence/Rad60ReviewEvidence.vue';
 import Rad67EditorChromeEvidence from './evidence/Rad67EditorChromeEvidence.vue';
 import Rad55FocusModeEvidence from './evidence/Rad55FocusModeEvidence.vue';
 import Rad38NotesEvidence from './evidence/Rad38NotesEvidence.vue';
+import Rad34InstallEvidence from './evidence/Rad34InstallEvidence.vue';
 import { readEvidenceQuery } from './evidence/evidence-routes';
 import AppToast from './shells/AppToast.vue';
 import OpeningProgress from './shells/OpeningProgress.vue';
@@ -1265,7 +1266,8 @@ defineExpose({ open, closeSession });
 </script>
 
 <template>
-  <Rad60ReviewEvidence v-if="evidence === 'rad60-review'" class="shell" />
+  <Rad34InstallEvidence v-if="evidence === '34-install'" class="shell" />
+  <Rad60ReviewEvidence v-else-if="evidence === 'rad60-review'" class="shell" />
   <Rad38NotesEvidence v-else-if="evidence === '38-notes'" class="shell" />
   <Rad67EditorChromeEvidence v-else-if="evidence === 'rad67'" class="shell" />
   <Rad55FocusModeEvidence v-else-if="evidence === 'rad55'" class="shell shell--focus-mode" />

@@ -24,6 +24,9 @@ const emit = defineEmits<{ action: [] }>();
 
 <style scoped>
 .es {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   padding: var(--ct-space-6) var(--ct-space-8) var(--ct-space-6);
   border: 1px solid var(--ct-border);
   border-radius: var(--ct-radius-lg);
@@ -33,7 +36,7 @@ const emit = defineEmits<{ action: [] }>();
   text-align: center;
 }
 .es__icon {
-  display: inline-grid;
+  display: grid;
   place-items: center;
   width: var(--ct-space-8);
   height: var(--ct-space-8);

@@ -1,0 +1,6 @@
+# Writer-facing UI must not use these terms (#34 copy deck, pending full deck + CI).
+# "import" is allowed (book menu uses Import for Word manuscripts).
+.docx
+sync
+database
+MCP
