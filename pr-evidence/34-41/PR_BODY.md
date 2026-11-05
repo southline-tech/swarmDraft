@@ -13,38 +13,38 @@ Part of #41 (pilot flow + release gate docs; **template marketplace** and **self
 
 ## #34 / #41 item status vs `main`
 
-| Item | Status |
-| ---- | ------ |
-| Copy deck centralized | **Done here** — `copy-deck.ts` + scope test; shortcuts sheet chrome strings still deferred |
-| Banned list (`.docx`, sync, database, MCP; import allowed) | **Done here** — `docs/copy-deck-banned.txt` |
-| Jargon CI | **Done here** — `pnpm copy:check`, workflow step, `copy-jargon.test.mjs` |
-| Release checklist | **Done here** — `docs/release-checklist.md` |
-| Evidence PNGs (1280×800+) | **Done here** — ten files under `pr-evidence/34-41/` via `node scripts/copy-34-41-evidence.mjs` |
-| Pilot flow doc | **Done here** — `docs/pilot-flow.md` |
-| Code signing / SmartScreen | **Left out** — tracked on #34 separately |
-| #41 bot templates / self-host | **Out of scope (After MVP)** — #41 stays open |
+| Item                                                       | Status                                                                                          |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Copy deck centralized                                      | **Done here** — `copy-deck.ts` + scope test; shortcuts sheet chrome strings still deferred      |
+| Banned list (`.docx`, sync, database, MCP; import allowed) | **Done here** — `docs/copy-deck-banned.txt`                                                     |
+| Jargon CI                                                  | **Done here** — `pnpm copy:check`, workflow step, `copy-jargon.test.mjs`                        |
+| Release checklist                                          | **Done here** — `docs/release-checklist.md`                                                     |
+| Evidence PNGs (1280×800+)                                  | **Done here** — ten files under `pr-evidence/34-41/` via `node scripts/copy-34-41-evidence.mjs` |
+| Pilot flow doc                                             | **Done here** — `docs/pilot-flow.md`                                                            |
+| Code signing / SmartScreen                                 | **Left out** — tracked on #34 separately                                                        |
+| #41 bot templates / self-host                              | **Out of scope (After MVP)** — #41 stays open                                                   |
 
 ## Acceptance criteria
 
 ### #34 — copy deck & release gate
 
-| Item | Status | Evidence |
-| ---- | ------ | -------- |
-| Banned jargon list | Done | `docs/copy-deck-banned.txt` |
-| Writer strings in copy deck | Done (gate + batch surfaces) | `copy-deck.ts`; `copy-deck-scope.test.ts` |
-| Jargon CI gate | Done | `.github/workflows/ci.yml`, `scripts/copy-jargon.test.mjs`, `ci/copy-jargon-gate.test.ts` |
-| Release checklist | Done | `docs/release-checklist.md` |
-| Evidence screenshots | Done | `pr-evidence/34-41/*.png` (10 files) |
-| No real person names | Done | review of changed files |
-| Full Vue string migration | Partial | shortcuts sheet chrome deferred |
+| Item                        | Status                       | Evidence                                                                                  |
+| --------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------- |
+| Banned jargon list          | Done                         | `docs/copy-deck-banned.txt`                                                               |
+| Writer strings in copy deck | Done (gate + batch surfaces) | `copy-deck.ts`; `copy-deck-scope.test.ts`                                                 |
+| Jargon CI gate              | Done                         | `.github/workflows/ci.yml`, `scripts/copy-jargon.test.mjs`, `ci/copy-jargon-gate.test.ts` |
+| Release checklist           | Done                         | `docs/release-checklist.md`                                                               |
+| Evidence screenshots        | Done                         | `pr-evidence/34-41/*.png` (10 files)                                                      |
+| No real person names        | Done                         | review of changed files                                                                   |
+| Full Vue string migration   | Partial                      | shortcuts sheet chrome deferred                                                           |
 
 ### #41 — pilot
 
-| Item | Status | Evidence |
-| ---- | ------ | -------- |
-| Pilot flow documented | Done | `docs/pilot-flow.md` |
-| KDP PDF / EPUB gaps for Brett | Done | `docs/pilot-flow.md` gaps table |
-| Bot templates / self-host relay | Out of scope | this PR + leave #41 open |
+| Item                            | Status       | Evidence                        |
+| ------------------------------- | ------------ | ------------------------------- |
+| Pilot flow documented           | Done         | `docs/pilot-flow.md`            |
+| KDP PDF / EPUB gaps for Brett   | Done         | `docs/pilot-flow.md` gaps table |
+| Bot templates / self-host relay | Out of scope | this PR + leave #41 open        |
 
 - [x] **AC:** Jargon check passes in CI — `pnpm copy:check`, test `copy jargon check (#34)`
 - [x] **AC:** Jargon check fails on banned word — test `fails when a banned word appears in copy-deck.ts`
@@ -78,14 +78,14 @@ Commands on pushed head (`feat/34-41-pilot-gate`):
 
 **Test counts:**
 
-| Package / area | Tests |
-| -------------- | ----- |
-| root (`node --test` + site vitest) | 42 + 26 site |
-| `@swarmdraft/desktop` | 1058 passed, 10 skipped |
-| `@swarmdraft/editor` | 181 |
-| `@swarmdraft/schema` | 11 |
-| `@swarmdraft/docx` | 67 |
-| Rust (`cargo test --locked`) | 287 passed, 2 ignored |
+| Package / area                     | Tests                   |
+| ---------------------------------- | ----------------------- |
+| root (`node --test` + site vitest) | 42 + 26 site            |
+| `@swarmdraft/desktop`              | 1058 passed, 10 skipped |
+| `@swarmdraft/editor`               | 181                     |
+| `@swarmdraft/schema`               | 11                      |
+| `@swarmdraft/docx`                 | 67                      |
+| Rust (`cargo test --locked`)       | 287 passed, 2 ignored   |
 
 ## Open PR overlap
 
