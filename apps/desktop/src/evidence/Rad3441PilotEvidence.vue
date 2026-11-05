@@ -167,7 +167,7 @@ onMounted(async () => {
             />
           </div>
           <div
-            v-if="frame === 'empty-states'"
+            v-else-if="frame === 'empty-states'"
             class="workspace grid min-h-0 flex-1 grid-cols-[18rem_minmax(0,1fr)] gap-4 p-4"
             data-test="empty-states-pair"
           >
@@ -205,7 +205,7 @@ onMounted(async () => {
               :manuscript-save="manuscriptSave"
             />
             <div
-              v-else-if="frame === 'save-status' || frame === 'error-card'"
+              v-else
               class="ev3441__editor-placeholder"
               data-test="editor-placeholder"
               aria-hidden="true"
@@ -214,7 +214,7 @@ onMounted(async () => {
         </div>
       </div>
       <StatusBar
-        v-if="showEditor"
+        v-if="frame === 'save-status' || frame === 'editor'"
         class="shell__status"
         :chapter-count="1"
         :show-chapter-segment="navigatorOpen"
