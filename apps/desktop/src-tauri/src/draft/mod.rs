@@ -5,6 +5,7 @@
 
 mod format;
 mod migrate;
+mod repair;
 mod repo;
 mod service;
 mod sync;
@@ -13,5 +14,6 @@ pub use format::{
     pack_draft, unpack_draft, DraftFormatError, DraftManifest, DRAFT_FORMAT, DRAFT_FORMAT_VERSION,
 };
 pub use migrate::{migrate_legacy_books_to_draft, DraftMigrationNotice};
+pub use repair::repair_draft_file_paths;
 pub use repo::{CommitEntry, DraftRepoError};
 pub use service::{DraftRecoveryOffer, DraftSaveOutcome, DraftService, OpenDraftResult};

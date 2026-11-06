@@ -302,7 +302,7 @@ onMounted(() => root.value?.focus());
 .st {
   position: fixed;
   inset: 0;
-  z-index: 5;
+  z-index: var(--ct-z-settings);
   display: flex;
   flex-direction: column;
   background: var(--ct-bg);
@@ -364,7 +364,7 @@ onMounted(() => root.value?.focus());
   text-align: left;
   cursor: pointer;
 }
-.st__navi:hover {
+.st__navi:hover:not(.st__navi--a) {
   background: var(--ct-selected-bg);
 }
 .st__navi:focus-visible {

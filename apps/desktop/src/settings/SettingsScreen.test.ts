@@ -54,6 +54,7 @@ describe('Settings screen (#99)', () => {
   it('nav is 240px wide and the title bar uses AppLogo with the small mark', () => {
     const sfc = readFileSync(resolve(__dirname, 'SettingsScreen.vue'), 'utf8');
     expect(sfc).toMatch(/\.st__nav \{[^}]*width: 240px;/);
+    expect(sfc).toMatch(/z-index: var\(--ct-z-settings\)/);
     expect(screen().get('[data-test="settings-logo"]').attributes('src')).toBe(logo24Url);
     expect(sfc).toContain('<AppLogo :size="18"');
   });

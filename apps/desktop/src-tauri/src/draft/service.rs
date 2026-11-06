@@ -6,6 +6,7 @@ use std::sync::Mutex;
 
 use chrono::{Local, TimeZone};
 use serde::Serialize;
+use tauri::Window;
 use tauri_plugin_dialog::DialogExt;
 
 use crate::storage::Store;
@@ -372,6 +373,7 @@ impl DraftService {
     pub fn save_as_dialog(
         &self,
         app: &tauri::AppHandle,
+        window: &Window,
         store: &Store,
         manuscript_id: &str,
     ) -> Result<Option<String>, String> {
@@ -380,12 +382,17 @@ impl DraftService {
                 .get_manuscript(manuscript_id)
                 .map_err(|e| e.to_string())?;
             let default_name = sanitize_filename(&manuscript.title);
-            let picked = app
+            let mut dialog = app
                 .dialog()
                 .file()
+                .set_parent(window)
+                .set_title("Save As")
                 .set_file_name(format!("{default_name}.draft"))
-                .add_filter("swarmDraft draft", &["draft"])
-                .blocking_save_file();
+                .add_filter("swarmDraft draft", &["draft"]);
+            if let Some(dir) = crate::save_copy::documents_dir(app) {
+                dialog = dialog.set_directory(dir);
+            }
+            let picked = dialog.blocking_save_file();
             let Some(file) = picked else {
                 return Ok(None);
             };
@@ -393,6 +400,13 @@ impl DraftService {
             store
                 .set_draft_file_path(manuscript_id, &path)
                 .map_err(|e| e.to_string())?;
+            self.commit_now_inner(
+                store,
+                manuscript_id,
+                "Saved",
+                &author_name(store),
+                "author@swarmdraft.local",
+            )?;
             self.pack_if_linked_inner(store, manuscript_id)?;
             Ok(Some(path))
         })
@@ -689,7 +703,7 @@ pub(crate) fn path_with_draft_extension(path: &str) -> String {
     format!("{path}.draft")
 }
 
-fn unique_draft_path(dir: &Path, base: &str) -> PathBuf {
+pub(crate) fn unique_draft_path(dir: &Path, base: &str) -> PathBuf {
     let first = dir.join(format!("{base}.draft"));
     if !first.exists() {
         return first;
@@ -748,7 +762,7 @@ fn recovery_offer_if_worktree_newer(
     }))
 }
 
-fn sanitize_filename(title: &str) -> String {
+pub(crate) fn sanitize_filename(title: &str) -> String {
     let mut s: String = title
         .chars()
         .map(|c| {

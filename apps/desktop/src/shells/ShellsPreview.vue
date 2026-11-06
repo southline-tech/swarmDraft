@@ -198,7 +198,7 @@ const cards = [
             icon="book"
             title="No book open yet"
             text="Import your Word manuscript to start writing."
-            action="Import Word manuscript"
+            action="Import Word .docx"
             @action="stub('Import')"
           />
         </div>

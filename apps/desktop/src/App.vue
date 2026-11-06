@@ -72,7 +72,7 @@ import {
 } from './errors/map-error';
 import { saveCopy } from './errors/save-copy';
 import { BUSY_NOTICE } from './errors/busy';
-import { appShell, PRODUCT_NAME } from './copy-deck';
+import { appShell, PRODUCT_NAME, opening as openingDeck } from './copy-deck';
 import ShellsPreview from './shells/ShellsPreview.vue';
 import Rad60ReviewEvidence from './evidence/Rad60ReviewEvidence.vue';
 import Rad67EditorChromeEvidence from './evidence/Rad67EditorChromeEvidence.vue';
@@ -128,6 +128,12 @@ import { useDeferredValue } from './a11y/deferred';
 import './shells/shells.css';
 import { applyThemeParam, readPreview } from './shells/preview';
 import { CLOSE_FLUSH_TIMEOUT_MS, confirmQuit, flushOnClose, flushWithTimeout } from './close-flush';
+import { loadReadingPosition, saveReadingPosition, type ReadingPosition } from './reading-position';
+import {
+  shouldShowImportHome,
+  startupResumeAfterReopen,
+  type StartupResumePhase,
+} from './startup-resume';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { resetCollabSlots } from './author-colors';
@@ -201,6 +207,7 @@ const importing = ref(false);
 /** ob6: backend-driven opening progress; revealed only after a short delay (#80). */
 const opening = ref<OpeningUiState | null>(null);
 const openingVisible = ref(false);
+const startupResume = ref<StartupResumePhase>(isTauri() ? 'pending' : 'done');
 const openingError = ref<MappedError | null>(null);
 const openingRetry = ref<OpeningRetry | null>(null);
 let openingRevealTimer: ReturnType<typeof setTimeout> | undefined;
@@ -280,8 +287,17 @@ function dismissOpeningError() {
 }
 const showOpeningShell = computed(
   () =>
+    startupResume.value === 'pending' ||
     !!openingError.value ||
     (openingVisible.value && (!session.value || choosingBook.value || importing.value)),
+);
+const showImportHome = computed(() =>
+  shouldShowImportHome(
+    startupResume.value,
+    !!session.value,
+    choosingBook.value,
+    showOpeningShell.value,
+  ),
 );
 const openingShellOverlay = computed(
   () => !!session.value && !choosingBook.value && (importing.value || !!openingError.value),
@@ -366,9 +382,10 @@ const persistHooks = {
     const title =
       session.value?.outline.value.find((s) => s.id === selectedId.value)?.title ?? 'chapter';
     if (id && isTauri()) {
-      void draftCheckpoint(id, `Edited ${title}`).catch((err) =>
-        console.error('Draft checkpoint failed', err),
-      );
+      void draftCheckpoint(id, `Edited ${title}`).catch((err) => {
+        console.error('Draft checkpoint failed', err);
+        saveFailure.value = saveFailed(saveFailure.value, err);
+      });
     }
   },
 };
@@ -386,8 +403,20 @@ const manuscriptSave = computed((): ManuscriptSaveView | undefined => {
 function onManuscriptSaveRetry() {
   void session.value?.flush();
 }
+const saveCopyRelinkOffer = ref(false);
 const saveCopyOfOpen = () =>
   session.value ? saveCopy(session.value) : Promise.resolve({ status: 'cancelled' as const });
+async function onSaveCopyRelink() {
+  await onMenuSaveAs();
+  saveCopyRelinkOffer.value = false;
+}
+async function onSaveCopyWithOffer() {
+  const r = await saveCopyOfOpen();
+  if (r.status === 'saved' && saveFailure.value.failing) {
+    saveCopyRelinkOffer.value = true;
+  }
+  return r;
+}
 /**
  * Bumped by the editor's Reload action to reopen the section from its Y.Doc. The editor is bound
  * to that doc, so everything typed is already in it and survives the remount (and switching
@@ -996,8 +1025,10 @@ async function onMenuSave() {
     await session.value.flush();
     const outcome = await draftSave(session.value.id);
     if (outcome.status === 'needsSaveAs') {
-      await draftSaveAs(session.value.id);
+      await onMenuSaveAs();
+      return;
     }
+    saveFailure.value = saveSucceeded();
   } catch (e) {
     console.error('Save draft failed', e);
     saveFailure.value = saveFailed(saveFailure.value, e);
@@ -1009,7 +1040,12 @@ async function onMenuSaveAs() {
   closeBookMenu();
   try {
     await session.value.flush();
-    await draftSaveAs(session.value.id);
+    const path = await draftSaveAs(session.value.id);
+    if (path) {
+      saveFailure.value = saveSucceeded();
+      saveCopyRelinkOffer.value = false;
+      await refreshDraftRows();
+    }
   } catch (e) {
     console.error('Save As failed', e);
     saveFailure.value = saveFailed(saveFailure.value, e);
@@ -1214,9 +1250,16 @@ onMounted(async () => {
       console.error('Reopen failed', err);
       finishOpening();
       openError.value = `Couldn't reopen the last manuscript. ${errorLine(err, 'open')}`;
+    } finally {
+      startupResume.value = startupResumeAfterReopen();
     }
+  } else {
+    startupResume.value = 'done';
   }
-  stopCloseFlush = await flushOnClose(() => session.value?.flush() ?? Promise.resolve());
+  stopCloseFlush = await flushOnClose(async () => {
+    persistReadingPositionForClose();
+    await (session.value?.flush() ?? Promise.resolve());
+  });
   if (isTauri()) {
     appUpdater = createAppUpdater(defaultUpdaterDeps(), (s) => {
       updatePrompt.value = s;
@@ -1399,8 +1442,27 @@ function open(next: ManuscriptSession) {
   void loadDecisionRecords(next.id);
   syncWindowTitle(next.title || PRODUCT_NAME);
   const rows = next.outline.value;
-  selectedId.value = rows.find((s) => s.kind === 'chapter')?.id;
+  const saved = loadReadingPosition(next.id);
+  selectedId.value =
+    saved?.sectionId && rows.some((s) => s.id === saved.sectionId)
+      ? saved.sectionId
+      : rows.find((s) => s.kind === 'chapter')?.id;
+  void nextTick(() => {
+    if (saved) editorPane.value?.restoreReadingPosition(saved);
+  });
   void refreshDraftRows();
+}
+
+const lastReadingPosition = ref<ReadingPosition | null>(null);
+function onReadingPosition(pos: ReadingPosition) {
+  lastReadingPosition.value = pos;
+  const id = session.value?.id;
+  if (id) saveReadingPosition(id, pos);
+}
+function persistReadingPositionForClose() {
+  const id = session.value?.id;
+  if (!id || !lastReadingPosition.value) return;
+  saveReadingPosition(id, lastReadingPosition.value);
 }
 
 /**
@@ -1891,9 +1953,9 @@ defineExpose({ open, closeSession });
                 "
               >
                 <span class="sh-mi-lead" aria-hidden="true"
-                  ><AppIcon name="book" class="app-menu-icon"
+                  ><AppIcon name="word-doc" class="app-menu-icon"
                 /></span>
-                Import Word manuscript…<span v-if="appMenuShortcuts.importWord" class="sh-k">{{
+                Import Word .docx<span v-if="appMenuShortcuts.importWord" class="sh-k">{{
                   appMenuShortcuts.importWord
                 }}</span>
               </button>
@@ -2178,7 +2240,9 @@ defineExpose({ open, closeSession });
         v-if="saveFailure.failing"
         data-test="save-error"
         :state="saveFailure"
-        :save-copy="saveCopyOfOpen"
+        :save-copy="onSaveCopyWithOffer"
+        :offer-relink="saveCopyRelinkOffer"
+        @relink="() => void onSaveCopyRelink()"
       />
       <HistoryPanel
         v-if="isTauri()"
@@ -2269,7 +2333,7 @@ defineExpose({ open, closeSession });
         />
       </Teleport>
       <HomeScreen
-        v-if="(!session || choosingBook) && !showOpeningShell"
+        v-if="showImportHome"
         ref="home"
         data-test="no-manuscript"
         :step="welcomed ? 'open' : 'welcome'"
@@ -2310,6 +2374,15 @@ defineExpose({ open, closeSession });
           :cancellable="opening.kind === 'import' && importing"
           @cancel="cancelImportOpening"
         />
+        <section
+          v-else-if="startupResume === 'pending'"
+          class="op-start"
+          data-test="startup-loading"
+          aria-busy="true"
+        >
+          <AppLogo :size="48" aria-hidden="true" />
+          <p class="op-start__text">{{ openingDeck.loadingBook }}</p>
+        </section>
       </div>
       <div
         v-if="session && !choosingBook"
@@ -2392,6 +2465,7 @@ defineExpose({ open, closeSession });
               @save-retry="onManuscriptSaveRetry"
               @words-before-caret="onWordsBeforeCaret"
               @change-counts="changeCounts = $event"
+              @reading-position="onReadingPosition"
               @open-settings="openToolbarSettings"
               @open-agents="openToolbarAgents"
               @draft-new="onToolbarDraftNew"
@@ -2501,6 +2575,21 @@ body {
   inset: 0;
   z-index: var(--ct-z-overlay);
   background: var(--ct-scrim);
+}
+.op-start {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: calc(var(--ct-space-10) + var(--ct-space-1));
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-lg);
+  background: var(--ct-surface-raised);
+  box-shadow: var(--ct-elevation-2);
+  text-align: center;
+}
+.op-start__text {
+  margin: var(--ct-space-4) 0 0;
+  font-size: var(--ct-text-xl);
+  font-weight: var(--ct-weight-semibold);
 }
 @media (max-width: 639px) {
   .opening-shell {

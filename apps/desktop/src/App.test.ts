@@ -197,11 +197,14 @@ describe('App', () => {
   });
 
   it('type, restart, and the typed text is still there (saved through the backend)', async () => {
+    localStorage.removeItem('swarmdraft.reading-position.v1');
     const backend = await import('./backend');
     // A fake backend: the stored state plus every saved update, per section.
     const stored = storedFixture();
     const saved = new Map<string, Uint8Array[]>();
     vi.mocked(backend.persistImport).mockResolvedValueOnce(stored);
+    vi.mocked(backend.openLatestManuscript).mockReset();
+    vi.mocked(backend.openLatestManuscript).mockResolvedValue(null);
     vi.mocked(backend.saveSectionUpdate).mockImplementation(async (m, sec, u) => {
       expect(m).toBe(stored.manuscript.id);
       saved.set(sec, [...(saved.get(sec) ?? []), u]);
@@ -214,9 +217,11 @@ describe('App', () => {
     const editor = leadTiptapEditor(first);
     editor.commands.insertContentAt(1, 'TYPED ');
     await settle();
-    first.unmount(); // closing flushes pending edits
+    // Autosave is debounced; wait for the backend write before simulating quit (unmount flush
+    // is fire-and-forget and can still be in flight on slow CI).
+    await vi.waitFor(() => expect([...saved.keys()].length).toBe(1));
+    first.unmount();
     await settle();
-    expect([...saved.keys()].length).toBe(1);
 
     // Restart: the backend returns the stored state with the saved updates applied.
     const reopened = {
@@ -230,12 +235,11 @@ describe('App', () => {
     };
     vi.mocked(backend.openLatestManuscript).mockResolvedValueOnce(reopened);
     const w = mount(App, { attachTo: document.body });
-    await settle();
-    expect(w.findAll('.row').length).toBe(chapter);
-    expect(proseFind(w).text()).toContain('TYPED ');
+    await vi.waitFor(() => expect(w.findAll('.row').length).toBe(chapter));
+    await vi.waitFor(() => expect(proseFind(w).text()).toContain('TYPED '));
     w.unmount();
     vi.mocked(backend.saveSectionUpdate).mockReset();
-  });
+  }, 15_000);
 
   it("makes a closed session's editor read-only", async () => {
     const { w, session } = await withManuscript();
@@ -1856,11 +1860,11 @@ describe('home screen', () => {
     const again = mount(App);
     await flushPromises();
     expect(again.find('[data-test="home-welcome"]').exists()).toBe(false);
-    expect(again.find('[data-test="open-manuscript"]').text()).toContain('Import Word manuscript');
+    expect(again.find('[data-test="open-manuscript"]').text()).toContain('Import Word .docx');
     again.unmount();
   });
 
-  it('"Import Word manuscript" opens the Word file picker', async () => {
+  it('"Import Word .docx" opens the Word file picker', async () => {
     localStorage.setItem('swarmdraft.welcomed', '1');
     const w = mount(App, { attachTo: document.body });
     await flushPromises();

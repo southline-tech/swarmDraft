@@ -375,8 +375,13 @@ async fn save_manuscript_copy(
             .set_parent(&window)
             .set_title("Save a copy")
             .set_file_name(save_copy::default_file_name(&title))
-            .add_filter("Word document", &["docx"])
-            .blocking_save_file();
+            .add_filter("Word document", &["docx"]);
+        let picked = if let Some(dir) = save_copy::documents_dir(&app) {
+            picked.set_directory(dir)
+        } else {
+            picked
+        }
+        .blocking_save_file();
         let Some(picked) = picked else {
             return Ok(None);
         };
@@ -1059,6 +1064,7 @@ async fn draft_after_word_import(
 #[tauri::command]
 async fn draft_save_as(
     app: tauri::AppHandle,
+    window: tauri::Window,
     store: tauri::State<'_, storage::Store>,
     drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
     manuscript_id: String,
@@ -1067,7 +1073,7 @@ async fn draft_save_as(
     let store = store.inner().clone();
     let drafts = std::sync::Arc::clone(drafts.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        drafts.save_as_dialog(&app, &store, &manuscript_id)
+        drafts.save_as_dialog(&app, &window, &store, &manuscript_id)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1267,6 +1273,10 @@ pub fn run() {
                 {
                     let _ = store.app_meta_set("draft_file_migration_v1", "done");
                 }
+            }
+            let local = app.path().app_local_data_dir().ok();
+            if let Err(e) = draft::repair_draft_file_paths(&store, &dir, local.as_deref()) {
+                eprintln!("swarmDraft: draft path repair: {e}");
             }
             let draft_service = std::sync::Arc::new(draft_service);
             app.manage(draft_service.clone());

@@ -23,7 +23,7 @@ export const home = {
   openTitle: "Let's import your book",
   openLede:
     "Choose the Word manuscript you've been working on. We'll make a working copy — your original file is never changed.",
-  importButton: 'Import Word manuscript',
+  importButton: 'Import Word .docx',
   importingButton: 'Importing your book…',
   dropAria: 'Drop a Word manuscript here to import it',
   dropHint: 'Or drag your manuscript here from a folder',
@@ -48,6 +48,8 @@ export const opening = {
   openHint: 'Getting your chapters ready. This usually takes a few seconds.',
   verbImport: 'Importing',
   verbOpen: 'Opening',
+  /** Shown on cold start before we know whether a last book exists (#329). */
+  loadingBook: 'Opening your book…',
   progressLabel: (verb: string) => `${verb} progress`,
   chaptersFound: (count: number) => `Found ${count} chapters so far`,
   cancel: 'Cancel',
@@ -176,6 +178,13 @@ export function errorCopyBlocks(app = appName()): Record<string, ErrorCopyBlock>
       action: 'save-a-copy',
       actionLabel: 'Save a copy',
       tone: 'danger',
+    },
+    'save-relink-book': {
+      title: 'Copy saved',
+      message: `Save your book to the same folder to keep working there and clear this warning.`,
+      action: 'save-a-copy',
+      actionLabel: 'Save book here',
+      tone: 'warning',
     },
     'export-failed': {
       title: "We couldn't make your book file",

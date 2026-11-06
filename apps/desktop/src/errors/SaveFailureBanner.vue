@@ -7,16 +7,22 @@ import { ref } from 'vue';
 import type { SaveFailureState } from './map-error';
 import type { SaveCopyResult } from './save-copy';
 import { BUSY_NOTICE } from './busy';
+import { errorCopyBlocks, PRODUCT_NAME } from '../copy-deck';
 import ErrorCard from '../shells/ErrorCard.vue';
 
 const props = defineProps<{
   state: SaveFailureState;
   saveCopy: () => Promise<SaveCopyResult>;
+  /** After a .docx copy succeeds but the book still can't save, offer Save As (#331). */
+  offerRelink?: boolean;
 }>();
+
+const emit = defineEmits<{ relink: [] }>();
 
 const busy = ref(false);
 const result = ref('');
 const resultFailed = ref(false);
+const relinkCopy = errorCopyBlocks(PRODUCT_NAME)['save-relink-book'];
 
 async function onSaveCopy() {
   if (busy.value) return;
@@ -50,6 +56,19 @@ async function onSaveCopy() {
       :action-aria-busy="busy"
       @action="onSaveCopy"
     />
+    <ErrorCard
+      v-if="offerRelink && relinkCopy"
+      class="save-failure__relink"
+      variant="banner"
+      role="alert"
+      icon="save"
+      :tone="relinkCopy.tone"
+      :title="relinkCopy.title"
+      :text="relinkCopy.message"
+      :action="relinkCopy.actionLabel"
+      action-data-test="save-book-here"
+      @action="emit('relink')"
+    />
     <p
       v-if="result"
       class="save-failure__result"
@@ -64,6 +83,9 @@ async function onSaveCopy() {
 <style scoped>
 .save-failure {
   margin: var(--ct-space-2) var(--ct-space-4);
+}
+.save-failure__relink {
+  margin-top: var(--ct-space-2);
 }
 .save-failure__result {
   margin: var(--ct-space-2) 0 0;

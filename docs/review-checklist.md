@@ -86,6 +86,7 @@ Run this consolidated pass in order; do not hand off until every line that appli
 
 Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
 
+- 2026-11-05 · #332 · PR #335 · release note named a competitor in Word icon copy · `docs/releases/v0.2.1.md` uses “not a trademarked product logo” (matches `icons.ts` comment); no competitor names in docs
 - 2026-11-05 · #314 · PR #316 · NSIS sidebar 72px mark used simplified small SVG · `generate.py` sidebar uses `render(72)` (full 5-hex); header stays `render_small(36)`
 - 2026-11-04 · #310 · PR #318 · install failure reused check-for-updates copy · `install-failed` manual message + `onInstallFailed`; distinct install copy in `manualMessageCopy`
 - 2026-11-04 · #310 · PR #318 · update-available toast used success check + old copy · accent/download icon; `availableTitle` / `availableBody`; progress `aria-label` + `aria-valuetext`; Esc via `updatePromptEscapeAction`; menu `refresh` icon

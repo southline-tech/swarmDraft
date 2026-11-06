@@ -11,7 +11,19 @@ use std::fs::File;
 use std::io::{Error, ErrorKind, Write};
 use std::path::{Component, Path, PathBuf};
 
+use tauri::AppHandle;
+use tauri::Manager;
+
+/// User Documents folder for save-dialog defaults (#331, #334).
+pub fn documents_dir(app: &AppHandle) -> Option<PathBuf> {
+    app.path().document_dir().ok()
+}
+
 /// True when `path` is `root` or inside it. On Windows paths compare case-insensitively.
+pub(crate) fn is_path_within(path: &Path, root: &Path, case_insensitive: bool) -> bool {
+    is_within(path, root, case_insensitive)
+}
+
 fn is_within(path: &Path, root: &Path, case_insensitive: bool) -> bool {
     let norm = |p: &Path| -> Vec<String> {
         p.components()
@@ -237,6 +249,7 @@ mod tests {
         );
         // The command passes the guard it took, not a fresh one.
         assert!(command_body().contains("save_copy::write_copy(&held,"));
+        assert!(command_body().contains("save_copy::documents_dir"));
     }
 
     /// #100: the lock is taken before the save dialog opens, and the dialog is parented.
