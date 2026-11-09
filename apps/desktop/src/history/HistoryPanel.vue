@@ -5,6 +5,7 @@ import { draftHistory, draftRestore } from '../backend';
 import AppIcon from '../icons/AppIcon.vue';
 import { APP_OVERLAY_LAYER, ensureOverlayLayer } from '../overlay/layer';
 import { trapTab } from '../settings/focus-trap';
+import '../shells/shells.css';
 
 const props = defineProps<{
   open: boolean;
@@ -196,61 +197,3 @@ watch(
     </div>
   </Teleport>
 </template>
-
-<style scoped>
-.history-panel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ct-space-3);
-  width: min(32rem, calc(100vw - 2rem));
-  max-height: min(70vh, 32rem);
-  overflow: auto;
-}
-.history-panel__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--ct-space-2);
-}
-.history-panel__error {
-  color: var(--ct-danger);
-}
-.history-panel__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--ct-space-3);
-}
-.history-panel__row {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ct-space-1);
-  padding-bottom: var(--ct-space-3);
-  border-bottom: 1px solid var(--ct-border);
-}
-.history-panel__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--ct-space-2);
-  font-size: var(--ct-text-sm);
-  color: var(--ct-text-muted);
-}
-.history-panel__msg {
-  margin: 0;
-}
-.history-panel__confirm {
-  margin-top: var(--ct-space-3);
-  padding: var(--ct-space-4);
-  border: 1px solid var(--ct-border);
-  border-radius: var(--ct-radius-md);
-  background: var(--ct-bg);
-}
-.history-panel__confirm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--ct-space-2);
-  margin-top: var(--ct-space-3);
-}
-</style>

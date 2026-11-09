@@ -553,29 +553,6 @@ a:hover {
   background: var(--ct-surface);
 }
 
-.footer-link-btn {
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--ct-text-muted);
-  font: inherit;
-  font-size: inherit;
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.footer-link-btn:hover,
-.footer-link-btn:focus-visible {
-  color: var(--ct-accent);
-  text-decoration: underline;
-}
-
-.footer-link-btn:focus-visible {
-  outline: var(--ct-focus-outline);
-  outline-offset: var(--ct-focus-offset);
-  border-radius: var(--ct-radius-sm);
-}
-
 .feedback-dialog {
   z-index: var(--ct-z-modal);
   margin: auto;
@@ -641,7 +618,9 @@ a:hover {
   width: 100%;
   min-width: 0;
   padding: var(--ct-space-6);
-  padding-bottom: calc(var(--ct-space-6) + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(
+    var(--ct-space-6) + env(safe-area-inset-bottom, 0px) + var(--feedback-keyboard-inset, 0px)
+  );
   background: var(--ct-surface);
   border: 1px solid var(--ct-border);
   border-radius: var(--ct-radius-lg);

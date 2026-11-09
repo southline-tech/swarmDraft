@@ -4,6 +4,7 @@ import {
   MESSAGE_COUNTER_FROM,
   buildLandingPayload,
   feedbackErrorMessage,
+  feedbackKeyboardInsetPx,
   formatMessageCounter,
   getFocusableElements,
   validateFeedbackForm,
@@ -52,6 +53,13 @@ describe('landing feedback form helpers', () => {
     expect(feedbackErrorMessage(429)).toMatch(/Too many/);
     expect(feedbackErrorMessage(502)).toMatch(/unavailable/);
     expect(feedbackErrorMessage(0)).toMatch(/Couldn't send/);
+  });
+
+  it('measures the gap the software keyboard leaves', () => {
+    const viewport = { height: 320, offsetTop: 20 };
+    expect(feedbackKeyboardInsetPx(800, viewport)).toBe(460);
+    expect(feedbackKeyboardInsetPx(800, { height: 800, offsetTop: 0 })).toBe(0);
+    expect(feedbackKeyboardInsetPx(800, null)).toBe(0);
   });
 });
 

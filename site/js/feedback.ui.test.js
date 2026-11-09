@@ -355,5 +355,34 @@ describe('landing feedback modal', () => {
       /\.feedback-dialog__card\s*\{[\s\S]*?border-radius:\s*var\(--ct-radius-lg\)/,
     );
     expect(css).toMatch(/\.feedback-dialog::backdrop\s*\{[\s\S]*?--ct-scrim/);
+    expect(css).toMatch(/--feedback-keyboard-inset/);
+    expect(css).not.toMatch(/\.footer-link-btn/);
+  });
+
+  it('pads the dialog card when the visual viewport shrinks', () => {
+    const listeners = {};
+    const viewport = {
+      height: 320,
+      offsetTop: 0,
+      addEventListener(type, fn) {
+        listeners[type] = fn;
+      },
+      removeEventListener(type, fn) {
+        if (listeners[type] === fn) delete listeners[type];
+      },
+    };
+    vi.stubGlobal('visualViewport', viewport);
+    window.innerHeight = 800;
+    const root = buildFeedbackDom();
+    initFeedback(root);
+    root.querySelector('#feedback').click();
+    const card = root.querySelector('.feedback-dialog__card');
+    expect(card.style.getPropertyValue('--feedback-keyboard-inset')).toBe('480px');
+    viewport.height = 800;
+    listeners.resize();
+    expect(card.style.getPropertyValue('--feedback-keyboard-inset')).toBe('0px');
+    root.querySelector('[data-feedback-close]').click();
+    expect(card.style.getPropertyValue('--feedback-keyboard-inset')).toBe('');
+    expect(listeners.resize).toBeUndefined();
   });
 });

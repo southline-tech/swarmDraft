@@ -83,7 +83,11 @@ import {
   seedProfileForTracking,
   type Profile,
 } from './settings/prefs';
-import { ariaKeyshortcuts, MANUSCRIPT_SHORTCUTS } from './shells/app-shortcuts';
+import {
+  ariaKeyshortcuts,
+  isTrackChangesChord,
+  MANUSCRIPT_SHORTCUTS,
+} from './shells/app-shortcuts';
 import './shells/shells.css';
 import {
   collaborativeEditorOptions,
@@ -302,10 +306,24 @@ const shortcutsOpen = shallowRef(Boolean(import.meta.env.DEV && props.initialSho
 const focusMode = shallowRef(Boolean(import.meta.env.DEV && props.initialFocusMode));
 const prefStore = () => props.storage ?? globalThis.localStorage;
 /** Track changes (#57): persisted on/off; first enable may show the tc3 name prompt. */
-const tracking = shallowRef(
-  loadTracking(prefStore()) || Boolean(import.meta.env.DEV && props.initialTracking),
-);
-watch(tracking, (on) => saveTracking(on, prefStore()));
+const storedTracking = loadTracking(prefStore());
+/**
+ * Dev evidence (`initialTracking`) may show the toggle on for screenshots.
+ * Apply that after the persist watch so the synthetic on-state is skipped,
+ * while a later user toggle still writes the preference.
+ */
+const trackingForcedOn = Boolean(import.meta.env.DEV && props.initialTracking) && !storedTracking;
+const tracking = shallowRef(storedTracking);
+let skipForcedTrackingPersist = trackingForcedOn;
+watch(tracking, (on) => {
+  if (skipForcedTrackingPersist && on) {
+    skipForcedTrackingPersist = false;
+    return;
+  }
+  skipForcedTrackingPersist = false;
+  saveTracking(on, prefStore());
+});
+if (trackingForcedOn) tracking.value = true;
 const writerProfile = shallowRef<Profile>(loadProfile(prefStore()));
 const namePromptOpen = shallowRef(false);
 const nameColorPromptOpen = shallowRef(false);
@@ -498,6 +516,12 @@ const splitDisabledReason = computed((): string | null => {
   const e = editor.value;
   if (!e || e.isDestroyed || !props.doc) return 'Read-only';
   return chapterSplitDisabledReason(e, e.state.doc.toJSON() as DocNode);
+});
+const mergePrevDisabledReason = computed((): string | undefined => {
+  const e = editor.value;
+  if (!e || e.isDestroyed || !props.doc || !e.isEditable) return 'Read-only';
+  if (!props.canMergePrevChapter) return 'No previous chapter';
+  return undefined;
 });
 const menuDisabled = computed(() =>
   contextMenuDisabled(editor.value, {
@@ -1155,6 +1179,11 @@ function onSelectView(author: string | null) {
 
 function onKeydown(ev: KeyboardEvent) {
   if (shortcutsOpen.value) return;
+  if (isTrackChangesChord(ev) && !inForeignInput(ev.target, editor.value?.view.dom ?? null)) {
+    ev.preventDefault();
+    toggleTrackChanges();
+    return;
+  }
   if (
     chapterSplitShortcut(ev) &&
     props.chapterOpsEnabled &&
@@ -1990,7 +2019,7 @@ onBeforeUnmount(() => {
       :active-style="menuActiveStyle"
       :show-chapter-group="!!chapterOpsEnabled && !sliceMode"
       :split-title="splitDisabledReason ?? undefined"
-      :merge-prev-title="!editor?.isEditable ? 'Read-only' : undefined"
+      :merge-prev-title="mergePrevDisabledReason"
       @select="onContextMenuSelect"
       @close="menuAt = null"
     />

@@ -564,6 +564,45 @@ describe('SectionNav', () => {
   });
 });
 
+describe('outline chapter merge menu', () => {
+  it('shows merge with previous disabled on the first chapter and enabled later', async () => {
+    const first = setup({ selectedId: 'ch-1' });
+    await openCtx(first, 'ch-1');
+    const firstPrev = ctxEl('outline-ctx-merge-prev');
+    expect(firstPrev.getAttribute('aria-disabled')).toBe('true');
+    expect(firstPrev.textContent).toContain('Merge with previous chapter');
+    expect(firstPrev.textContent).toContain('No previous chapter');
+    expect(firstPrev.getAttribute('aria-describedby')).toBe('outline-merge-prev-reason');
+    firstPrev.click();
+    await settle();
+    expect(first.emitted('merge-chapter')).toBeUndefined();
+    const firstNext = ctxEl('outline-ctx-merge-next');
+    expect(firstNext.getAttribute('aria-disabled')).toBeNull();
+    first.unmount();
+
+    const later = setup({ selectedId: 'ch-2' });
+    await openCtx(later, 'ch-2');
+    const prev = ctxEl('outline-ctx-merge-prev');
+    expect(prev.getAttribute('aria-disabled')).toBeNull();
+    prev.click();
+    await settle();
+    expect(later.emitted('merge-chapter')?.[0]).toEqual(['ch-1', 'ch-2']);
+    later.unmount();
+  });
+
+  it('shows merge with next disabled on the last chapter', async () => {
+    const w = setup({ selectedId: 'ch-2' });
+    await openCtx(w, 'ch-2');
+    const next = ctxEl('outline-ctx-merge-next');
+    expect(next.getAttribute('aria-disabled')).toBe('true');
+    expect(next.textContent).toContain('No next chapter');
+    next.click();
+    await settle();
+    expect(w.emitted('merge-chapter')).toBeUndefined();
+    w.unmount();
+  });
+});
+
 describe('repair notice', () => {
   it('says the next change saves the repair', async () => {
     const outline = sampleOutline();

@@ -1334,26 +1334,42 @@ const rovingTabKey = computed(() => {
         <template v-if="menuChapterNeighbors">
           <div class="sh-sep" role="separator" />
           <button
-            v-if="menuChapterNeighbors.prev"
             type="button"
             role="menuitem"
             tabindex="-1"
             class="sh-mi"
+            :class="{ 'sh-mi--stack': !menuChapterNeighbors.prev }"
             data-test="outline-ctx-merge-prev"
-            @click="menuMergePrev"
+            :aria-disabled="!menuChapterNeighbors.prev ? 'true' : undefined"
+            :aria-describedby="!menuChapterNeighbors.prev ? 'outline-merge-prev-reason' : undefined"
+            @click="menuChapterNeighbors.prev && menuMergePrev()"
           >
-            Merge with previous chapter
+            <span class="sh-mi-row">Merge with previous chapter</span>
+            <span
+              v-if="!menuChapterNeighbors.prev"
+              id="outline-merge-prev-reason"
+              class="sh-mi-reason"
+              >No previous chapter</span
+            >
           </button>
           <button
-            v-if="menuChapterNeighbors.next"
             type="button"
             role="menuitem"
             tabindex="-1"
             class="sh-mi"
+            :class="{ 'sh-mi--stack': !menuChapterNeighbors.next }"
             data-test="outline-ctx-merge-next"
-            @click="menuMergeNext"
+            :aria-disabled="!menuChapterNeighbors.next ? 'true' : undefined"
+            :aria-describedby="!menuChapterNeighbors.next ? 'outline-merge-next-reason' : undefined"
+            @click="menuChapterNeighbors.next && menuMergeNext()"
           >
-            Merge with next chapter
+            <span class="sh-mi-row">Merge with next chapter</span>
+            <span
+              v-if="!menuChapterNeighbors.next"
+              id="outline-merge-next-reason"
+              class="sh-mi-reason"
+              >No next chapter</span
+            >
           </button>
           <button
             type="button"

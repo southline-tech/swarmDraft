@@ -119,6 +119,52 @@ describe('Find & replace (#53)', () => {
     await w.find('[data-test="find-close"]').trigger('click');
     w.unmount();
   });
+
+  it('throttles the match announcement while typing and announces navigation immediately', async () => {
+    const { w } = await mounted();
+    await w.find('[data-test="tb-find"]').trigger('click');
+    vi.useFakeTimers();
+    try {
+      const input = w.get('[data-test="find-input"]');
+      const live = () => w.get('[data-test="find-count-live"]').text().trim();
+      const visible = () => w.get('[data-test="find-count"]').text().trim();
+
+      await input.setValue('t');
+      await input.setValue('th');
+      await input.setValue('the');
+      expect(visible()).toMatch(/\d+ of \d+/);
+      expect(live()).toBe('');
+      await vi.advanceTimersByTimeAsync(349);
+      expect(live()).toBe('');
+      await vi.advanceTimersByTimeAsync(1);
+      expect(live()).toBe(visible());
+
+      await input.setValue('rain');
+      expect(visible()).toMatch(/1 of 1/);
+      expect(live()).not.toBe(visible());
+      await input.trigger('keydown', { key: 'Enter' });
+      expect(live()).toBe(visible());
+
+      await input.setValue('the');
+      expect(live()).not.toBe(visible());
+      await w.get('[data-test="find-next"]').trigger('click');
+      expect(live()).toBe(visible());
+
+      await w.get('[data-test="find-prev"]').trigger('click');
+      expect(live()).toBe(visible());
+
+      await input.setValue('rain');
+      await w.get('[data-test="replace-input"]').setValue('mist');
+      const beforeReplace = live();
+      await w.get('[data-test="replace-one"]').trigger('click');
+      await flushPromises();
+      expect(live()).toBe(visible());
+      expect(live()).not.toBe(beforeReplace);
+    } finally {
+      vi.useRealTimers();
+      w.unmount();
+    }
+  });
 });
 
 describe('UI shells (Part of #36)', () => {
@@ -286,6 +332,62 @@ describe('UI shells (Part of #36)', () => {
     );
     w.unmount();
   });
+
+  it('toggles track changes with Ctrl+Shift+E and lists it on the sheet', async () => {
+    localStorage.removeItem(TRACKING_KEY);
+    localStorage.removeItem(TRACK_PROMPT_SEEN_KEY);
+    localStorage.removeItem(PROFILE_KEY);
+    const { w } = await mounted();
+    const toggle = w.get('[data-test="track-changes-toggle"]');
+    expect(toggle.attributes('aria-pressed')).toBe('false');
+    expect(toggle.attributes('aria-keyshortcuts')).toBe('Control+Shift+E');
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'e', ctrlKey: true, shiftKey: true, bubbles: true }),
+    );
+    await flushPromises();
+    expect(toggle.attributes('aria-pressed')).toBe('true');
+    expect(loadTracking()).toBe(true);
+
+    await w.find('[data-test="shortcuts-open"]').trigger('click');
+    const sheet = w.get('[data-test="shortcuts-sheet"]');
+    expect(sheet.text()).toContain('Track changes');
+    expect(sheet.text()).toContain('Ctrl');
+    expect(sheet.text()).toContain('E');
+    await sheet.trigger('keydown', { key: 'e', ctrlKey: true, shiftKey: true });
+    expect(toggle.attributes('aria-pressed')).toBe('true');
+    await sheet.trigger('keydown', { key: 'Escape' });
+
+    await w.find('[data-test="tb-find"]').trigger('click');
+    w.get('[data-test="find-input"]').element.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'e', ctrlKey: true, shiftKey: true, bubbles: true }),
+    );
+    await flushPromises();
+    expect(toggle.attributes('aria-pressed')).toBe('true');
+
+    w.unmount();
+    localStorage.removeItem(TRACKING_KEY);
+    localStorage.removeItem(TRACK_PROMPT_SEEN_KEY);
+    localStorage.removeItem(PROFILE_KEY);
+  });
+
+  it('keeps merge with previous visible when it cannot run', async () => {
+    const ydoc = docToYDoc(SAMPLE_DOC as never);
+    const w = mount(ManuscriptEditor, {
+      props: { doc: ydoc, chapterOpsEnabled: true, canMergePrevChapter: false },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    await openContextMenu(w);
+    const item = w.get('[data-test="ctx-merge_prev_chapter"]');
+    expect(item.isVisible()).toBe(true);
+    expect(item.attributes('aria-disabled')).toBe('true');
+    expect(item.attributes('aria-describedby')).toBe('ctx-reason-merge_prev_chapter');
+    expect(item.text()).toContain('Merge with previous chapter');
+    expect(item.text()).toContain('No previous chapter');
+    await item.trigger('click');
+    expect(w.emitted('merge-prev-chapter')).toBeUndefined();
+    w.unmount();
+  });
 });
 
 describe('ContextMenu theme (#54)', () => {
@@ -343,6 +445,26 @@ describe('ContextMenu theme (#54)', () => {
     });
     expect(w.get('[data-test="ctx-cut"]').attributes('aria-disabled')).toBe('true');
     expect(w.get('[data-test="ctx-copy"]').attributes('aria-disabled')).toBeUndefined();
+    w.unmount();
+  });
+
+  it('keeps Merge with previous chapter in the menu when disabled and exposes the reason', () => {
+    const w = mount(ContextMenu, {
+      props: {
+        x: 8,
+        y: 8,
+        showChapterGroup: true,
+        mergePrevTitle: 'Read-only',
+        disabled: new Set<ContextMenuAction>(['merge_prev_chapter']),
+      },
+      attachTo: document.body,
+    });
+    const item = w.get('[data-test="ctx-merge_prev_chapter"]');
+    expect(item.isVisible()).toBe(true);
+    expect(item.attributes('aria-disabled')).toBe('true');
+    expect(item.attributes('aria-describedby')).toBe('ctx-reason-merge_prev_chapter');
+    expect(item.text()).toContain('Merge with previous chapter');
+    expect(w.get('#ctx-reason-merge_prev_chapter').text()).toBe('Read-only');
     w.unmount();
   });
 });

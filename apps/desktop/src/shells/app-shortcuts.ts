@@ -19,7 +19,15 @@ export const MANUSCRIPT_SHORTCUTS = {
   heading: 'Ctrl+Alt+1',
   blockQuote: 'Ctrl+Alt+2',
   comment: 'Ctrl+Alt+M',
+  /** Free of find, focus mode, save, and the review chords. */
+  trackChanges: 'Ctrl+Shift+E',
 } as const;
+
+/** True for {@link MANUSCRIPT_SHORTCUTS.trackChanges} (Ctrl+Shift+E, or Cmd on Mac). */
+export function isTrackChangesChord(ev: KeyboardEvent): boolean {
+  const mod = ev.ctrlKey || ev.metaKey;
+  return mod && ev.shiftKey && !ev.altKey && ev.key.toLowerCase() === 'e';
+}
 
 const KEY_LABELS: Record<string, string> = {
   Backspace: '⌫',
@@ -92,6 +100,7 @@ export const SHORTCUT_SHEET_GROUPS: ShortcutSheetGroup[] = [
   {
     title: shortcutSheet.review,
     rows: [
+      { label: shortcutSheet.trackChanges, chord: MANUSCRIPT_SHORTCUTS.trackChanges },
       { label: shortcutSheet.nextChange, chord: REVIEW_SHORTCUTS.next },
       { label: shortcutSheet.previousChange, chord: REVIEW_SHORTCUTS.prev },
       { label: shortcutSheet.acceptChange, chord: REVIEW_SHORTCUTS.accept },

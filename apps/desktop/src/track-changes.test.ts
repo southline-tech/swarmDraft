@@ -30,11 +30,17 @@ async function mountedEditor(
     storage?: ReturnType<typeof store>;
     computerName?: string;
     content?: typeof SAMPLE_DOC;
+    initialTracking?: boolean;
   } = {},
 ) {
   const ydoc = docToYDoc((opts.content ?? SAMPLE_DOC) as never);
   const w = mount(ManuscriptEditor, {
-    props: { doc: ydoc, storage: opts.storage, computerName: opts.computerName },
+    props: {
+      doc: ydoc,
+      storage: opts.storage,
+      computerName: opts.computerName,
+      ...(opts.initialTracking ? { initialTracking: true } : {}),
+    },
     attachTo: document.body,
   });
   await flushPromises();
@@ -147,6 +153,21 @@ describe('Track changes toggle (#57)', () => {
     const { w } = await mountedEditor({ storage: s });
     expect(w.get('[data-test="track-changes-toggle"]').attributes('aria-pressed')).toBe('true');
     expect(w.find('[data-test="name-prompt"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('does not persist evidence initialTracking until the writer toggles it', async () => {
+    const s = store();
+    const { w } = await mountedEditor({ storage: s, initialTracking: true });
+    const toggle = w.get('[data-test="track-changes-toggle"]');
+    expect(toggle.attributes('aria-pressed')).toBe('true');
+    expect(s.getItem(TRACKING_KEY)).toBeNull();
+    await toggle.trigger('click');
+    expect(toggle.attributes('aria-pressed')).toBe('false');
+    expect(s.getItem(TRACKING_KEY)).toBe('0');
+    await toggle.trigger('click');
+    expect(toggle.attributes('aria-pressed')).toBe('true');
+    expect(s.getItem(TRACKING_KEY)).toBe('1');
     w.unmount();
   });
 });

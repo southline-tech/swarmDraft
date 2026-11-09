@@ -1994,22 +1994,31 @@ defineExpose({ open, closeSession });
                 }}</span>
               </button>
               <button
-                v-if="session && isTauri()"
+                v-if="isTauri()"
                 type="button"
                 class="sh-mi"
+                :class="{ 'sh-mi--stack': !session }"
                 role="menuitem"
                 data-test="app-menu-history"
+                :aria-disabled="session ? undefined : 'true'"
+                :aria-describedby="session ? undefined : 'app-menu-history-reason'"
                 @click="
                   () => {
+                    if (!session) return;
                     historyOpen = true;
                     closeBookMenu();
                   }
                 "
               >
-                <span class="sh-mi-lead" aria-hidden="true"
-                  ><AppIcon name="clock" class="app-menu-icon"
-                /></span>
-                History
+                <span class="sh-mi-line">
+                  <span class="sh-mi-lead" aria-hidden="true"
+                    ><AppIcon name="clock" class="app-menu-icon"
+                  /></span>
+                  History
+                </span>
+                <span v-if="!session" id="app-menu-history-reason" class="sh-mi-reason"
+                  >Open a book first</span
+                >
               </button>
               <div
                 class="topbar__recent"
