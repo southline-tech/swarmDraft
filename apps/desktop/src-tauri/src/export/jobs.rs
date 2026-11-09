@@ -159,6 +159,6 @@ impl Store {
     }
 
     pub fn exports_dir(&self) -> std::path::PathBuf {
-        self.data_dir().join("exports")
+        crate::platform::exports_dir(self.data_dir())
     }
 }

@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 use std::process::Command;
 
 /// True when the executable name looks like the pre-rename desktop app, not swarmDraft.
@@ -26,7 +26,8 @@ pub fn legacy_coauthor_holds_port(host: &str, port: u16) -> bool {
         .any(|name| executable_name_suggests_legacy_coauthor(&name))
 }
 
-#[cfg(unix)]
+/// Linux reads `/proc/net/tcp`. macOS has no `/proc`, so it uses `lsof` (#193).
+#[cfg(target_os = "linux")]
 fn port_listener_pids(host: &str, port: u16) -> Vec<u32> {
     let want_ip = ipv4_hex(host);
     let want_port = format!("{:04X}", port);
@@ -51,7 +52,7 @@ fn port_listener_pids(host: &str, port: u16) -> Vec<u32> {
     inodes.into_iter().flat_map(pids_for_socket_inode).collect()
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn ipv4_hex(host: &str) -> String {
     let host = if host == "localhost" {
         "127.0.0.1"
@@ -71,7 +72,7 @@ fn ipv4_hex(host: &str) -> String {
     )
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn pids_for_socket_inode(inode: u32) -> Vec<u32> {
     let needle = format!("socket:[{inode}]");
     let Ok(entries) = std::fs::read_dir("/proc") else {
@@ -104,7 +105,7 @@ fn pids_for_socket_inode(inode: u32) -> Vec<u32> {
     out
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn process_image_name(pid: u32) -> Option<String> {
     let link = std::fs::read_link(format!("/proc/{pid}/exe")).ok()?;
     Some(link.to_string_lossy().into_owned())
@@ -154,12 +155,50 @@ fn process_image_name(pid: u32) -> Option<String> {
     Some(first.trim_matches('"').to_string())
 }
 
-#[cfg(not(any(unix, windows)))]
+#[cfg(target_os = "macos")]
+fn port_listener_pids(host: &str, port: u16) -> Vec<u32> {
+    let host = if host == "localhost" {
+        "127.0.0.1"
+    } else {
+        host
+    };
+    let spec = format!("{host}:{port}");
+    let output = match Command::new("lsof")
+        .args(["-nP", "-iTCP", &spec, "-sTCP:LISTEN", "-t"])
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .filter_map(|s| s.parse().ok())
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn process_image_name(pid: u32) -> Option<String> {
+    let output = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name)
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn port_listener_pids(_host: &str, _port: u16) -> Vec<u32> {
     Vec::new()
 }
 
-#[cfg(not(any(unix, windows)))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn process_image_name(_pid: u32) -> Option<String> {
     None
 }

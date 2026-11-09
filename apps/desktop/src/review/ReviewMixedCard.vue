@@ -9,6 +9,7 @@ import {
 import type { ReviewListItem } from './review-inline';
 import { agentIdOf, agentName, type AgentName } from '../agent-names';
 import { collabColor } from '../author-colors';
+import { displayChord } from '../shells/app-shortcuts';
 
 const props = defineProps<{
   item: ReviewListItem;
@@ -74,7 +75,7 @@ function submitReply() {
   if (body) emit('comment-reply', props.item.thread.id, body);
 }
 
-const tip = (text: string, keys: string) => `${text} (${keys})`;
+const tip = (text: string, keys: string) => `${text} (${displayChord(keys)})`;
 </script>
 
 <template>

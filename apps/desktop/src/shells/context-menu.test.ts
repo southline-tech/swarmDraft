@@ -53,6 +53,26 @@ describe('context menu actions (#54)', () => {
     expect(key('1')).toBe('heading');
     expect(key('2')).toBe('block_quote');
     expect(key('m')).toBe('comment');
+    vi.stubGlobal('navigator', { platform: 'MacIntel' });
+    try {
+      expect(
+        contextMenuActionForKey(
+          new KeyboardEvent('keydown', { key: '1', metaKey: true, altKey: true }),
+        ),
+      ).toBe('heading');
+      expect(
+        contextMenuActionForKey(
+          new KeyboardEvent('keydown', { key: '1', ctrlKey: true, altKey: true }),
+        ),
+      ).toBeNull();
+      expect(
+        chapterSplitShortcut(
+          new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, shiftKey: true }),
+        ),
+      ).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
     expect(
       contextMenuActionForKey(
         new KeyboardEvent('keydown', { key: '1', ctrlKey: true, altKey: true, shiftKey: true }),

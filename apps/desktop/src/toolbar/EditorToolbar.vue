@@ -27,6 +27,7 @@ import {
   pickInlineOverflowItems,
   type ToolbarOverflowItemId,
 } from './toolbar-overflow';
+import { ariaKeyshortcuts, displayChord } from '../shells/app-shortcuts';
 
 const props = withDefaults(
   defineProps<{
@@ -293,7 +294,7 @@ function pick(cmd: ToolbarCommand) {
   run(cmd);
 }
 
-const tip = (label: string, key?: string) => (key ? `${label} (${key})` : label);
+const tip = (label: string, key?: string) => (key ? `${label} (${displayChord(key)})` : label);
 const SOON = 'coming soon';
 const SOON_ATTRS: Record<string, string> = { 'aria-disabled': 'true', 'aria-description': SOON };
 const soon = (label: string, key?: string) => `${tip(label, key)} — ${SOON}`;
@@ -340,7 +341,9 @@ const themeLabel = computed(() =>
           data-test="toolbar-undo"
           :class="btn"
           aria-label="Undo"
-          :aria-keyshortcuts="editable && state.hasHistory ? 'Control+Z' : undefined"
+          :aria-keyshortcuts="
+            editable && state.hasHistory ? ariaKeyshortcuts(SHORTCUTS.undo) : undefined
+          "
           :title="ftip('Undo', state.hasHistory ? SHORTCUTS.undo : undefined)"
           :disabled="editable && !state.canUndo"
           v-bind="ro"
@@ -356,7 +359,9 @@ const themeLabel = computed(() =>
           data-test="toolbar-redo"
           :class="btn"
           aria-label="Redo"
-          :aria-keyshortcuts="editable && state.hasHistory ? 'Control+Y' : undefined"
+          :aria-keyshortcuts="
+            editable && state.hasHistory ? ariaKeyshortcuts(SHORTCUTS.redo) : undefined
+          "
           :title="ftip('Redo', state.hasHistory ? SHORTCUTS.redo : undefined)"
           :disabled="editable && !state.canRedo"
           v-bind="ro"
@@ -391,7 +396,7 @@ const themeLabel = computed(() =>
           :class="[btn, 'font-manuscript! font-bold']"
           :aria-pressed="state.bold"
           aria-label="Bold"
-          :aria-keyshortcuts="editable ? 'Control+B' : undefined"
+          :aria-keyshortcuts="editable ? ariaKeyshortcuts(SHORTCUTS.bold) : undefined"
           :title="ftip('Bold', SHORTCUTS.bold)"
           v-bind="ro"
           @click="run('bold')"
@@ -404,7 +409,7 @@ const themeLabel = computed(() =>
           :class="[btn, 'font-manuscript! italic']"
           :aria-pressed="state.italic"
           aria-label="Italic"
-          :aria-keyshortcuts="editable ? 'Control+I' : undefined"
+          :aria-keyshortcuts="editable ? ariaKeyshortcuts(SHORTCUTS.italic) : undefined"
           :title="ftip('Italic', SHORTCUTS.italic)"
           v-bind="ro"
           @click="run('italic')"

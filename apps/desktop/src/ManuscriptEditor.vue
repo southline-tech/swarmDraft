@@ -83,7 +83,11 @@ import {
   seedProfileForTracking,
   type Profile,
 } from './settings/prefs';
-import { ariaKeyshortcuts, MANUSCRIPT_SHORTCUTS } from './shells/app-shortcuts';
+import {
+  ariaKeyshortcuts,
+  MANUSCRIPT_SHORTCUTS,
+  usesPrimaryModifier,
+} from './shells/app-shortcuts';
 import './shells/shells.css';
 import {
   collaborativeEditorOptions,
@@ -373,7 +377,7 @@ function onWindowKey(e: KeyboardEvent) {
   if (shortcutsOpen.value) return;
   if (e.target instanceof Node && rootEl.value?.contains(e.target)) return;
   if (isField(e.target)) return;
-  const mod = e.ctrlKey || e.metaKey;
+  const mod = usesPrimaryModifier(e);
   // An open context menu or Find owns Escape: close it and stay in focus mode (#94).
   if (e.key === 'Escape' && spellMenu.value) {
     e.preventDefault();
@@ -405,7 +409,7 @@ const isField = (t: EventTarget | null) =>
 function onShellKey(e: KeyboardEvent) {
   if (shortcutsOpen.value) return;
   if (isField(e.target)) return;
-  const mod = e.ctrlKey || e.metaKey;
+  const mod = usesPrimaryModifier(e);
   if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
     e.preventDefault();
     findFocusReplace.value = false;

@@ -4,6 +4,7 @@
  */
 import type { Editor } from '@tiptap/core';
 import { applyCommentAnchor } from '../review/comment';
+import { usesPrimaryModifier } from './modifier-key';
 import { runCommand, type ToolbarCommand } from '../toolbar/toolbar';
 
 export type ContextMenuAction =
@@ -28,7 +29,7 @@ const STYLE_ACTIONS = new Set<ContextMenuAction>(['body', 'heading', 'block_quot
 
 /** Map wp4 style/comment accelerators (shared with the shortcuts sheet, #56). */
 export function contextMenuActionForKey(ev: KeyboardEvent): ContextMenuAction | null {
-  if (!(ev.ctrlKey || ev.metaKey) || !ev.altKey || ev.shiftKey) return null;
+  if (!usesPrimaryModifier(ev) || !ev.altKey || ev.shiftKey) return null;
   switch (ev.key) {
     case '0':
       return 'body';
@@ -51,7 +52,7 @@ function defaultClipboard(): ContextMenuClipboard | undefined {
 }
 
 export function chapterSplitShortcut(ev: KeyboardEvent): boolean {
-  const ctrl = ev.ctrlKey || ev.metaKey;
+  const ctrl = usesPrimaryModifier(ev);
   return ctrl && ev.shiftKey && !ev.altKey && ev.key === 'Enter';
 }
 

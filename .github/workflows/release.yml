@@ -1,9 +1,13 @@
 name: Release
 
+# Tag pushes build Windows (NSIS/MSI + updater) and an unsigned macOS DMG.
+# workflow_dispatch builds the unsigned macOS DMG only — no Apple signing secrets.
+# PR CI stays on ubuntu-latest (ci.yml). macOS is not part of every pull request.
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -20,6 +24,8 @@ env:
 jobs:
   windows-installer:
     name: Windows signed installer and updater
+    # Tag pushes only. A manual run is the unsigned macOS job below.
+    if: github.event_name == 'push'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -88,4 +94,92 @@ jobs:
             apps/desktop/src-tauri/target/release/bundle/msi/*.msi
             apps/desktop/src-tauri/target/release/bundle/msi/*.sig
             SHA256SUMS.txt
+          retention-days: 14
+
+  # Unsigned on purpose (#193). No Apple Developer identity, notarization, hardened runtime,
+  # or APPLE_* secrets. Tauri may ad-hoc sign so the binary can launch; Gatekeeper still warns.
+  macos-unsigned-dmg:
+    name: macOS unsigned DMG (no Apple signing)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - run: pnpm install --frozen-lockfile
+      - name: Check tag matches version
+        if: github.event_name == 'push'
+        run: node scripts/check-version.mjs --tag ${{ github.ref_name }}
+
+      - name: Build unsigned universal DMG
+        working-directory: apps/desktop
+        run: |
+          pnpm exec tauri build \
+            --target universal-apple-darwin \
+            --bundles dmg,app \
+            --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: SHA256 checksums
+        run: |
+          set -euo pipefail
+          bundle="apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg"
+          shopt -s nullglob
+          files=("$bundle"/*.dmg)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No unsigned DMG under $bundle" >&2
+            exit 1
+          fi
+          : > SHA256SUMS-macos.txt
+          for f in "${files[@]}"; do
+            hash=$(shasum -a 256 "$f" | awk '{print $1}')
+            printf '%s  %s\n' "$hash" "$(basename "$f")" >> SHA256SUMS-macos.txt
+          done
+          cat SHA256SUMS-macos.txt
+
+      - name: Upload unsigned DMG to the GitHub release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+          shopt -s nullglob
+          files=(SHA256SUMS-macos.txt apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+          upload() {
+            if gh release view "$tag" >/dev/null 2>&1; then
+              gh release upload "$tag" "${files[@]}"
+              return $?
+            fi
+            gh release create "$tag" "${files[@]}" \
+              --title "swarmDraft ${tag}" \
+              --notes-file docs/release-notes-template.md
+          }
+          for _ in 1 2 3 4 5 6; do
+            if upload; then
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Could not attach the unsigned DMG to $tag" >&2
+          exit 1
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: swarmdraft-macos-unsigned-${{ github.ref_name }}
+          path: |
+            apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            SHA256SUMS-macos.txt
           retention-days: 14
