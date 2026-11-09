@@ -1,6 +1,6 @@
 //! Change index (`review/changes.json`) and history lookup for one change id.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::manuscripts::{ReviewDecisionRecord, Suggestion};
 use crate::storage::{StorageError, Store};
 
-use super::repo::{message_trailers, trailer_value, DraftRepo, DraftRepoError};
+use super::repo::{message_trailers, trailer_value, trailer_values, DraftRepo, DraftRepoError};
 use super::sync::{to_pretty, write_stable};
 
 const QUOTE_CHARS: usize = 200;
@@ -379,8 +379,22 @@ struct DecisionHit {
     session_id: Option<String>,
 }
 
+/// Cache key for change lookup. Includes every searched tip so a bot or session
+/// commit invalidates a result that was cached while `main` stayed put.
+pub fn tip_cache_key(repo: &DraftRepo) -> Result<String, DraftRepoError> {
+    let tips = repo.search_ref_tips()?;
+    Ok(tips
+        .into_iter()
+        .map(|tip| format!("{} {}", tip.name, tip.oid))
+        .collect::<Vec<_>>()
+        .join("\n"))
+}
+
 /// Every change id found in history. Unknown ids are simply absent.
-/// A `review/changes.json` that does not parse is skipped.
+/// The introducing commit is the earliest one that adds the id. A later snapshot
+/// that lists the same id does not replace it. A `review/changes.json` that does
+/// not parse is skipped. Each ref walk stops at a commit already seen, so session
+/// refs that point at `main` history are not walked again.
 pub fn resolve_all(
     repo: &DraftRepo,
 ) -> Result<HashMap<String, DraftChangeResolve>, DraftRepoError> {
@@ -400,54 +414,83 @@ pub fn resolve_all(
 
     let mut intro: HashMap<String, Intro> = HashMap::new();
     let mut decided: HashMap<String, DecisionHit> = HashMap::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut index_cache: HashMap<String, Vec<ChangeEntry>> = HashMap::new();
 
     for tip in repo.search_ref_tips()? {
-        let commits = repo.walk_first_parent(&tip.oid)?;
-        for commit in commits {
+        if !seen.insert(tip.oid.clone()) {
+            continue;
+        }
+        let mut oid = tip.oid;
+        loop {
+            let commit = repo.history_commit(&oid)?;
             let trailers = message_trailers(&commit.message);
             let session = trailer_value(&trailers, "Session");
-            if let Some(id) = trailer_value(&trailers, "Change-Id") {
-                if !id.is_empty() {
-                    let decision = trailer_value(&trailers, "Decision").unwrap_or_default();
-                    let replace = decided
-                        .get(&id)
-                        .map(|d| commit.time_unix > d.at)
-                        .unwrap_or(true);
-                    if replace {
-                        decided.insert(
-                            id,
-                            DecisionHit {
-                                commit: commit.oid.clone(),
-                                at: commit.time_unix,
-                                decision,
-                                session_id: session.clone(),
-                            },
-                        );
-                    }
-                }
-            }
-            let Some(bytes) = repo.file_bytes(&commit.oid, CHANGES_PATH)? else {
-                continue;
-            };
-            let Ok(entries) = parse_change_index(&bytes) else {
-                continue;
-            };
-            for entry in entries {
-                if intro.contains_key(&entry.id) {
+            let decisions = trailer_values(&trailers, "Decision");
+            for (index, id) in trailer_values(&trailers, "Change-Id")
+                .into_iter()
+                .enumerate()
+            {
+                if id.is_empty() {
                     continue;
                 }
-                intro.insert(
-                    entry.id.clone(),
-                    Intro {
-                        commit: commit.oid.clone(),
-                        at: commit.time_unix,
-                        reference: tip.name.clone(),
-                        status: entry.status,
-                        section_id: entry.section_id,
-                        session_id: session.clone(),
-                    },
-                );
+                let decision = decisions
+                    .get(index)
+                    .or_else(|| decisions.last())
+                    .cloned()
+                    .unwrap_or_default();
+                let replace = decided
+                    .get(&id)
+                    .map(|hit| commit.time_unix > hit.at)
+                    .unwrap_or(true);
+                if replace {
+                    decided.insert(
+                        id,
+                        DecisionHit {
+                            commit: commit.oid.clone(),
+                            at: commit.time_unix,
+                            decision,
+                            session_id: session.clone(),
+                        },
+                    );
+                }
             }
+            let parent = repo.parent_oid(&oid)?;
+            let parent_ids = match &parent {
+                Some(parent_oid) => change_id_set(repo, parent_oid, &mut index_cache)?,
+                None => HashSet::new(),
+            };
+            for entry in change_entries_at(repo, &oid, &mut index_cache)? {
+                if parent_ids.contains(&entry.id) {
+                    continue;
+                }
+                let replace = match intro.get(&entry.id) {
+                    Some(prev) => {
+                        intro_beats(commit.time_unix, &tip.name, prev.at, &prev.reference)
+                    }
+                    None => true,
+                };
+                if replace {
+                    intro.insert(
+                        entry.id.clone(),
+                        Intro {
+                            commit: commit.oid.clone(),
+                            at: commit.time_unix,
+                            reference: tip.name.clone(),
+                            status: entry.status,
+                            section_id: entry.section_id,
+                            session_id: session.clone(),
+                        },
+                    );
+                }
+            }
+            let Some(parent_oid) = parent else {
+                break;
+            };
+            if !seen.insert(parent_oid.clone()) {
+                break;
+            }
+            oid = parent_oid;
         }
     }
 
@@ -498,6 +541,48 @@ pub fn resolve_all(
         );
     }
     Ok(out)
+}
+
+fn change_entries_at(
+    repo: &DraftRepo,
+    oid: &str,
+    cache: &mut HashMap<String, Vec<ChangeEntry>>,
+) -> Result<Vec<ChangeEntry>, DraftRepoError> {
+    if let Some(entries) = cache.get(oid) {
+        return Ok(entries.clone());
+    }
+    let entries = match repo.file_bytes(oid, CHANGES_PATH)? {
+        Some(bytes) => parse_change_index(&bytes).unwrap_or_default(),
+        None => Vec::new(),
+    };
+    cache.insert(oid.to_string(), entries.clone());
+    Ok(entries)
+}
+
+fn change_id_set(
+    repo: &DraftRepo,
+    oid: &str,
+    cache: &mut HashMap<String, Vec<ChangeEntry>>,
+) -> Result<HashSet<String>, DraftRepoError> {
+    Ok(change_entries_at(repo, oid, cache)?
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect())
+}
+
+/// Earlier commit wins. The same timestamp prefers the bot ref, then `main`.
+fn intro_beats(new_at: i64, new_ref: &str, old_at: i64, old_ref: &str) -> bool {
+    new_at < old_at || (new_at == old_at && ref_rank(new_ref) < ref_rank(old_ref))
+}
+
+fn ref_rank(name: &str) -> u8 {
+    if name.starts_with("bot/") {
+        0
+    } else if name == "main" || name == "master" {
+        1
+    } else {
+        2
+    }
 }
 
 fn storage_err(e: StorageError) -> DraftRepoError {

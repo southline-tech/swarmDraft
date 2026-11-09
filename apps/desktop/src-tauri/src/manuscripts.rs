@@ -1240,6 +1240,61 @@ impl Store {
         })
     }
 
+    /// Make this manuscript's comment rows exactly `comments`.
+    /// A row whose section is not in the manuscript is skipped.
+    pub fn replace_comments_for_manuscript(
+        &self,
+        manuscript_id: &str,
+        comments: &[Comment],
+    ) -> Result<(), StorageError> {
+        self.with_conn(|c| {
+            let tx = c.unchecked_transaction()?;
+            let section_ids = {
+                let mut st = tx.prepare("SELECT id FROM sections WHERE manuscript_id = ?1")?;
+                let ids = st
+                    .query_map([manuscript_id], |r| r.get::<_, String>(0))?
+                    .collect::<Result<std::collections::HashSet<String>, _>>()?;
+                ids
+            };
+            tx.execute(
+                "DELETE FROM comments WHERE manuscript_id = ?1",
+                [manuscript_id],
+            )?;
+            for comment in comments {
+                if comment.id.is_empty()
+                    || comment.body.is_empty()
+                    || comment.created_at.is_empty()
+                    || (comment.author.kind != "human" && comment.author.kind != "agent")
+                    || !section_ids.contains(&comment.section_id)
+                {
+                    eprintln!("draft comment import skipped {}", comment.id);
+                    continue;
+                }
+                tx.execute(
+                    "INSERT INTO comments (id, manuscript_id, section_id, block_id, quote, body, thread_id,
+                       author_kind, author_id, author_name, created_at, resolved_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                    params![
+                        comment.id,
+                        manuscript_id,
+                        comment.section_id,
+                        comment.block_id,
+                        comment.quote,
+                        comment.body,
+                        comment.thread_id,
+                        comment.author.kind,
+                        comment.author.id,
+                        comment.author.name,
+                        comment.created_at,
+                        comment.resolved_at
+                    ],
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
     /// Every unresolved comment in a manuscript, for building a .docx copy (#74).
     pub fn open_comments_for_manuscript(
         &self,

@@ -146,7 +146,53 @@ describe('draft backbone wiring (#116)', () => {
     expect(backend.draftCheckpoint).toHaveBeenCalledWith(
       session.id,
       expect.stringMatching(/^Edited /),
+      true,
     );
+    w.unmount();
+  });
+
+  it('commits each id when accept all records two decisions', async () => {
+    const backend = await import('./backend');
+    const { w, session } = await openBook();
+    const sectionId = session.outline.value.find((s) => s.kind === 'chapter')!.id;
+    vi.mocked(backend.draftReviewCommit).mockClear();
+    const records = [
+      {
+        id: 'chg-a',
+        kind: 'suggestion_insert',
+        status: 'accepted' as const,
+        decidedAt: '2026-01-02T00:00:00.000Z',
+        decidedBy: 'author',
+      },
+      {
+        id: 'chg-b',
+        kind: 'suggestion_delete',
+        status: 'rejected' as const,
+        decidedAt: '2026-01-02T00:00:01.000Z',
+        decidedBy: 'author',
+      },
+    ];
+    w.findComponent(ContinuousManuscript).vm.$emit('decisions', sectionId, records, 'agent:bot-1');
+    await flushPromises();
+    expect(backend.draftReviewCommit).toHaveBeenCalledTimes(2);
+    expect(backend.draftReviewCommit).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ suggestionId: 'chg-a', accepted: true, sectionId }),
+    );
+    expect(backend.draftReviewCommit).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ suggestionId: 'chg-b', accepted: false, sectionId }),
+    );
+    w.unmount();
+  });
+
+  it('shows the save failure when ending the editing session fails', async () => {
+    const backend = await import('./backend');
+    const { w, session } = await openBook();
+    vi.mocked(backend.draftEndSession).mockRejectedValueOnce(new Error('pack failed'));
+    const other = sessionFromDocx(bytes(), 'm-backbone-next');
+    (w.vm as unknown as { open: (s: typeof session) => void }).open(other);
+    await vi.waitFor(() => expect(w.find('[data-test="save-error"]').exists()).toBe(true));
     w.unmount();
   });
 });

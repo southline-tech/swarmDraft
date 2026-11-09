@@ -867,6 +867,16 @@ impl SwarmdraftMcp {
                         suggestion: None,
                     },
                 )?;
+                let bot = author(p);
+                if let Err(e) = self.drafts.commit_bot_suggestion(
+                    &self.store,
+                    &a.manuscript_id,
+                    &p.agent_id,
+                    &bot.name,
+                    "Bot comment",
+                ) {
+                    eprintln!("draft commit_bot_suggestion: {e}");
+                }
                 Ok(Output::Json(json!({ "comment": c })))
             },
         )

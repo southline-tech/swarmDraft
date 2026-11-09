@@ -362,8 +362,8 @@ fn comment_threads_round_trip_without_duplicates() {
     let rows = store2
         .comments_for_manuscript(&opened.manuscript_id)
         .unwrap();
-    assert_eq!(rows.len(), 3);
-    assert_eq!(rows.iter().filter(|c| c.id == "clocalextra").count(), 1);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows.iter().filter(|c| c.id == "clocalextra").count(), 0);
     assert_eq!(rows.iter().filter(|c| c.id == thread).count(), 1);
 }
 
@@ -482,7 +482,7 @@ fn checkpoint_commits_yjs_and_live_edit_does_not_wait() {
     link_draft(&store, &m.id, "yjs.draft");
     set_chapter_plain(&store, &chapter.doc_id, "before-checkpoint");
     let before = svc
-        .checkpoint_if_due(&store, &m.id, "Edited chapter")
+        .checkpoint_if_due(&store, &m.id, "Edited chapter", false)
         .unwrap()
         .expect("checkpoint");
     set_chapter_plain(&store, &chapter.doc_id, "typed-live");
@@ -612,6 +612,409 @@ fn bot_branch_stays_on_its_ref_and_main_stays_checked_out() {
     assert!(history
         .iter()
         .all(|c| !c.message.contains("Change-Id") && !c.message.contains("Session:")));
+}
+
+fn sample_comment(id: &str, section_id: &str, body: &str) -> Comment {
+    Comment {
+        id: id.into(),
+        section_id: section_id.into(),
+        block_id: None,
+        quote: None,
+        body: body.into(),
+        thread_id: Some(id.into()),
+        author: Author {
+            kind: "human".into(),
+            id: "local".into(),
+            name: "Author".into(),
+        },
+        created_at: "2026-01-01T00:00:00.000Z".into(),
+        resolved_at: None,
+    }
+}
+
+#[test]
+fn accept_all_writes_a_deciding_commit_per_change() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "accept-all.draft");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap();
+    let mut records = Vec::new();
+    let mut decided = Vec::new();
+    for (id, accepted) in [("chg-a", true), ("chg-b", false)] {
+        records.push(ReviewDecisionRecord {
+            kind: "suggestion_insert".into(),
+            id: id.into(),
+            status: if accepted { "accepted" } else { "rejected" }.into(),
+            decided_at: "2026-01-02T00:00:00.000Z".into(),
+            decided_by: "author".into(),
+        });
+        store
+            .save_section_review_decisions(&m.id, &chapter.id, &records)
+            .unwrap();
+        let oid = svc
+            .commit_review_decision(
+                &store,
+                &m.id,
+                accepted,
+                "Line Editor",
+                chapter.title.as_str(),
+                "Author",
+                Some("bot-1"),
+                Some(id),
+                Some("suggestion_insert"),
+                Some(chapter.id.as_str()),
+            )
+            .unwrap()
+            .expect("one commit per id");
+        decided.push(oid);
+    }
+    assert_ne!(decided[0], decided[1]);
+    let first = found(svc.resolve_change(&store, &m.id, "chg-a").unwrap());
+    let second = found(svc.resolve_change(&store, &m.id, "chg-b").unwrap());
+    assert_eq!(first.decided_commit.as_deref(), Some(decided[0].as_str()));
+    assert_eq!(first.decision.as_deref(), Some("accepted"));
+    assert_eq!(second.decided_commit.as_deref(), Some(decided[1].as_str()));
+    assert_eq!(second.decision.as_deref(), Some("rejected"));
+    let accepted = svc
+        .history(&store, &m.id, 10, 0)
+        .unwrap()
+        .into_iter()
+        .filter(|c| c.message.starts_with("Accepted") || c.message.starts_with("Rejected"))
+        .count();
+    assert_eq!(accepted, 2);
+}
+
+#[test]
+fn resolve_change_uses_the_bot_commit_that_added_the_id() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "bot-intro.draft");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap();
+    match svc.resolve_change(&store, &m.id, "chg-bot").unwrap() {
+        DraftChangeResolve::NotFound { change_id } => assert_eq!(change_id, "chg-bot"),
+        DraftChangeResolve::Found { .. } => panic!("id is not in history yet"),
+    }
+    set_chapter_mark(&store, &chapter.doc_id, "chg-bot", "harbor light");
+    let bot_oid = svc
+        .commit_bot_suggestion(
+            &store,
+            &m.id,
+            "agent-test-1",
+            "Line Editor",
+            "Bot suggestions",
+        )
+        .unwrap()
+        .expect("bot commit");
+    let introduced = found(svc.resolve_change(&store, &m.id, "chg-bot").unwrap());
+    assert_eq!(introduced.introduced_commit, bot_oid);
+    assert!(introduced.introduced_ref.starts_with("bot/"));
+    let main_oid = svc
+        .commit_now(
+            &store,
+            &m.id,
+            "Edited chapter",
+            "Author",
+            "author@swarmdraft.local",
+        )
+        .unwrap()
+        .expect("later main snapshot");
+    assert_ne!(main_oid, bot_oid);
+    let still = found(svc.resolve_change(&store, &m.id, "chg-bot").unwrap());
+    assert_eq!(still.introduced_commit, bot_oid);
+    assert!(still.introduced_ref.starts_with("bot/"));
+}
+
+#[test]
+fn reopen_applies_a_newer_resolved_at() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "resolve-comment.draft");
+    let thread = "cthread1";
+    store
+        .insert_comment(
+            &m.id,
+            &sample_comment(thread, &chapter.id, "Please check this."),
+        )
+        .unwrap();
+    svc.commit_now(&store, &m.id, "Saved", "Author", "author@swarmdraft.local")
+        .unwrap();
+    let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
+
+    let dir2 = tempfile::tempdir().unwrap();
+    let store2 = Store::open(dir2.path()).unwrap();
+    let svc2 = DraftService::new(store2.data_dir().to_path_buf(), "0.2.1".into());
+    let opened = svc2
+        .open_draft_path(&store2, &draft_path, true)
+        .unwrap()
+        .unwrap();
+    let rows = store2
+        .comments_for_manuscript(&opened.manuscript_id)
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].resolved_at.is_none());
+
+    store
+        .set_comment_thread_resolved(&m.id, &chapter.id, thread, true)
+        .unwrap();
+    svc.commit_now(&store, &m.id, "Saved", "Author", "author@swarmdraft.local")
+        .unwrap()
+        .expect("resolved comment is committed");
+    svc2.open_draft_path(&store2, &draft_path, true)
+        .unwrap()
+        .unwrap();
+    let rows = store2
+        .comments_for_manuscript(&opened.manuscript_id)
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].resolved_at.is_some());
+}
+
+#[test]
+fn restore_drops_a_comment_added_after_that_commit() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "restore-comments.draft");
+    store
+        .insert_comment(
+            &m.id,
+            &sample_comment("cthread1", &chapter.id, "Keep this."),
+        )
+        .unwrap();
+    let older = svc
+        .commit_now(&store, &m.id, "Saved", "Author", "author@swarmdraft.local")
+        .unwrap()
+        .expect("comment commit");
+    store
+        .insert_comment(
+            &m.id,
+            &sample_comment("cthread2", &chapter.id, "Added later."),
+        )
+        .unwrap();
+    svc.commit_now(&store, &m.id, "Saved", "Author", "author@swarmdraft.local")
+        .unwrap()
+        .expect("later comment");
+    svc.restore(&store, &m.id, &older, "Author").unwrap();
+    let rows = store.comments_for_manuscript(&m.id).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "cthread1");
+}
+
+#[test]
+fn legacy_archive_without_comments_keeps_local_rows() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "legacy-comments.draft");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap();
+    let comments = svc.worktree_path(&m.id).join("comments");
+    fs::remove_dir_all(&comments).unwrap();
+    DraftRepo::open_working(&svc.worktree_path(&m.id))
+        .unwrap()
+        .commit_all(
+            "Older draft",
+            "Author",
+            "author@swarmdraft.local",
+            &CommitOptions::default(),
+        )
+        .unwrap()
+        .expect("strip comments");
+    svc.pack_if_linked(&store, &m.id).unwrap();
+    let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
+
+    let dir2 = tempfile::tempdir().unwrap();
+    let store2 = Store::open(dir2.path()).unwrap();
+    let svc2 = DraftService::new(store2.data_dir().to_path_buf(), "0.2.1".into());
+    let opened = svc2
+        .open_draft_path(&store2, &draft_path, true)
+        .unwrap()
+        .expect("older draft opens");
+    let section = store2
+        .list_sections(&opened.manuscript_id)
+        .unwrap()
+        .into_iter()
+        .find(|s| s.kind == "chapter")
+        .unwrap();
+    store2
+        .insert_comment(
+            &opened.manuscript_id,
+            &sample_comment("clocalextra", &section.id, "Kept locally."),
+        )
+        .unwrap();
+    svc2.open_draft_path(&store2, &draft_path, true)
+        .unwrap()
+        .unwrap();
+    let rows = store2
+        .comments_for_manuscript(&opened.manuscript_id)
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "clocalextra");
+}
+
+#[test]
+fn comment_edit_commits_inside_the_checkpoint_window() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "comment-now.draft");
+    set_chapter_plain(&store, &chapter.doc_id, "before");
+    let first = svc
+        .checkpoint_if_due(&store, &m.id, "Edited chapter", false)
+        .unwrap()
+        .expect("first checkpoint");
+    store
+        .insert_comment(
+            &m.id,
+            &sample_comment("cthread1", &chapter.id, "Please check this."),
+        )
+        .unwrap();
+    assert!(svc
+        .checkpoint_if_due(&store, &m.id, "Edited chapter", false)
+        .unwrap()
+        .is_none());
+    let second = svc
+        .checkpoint_if_due(&store, &m.id, "Edited chapter", true)
+        .unwrap()
+        .expect("comment commit does not wait");
+    assert_ne!(first, second);
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let bytes = repo
+        .file_bytes(&second, "comments/cthread1.json")
+        .unwrap()
+        .expect("thread file");
+    assert!(String::from_utf8(bytes)
+        .unwrap()
+        .contains("Please check this."));
+}
+
+#[test]
+fn bot_comment_lands_on_the_bot_branch() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "bot-comment.draft");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap();
+    store
+        .insert_comment(
+            &m.id,
+            &sample_comment("cthread1", &chapter.id, "Which lantern?"),
+        )
+        .unwrap();
+    let oid = svc
+        .commit_bot_suggestion(&store, &m.id, "agent-test-1", "Line Editor", "Bot comment")
+        .unwrap()
+        .expect("bot comment commit");
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let bytes = repo
+        .file_bytes(&oid, "comments/cthread1.json")
+        .unwrap()
+        .expect("comment on the bot commit");
+    assert!(String::from_utf8(bytes).unwrap().contains("Which lantern?"));
+    let main = repo.head_oid().unwrap().unwrap();
+    assert_ne!(main, oid);
+    assert!(repo
+        .file_bytes(&main, "comments/cthread1.json")
+        .unwrap()
+        .is_none());
+    let head = repo.head_name().unwrap().unwrap();
+    assert!(head == "main" || head == "master");
+}
+
+#[test]
+fn failed_session_end_keeps_the_session_ref_moving() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "end-fail.draft");
+    set_chapter_plain(&store, &chapter.doc_id, "base");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap();
+    let session_id = svc.begin_editing_session(&store, &m.id).unwrap();
+    let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
+    fs::remove_file(&draft_path).unwrap();
+    fs::create_dir(&draft_path).unwrap();
+    let err = svc.end_editing_session(&store, &m.id).unwrap_err();
+    assert!(!err.is_empty());
+    assert_eq!(
+        svc.begin_editing_session(&store, &m.id).unwrap(),
+        session_id
+    );
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let before = repo
+        .branch_target(&format!("session/{session_id}"))
+        .unwrap()
+        .expect("session ref");
+    set_chapter_plain(&store, &chapter.doc_id, "still in the session");
+    assert!(svc
+        .commit_now(
+            &store,
+            &m.id,
+            "Edited chapter",
+            "Author",
+            "author@swarmdraft.local",
+        )
+        .is_err());
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let after = repo
+        .branch_target(&format!("session/{session_id}"))
+        .unwrap()
+        .expect("session ref moved");
+    assert_ne!(before, after);
+    let message = repo.commit_message(&after).unwrap();
+    assert_eq!(message.lines().next(), Some("Edited chapter"));
+    assert!(message.contains(&format!("Session: {session_id}")));
 }
 
 #[test]

@@ -58,7 +58,7 @@ pub struct DraftService {
     human_sessions: Mutex<HashMap<String, SessionRecord>>,
     /// Missing entry means a human commit may start a session. `false` after the session ends.
     autostart: Mutex<HashMap<String, bool>>,
-    /// change lookups cached for one HEAD oid per manuscript.
+    /// Change lookups cached until a main, bot, or session tip moves.
     resolve_cache: Mutex<ResolveCache>,
     /// Serialize pack, commit, open, restore (git2 + SQLite hydrate).
     op: Mutex<()>,
@@ -156,13 +156,16 @@ impl DraftService {
         store: &Store,
         manuscript_id: &str,
         message: &str,
+        immediate: bool,
     ) -> Result<Option<String>, String> {
         self.with_op(|| {
             let now = now_ms();
             let mut last = self.last_checkpoint.lock().expect("draft checkpoint");
-            if let Some(prev) = last.get(manuscript_id) {
-                if now.saturating_sub(*prev) < CHECKPOINT_DEBOUNCE_MS {
-                    return Ok(None);
+            if !immediate {
+                if let Some(prev) = last.get(manuscript_id) {
+                    if now.saturating_sub(*prev) < CHECKPOINT_DEBOUNCE_MS {
+                        return Ok(None);
+                    }
                 }
             }
             let oid = self.commit_now_inner(
@@ -857,6 +860,7 @@ impl DraftService {
                 .insert(manuscript_id.to_string(), false);
             return Ok(());
         };
+        let prior_ended = record.ended_at.clone();
         record.ended_at = Some(
             store
                 .now()
@@ -866,23 +870,36 @@ impl DraftService {
             .lock()
             .expect("sessions")
             .insert(manuscript_id.to_string(), record);
-        let committed = self.commit_now_inner(
+        match self.commit_now_inner(
             store,
             manuscript_id,
             "Saved",
             &author_name(store),
             "author@swarmdraft.local",
             false,
-        );
-        self.human_sessions
-            .lock()
-            .expect("sessions")
-            .remove(manuscript_id);
-        self.autostart
-            .lock()
-            .expect("autostart")
-            .insert(manuscript_id.to_string(), false);
-        committed.map(|_| ())
+        ) {
+            Ok(_) => {
+                self.human_sessions
+                    .lock()
+                    .expect("sessions")
+                    .remove(manuscript_id);
+                self.autostart
+                    .lock()
+                    .expect("autostart")
+                    .insert(manuscript_id.to_string(), false);
+                Ok(())
+            }
+            Err(err) => {
+                if let Some(mut current) = self.active_record(manuscript_id) {
+                    current.ended_at = prior_ended;
+                    self.human_sessions
+                        .lock()
+                        .expect("sessions")
+                        .insert(manuscript_id.to_string(), current);
+                }
+                Err(err)
+            }
+        }
     }
 
     fn resolve_change_inner(
@@ -899,15 +916,16 @@ impl DraftService {
         }
         let dir = self.ensure_open_inner(store, manuscript_id)?;
         let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
-        let Some(head) = repo.head_oid().map_err(|e| e.to_string())? else {
+        let key = changes::tip_cache_key(&repo).map_err(|e| e.to_string())?;
+        if key.is_empty() {
             return Ok(DraftChangeResolve::NotFound {
                 change_id: change_id.to_string(),
             });
-        };
+        }
         {
             let cache = self.resolve_cache.lock().expect("resolve cache");
-            if let Some((cached_head, found)) = cache.get(manuscript_id) {
-                if cached_head == &head {
+            if let Some((cached_key, found)) = cache.get(manuscript_id) {
+                if cached_key == &key {
                     return Ok(found.get(change_id).cloned().unwrap_or_else(|| {
                         DraftChangeResolve::NotFound {
                             change_id: change_id.to_string(),
@@ -927,7 +945,7 @@ impl DraftService {
         self.resolve_cache
             .lock()
             .expect("resolve cache")
-            .insert(manuscript_id.to_string(), (head, found));
+            .insert(manuscript_id.to_string(), (key, found));
         Ok(result)
     }
 

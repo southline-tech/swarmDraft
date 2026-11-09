@@ -1102,11 +1102,13 @@ async fn draft_checkpoint(
     drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
     manuscript_id: String,
     message: String,
+    immediate: Option<bool>,
 ) -> Result<Option<String>, String> {
     let store = store.inner().clone();
     let drafts = std::sync::Arc::clone(drafts.inner());
+    let immediate = immediate.unwrap_or(false);
     tauri::async_runtime::spawn_blocking(move || {
-        drafts.checkpoint_if_due(&store, &manuscript_id, &message)
+        drafts.checkpoint_if_due(&store, &manuscript_id, &message, immediate)
     })
     .await
     .map_err(|e| e.to_string())?

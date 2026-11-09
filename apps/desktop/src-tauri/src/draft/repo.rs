@@ -198,6 +198,25 @@ impl DraftRepo {
         Ok(commit.message().unwrap_or("").to_string())
     }
 
+    pub fn history_commit(&self, oid: &str) -> Result<HistoryCommit, DraftRepoError> {
+        let commit = self.repo.find_commit(parse_oid(oid)?)?;
+        Ok(HistoryCommit {
+            oid: commit.id().to_string(),
+            time_unix: commit.time().seconds(),
+            message: commit.message().unwrap_or("").to_string(),
+        })
+    }
+
+    /// First parent, when this commit has one.
+    pub fn parent_oid(&self, oid: &str) -> Result<Option<String>, DraftRepoError> {
+        let commit = self.repo.find_commit(parse_oid(oid)?)?;
+        if commit.parent_count() == 0 {
+            Ok(None)
+        } else {
+            Ok(Some(commit.parent_id(0)?.to_string()))
+        }
+    }
+
     pub fn file_bytes(&self, oid: &str, path: &str) -> Result<Option<Vec<u8>>, DraftRepoError> {
         let commit = self.repo.find_commit(parse_oid(oid)?)?;
         let tree = commit.tree()?;
@@ -486,11 +505,16 @@ pub fn message_trailers(message: &str) -> Vec<(String, String)> {
 }
 
 pub fn trailer_value(trailers: &[(String, String)], key: &str) -> Option<String> {
+    trailer_values(trailers, key).into_iter().next_back()
+}
+
+/// Every value for `key`, in message order. A commit can name more than one change.
+pub fn trailer_values(trailers: &[(String, String)], key: &str) -> Vec<String> {
     trailers
         .iter()
-        .rev()
-        .find(|(k, _)| k == key)
+        .filter(|(k, _)| k == key)
         .map(|(_, v)| v.clone())
+        .collect()
 }
 
 fn split_trailer(line: &str) -> Option<(String, String)> {
@@ -504,7 +528,7 @@ fn split_trailer(line: &str) -> Option<(String, String)> {
 
 #[cfg(test)]
 mod trailer_tests {
-    use super::{append_trailers, message_trailers, trailer_value};
+    use super::{append_trailers, message_trailers, trailer_value, trailer_values};
 
     #[test]
     fn trailers_stay_off_the_first_line() {
@@ -543,5 +567,23 @@ mod trailer_tests {
         );
         assert_eq!(trailer_value(&trailers, "Session").as_deref(), Some("sess"));
         assert_eq!(twice.matches("\n\n").count(), 1);
+    }
+
+    #[test]
+    fn every_change_id_trailer_is_kept() {
+        let msg = append_trailers(
+            "Accepted Bot's change in One",
+            &[("Change-Id", "one"), ("Decision", "accepted")],
+        );
+        let msg = append_trailers(&msg, &[("Change-Id", "two"), ("Decision", "rejected")]);
+        let trailers = message_trailers(&msg);
+        assert_eq!(
+            trailer_values(&trailers, "Change-Id"),
+            vec!["one".to_string(), "two".to_string()]
+        );
+        assert_eq!(
+            trailer_value(&trailers, "Decision").as_deref(),
+            Some("rejected")
+        );
     }
 }

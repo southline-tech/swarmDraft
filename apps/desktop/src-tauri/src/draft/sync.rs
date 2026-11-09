@@ -230,6 +230,9 @@ fn sync_comments(
     }
     let dir = worktree.join("comments");
     fs::create_dir_all(&dir)?;
+    // Git does not store an empty directory. The placeholder keeps `comments/` in the
+    // tree when a book has no threads, so open and restore can clear local rows.
+    write_stable(&dir.join(".keep"), b"")?;
     let mut keep = HashSet::new();
     for (thread_id, mut rows) in groups {
         rows.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
@@ -261,9 +264,13 @@ fn import_comments_from_worktree(
     worktree: &Path,
 ) -> Result<(), DraftRepoError> {
     let dir = worktree.join("comments");
+    // A legacy archive has no comments directory. Leave the local rows alone.
     if !dir.is_dir() {
         return Ok(());
     }
+    let mut rows = Vec::new();
+    let mut seen_ids = HashSet::new();
+    let mut preserve_threads = HashSet::new();
     for entry in fs::read_dir(&dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -276,17 +283,39 @@ fn import_comments_from_worktree(
                 "draft comment file skipped (unreadable): {}",
                 path.display()
             );
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                if !stem.is_empty() {
+                    preserve_threads.insert(stem.to_string());
+                }
+            }
             continue;
         };
         for row in file.rows {
             let Some(comment) = row.into_comment(&file.thread_id) else {
                 continue;
             };
-            if let Err(e) = store.insert_comment_if_missing(manuscript_id, &comment) {
-                eprintln!("draft comment import skipped {}: {e}", comment.id);
+            if seen_ids.insert(comment.id.clone()) {
+                rows.push(comment);
             }
         }
     }
+    if !preserve_threads.is_empty() {
+        for existing in store
+            .comments_for_manuscript(manuscript_id)
+            .map_err(storage_err)?
+        {
+            let thread = existing
+                .thread_id
+                .clone()
+                .unwrap_or_else(|| existing.id.clone());
+            if preserve_threads.contains(&thread) && seen_ids.insert(existing.id.clone()) {
+                rows.push(existing);
+            }
+        }
+    }
+    store
+        .replace_comments_for_manuscript(manuscript_id, &rows)
+        .map_err(storage_err)?;
     Ok(())
 }
 

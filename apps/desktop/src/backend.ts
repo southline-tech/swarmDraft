@@ -445,9 +445,10 @@ export async function draftSave(manuscriptId: string, message?: string): Promise
 export async function draftCheckpoint(
   manuscriptId: string,
   message: string,
+  immediate = false,
 ): Promise<string | null> {
   if (!isTauri()) return null;
-  return invoke<string | null>('draft_checkpoint', { manuscriptId, message });
+  return invoke<string | null>('draft_checkpoint', { manuscriptId, message, immediate });
 }
 
 export async function draftHistory(
