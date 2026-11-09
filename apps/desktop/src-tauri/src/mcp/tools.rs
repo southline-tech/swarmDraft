@@ -293,28 +293,26 @@ fn search_char(c: char) -> char {
     folded.to_lowercase().next().unwrap_or(folded)
 }
 
-/// Git commit for a bot suggestion. Runs off the request so a held draft op lock cannot
-/// stall the HTTP response. Failures are logged; the suggestion row is already stored.
+/// Git commit for a bot suggestion or comment. Runs off the request so a held draft op lock
+/// cannot stall the HTTP response. Failures are logged; the row is already stored.
 fn queue_bot_suggestion_commit(
     drafts: &std::sync::Arc<crate::draft::DraftService>,
     store: &crate::storage::Store,
     manuscript_id: &str,
     agent_id: &str,
     bot_name: &str,
+    message: &str,
 ) {
     let drafts = std::sync::Arc::clone(drafts);
     let store = store.clone();
     let manuscript_id = manuscript_id.to_string();
     let agent_id = agent_id.to_string();
     let bot_name = bot_name.to_string();
+    let message = message.to_string();
     let work = move || {
-        if let Err(e) = drafts.commit_bot_suggestion(
-            &store,
-            &manuscript_id,
-            &agent_id,
-            &bot_name,
-            "Bot suggestions",
-        ) {
+        if let Err(e) =
+            drafts.commit_bot_suggestion(&store, &manuscript_id, &agent_id, &bot_name, &message)
+        {
             eprintln!("draft commit_bot_suggestion: {e}");
         }
     };
@@ -868,15 +866,14 @@ impl SwarmdraftMcp {
                     },
                 )?;
                 let bot = author(p);
-                if let Err(e) = self.drafts.commit_bot_suggestion(
+                queue_bot_suggestion_commit(
+                    &self.drafts,
                     &self.store,
                     &a.manuscript_id,
                     &p.agent_id,
                     &bot.name,
                     "Bot comment",
-                ) {
-                    eprintln!("draft commit_bot_suggestion: {e}");
-                }
+                );
                 Ok(Output::Json(json!({ "comment": c })))
             },
         )
@@ -977,6 +974,7 @@ overlaps another bot's pending suggestion on the same passage."
                     &a.manuscript_id,
                     &p.agent_id,
                     &bot.name,
+                    "Bot suggestions",
                 );
                 Ok(Output::Json(json!({ "suggestion": x })))
             },
@@ -1114,6 +1112,7 @@ Use this instead of cramming new scenes into suggest_edit replacements."
                     &a.manuscript_id,
                     &p.agent_id,
                     &bot.name,
+                    "Bot suggestions",
                 );
                 Ok(Output::Json(json!({ "suggestion": x, "blockIds": block_ids })))
             },
@@ -1241,6 +1240,7 @@ Use this instead of cramming new scenes into suggest_edit replacements."
                     &a.manuscript_id,
                     &p.agent_id,
                     &bot.name,
+                    "Bot suggestions",
                 );
                 Ok(Output::Json(json!({ "suggestion": x })))
             },
