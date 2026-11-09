@@ -287,6 +287,53 @@ pub const PARAGRAPH_STYLES: &[&str] = &[
     "centered",
 ];
 
+/// Case-fold plus straight/curly quote fold, one char to one char, so search and anchors agree.
+fn search_char(c: char) -> char {
+    let folded = crate::anchor::fold_quote_char(c);
+    folded.to_lowercase().next().unwrap_or(folded)
+}
+
+/// Git commit for a bot suggestion. Runs off the request so a held draft op lock cannot
+/// stall the HTTP response. Failures are logged; the suggestion row is already stored.
+fn queue_bot_suggestion_commit(
+    drafts: &std::sync::Arc<crate::draft::DraftService>,
+    store: &crate::storage::Store,
+    manuscript_id: &str,
+    agent_id: &str,
+    bot_name: &str,
+) {
+    let drafts = std::sync::Arc::clone(drafts);
+    let store = store.clone();
+    let manuscript_id = manuscript_id.to_string();
+    let agent_id = agent_id.to_string();
+    let bot_name = bot_name.to_string();
+    let work = move || {
+        if let Err(e) = drafts.commit_bot_suggestion(
+            &store,
+            &manuscript_id,
+            &agent_id,
+            &bot_name,
+            "Bot suggestions",
+        ) {
+            eprintln!("draft commit_bot_suggestion: {e}");
+        }
+    };
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => {
+            // Detached on purpose: the tool result must not wait on git. The inner await
+            // logs a panic instead of dropping it.
+            let _task = handle.spawn(async move {
+                if let Err(e) = tokio::task::spawn_blocking(work).await {
+                    eprintln!("draft commit_bot_suggestion task failed: {e}");
+                }
+            });
+        }
+        Err(_) => {
+            std::thread::spawn(work);
+        }
+    }
+}
+
 fn author(p: &AgentPrincipal) -> crate::manuscripts::Author {
     crate::manuscripts::Author {
         kind: "agent".into(),
@@ -692,7 +739,7 @@ impl SwarmdraftMcp {
             |_| {
                 check_ids(&[("manuscript_id", Some(&a.manuscript_id))])?;
                 check_len("query", &a.query, MAX_QUERY)?;
-                let q: Vec<char> = a.query.to_lowercase().chars().collect();
+                let q: Vec<char> = a.query.chars().map(search_char).collect();
                 if q.is_empty() {
                     return Err(ToolErr::invalid("query must not be empty"));
                 }
@@ -703,10 +750,7 @@ impl SwarmdraftMcp {
                         .map_err(ToolErr::invalid)?
                     {
                         let text: Vec<char> = content::block_text(&b.node).chars().collect();
-                        let lower: Vec<char> = text
-                            .iter()
-                            .map(|c| c.to_lowercase().next().unwrap_or(*c))
-                            .collect();
+                        let lower: Vec<char> = text.iter().copied().map(search_char).collect();
                         let mut i = 0;
                         while i + q.len() <= lower.len() {
                             if lower[i..i + q.len()] == q[..] {
@@ -917,15 +961,13 @@ overlaps another bot's pending suggestion on the same passage."
                     },
                 )?;
                 let bot = author(p);
-                if let Err(e) = self.drafts.commit_bot_suggestion(
+                queue_bot_suggestion_commit(
+                    &self.drafts,
                     &self.store,
                     &a.manuscript_id,
                     &p.agent_id,
                     &bot.name,
-                    "Bot suggestions",
-                ) {
-                    eprintln!("draft commit_bot_suggestion: {e}");
-                }
+                );
                 Ok(Output::Json(json!({ "suggestion": x })))
             },
         )
@@ -1056,15 +1098,13 @@ Use this instead of cramming new scenes into suggest_edit replacements."
                     },
                 )?;
                 let bot = author(p);
-                if let Err(e) = self.drafts.commit_bot_suggestion(
+                queue_bot_suggestion_commit(
+                    &self.drafts,
                     &self.store,
                     &a.manuscript_id,
                     &p.agent_id,
                     &bot.name,
-                    "Bot suggestions",
-                ) {
-                    eprintln!("draft commit_bot_suggestion: {e}");
-                }
+                );
                 Ok(Output::Json(json!({ "suggestion": x, "blockIds": block_ids })))
             },
         )
@@ -1185,15 +1225,13 @@ Use this instead of cramming new scenes into suggest_edit replacements."
                     },
                 )?;
                 let bot = author(p);
-                if let Err(e) = self.drafts.commit_bot_suggestion(
+                queue_bot_suggestion_commit(
+                    &self.drafts,
                     &self.store,
                     &a.manuscript_id,
                     &p.agent_id,
                     &bot.name,
-                    "Bot suggestions",
-                ) {
-                    eprintln!("draft commit_bot_suggestion: {e}");
-                }
+                );
                 Ok(Output::Json(json!({ "suggestion": x })))
             },
         )

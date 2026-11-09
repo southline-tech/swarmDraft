@@ -316,14 +316,61 @@ async fn body_limit(req: Request, next: Next) -> Response {
         Some(None) => return (StatusCode::BAD_REQUEST, "invalid content-length").into_response(),
         _ => {}
     }
-    let (parts, body) = req.into_parts();
+    let (mut parts, body) = req.into_parts();
     match axum::body::to_bytes(body, MAX_BODY_BYTES).await {
         Ok(bytes) => {
-            next.run(Request::from_parts(parts, axum::body::Body::from(bytes)))
-                .await
+            let stripped = strip_leading_utf8_bom(&bytes);
+            // A non-JSON body (including a BOM-only body) must not reach the MCP service,
+            // which otherwise waits forever instead of returning a parse error.
+            if !json_body_ok(&bytes, stripped) {
+                return jsonrpc_parse_error();
+            }
+            if let Ok(len) = HeaderValue::from_str(&stripped.len().to_string()) {
+                parts.headers.insert(header::CONTENT_LENGTH, len);
+            }
+            next.run(Request::from_parts(
+                parts,
+                axum::body::Body::from(stripped.to_vec()),
+            ))
+            .await
         }
         Err(_) => too_large(),
     }
+}
+
+/// One leading UTF-8 BOM (`EF BB BF`). A second BOM is left in place and fails JSON parsing.
+fn strip_leading_utf8_bom(bytes: &[u8]) -> &[u8] {
+    const BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
+    if bytes.starts_with(BOM) {
+        &bytes[BOM.len()..]
+    } else {
+        bytes
+    }
+}
+
+/// Empty bodies (GET) pass through. Anything else must be JSON after a single BOM is removed.
+fn json_body_ok(original: &[u8], stripped: &[u8]) -> bool {
+    if stripped.is_empty() {
+        return original.is_empty();
+    }
+    serde_json::from_slice::<serde_json::Value>(stripped).is_ok()
+}
+
+fn jsonrpc_parse_error() -> Response {
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": null,
+        "error": { "code": -32700, "message": "Parse error" }
+    });
+    (
+        StatusCode::BAD_REQUEST,
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json; charset=utf-8"),
+        )],
+        body.to_string(),
+    )
+        .into_response()
 }
 
 fn too_large() -> Response {

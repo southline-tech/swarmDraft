@@ -1018,11 +1018,28 @@ function openBookPicker() {
   else void getStarted();
 }
 
+/**
+ * Retry section persist, then write the draft file. A failed flush used to stop before
+ * `draftSave` / `draftSaveAs`, so Ctrl+S in the error state only refreshed the same banner.
+ * If the retry still can't persist, show the plain save warning and skip the file write.
+ */
+async function flushForDraftSave(): Promise<boolean> {
+  if (!session.value) return false;
+  try {
+    await session.value.flush();
+    return true;
+  } catch (e) {
+    console.error('Save draft failed', e);
+    saveFailure.value = saveFailed(saveFailure.value, e);
+    return false;
+  }
+}
+
 async function onMenuSave() {
   if (!session.value || !isTauri()) return;
   closeBookMenu();
+  if (!(await flushForDraftSave())) return;
   try {
-    await session.value.flush();
     const outcome = await draftSave(session.value.id);
     if (outcome.status === 'needsSaveAs') {
       await onMenuSaveAs();
@@ -1035,11 +1052,16 @@ async function onMenuSave() {
   }
 }
 
+/** Second Save As while the picker or write is in flight is ignored; always cleared in `finally`. */
+let saveAsBusy = false;
+
 async function onMenuSaveAs() {
   if (!session.value || !isTauri()) return;
+  if (saveAsBusy) return;
+  saveAsBusy = true;
   closeBookMenu();
   try {
-    await session.value.flush();
+    if (!(await flushForDraftSave())) return;
     const path = await draftSaveAs(session.value.id);
     if (path) {
       saveFailure.value = saveSucceeded();
@@ -1049,6 +1071,8 @@ async function onMenuSaveAs() {
   } catch (e) {
     console.error('Save As failed', e);
     saveFailure.value = saveFailed(saveFailure.value, e);
+  } finally {
+    saveAsBusy = false;
   }
 }
 let openingRecent = false;
@@ -1123,8 +1147,17 @@ const appMenuShortcuts = computed(() => ({
   quit: isTauri() ? 'Ctrl+Q' : undefined,
 }));
 
+const menuTextField = (t: EventTarget | null) =>
+  t instanceof HTMLElement && !!t.closest('input, textarea, select');
+
 const menuField = (t: EventTarget | null) =>
-  t instanceof HTMLElement && !!t.closest('input, textarea, select, [contenteditable=true]');
+  menuTextField(t) || (t instanceof HTMLElement && !!t.closest('[contenteditable=true]'));
+
+/** Ctrl+S / Ctrl+Shift+S save the book from the editor. They stay inert in text fields. */
+function isSaveChord(e: KeyboardEvent) {
+  const mod = e.ctrlKey || e.metaKey;
+  return mod && !e.altKey && e.key.toLowerCase() === 's' && !!session.value && isTauri();
+}
 
 function onUpdatePromptEscape(e: KeyboardEvent) {
   if (e.key !== 'Escape' || menuField(e.target)) return;
@@ -1140,7 +1173,8 @@ function onUpdatePromptEscape(e: KeyboardEvent) {
 
 function onAppMenuKey(e: KeyboardEvent) {
   if (preview.value) return;
-  if (menuField(e.target)) return;
+  // The editor is contenteditable, but Save must still run while the failure banner is up (#336).
+  if (menuField(e.target) && !(isSaveChord(e) && !menuTextField(e.target))) return;
   const mod = e.ctrlKey || e.metaKey;
   const k = e.key.toLowerCase();
   if (mod && e.shiftKey && k === 'o' && !e.altKey) {

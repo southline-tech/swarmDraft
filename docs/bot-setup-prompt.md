@@ -143,6 +143,20 @@ if ($Mode -eq "request") {
 }
 ```
 
+## Request bodies
+
+Write every request body as UTF-8 **without** a byte-order mark. PowerShell 5
+`Set-Content -Encoding utf8` writes a BOM, and a body that starts with one used to hang with no
+error. The server now strips a single leading BOM, but write the file without one:
+
+```powershell
+$enc = [System.Text.UTF8Encoding]::new($false)
+[IO.File]::WriteAllText($path, $json, $enc)
+```
+
+`Invoke-WebRequest -Body` with a .NET string does not add a BOM. The helper below reads a file with
+`Get-Content -Raw` when you pass `-Body`, so that file must be UTF-8 without a BOM.
+
 ## Helper script: mcp.ps1
 
 ```powershell
