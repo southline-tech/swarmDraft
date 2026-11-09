@@ -547,7 +547,8 @@ a:hover {
   gap: var(--ct-space-3);
   justify-content: flex-end;
   position: sticky;
-  bottom: 0;
+  /* Sticky bottom tracks the scrollport. Padding the card left this row under the keyboard. */
+  bottom: var(--feedback-keyboard-inset, 0px);
   margin-top: var(--ct-space-2);
   padding-top: var(--ct-space-3);
   background: var(--ct-surface);
@@ -618,9 +619,7 @@ a:hover {
   width: 100%;
   min-width: 0;
   padding: var(--ct-space-6);
-  padding-bottom: calc(
-    var(--ct-space-6) + env(safe-area-inset-bottom, 0px) + var(--feedback-keyboard-inset, 0px)
-  );
+  padding-bottom: calc(var(--ct-space-6) + env(safe-area-inset-bottom, 0px));
   background: var(--ct-surface);
   border: 1px solid var(--ct-border);
   border-radius: var(--ct-radius-lg);

@@ -355,11 +355,14 @@ describe('landing feedback modal', () => {
       /\.feedback-dialog__card\s*\{[\s\S]*?border-radius:\s*var\(--ct-radius-lg\)/,
     );
     expect(css).toMatch(/\.feedback-dialog::backdrop\s*\{[\s\S]*?--ct-scrim/);
-    expect(css).toMatch(/--feedback-keyboard-inset/);
+    expect(css).toMatch(
+      /\.feedback-actions\s*\{[^}]*bottom:\s*var\(--feedback-keyboard-inset,\s*0px\)/,
+    );
+    expect(css).not.toMatch(/padding-bottom:[\s\S]{0,240}--feedback-keyboard-inset/);
     expect(css).not.toMatch(/\.footer-link-btn/);
   });
 
-  it('pads the dialog card when the visual viewport shrinks', () => {
+  it('lifts the send row by the keyboard inset when the visual viewport shrinks', () => {
     const listeners = {};
     const viewport = {
       height: 320,
@@ -373,14 +376,18 @@ describe('landing feedback modal', () => {
     };
     vi.stubGlobal('visualViewport', viewport);
     window.innerHeight = 800;
-    const root = buildFeedbackDom();
+    const root = buildFeedbackDom({ withCss: true });
     initFeedback(root);
     root.querySelector('#feedback').click();
     const card = root.querySelector('.feedback-dialog__card');
+    const actions = card.querySelector('.feedback-actions');
     expect(card.style.getPropertyValue('--feedback-keyboard-inset')).toBe('480px');
+    expect(getComputedStyle(actions).bottom).toBe('480px');
+    expect(getComputedStyle(card).paddingBottom.includes('480')).toBe(false);
     viewport.height = 800;
     listeners.resize();
     expect(card.style.getPropertyValue('--feedback-keyboard-inset')).toBe('0px');
+    expect(getComputedStyle(actions).bottom).toBe('0px');
     root.querySelector('[data-feedback-close]').click();
     expect(card.style.getPropertyValue('--feedback-keyboard-inset')).toBe('');
     expect(listeners.resize).toBeUndefined();

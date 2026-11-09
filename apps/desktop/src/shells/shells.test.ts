@@ -370,6 +370,73 @@ describe('UI shells (Part of #36)', () => {
     localStorage.removeItem(PROFILE_KEY);
   });
 
+  it('toggles track changes once from the lead when another section is mounted', async () => {
+    localStorage.removeItem(TRACKING_KEY);
+    localStorage.removeItem(TRACK_PROMPT_SEEN_KEY);
+    localStorage.removeItem(PROFILE_KEY);
+    const lead = mount(ManuscriptEditor, {
+      props: { doc: docToYDoc(SAMPLE_DOC as never) },
+      attachTo: document.body,
+    });
+    const slice = mount(ManuscriptEditor, {
+      props: { doc: docToYDoc(SAMPLE_DOC as never), sliceMode: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    const toggle = lead.get('[data-test="track-changes-toggle"]');
+    expect(toggle.attributes('aria-pressed')).toBe('false');
+    expect(slice.find('[data-test="track-changes-toggle"]').exists()).toBe(false);
+
+    const chord = (target: EventTarget, repeat = false) => {
+      target.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'e',
+          ctrlKey: true,
+          shiftKey: true,
+          bubbles: true,
+          repeat,
+        }),
+      );
+    };
+
+    chord(slice.get('.tiptap').element);
+    await flushPromises();
+    // Caret in the other section still toggles the lead, once, so the toolbar and the
+    // saved preference stay together. A second editor must not flip them back.
+    expect(toggle.attributes('aria-pressed')).toBe('true');
+    expect(loadTracking()).toBe(true);
+    expect(lead.find('[data-test="name-prompt"]').exists()).toBe(true);
+    expect(slice.find('[data-test="name-prompt"]').exists()).toBe(false);
+
+    chord(slice.get('.tiptap').element, true);
+    await flushPromises();
+    expect(toggle.attributes('aria-pressed')).toBe('true');
+    expect(loadTracking()).toBe(true);
+
+    chord(toggle.element);
+    await flushPromises();
+    expect(toggle.attributes('aria-pressed')).toBe('false');
+    expect(loadTracking()).toBe(false);
+
+    chord(toggle.element);
+    await flushPromises();
+    expect(toggle.attributes('aria-pressed')).toBe('true');
+    expect(loadTracking()).toBe(true);
+    await lead.get('[data-test="name-prompt-ok"]').trigger('click');
+
+    await slice.setProps({ sliceMode: false });
+    await lead.setProps({ sliceMode: true });
+    await flushPromises();
+    expect(slice.find('[data-test="name-prompt"]').exists()).toBe(false);
+    expect(document.querySelectorAll('[data-test="name-prompt"]').length).toBe(0);
+
+    lead.unmount();
+    slice.unmount();
+    localStorage.removeItem(TRACKING_KEY);
+    localStorage.removeItem(TRACK_PROMPT_SEEN_KEY);
+    localStorage.removeItem(PROFILE_KEY);
+  });
+
   it('keeps merge with previous visible when it cannot run', async () => {
     const ydoc = docToYDoc(SAMPLE_DOC as never);
     const w = mount(ManuscriptEditor, {

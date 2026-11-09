@@ -334,3 +334,5 @@ Implementor: add one line here for every review, design or QA finding, in the sa
 - 2026-11-05 · #34/#41 · PR #327 Designer review @ bbba72d · MCP/Pandoc/DOCX on screen · `Connected`, Word export copy in `copy-deck.ts`; map export errors; allow `.docx` in banned list; `copy:check` MCP test
 - 2026-11-05 · #34/#41 · PR #327 Designer review @ bbba72d · error-card bare line · ob9 card in opening-shell scrim; empty-states shows review + comments
 - 2026-11-05 · #34/#41 · PR #327 Designer review @ bbba72d · toast space after “Your book is open.” · trailing space inside `AppToast` bold lead
+- 2026-11-09 · #324 · PR #342 · Ctrl+Shift+E ran on every section editor, so a caret in a slice saved tracking while the lead toolbar stayed put and a held key flipped it · handle the chord only on the non-slice editor, treat another section's page as the manuscript, ignore `event.repeat`; two-editor test
+- 2026-11-09 · #321 · PR #342 · keyboard inset padded the dialog card, so the sticky send row stayed on the edge the keyboard covers · `.feedback-actions` `bottom` uses `--feedback-keyboard-inset`; test reads computed `bottom`

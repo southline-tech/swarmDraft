@@ -1177,10 +1177,23 @@ function onSelectView(author: string | null) {
   if (editor.value) refreshReview(editor.value);
 }
 
+/**
+ * Track changes is book-wide and owned by the lead editor. Another section's page is still the
+ * manuscript; find fields and other inputs are not.
+ */
+function trackChangesFieldBlocks(target: EventTarget | null, editorRoot: Element | null): boolean {
+  if (!inForeignInput(target, editorRoot)) return false;
+  return !(target instanceof Element && target.closest('.tiptap'));
+}
+
 function onKeydown(ev: KeyboardEvent) {
   if (shortcutsOpen.value) return;
-  if (isTrackChangesChord(ev) && !inForeignInput(ev.target, editor.value?.view.dom ?? null)) {
+  if (isTrackChangesChord(ev)) {
+    // Every section mounts a listener. Only the lead (the toolbar owner) may toggle.
+    if (props.sliceMode) return;
+    if (trackChangesFieldBlocks(ev.target, editor.value?.view.dom ?? null)) return;
     ev.preventDefault();
+    if (ev.repeat) return;
     toggleTrackChanges();
     return;
   }
