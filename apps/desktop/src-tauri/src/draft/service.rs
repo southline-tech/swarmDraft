@@ -71,6 +71,13 @@ impl DraftService {
         f()
     }
 
+    /// Hold the draft op lock for the duration of `f`.
+    /// Path pickers and bot HTTP handlers must not wait on this across UI or the request.
+    pub fn with_op_guard<T>(&self, f: impl FnOnce() -> T) -> T {
+        let _guard = self.op.lock().expect("draft op");
+        f()
+    }
+
     fn work_dir(&self, manuscript_id: &str) -> PathBuf {
         self.store_data_dir.join("draft-repos").join(manuscript_id)
     }
@@ -370,6 +377,8 @@ impl DraftService {
         Ok(())
     }
 
+    /// Native Save As. The file picker runs **outside** the draft op lock so checkpoint
+    /// and bot commits are not stuck behind the dialog. Cancel returns `Ok(None)`.
     pub fn save_as_dialog(
         &self,
         app: &tauri::AppHandle,
@@ -377,11 +386,11 @@ impl DraftService {
         store: &Store,
         manuscript_id: &str,
     ) -> Result<Option<String>, String> {
-        self.with_op(|| {
-            let manuscript = store
-                .get_manuscript(manuscript_id)
-                .map_err(|e| e.to_string())?;
-            let default_name = sanitize_filename(&manuscript.title);
+        let manuscript = store
+            .get_manuscript(manuscript_id)
+            .map_err(|e| e.to_string())?;
+        let default_name = sanitize_filename(&manuscript.title);
+        self.save_as_with_picker(store, manuscript_id, || {
             let mut dialog = app
                 .dialog()
                 .file()
@@ -392,24 +401,56 @@ impl DraftService {
             if let Some(dir) = crate::save_copy::documents_dir(app) {
                 dialog = dialog.set_directory(dir);
             }
-            let picked = dialog.blocking_save_file();
-            let Some(file) = picked else {
-                return Ok(None);
-            };
-            let path = path_with_draft_extension(&file.to_string());
-            store
-                .set_draft_file_path(manuscript_id, &path)
-                .map_err(|e| e.to_string())?;
-            self.commit_now_inner(
-                store,
-                manuscript_id,
-                "Saved",
-                &author_name(store),
-                "author@swarmdraft.local",
-            )?;
-            self.pack_if_linked_inner(store, manuscript_id)?;
-            Ok(Some(path))
+            dialog.blocking_save_file().map(|file| file.to_string())
         })
+    }
+
+    /// Run `pick` with the op lock free, then link + commit + pack only if a path was chosen.
+    /// `pick` returning `None` is cancel and does not take the lock.
+    pub fn save_as_with_picker<F>(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        pick: F,
+    ) -> Result<Option<String>, String>
+    where
+        F: FnOnce() -> Option<String>,
+    {
+        let Some(raw) = pick() else {
+            return Ok(None);
+        };
+        let path = path_with_draft_extension(&raw);
+        self.finish_save_as(store, manuscript_id, &path).map(Some)
+    }
+
+    /// Link `path` as the draft file, commit, and pack. Holds the op lock only for that work.
+    pub fn finish_save_as(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        path: &str,
+    ) -> Result<String, String> {
+        self.with_op(|| self.finish_save_as_inner(store, manuscript_id, path))
+    }
+
+    fn finish_save_as_inner(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        path: &str,
+    ) -> Result<String, String> {
+        store
+            .set_draft_file_path(manuscript_id, path)
+            .map_err(|e| e.to_string())?;
+        self.commit_now_inner(
+            store,
+            manuscript_id,
+            "Saved",
+            &author_name(store),
+            "author@swarmdraft.local",
+        )?;
+        self.pack_if_linked_inner(store, manuscript_id)?;
+        Ok(path.to_string())
     }
 
     pub fn open_dialog(
@@ -811,6 +852,69 @@ mod path_tests {
         assert_eq!(
             path_with_draft_extension("/tmp/book.DRAFT"),
             "/tmp/book.DRAFT"
+        );
+    }
+}
+
+#[cfg(test)]
+mod save_as_lock_tests {
+    use super::*;
+    use std::sync::{mpsc, Arc};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    /// The native picker is the `pick` closure. While it runs, the op lock must be free so a
+    /// checkpoint or bot commit (both `with_op`) does not wait for the dialog.
+    #[test]
+    fn save_as_picker_does_not_hold_op_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+        let id = stored.manuscript.id.clone();
+        let svc = Arc::new(DraftService::new(
+            store.data_dir().to_path_buf(),
+            "0.2.2".into(),
+        ));
+        let (entered_tx, entered_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let svc_pick = Arc::clone(&svc);
+        let store_pick = store.clone();
+        let id_pick = id.clone();
+        let path = dir.path().join("picked.draft");
+        let path_pick = path.clone();
+        let worker = thread::spawn(move || {
+            svc_pick.save_as_with_picker(&store_pick, &id_pick, || {
+                let free = svc_pick.op.try_lock();
+                assert!(
+                    free.is_ok(),
+                    "draft op lock held while the Save As path is being chosen"
+                );
+                drop(free);
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                Some(path_pick.to_string_lossy().into_owned())
+            })
+        });
+        entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("picker did not start");
+        let started = Instant::now();
+        svc.with_op(|| Ok(()))
+            .expect("draft op while picker is open");
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "a draft op waited for Save As path selection"
+        );
+        release_tx.send(()).unwrap();
+        let saved = worker.join().unwrap().expect("save as");
+        assert_eq!(saved.as_deref(), Some(path.to_str().unwrap()));
+        assert!(
+            path.is_file(),
+            "draft file was not written after the picker"
+        );
+        assert_eq!(
+            store.draft_file_path(&id).unwrap().as_deref(),
+            Some(path.to_str().unwrap())
         );
     }
 }

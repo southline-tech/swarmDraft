@@ -12,6 +12,7 @@ const SECTION_FIXTURE: &str = concat!(
 pub struct Server {
     pub url: String,
     pub store: Store,
+    pub drafts: std::sync::Arc<swarmdraft_lib::draft::DraftService>,
     pub token: String,
     pub manuscript_id: String,
     pub section_id: String,
@@ -44,9 +45,10 @@ pub async fn start_with(scopes: &[&str], tune: impl FnOnce(&mut mcp::McpConfig))
     let mut cfg = mcp::McpConfig::new(addr.port());
     cfg.auth_failure_floor = std::time::Duration::from_millis(20);
     tune(&mut cfg);
+    let drafts = mcp::drafts_for_store(&store);
     let (app, stats) = mcp::router_with_stats(
         store.clone(),
-        mcp::drafts_for_store(&store),
+        std::sync::Arc::clone(&drafts),
         cfg,
         None,
         None,
@@ -56,6 +58,7 @@ pub async fn start_with(scopes: &[&str], tune: impl FnOnce(&mut mcp::McpConfig))
     Server {
         url: format!("http://{addr}/mcp"),
         store,
+        drafts,
         token,
         manuscript_id: m.id,
         section_id: s.id,
@@ -1909,4 +1912,271 @@ async fn agent_without_draft_access_cannot_read_or_list_other_manuscripts() {
     .await;
     assert_eq!(denied["isError"], true);
     assert!(text(&denied).contains("does not have access"));
+}
+
+async fn post_bytes(url: &str, token: Option<&str>, body: Vec<u8>) -> reqwest::Response {
+    let mut req = reqwest::Client::new()
+        .post(url)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .header("MCP-Protocol-Version", "2025-06-18")
+        .body(body);
+    if let Some(t) = token {
+        req = req.bearer_auth(t);
+    }
+    req.send().await.unwrap()
+}
+
+fn tools_call_bytes(name: &str, arguments: Value) -> Vec<u8> {
+    serde_json::to_vec(&json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": { "name": name, "arguments": arguments }
+    }))
+    .unwrap()
+}
+
+#[tokio::test]
+async fn suggest_edit_returns_while_a_draft_op_holds_the_lock() {
+    let s = start(&["read", "suggest"], 1000).await;
+    let (sid, bid) = chapter_two(&s).await;
+    // A bot branch is cut from main, so the book needs one commit first.
+    let draft_path = s
+        .store
+        .data_dir()
+        .join("drafts/held-lock.draft")
+        .to_string_lossy()
+        .into_owned();
+    s.store
+        .set_draft_file_path(&s.manuscript_id, &draft_path)
+        .unwrap();
+    s.drafts
+        .commit_now(
+            &s.store,
+            &s.manuscript_id,
+            "Baseline",
+            "Author",
+            "author@swarmdraft.local",
+        )
+        .unwrap();
+    let drafts = std::sync::Arc::clone(&s.drafts);
+    let (held_tx, held_rx) = std::sync::mpsc::channel::<()>();
+    let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        drafts.with_op_guard(|| {
+            held_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+    });
+    held_rx
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .expect("could not take the draft op lock");
+
+    let started = std::time::Instant::now();
+    let pending = call(
+        &s,
+        "suggest_edit",
+        json!({
+            "manuscript_id": s.manuscript_id,
+            "section_id": sid,
+            "block_id": bid,
+            "quote": "flickered",
+            "replacement": "guttered",
+        }),
+    );
+    let timed = tokio::time::timeout(std::time::Duration::from_secs(2), pending).await;
+    let elapsed = started.elapsed();
+    if timed.is_err() {
+        let _ = release_tx.send(());
+        panic!("suggest_edit hung while a draft op held the lock ({elapsed:?})");
+    }
+    let r = timed.unwrap();
+    assert!(
+        elapsed < std::time::Duration::from_secs(2),
+        "suggest_edit took {elapsed:?}"
+    );
+    assert_ne!(r["isError"], true, "{r}");
+    let id = r["structuredContent"]["suggestion"]["id"]
+        .as_str()
+        .expect("suggestion.id")
+        .to_string();
+    assert!(!id.is_empty());
+    let agent_id = r["structuredContent"]["suggestion"]["author"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let bot_name = r["structuredContent"]["suggestion"]["author"]["name"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // The suggestion is in the doc before the git commit, which is still waiting on the lock.
+    let open = s.store.open_suggestions(&sid).unwrap();
+    assert!(open.iter().any(|x| x.id == id), "{open:?}");
+    let md = read_md(&s, &sid).await;
+    assert!(md.contains("guttered"), "{md}");
+
+    let _ = release_tx.send(());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match s
+            .drafts
+            .bot_branch_exists(&s.store, &s.manuscript_id, &agent_id, &bot_name)
+        {
+            Ok(true) => break,
+            _ if std::time::Instant::now() < deadline => {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            other => panic!("bot branch commit did not land: {other:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn tools_call_with_utf8_bom_matches_the_same_body_without_bom() {
+    let s = start(&["read"], 1000).await;
+    let plain = tools_call_bytes("list_documents", json!({}));
+    let mut bom = vec![0xEF, 0xBB, 0xBF];
+    bom.extend_from_slice(&plain);
+    let started = std::time::Instant::now();
+    let without = post_bytes(&s.url, Some(&s.token), plain).await;
+    let with = post_bytes(&s.url, Some(&s.token), bom).await;
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(2),
+        "BOM request hung"
+    );
+    assert_eq!(without.status(), 200);
+    assert_eq!(with.status(), 200);
+    let a: Value = without.json().await.unwrap();
+    let b: Value = with.json().await.unwrap();
+    assert_eq!(a["result"], b["result"]);
+    assert!(a["result"]["structuredContent"]["documents"].is_array());
+}
+
+#[tokio::test]
+async fn malformed_json_body_returns_parse_error_promptly() {
+    let s = start(&["read"], 1000).await;
+    let started = std::time::Instant::now();
+    let res = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        post_bytes(&s.url, Some(&s.token), b"{not json".to_vec()),
+    )
+    .await
+    .expect("malformed body hung");
+    assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    assert_eq!(res.status(), 400);
+    let v: Value = res.json().await.unwrap();
+    assert_eq!(v["error"]["code"], -32700);
+    assert_eq!(v["error"]["message"], "Parse error");
+
+    let mut bom_bad = vec![0xEF, 0xBB, 0xBF];
+    bom_bad.extend_from_slice(b"<<<");
+    let res = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        post_bytes(&s.url, None, bom_bad),
+    )
+    .await
+    .expect("BOM malformed body hung");
+    assert_eq!(res.status(), 400);
+    let v: Value = res.json().await.unwrap();
+    assert_eq!(v["error"]["code"], -32700);
+}
+
+#[tokio::test]
+async fn apostrophe_quotes_match_straight_and_curly_both_ways() {
+    let s = start(&["read", "comment", "suggest"], 1000).await;
+    let cases = [
+        ("Meet X\u{2019}s friend.", "X's", "X\u{2019}s"),
+        ("Meet X's friend.", "X\u{2019}s", "X's"),
+    ];
+    for (body, quote, marked) in cases {
+        let sec = s
+            .store
+            .import_section_json(
+                &s.manuscript_id,
+                "chapter",
+                "Apostrophe",
+                &json!({"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text": body}]}]}),
+            )
+            .unwrap();
+        let js = read_json(&s, &sec.id).await;
+        let bid = js["blocks"][0]["id"].as_str().unwrap().to_string();
+        let comment = call(
+            &s,
+            "add_comment",
+            json!({
+                "manuscript_id": s.manuscript_id,
+                "section_id": sec.id,
+                "block_id": bid,
+                "quote": quote,
+                "body": "Whose?",
+            }),
+        )
+        .await;
+        assert_ne!(comment["isError"], true, "{quote} comment: {comment}");
+        let edit = call(
+            &s,
+            "suggest_edit",
+            json!({
+                "manuscript_id": s.manuscript_id,
+                "section_id": sec.id,
+                "block_id": bid,
+                "quote": quote,
+                "replacement": "their",
+            }),
+        )
+        .await;
+        assert_ne!(edit["isError"], true, "{quote} edit: {edit}");
+        assert!(edit["structuredContent"]["suggestion"]["id"].is_string());
+        let after = read_json(&s, &sec.id).await;
+        let nodes = after["blocks"][0]["node"]["content"].as_array().unwrap();
+        let hit = nodes
+            .iter()
+            .find(|n| n["text"] == marked)
+            .unwrap_or_else(|| {
+                panic!("marked text {marked:?} missing in {nodes:?}");
+            });
+        assert_eq!(
+            hit["text"].as_str().unwrap().chars().count(),
+            quote.chars().count()
+        );
+        let marks = hit["marks"].as_array().unwrap();
+        assert!(
+            marks.iter().any(|m| m["type"] == "comment_anchor"),
+            "{marks:?}"
+        );
+        assert!(
+            marks.iter().any(|m| m["type"] == "suggestion_delete"),
+            "{marks:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn search_text_folds_apostrophes_and_returns_the_document_quote() {
+    let s = start(&["read"], 1000).await;
+    let sec = s
+        .store
+        .import_section_json(
+            &s.manuscript_id,
+            "chapter",
+            "Search quotes",
+            &json!({"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text": "See X\u{2019}s hat."}]}]}),
+        )
+        .unwrap();
+    let hits = call(
+        &s,
+        "search_text",
+        json!({"manuscript_id": s.manuscript_id, "query": "X's"}),
+    )
+    .await;
+    assert_ne!(hits["isError"], true, "{hits}");
+    let matches = hits["structuredContent"]["matches"].as_array().unwrap();
+    let hit = matches
+        .iter()
+        .find(|m| m["sectionId"] == sec.id)
+        .expect("search hit");
+    assert_eq!(hit["quote"], "X\u{2019}s");
+    assert_eq!(hit["length"], 3);
 }

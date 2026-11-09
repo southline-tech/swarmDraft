@@ -91,6 +91,33 @@ fn collect_texts(txn: &TransactionMut, parent: &impl XmlFragment, out: &mut Vec<
 
 /// Visible text of the block's runs, joined across footnote markers (and only those). True when
 /// the quote matches there but in no single run, i.e. it straddles a footnote.
+/// Straight and curly quotes compare equal. One character stays one character, so match
+/// offsets are the document's own offsets. The stored text is not rewritten.
+pub(crate) fn fold_quote_char(c: char) -> char {
+    match c {
+        '\u{2018}' | '\u{2019}' | '\u{02BC}' => '\'',
+        '\u{201C}' | '\u{201D}' => '"',
+        other => other,
+    }
+}
+
+pub(crate) fn quotes_match(hay: &[char], needle: &[char]) -> bool {
+    hay.len() == needle.len()
+        && hay
+            .iter()
+            .zip(needle)
+            .all(|(a, b)| fold_quote_char(*a) == fold_quote_char(*b))
+}
+
+fn contains_folded(haystack: &str, needle: &str) -> bool {
+    let hay: Vec<char> = haystack.chars().collect();
+    let needle: Vec<char> = needle.chars().collect();
+    if needle.is_empty() || needle.len() > hay.len() {
+        return false;
+    }
+    hay.windows(needle.len()).any(|w| quotes_match(w, &needle))
+}
+
 fn spans_footnote(txn: &TransactionMut, el: &impl XmlFragment, quote: &str) -> bool {
     let mut runs = vec![String::new()];
     let mut crossed = vec![false];
@@ -108,7 +135,7 @@ fn spans_footnote(txn: &TransactionMut, el: &impl XmlFragment, quote: &str) -> b
     }
     runs.iter()
         .zip(crossed)
-        .any(|(r, x)| x && r.contains(quote))
+        .any(|(r, x)| x && contains_folded(r, quote))
 }
 
 fn visible_text(txn: &TransactionMut, t: &XmlTextRef) -> String {
@@ -201,7 +228,7 @@ pub fn resolve(
         let q: Vec<char> = quote.chars().collect();
         let mut i = 0;
         while i + q.len() <= chars.len() {
-            if chars[i..i + q.len()] == q[..] {
+            if quotes_match(&chars[i..i + q.len()], &q[..]) {
                 let first = &map[i];
                 let last = &map[i + q.len() - 1];
                 let start = first.0;
@@ -510,4 +537,118 @@ pub fn add_paragraph_format_change(
         return Err(AnchorError::NoMarkableText);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::content::{self, new_doc};
+    use serde_json::json;
+    use yrs::{GetString, Transact};
+
+    fn doc_with(text: &str) -> (Doc, String) {
+        let doc = new_doc();
+        content::encode(
+            &doc,
+            &json!({"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text": text}]}]}),
+        )
+        .unwrap();
+        let id = content::decode(&doc)[0].id.clone();
+        (doc, id)
+    }
+
+    fn covered(text: &str, quote: &str) -> (u32, u32, String) {
+        let (doc, id) = doc_with(text);
+        let txn = doc.transact_mut();
+        let r = resolve(&doc, &txn, &id, quote).unwrap_or_else(|e| panic!("{e}"));
+        let full = r.text.get_string(&txn);
+        let units: Vec<u16> = full.encode_utf16().collect();
+        let start = r.start as usize;
+        let end = (r.start + r.len) as usize;
+        let slice = String::from_utf16(&units[start..end]).unwrap();
+        (r.start, r.len, slice)
+    }
+
+    #[test]
+    fn straight_apostrophe_quote_matches_curly_text_at_the_same_offsets() {
+        // 😀 is two UTF-16 units; the match must stay on the document's own units.
+        let (start, len, slice) = covered("😀 X’s book", "X's");
+        assert_eq!(slice, "X’s");
+        assert_eq!(start, 3);
+        assert_eq!(len, 3);
+    }
+
+    #[test]
+    fn curly_apostrophe_quote_matches_straight_text_at_the_same_offsets() {
+        let (start, len, slice) = covered("😀 X's book", "X’s");
+        assert_eq!(slice, "X's");
+        assert_eq!(start, 3);
+        assert_eq!(len, 3);
+    }
+
+    #[test]
+    fn modifier_letter_apostrophe_matches_straight() {
+        let (start, len, slice) = covered("Xʼs", "X's");
+        assert_eq!(slice, "Xʼs");
+        assert_eq!((start, len), (0, 3));
+        let (start, len, slice) = covered("X's", "Xʼs");
+        assert_eq!(slice, "X's");
+        assert_eq!((start, len), (0, 3));
+    }
+
+    #[test]
+    fn straight_and_curly_double_quotes_match_both_ways() {
+        let (start, len, slice) = covered("She said “hi” today", "\"hi\"");
+        assert_eq!(slice, "“hi”");
+        assert_eq!(start, 9);
+        assert_eq!(len, 4);
+        let (start, len, slice) = covered("She said \"hi\" today", "“hi”");
+        assert_eq!(slice, "\"hi\"");
+        assert_eq!((start, len), (9, 4));
+    }
+
+    #[test]
+    fn two_matches_after_folding_are_still_ambiguous() {
+        let (doc, id) = doc_with("X's and X’s");
+        let txn = doc.transact_mut();
+        match resolve(&doc, &txn, &id, "X's") {
+            Err(AnchorError::Ambiguous(_, 2)) => {}
+            Err(e) => panic!("expected ambiguous, got {e}"),
+            Ok(_) => panic!("expected ambiguous, got a match"),
+        }
+    }
+
+    #[test]
+    fn an_unrelated_quote_stays_stale() {
+        let (doc, id) = doc_with("X’s book");
+        let txn = doc.transact_mut();
+        match resolve(&doc, &txn, &id, "cat") {
+            Err(AnchorError::Stale(_)) => {}
+            Err(e) => panic!("expected stale, got {e}"),
+            Ok(_) => panic!("expected stale, got a match"),
+        }
+    }
+
+    #[test]
+    fn a_folded_quote_that_straddles_a_footnote_is_not_stale() {
+        let doc = new_doc();
+        content::encode(
+            &doc,
+            &json!({"type":"doc","content":[{"type":"paragraph","content":[
+                {"type":"text","text":"X's"},
+                {"type":"footnote","attrs":{"id":"1"},"content":[
+                    {"type":"paragraph","content":[{"type":"text","text":"note"}]}
+                ]},
+                {"type":"text","text":" book"}
+            ]}]}),
+        )
+        .unwrap();
+        let id = content::decode(&doc)[0].id.clone();
+        let txn = doc.transact_mut();
+        match resolve(&doc, &txn, &id, "X’s book") {
+            Err(AnchorError::SpansFootnote(_)) => {}
+            Err(e) => panic!("expected footnote span, got {e}"),
+            Ok(_) => panic!("expected footnote span, got a match"),
+        }
+    }
 }
