@@ -1,20 +1,22 @@
 //! Bidirectional sync between SQLite / Yjs and the on-disk git working tree.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use yrs::{Array, Doc, Map, MapPrelim, ReadTxn, StateVector, Transact};
 
 use crate::agent_access::{ACCESS_MODE_ALL, ACCESS_MODE_SELECTED};
 use crate::content::{self, decode};
-use crate::manuscripts::{OutlineEntry, DEFAULT_NUMBERING_STYLE, SECTION_KINDS};
+use crate::manuscripts::{Comment, OutlineEntry, DEFAULT_NUMBERING_STYLE, SECTION_KINDS};
 use crate::notes;
 use crate::storage::{StorageError, Store};
 
+use super::changes;
 use super::repo::DraftRepoError;
+use super::sessions::safe_file_id;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -99,6 +101,7 @@ pub fn sync_worktree_to_store(
             .map_err(storage_err)?;
     }
     import_notes_from_worktree(store, manuscript_id, worktree)?;
+    import_comments_from_worktree(store, manuscript_id, worktree)?;
     Ok(())
 }
 
@@ -156,7 +159,186 @@ pub fn sync_store_to_worktree(
     }
 
     sync_notes(store, manuscript_id, worktree)?;
+    sync_comments(store, manuscript_id, worktree)?;
+    changes::write_change_index(store, manuscript_id, worktree)?;
     Ok(())
+}
+
+pub(super) fn to_pretty(value: &impl Serialize) -> Result<Vec<u8>, DraftRepoError> {
+    let mut bytes =
+        serde_json::to_vec_pretty(value).map_err(|e| DraftRepoError::Invalid(e.to_string()))?;
+    if !bytes.ends_with(b"\n") {
+        bytes.push(b'\n');
+    }
+    Ok(bytes)
+}
+
+/// Write `bytes` only when the file contents differ, so an unchanged index does not look dirty.
+pub(super) fn write_stable(path: &Path, bytes: &[u8]) -> Result<(), DraftRepoError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if path.is_file() && fs::read(path).ok().as_deref() == Some(bytes) {
+        return Ok(());
+    }
+    fs::write(path, bytes)?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CommentThreadFile {
+    thread_id: String,
+    rows: Vec<CommentRowFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CommentRowFile {
+    id: String,
+    section_id: String,
+    block_id: Option<String>,
+    quote: Option<String>,
+    body: String,
+    thread_id: Option<String>,
+    author_kind: String,
+    author_id: String,
+    author_name: String,
+    created_at: String,
+    resolved_at: Option<String>,
+}
+
+fn sync_comments(
+    store: &Store,
+    manuscript_id: &str,
+    worktree: &Path,
+) -> Result<(), DraftRepoError> {
+    let comments = store
+        .comments_for_manuscript(manuscript_id)
+        .map_err(storage_err)?;
+    let mut groups: BTreeMap<String, Vec<Comment>> = BTreeMap::new();
+    for comment in comments {
+        let key = comment
+            .thread_id
+            .clone()
+            .filter(|id| safe_file_id(id))
+            .unwrap_or_else(|| comment.id.clone());
+        if !safe_file_id(&key) {
+            continue;
+        }
+        groups.entry(key).or_default().push(comment);
+    }
+    let dir = worktree.join("comments");
+    fs::create_dir_all(&dir)?;
+    let mut keep = HashSet::new();
+    for (thread_id, mut rows) in groups {
+        rows.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
+        let file_name = format!("{thread_id}.json");
+        keep.insert(file_name.clone());
+        let payload = CommentThreadFile {
+            thread_id: thread_id.clone(),
+            rows: rows.into_iter().map(CommentRowFile::from).collect(),
+        };
+        write_stable(&dir.join(&file_name), &to_pretty(&payload)?)?;
+    }
+    for entry in fs::read_dir(&dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.ends_with(".json") && !keep.contains(name.as_ref()) {
+            fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+fn import_comments_from_worktree(
+    store: &Store,
+    manuscript_id: &str,
+    worktree: &Path,
+) -> Result<(), DraftRepoError> {
+    let dir = worktree.join("comments");
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(&dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let bytes = fs::read(&path)?;
+        let Ok(file) = serde_json::from_slice::<CommentThreadFile>(&bytes) else {
+            eprintln!(
+                "draft comment file skipped (unreadable): {}",
+                path.display()
+            );
+            continue;
+        };
+        for row in file.rows {
+            let Some(comment) = row.into_comment(&file.thread_id) else {
+                continue;
+            };
+            if let Err(e) = store.insert_comment_if_missing(manuscript_id, &comment) {
+                eprintln!("draft comment import skipped {}: {e}", comment.id);
+            }
+        }
+    }
+    Ok(())
+}
+
+impl From<Comment> for CommentRowFile {
+    fn from(c: Comment) -> Self {
+        Self {
+            id: c.id,
+            section_id: c.section_id,
+            block_id: c.block_id,
+            quote: c.quote,
+            body: c.body,
+            thread_id: c.thread_id,
+            author_kind: c.author.kind,
+            author_id: c.author.id,
+            author_name: c.author.name,
+            created_at: c.created_at,
+            resolved_at: c.resolved_at,
+        }
+    }
+}
+
+impl CommentRowFile {
+    fn into_comment(self, file_thread: &str) -> Option<Comment> {
+        if self.id.is_empty() || self.body.is_empty() || self.created_at.is_empty() {
+            return None;
+        }
+        if self.author_kind != "human" && self.author_kind != "agent" {
+            return None;
+        }
+        let thread_id = self.thread_id.or_else(|| {
+            if file_thread.is_empty() {
+                None
+            } else {
+                Some(file_thread.to_string())
+            }
+        });
+        Some(Comment {
+            id: self.id,
+            section_id: self.section_id,
+            block_id: self.block_id,
+            quote: self.quote,
+            body: self.body,
+            thread_id,
+            author: crate::manuscripts::Author {
+                kind: self.author_kind,
+                id: self.author_id,
+                name: self.author_name,
+            },
+            created_at: self.created_at,
+            resolved_at: self.resolved_at,
+        })
+    }
 }
 
 fn sync_notes(store: &Store, manuscript_id: &str, worktree: &Path) -> Result<(), DraftRepoError> {
