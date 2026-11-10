@@ -6,7 +6,6 @@ import {
   UNKNOWN_CHANGE_TOAST,
   openChangeLink,
   openReviewLink,
-  unknownChangesToast,
   type ChangeLinkRoute,
 } from './open-link';
 import type { OldChangeViewModel } from './open-link';
@@ -311,9 +310,9 @@ describe('open review link (#119)', () => {
     expect(result).toBe('opened');
     expect(r.opened).toHaveBeenCalledWith('book-1');
     expect(r.selected).toHaveBeenCalledWith(['chg-1', 'chg-2']);
-    expect(r.toast).toHaveBeenCalledWith(unknownChangesToast(1));
-    expect(unknownChangesToast(1)).toBe("1 change couldn't be found.");
-    expect(unknownChangesToast(2)).toBe("2 changes couldn't be found.");
+    expect(r.toast).toHaveBeenCalledWith(
+      "1 change isn't in this book's history. The others are in your review list.",
+    );
     expect(r.history).not.toHaveBeenCalled();
     expect(r.focus).not.toHaveBeenCalled();
   });
@@ -352,7 +351,57 @@ describe('open review link (#119)', () => {
         authorName: 'Line Editor',
       }),
     );
-    expect(r.toast).toHaveBeenCalledWith("1 change couldn't be found.");
+    expect(r.toast).toHaveBeenCalledWith(
+      "1 change isn't in this book's history. The others are in your review list.",
+    );
+  });
+
+  it('says several missing changes left the others in the review list', async () => {
+    const r = route();
+    const url = 'swarmdraft://review?draft=book-1&changes=chg-1,missing-a,missing-b';
+    await openReviewLink(url, r, async (_manuscriptId, changeId) => {
+      if (changeId !== 'chg-1') return { action: 'unknown', manuscriptId: 'book-1' };
+      return {
+        action: 'focus',
+        manuscriptId: 'book-1',
+        sectionId: 'sec-1',
+        changeId,
+      };
+    });
+    expect(r.selected).toHaveBeenCalledWith(['chg-1']);
+    expect(r.toast).toHaveBeenCalledWith(
+      "2 changes aren't in this book's history. The others are in your review list.",
+    );
+  });
+
+  it('says the book stayed put when the only linked change is missing', async () => {
+    const r = route();
+    const url = 'swarmdraft://review?draft=book-1&changes=missing';
+    const result = await openReviewLink(url, r, async () => ({
+      action: 'unknown',
+      manuscriptId: 'book-1',
+    }));
+    expect(result).toBe('opened');
+    expect(r.selected).not.toHaveBeenCalled();
+    expect(r.history).not.toHaveBeenCalled();
+    expect(r.toast).toHaveBeenCalledWith(
+      "That change isn't in this book's history. Your book is open where you left off.",
+    );
+    expect(r.failed).not.toHaveBeenCalled();
+  });
+
+  it('says the book stayed put when every linked change is missing', async () => {
+    const r = route();
+    const url = 'swarmdraft://review?draft=book-1&changes=missing-a,missing-b';
+    await openReviewLink(url, r, async () => ({
+      action: 'unknown',
+      manuscriptId: 'book-1',
+    }));
+    expect(r.selected).not.toHaveBeenCalled();
+    expect(r.history).not.toHaveBeenCalled();
+    expect(r.toast).toHaveBeenCalledWith(
+      "None of those changes are in this book's history. Your book is open where you left off.",
+    );
   });
 
   it('gives every decided id a history view, not only the first', async () => {

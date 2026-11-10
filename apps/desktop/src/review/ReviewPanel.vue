@@ -233,6 +233,23 @@ const groupedVisible = computed(() => {
 });
 
 const listEl = ref<HTMLElement | null>(null);
+const panelEl = ref<HTMLElement | null>(null);
+/** Drop the review-link chip, then move focus to whatever is left in the panel. */
+function clearSelection() {
+  emit('clear-change-ids');
+  void nextTick(() => {
+    if (viewToggle.value) {
+      viewToggle.value.focus();
+      return;
+    }
+    const row = listEl.value?.querySelector<HTMLElement>('[data-review-row-key]');
+    if (row) {
+      row.focus();
+      return;
+    }
+    panelEl.value?.focus();
+  });
+}
 const rowRefs = new Map<string, HTMLElement>();
 function setRowRef(key: string, el: unknown) {
   if (el instanceof HTMLElement) rowRefs.set(key, el);
@@ -360,8 +377,10 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
   <aside
     v-else
     :id="REVIEW_CHANGES_REGION_ID"
+    ref="panelEl"
     class="review-panel"
     aria-label="Review changes"
+    tabindex="-1"
     data-test="review-panel"
   >
     <header class="head">
@@ -405,9 +424,16 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
       </button>
     </header>
 
-    <div v-if="changeIds" class="selection-chip" role="status" data-test="selected-changes-chip">
-      <span data-test="selected-changes-label">{{ selectedChangesLabel(selectedCount) }}</span>
-      <button type="button" data-test="clear-selected-changes" @click="emit('clear-change-ids')">
+    <div v-if="changeIds" class="selection-chip" data-test="selected-changes-chip">
+      <span role="status" data-test="selected-changes-label">{{
+        selectedChangesLabel(selectedCount)
+      }}</span>
+      <button
+        type="button"
+        data-test="clear-selected-changes"
+        aria-label="Clear selected changes"
+        @click="clearSelection"
+      >
         Clear
       </button>
     </div>
@@ -502,7 +528,7 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
     </div>
 
     <label
-      v-if="changes.length || listRows.some((r) => r.kind === 'comment')"
+      v-if="!changeIds && (changes.length || listRows.some((r) => r.kind === 'comment'))"
       class="show-resolved"
     >
       <input
@@ -920,7 +946,10 @@ button.primary:disabled {
   color: var(--ct-text);
   background: none;
   border: 0;
-  padding: 0;
+  box-sizing: border-box;
+  min-width: var(--ct-space-6);
+  min-height: var(--ct-space-6);
+  padding: var(--ct-space-1) var(--ct-space-2);
   cursor: pointer;
 }
 .follow-chip {

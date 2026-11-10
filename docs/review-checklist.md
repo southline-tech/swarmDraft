@@ -86,6 +86,10 @@ Run this consolidated pass in order; do not hand off until every line that appli
 
 Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
 
+- 2026-11-10 · #119 · PR #347 · Clear unmounted the selection chip and focus landed on the body · `clearSelection` emits, then focuses the Show changes from toggle, else the first list row, else the panel (`tabindex="-1"`)
+- 2026-11-10 · #119 · PR #347 · an unknown-id toast only named a count · the four copies say the rest are in the review list, or that the book stayed where you left off, on the existing AppToast
+- 2026-11-10 · #119 · PR #347 · Clear had no accessible name, the whole chip was `role=status`, and its hit target had no padding · `aria-label="Clear selected changes"`, `role=status` on the label span, padding `var(--ct-space-1) var(--ct-space-2)` with a 24px minimum
+- 2026-11-10 · #119 · PR #347 · Show resolved stayed visible while a review link filtered the list · the checkbox is hidden until Clear
 - 2026-11-10 · #119 · PR #347 · a review link filtered the list and left margin notes, inline marks, other mounted sections, and Alt+[ / Alt+] on the full set · selection hides non-selected marks and margin notes in every mounted section the same way an author filter does, and the author-cycle shortcut stays idle until Clear
 - 2026-11-10 · #119 · PR #347 · decided ids after the first never appeared · `openReviewLink` hands every decided id to the history view, and closing one shows the next
 - 2026-11-10 · #119 · PR #347 · an empty review-link selection showed “Nothing to review” and the load-failure line together with “None of the selected changes are still open.” · one message for an empty selection; the load-failure line is the only message while suggestions fail to load

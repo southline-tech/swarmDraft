@@ -15,10 +15,20 @@ import { parseChangeLink, parseReviewLink } from './link-codec';
 export const UNKNOWN_CHANGE_TOAST =
   "That change isn't in this book's history. Your book is open where you left off.";
 
-/** How many review-link ids were not in the book. */
-export function unknownChangesToast(count: number): string {
-  if (count === 1) return "1 change couldn't be found.";
-  return `${count} changes couldn't be found.`;
+/**
+ * What happens when a review link names changes this book does not have.
+ * `missing` is how many ids were unknown. `remaining` is how many were found
+ * (still open, or already decided). Shown on the existing link toast.
+ */
+export function unknownChangesToast(missing: number, remaining: number): string {
+  if (remaining > 0) {
+    if (missing === 1) {
+      return "1 change isn't in this book's history. The others are in your review list.";
+    }
+    return `${missing} changes aren't in this book's history. The others are in your review list.`;
+  }
+  if (missing === 1) return UNKNOWN_CHANGE_TOAST;
+  return "None of those changes are in this book's history. Your book is open where you left off.";
 }
 
 export type { LinkResolution };
@@ -112,7 +122,8 @@ export async function openChangeLink(
 /**
  * Open a review link: filter Review to the still-open changes.
  * Each decided or no-longer-present change uses the same history view as one edit link.
- * Unknown ids are left out, with a toast for how many.
+ * Unknown ids are left out. The toast says whether the rest are in the review
+ * list, or that the book stayed where it was.
  */
 export async function openReviewLink(
   raw: string,
@@ -160,7 +171,7 @@ export async function openReviewLink(
   route.resetLinkUi();
   if (focusIds.length) route.showSelectedChanges(focusIds);
   for (const view of history) route.showHistory(view);
-  if (unknown) route.showToast(unknownChangesToast(unknown));
+  if (unknown) route.showToast(unknownChangesToast(unknown, focusIds.length + history.length));
   return 'opened';
 }
 
