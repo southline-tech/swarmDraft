@@ -107,6 +107,22 @@ pub fn parse_change_index(bytes: &[u8]) -> Result<Vec<ChangeEntry>, ()> {
     Ok(out)
 }
 
+/// Change ids listed in one commit's `review/changes.json`. Empty when the file is missing.
+pub(crate) fn change_ids_in_commit(
+    repo: &DraftRepo,
+    oid: &str,
+) -> Result<HashSet<String>, DraftRepoError> {
+    let Some(bytes) = repo.file_bytes(oid, CHANGES_PATH)? else {
+        return Ok(HashSet::new());
+    };
+    Ok(parse_change_index(&bytes)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|entry| entry.id)
+        .filter(|id| !id.is_empty())
+        .collect())
+}
+
 pub fn build_change_index(
     store: &Store,
     manuscript_id: &str,

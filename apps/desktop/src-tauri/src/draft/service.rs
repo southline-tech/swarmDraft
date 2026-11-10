@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 
 use chrono::{Local, TimeZone};
 use serde::Serialize;
@@ -63,6 +63,10 @@ pub struct DraftService {
     resolve_cache: Mutex<ResolveCache>,
     /// Serialize pack, commit, open, restore (git2 + SQLite hydrate).
     op: Mutex<()>,
+    /// Comment commits queued off the caller. Restore and open wait until this is zero
+    /// so a rebuild cannot drop a reply that has not landed in git yet.
+    main_commit_pending: Mutex<usize>,
+    main_commit_cv: Condvar,
 }
 
 impl DraftService {
@@ -77,6 +81,46 @@ impl DraftService {
             autostart: Mutex::new(HashMap::new()),
             resolve_cache: Mutex::new(HashMap::new()),
             op: Mutex::new(()),
+            main_commit_pending: Mutex::new(0),
+            main_commit_cv: Condvar::new(),
+        }
+    }
+
+    fn begin_main_commit(&self) {
+        let mut n = self.main_commit_pending.lock().expect("main commits");
+        *n += 1;
+    }
+
+    fn finish_main_commit(&self) {
+        let mut n = self.main_commit_pending.lock().expect("main commits");
+        *n = n.saturating_sub(1);
+        self.main_commit_cv.notify_all();
+    }
+
+    fn main_commits_pending(&self) -> bool {
+        *self.main_commit_pending.lock().expect("main commits") > 0
+    }
+
+    fn wait_for_main_commits(&self) {
+        let mut n = self.main_commit_pending.lock().expect("main commits");
+        while *n > 0 {
+            n = self.main_commit_cv.wait(n).expect("main commits");
+        }
+    }
+
+    /// Run `f` under the op lock only after queued comment commits have finished.
+    /// A commit that arrives while `f` is waiting is included. `f` must not take the op lock.
+    fn with_op_after_queued_commits<T>(
+        &self,
+        f: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        loop {
+            self.wait_for_main_commits();
+            let _guard = self.op.lock().expect("draft op");
+            if self.main_commits_pending() {
+                continue;
+            }
+            return f();
         }
     }
 
@@ -256,13 +300,6 @@ impl DraftService {
             let verb = if accepted { "Accepted" } else { "Rejected" };
             let base = format!("{verb} {bot_name}'s change in {chapter_title}");
             let decision = if accepted { "accepted" } else { "rejected" };
-            if !accepted {
-                if let Some(branch) = self.active_bot_branch(manuscript_id, bot_agent_id, bot_name)
-                {
-                    self.resolve_bot_only_comments(store, manuscript_id, &branch)?;
-                    self.end_bot_session(manuscript_id, bot_agent_id, bot_name);
-                }
-            }
             self.persist_review_decision(
                 store,
                 manuscript_id,
@@ -272,6 +309,17 @@ impl DraftService {
                 change_kind,
                 change_section_id,
             )?;
+            // One suggestion reject records that id only. The bot branch ends when every
+            // change it introduced has been rejected, so a later accept can still merge.
+            if !accepted {
+                if let Some(branch) = self.active_bot_branch(manuscript_id, bot_agent_id, bot_name)
+                {
+                    if self.bot_branch_fully_rejected(store, manuscript_id, &branch)? {
+                        self.resolve_bot_originated_comments(store, manuscript_id, &branch)?;
+                        self.end_bot_session(manuscript_id, bot_agent_id, bot_name);
+                    }
+                }
+            }
             let msg = match (change_id, change_kind, change_section_id) {
                 (Some(id), kind, Some(section)) if !id.is_empty() && !section.is_empty() => {
                     let mut trailers = vec![("Change-Id", id), ("Decision", decision)];
@@ -561,7 +609,9 @@ impl DraftService {
         path: &str,
         force_discard_recovery: bool,
     ) -> Result<Option<OpenDraftResult>, String> {
-        self.with_op(|| self.open_draft_path_inner(store, path, force_discard_recovery))
+        self.with_op_after_queued_commits(|| {
+            self.open_draft_path_inner(store, path, force_discard_recovery)
+        })
     }
 
     fn open_draft_path_inner(
@@ -664,7 +714,7 @@ impl DraftService {
         oid: &str,
         committer_name: &str,
     ) -> Result<String, String> {
-        self.with_op(|| {
+        self.with_op_after_queued_commits(|| {
             let dir = self.ensure_open_inner(store, manuscript_id)?;
             let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
             let time = repo.commit_time_unix(oid).unwrap_or(0);
@@ -896,9 +946,65 @@ impl DraftService {
         }
     }
 
-    /// Comments that exist only on `branch` are marked resolved so the next main commit
-    /// keeps them, instead of leaving them on the bot branch.
-    fn resolve_bot_only_comments(
+    /// True when `branch` introduced at least one change and every one of those ids is rejected.
+    /// Compared with the merge base, so a later checkpoint on `main` does not hide them.
+    fn bot_branch_fully_rejected(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        branch: &str,
+    ) -> Result<bool, String> {
+        let introduced = self.changes_introduced_on_branch(store, manuscript_id, branch)?;
+        if introduced.is_empty() {
+            return Ok(false);
+        }
+        let decisions = store
+            .review_decisions_for_manuscript(manuscript_id)
+            .map_err(|e| e.to_string())?;
+        for id in &introduced {
+            let rejected = decisions
+                .values()
+                .flatten()
+                .any(|row| row.id == *id && row.status == "rejected");
+            if !rejected {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Change ids on the bot tip that the branch point does not already list.
+    fn changes_introduced_on_branch(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        branch: &str,
+    ) -> Result<Vec<String>, String> {
+        let dir = self.ensure_open_inner(store, manuscript_id)?;
+        let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+        let Some(bot_oid) = repo.branch_target(branch).map_err(|e| e.to_string())? else {
+            return Ok(Vec::new());
+        };
+        let Some(main_oid) = repo.head_oid().map_err(|e| e.to_string())? else {
+            return Ok(Vec::new());
+        };
+        let Some(base) = repo
+            .merge_base(&bot_oid, &main_oid)
+            .map_err(|e| e.to_string())?
+        else {
+            return Ok(Vec::new());
+        };
+        let bot_ids = changes::change_ids_in_commit(&repo, &bot_oid).map_err(|e| e.to_string())?;
+        let base_ids = changes::change_ids_in_commit(&repo, &base).map_err(|e| e.to_string())?;
+        let mut ids: Vec<String> = bot_ids.difference(&base_ids).cloned().collect();
+        ids.sort();
+        Ok(ids)
+    }
+
+    /// Comments added on `branch` are marked resolved so the next main commit keeps them.
+    /// A checkpoint that already copied the row onto `main` does not exempt it: the
+    /// comparison is the branch point, not the current tip.
+    fn resolve_bot_originated_comments(
         &self,
         store: &Store,
         manuscript_id: &str,
@@ -909,17 +1015,23 @@ impl DraftService {
         let Some(bot_oid) = repo.branch_target(branch).map_err(|e| e.to_string())? else {
             return Ok(());
         };
-        let main_ids = match repo.head_oid().map_err(|e| e.to_string())? {
-            Some(oid) => sync::comment_rows_in_commit(&repo, &oid)
-                .map_err(|e| e.to_string())?
-                .into_iter()
-                .map(|row| row.comment.id)
-                .collect::<std::collections::HashSet<_>>(),
-            None => std::collections::HashSet::new(),
+        let Some(main_oid) = repo.head_oid().map_err(|e| e.to_string())? else {
+            return Ok(());
         };
+        let Some(base) = repo
+            .merge_base(&bot_oid, &main_oid)
+            .map_err(|e| e.to_string())?
+        else {
+            return Ok(());
+        };
+        let base_ids = sync::comment_rows_in_commit(&repo, &base)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|row| row.comment.id)
+            .collect::<std::collections::HashSet<_>>();
         let now = store.now().map_err(|e| e.to_string())?;
         for row in sync::comment_rows_in_commit(&repo, &bot_oid).map_err(|e| e.to_string())? {
-            if row.deleted_at.is_some() || main_ids.contains(&row.comment.id) {
+            if row.deleted_at.is_some() || base_ids.contains(&row.comment.id) {
                 continue;
             }
             let mut comment = row.comment;
@@ -1228,8 +1340,17 @@ pub(crate) fn sanitize_filename(title: &str) -> String {
     }
 }
 
+struct FinishMainCommit(Arc<DraftService>);
+
+impl Drop for FinishMainCommit {
+    fn drop(&mut self) {
+        self.0.finish_main_commit();
+    }
+}
+
 /// Commit the open book on `main` without blocking the caller. Comment create, reply,
 /// resolve, reopen, and delete use this so git never runs on the UI or request thread.
+/// Restore and open wait until the commit finishes.
 pub fn queue_main_commit(
     drafts: &Arc<DraftService>,
     store: &Store,
@@ -1237,10 +1358,12 @@ pub fn queue_main_commit(
     message: &str,
 ) {
     let drafts = Arc::clone(drafts);
+    drafts.begin_main_commit();
     let store = store.clone();
     let manuscript_id = manuscript_id.to_string();
     let message = message.to_string();
     let work = move || {
+        let _finish = FinishMainCommit(Arc::clone(&drafts));
         let name = author_name(&store);
         if let Err(e) = drafts.commit_now(
             &store,
@@ -1428,5 +1551,131 @@ mod save_as_lock_tests {
             );
             thread::sleep(Duration::from_millis(30));
         }
+    }
+
+    fn root_comment(section_id: &str) -> crate::manuscripts::Comment {
+        crate::manuscripts::Comment {
+            id: "cq1".into(),
+            section_id: section_id.into(),
+            block_id: None,
+            quote: None,
+            body: "Root.".into(),
+            thread_id: Some("cq1".into()),
+            author: crate::manuscripts::Author {
+                kind: "human".into(),
+                id: "local".into(),
+                name: "Author".into(),
+            },
+            created_at: "2026-03-01T00:00:00.000Z".into(),
+            resolved_at: None,
+        }
+    }
+
+    /// Reply, then restore, before the queued commit runs. The reply is still there.
+    #[test]
+    fn queued_reply_survives_restore_that_starts_before_the_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+        let id = stored.manuscript.id.clone();
+        let section_id = stored
+            .sections
+            .iter()
+            .find(|s| s.section.kind == "chapter")
+            .unwrap()
+            .section
+            .id
+            .clone();
+        let svc = Arc::new(DraftService::new(
+            store.data_dir().to_path_buf(),
+            "0.2.2".into(),
+        ));
+        let draft_path = dir.path().join("drafts").join("race-restore.draft");
+        store
+            .set_draft_file_path(&id, &draft_path.to_string_lossy())
+            .unwrap();
+        store
+            .insert_comment(&id, &root_comment(&section_id))
+            .unwrap();
+        let baseline = svc
+            .commit_now(&store, &id, "Baseline", "Author", "author@swarmdraft.local")
+            .unwrap()
+            .expect("baseline");
+        store
+            .human_comment_reply(&id, &section_id, "cq1", "Queued reply.", "Author", "local")
+            .unwrap();
+        let guard = svc.op.lock().expect("draft op");
+        queue_main_commit(&svc, &store, &id, "Comment reply");
+        let svc_restore = Arc::clone(&svc);
+        let store_restore = store.clone();
+        let id_restore = id.clone();
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            tx.send(svc_restore.restore(&store_restore, &id_restore, &baseline, "Author"))
+                .ok();
+        });
+        drop(guard);
+        let restored = rx
+            .recv_timeout(Duration::from_secs(8))
+            .expect("restore did not finish");
+        restored.expect("restore");
+        assert!(store
+            .comments_for_manuscript(&id)
+            .unwrap()
+            .iter()
+            .any(|c| c.body == "Queued reply."));
+    }
+
+    /// Reply, then reopen the packed book, before the queued commit runs. The reply is still there.
+    #[test]
+    fn queued_reply_survives_reopen_that_starts_before_the_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+        let id = stored.manuscript.id.clone();
+        let section_id = stored
+            .sections
+            .iter()
+            .find(|s| s.section.kind == "chapter")
+            .unwrap()
+            .section
+            .id
+            .clone();
+        let svc = Arc::new(DraftService::new(
+            store.data_dir().to_path_buf(),
+            "0.2.2".into(),
+        ));
+        let draft_path = dir.path().join("drafts").join("race-reopen.draft");
+        let path = draft_path.to_string_lossy().into_owned();
+        store.set_draft_file_path(&id, &path).unwrap();
+        store
+            .insert_comment(&id, &root_comment(&section_id))
+            .unwrap();
+        svc.commit_now(&store, &id, "Baseline", "Author", "author@swarmdraft.local")
+            .unwrap()
+            .expect("baseline");
+        store
+            .human_comment_reply(&id, &section_id, "cq1", "Queued reply.", "Author", "local")
+            .unwrap();
+        let guard = svc.op.lock().expect("draft op");
+        queue_main_commit(&svc, &store, &id, "Comment reply");
+        let svc_open = Arc::clone(&svc);
+        let store_open = store.clone();
+        let path_open = path.clone();
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            tx.send(svc_open.open_draft_path(&store_open, &path_open, true))
+                .ok();
+        });
+        drop(guard);
+        let opened = rx
+            .recv_timeout(Duration::from_secs(8))
+            .expect("reopen did not finish");
+        let opened = opened.expect("reopen").expect("draft opened");
+        assert!(store
+            .comments_for_manuscript(&opened.manuscript_id)
+            .unwrap()
+            .iter()
+            .any(|c| c.body == "Queued reply."));
     }
 }

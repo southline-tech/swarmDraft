@@ -207,6 +207,15 @@ impl DraftRepo {
         })
     }
 
+    /// Best common ancestor of two commits, when git can find one.
+    pub fn merge_base(&self, a: &str, b: &str) -> Result<Option<String>, DraftRepoError> {
+        match self.repo.merge_base(parse_oid(a)?, parse_oid(b)?) {
+            Ok(oid) => Ok(Some(oid.to_string())),
+            Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// First parent, when this commit has one.
     pub fn parent_oid(&self, oid: &str) -> Result<Option<String>, DraftRepoError> {
         let commit = self.repo.find_commit(parse_oid(oid)?)?;

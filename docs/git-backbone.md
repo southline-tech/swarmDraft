@@ -20,7 +20,7 @@ The `.draft` format version is **2** (`manifest.json` `formatVersion`). A file w
 
 A comment file has `threadId` and `rows`. Each row has `id`, `sectionId`, `blockId`, `quote`, `body`, `threadId`, `authorKind`, `authorId`, `authorName`, `createdAt`, and `resolvedAt`. A deleted row also has `deletedAt`. That row is a tombstone: the file stays in git, and opening the book removes the live cache row. A save writes `comments/.keep` so the directory stays in git when there are no threads.
 
-Opening a book replaces the cache with git. Live rows on `main` are the comment list. A tombstone on `main` removes that id. A comment that is only on a `bot/*` tip is still loaded, until that branch is accepted or rejected. A row that exists only in the local database, and not in git, is deleted.
+Opening a book replaces the cache with git. Live rows on `main` are the comment list. A tombstone on `main` removes that id. A comment that is only on a `bot/*` tip is still loaded. Accept merges it. Rejecting the whole branch marks it resolved, including when a checkpoint already copied it onto `main`. A row that exists only in the local database, and not in git, is deleted.
 
 `review/changes.json` records `decidedBy` and `decidedAt` when `status` is `accepted` or `rejected`. Opening the book writes those rows back into the decision log.
 
@@ -28,11 +28,11 @@ A session file has `id`, `authorName`, `startedAt`, `baseCommit`, and `endedAt` 
 
 ## Refs
 
-| Ref                   | When it moves                                                                                                                                                        |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `main`                | Every human checkpoint, Save, comment write, accept/reject, and Restore. HEAD stays here                                                                             |
-| `session/<sessionId>` | Created at the current `main` tip when the book is opened. Each commit on `main` during that session moves it to the new tip. The ref is kept after the session ends |
-| `bot/<bot>/<session>` | Bot suggestions and bot comments. Accept merges that branch into `main`. Reject keeps that branch's comments on `main` and marks them resolved                       |
+| Ref                   | When it moves                                                                                                                                                                                                                                               |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `main`                | Every human checkpoint, Save, comment write, accept/reject, and Restore. HEAD stays here                                                                                                                                                                    |
+| `session/<sessionId>` | Created at the current `main` tip when the book is opened. Each commit on `main` during that session moves it to the new tip. The ref is kept after the session ends                                                                                        |
+| `bot/<bot>/<session>` | Bot suggestions and bot comments. Accept merges that branch into `main`. The branch is rejected only when every change it introduced is rejected; those comments then land on `main` with `resolvedAt` set. Rejecting one suggestion leaves the branch open |
 
 Session ids are new each time a book is opened. Bot branch names are unchanged.
 
@@ -68,11 +68,11 @@ Live typing updates the Yjs document and SQLite on the existing save timer. It d
 1. Idle checkpoint, about 5 seconds after a successful save (`draft_checkpoint`).
 2. Save and Save As.
 3. Each accept or reject.
-4. Each comment create, reply, resolve, reopen, and delete, queued off the caller so the UI thread, the request thread, and a bot MCP call do not wait on git. A human comment commits on `main`. A bot comment commits on that bot's branch. A delete writes a tombstone row; it does not remove the comment file.
+4. Each comment create, reply, resolve, reopen, and delete, queued off the caller so the UI thread, the request thread, and a bot MCP call do not wait on git. A human comment commits on `main`. A bot comment commits on that bot's branch. A delete writes a tombstone row; it does not remove the comment file. Restore and open wait until a queued comment commit has finished, so a reply that is not in git yet is not dropped.
 5. Close, which finishes the editing session (`endedAt`) after the last flush. If that commit fails, the session stays active and the save failure is shown.
-6. Restore, which adds a new commit on `main` and reloads the book from that tree. The new tree's manuscript text (`book.json`, `chapters/`, `yjs/`) is the restored version. Comments, notes, sessions, and `review/` stay as they are on the previous tip, so a comment made after the restored point is still there. Restore never resets or rewinds a branch.
+6. Restore, which adds a new commit on `main` and reloads the book from that tree. The new tree's manuscript text (`book.json`, `chapters/`, `yjs/`) is the restored version. Comments, notes, sessions, and `review/` stay as they are on the previous tip, so a comment made after the restored point is still there. A comment or an accept on a chapter the restored text does not contain stays in the cache, and the next commit writes it again. Restore never resets or rewinds a branch.
 
-Accepting a bot change merges that `bot/*` branch into `main`, comments included. Rejecting it does not take the bot's text. Comments that exist only on that branch are committed onto `main` with `resolvedAt` set, and the bot session ends. The comment list on screen still reads from SQLite.
+Accepting a bot change merges that `bot/*` branch into `main`, comments included. Rejecting one suggestion does not end the branch, so another suggestion from that bot can still be accepted. The branch is rejected when every change it introduced has been rejected. That copies the branch's comments onto `main` with `resolvedAt` set, even if a checkpoint already wrote them unresolved, and the bot session ends. It does not take the bot's text. The comment list on screen still reads from SQLite.
 
 ## Finding a change
 

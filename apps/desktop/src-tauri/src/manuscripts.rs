@@ -1334,11 +1334,10 @@ impl Store {
         self.get_manuscript(manuscript_id)?;
         self.with_conn(|c| {
             let mut st = c.prepare(
-                "SELECT rd.section_id, rd.kind, rd.suggestion_id, rd.status, rd.decided_at, rd.decided_by
-                 FROM review_decisions rd
-                 INNER JOIN sections s ON s.id = rd.section_id
-                 WHERE s.manuscript_id = ?1
-                 ORDER BY rd.section_id, rd.decided_at, rd.kind, rd.suggestion_id",
+                "SELECT section_id, kind, suggestion_id, status, decided_at, decided_by
+                 FROM review_decisions
+                 WHERE manuscript_id = ?1
+                 ORDER BY section_id, decided_at, kind, suggestion_id",
             )?;
             let mut out: std::collections::HashMap<String, Vec<ReviewDecisionRecord>> =
                 std::collections::HashMap::new();
@@ -1396,9 +1395,11 @@ impl Store {
             )?;
             for r in records {
                 tx.execute(
-                    "INSERT INTO review_decisions (section_id, kind, suggestion_id, status, decided_at, decided_by)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    "INSERT INTO review_decisions (
+                        manuscript_id, section_id, kind, suggestion_id, status, decided_at, decided_by
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![
+                        manuscript_id,
                         section_id,
                         r.kind,
                         r.id,
@@ -1441,12 +1442,15 @@ impl Store {
                 None => return Err(StorageError::NotFound(section_id.into())),
             }
             tx.execute(
-                "INSERT INTO review_decisions (section_id, kind, suggestion_id, status, decided_at, decided_by)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                "INSERT INTO review_decisions (
+                    manuscript_id, section_id, kind, suggestion_id, status, decided_at, decided_by
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                  ON CONFLICT(section_id, kind, suggestion_id) DO UPDATE SET
+                   manuscript_id = excluded.manuscript_id,
                    status = excluded.status,
                    decided_by = excluded.decided_by",
                 params![
+                    manuscript_id,
                     section_id,
                     record.kind,
                     record.id,
@@ -1473,9 +1477,7 @@ impl Store {
         self.with_conn(|c| {
             let tx = c.unchecked_transaction()?;
             tx.execute(
-                "DELETE FROM review_decisions WHERE section_id IN (
-                    SELECT id FROM sections WHERE manuscript_id = ?1
-                 )",
+                "DELETE FROM review_decisions WHERE manuscript_id = ?1",
                 [manuscript_id],
             )?;
             for (section_id, record) in records {
@@ -1488,16 +1490,20 @@ impl Store {
                     .optional()?;
                 match owner.as_deref() {
                     Some(mid) if mid == manuscript_id => {}
-                    _ => {
+                    // The section was removed when text was restored. The decision stays.
+                    None => {}
+                    Some(_) => {
                         return Err(StorageError::Invalid(format!(
                             "decision section {section_id} is not in this book"
                         )))
                     }
                 }
                 tx.execute(
-                    "INSERT INTO review_decisions (section_id, kind, suggestion_id, status, decided_at, decided_by)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    "INSERT INTO review_decisions (
+                        manuscript_id, section_id, kind, suggestion_id, status, decided_at, decided_by
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![
+                        manuscript_id,
                         section_id,
                         record.kind,
                         record.id,

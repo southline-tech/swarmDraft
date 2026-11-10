@@ -1408,6 +1408,7 @@ fn rejecting_the_bot_branch_keeps_its_comment_resolved_on_main() {
     comment.author.id = "agent-test-1".into();
     comment.author.name = "Line Editor".into();
     store.insert_comment(&m.id, &comment).unwrap();
+    set_chapter_mark(&store, &chapter.doc_id, "chg-bot", "bot wording");
     svc.commit_bot_suggestion(&store, &m.id, "agent-test-1", "Line Editor", "Bot comment")
         .unwrap()
         .expect("bot comment");
@@ -1438,7 +1439,10 @@ fn rejecting_the_bot_branch_keeps_its_comment_resolved_on_main() {
         .expect("rejected bot comment is on main");
     let text = String::from_utf8(bytes).unwrap();
     assert!(text.contains("Keep this resolved."));
-    assert!(text.contains("resolvedAt"));
+    assert!(
+        text.contains("\"resolvedAt\": \""),
+        "branch reject marks the comment resolved: {text}"
+    );
     let row = store
         .comments_for_manuscript(&m.id)
         .unwrap()
@@ -1447,8 +1451,337 @@ fn rejecting_the_bot_branch_keeps_its_comment_resolved_on_main() {
         .unwrap();
     assert!(row.resolved_at.is_some());
     assert!(svc
+        .bot_branch_exists(&store, &m.id, "agent-test-1", "Line Editor")
+        .is_err());
+    assert!(svc
         .history(&store, &m.id, 10, 0)
         .unwrap()
         .iter()
         .any(|c| c.message.starts_with("Rejected Line Editor")));
+}
+
+#[test]
+fn checkpoint_then_reject_still_resolves_the_bot_comment() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "bot-checkpoint-reject.draft");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap();
+    set_chapter_mark(&store, &chapter.doc_id, "chg-bot", "bot wording");
+    let mut comment = sample_comment("cthread-bot", &chapter.id, "Copied before reject.");
+    comment.author.kind = "agent".into();
+    comment.author.id = "agent-test-1".into();
+    comment.author.name = "Line Editor".into();
+    store.insert_comment(&m.id, &comment).unwrap();
+    svc.commit_bot_suggestion(&store, &m.id, "agent-test-1", "Line Editor", "Bot comment")
+        .unwrap()
+        .expect("bot comment");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Checkpoint",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap()
+    .expect("checkpoint copies the comment onto main");
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let mid = repo.head_oid().unwrap().unwrap();
+    let copied = String::from_utf8(
+        repo.file_bytes(&mid, "comments/cthread-bot.json")
+            .unwrap()
+            .expect("checkpoint wrote the comment"),
+    )
+    .unwrap();
+    assert!(copied.contains("Copied before reject."));
+    assert!(
+        !copied.contains("\"resolvedAt\": \""),
+        "checkpoint leaves the bot comment unresolved: {copied}"
+    );
+    svc.commit_review_decision(
+        &store,
+        &m.id,
+        false,
+        "Line Editor",
+        &chapter.title,
+        "author",
+        Some("agent-test-1"),
+        Some("chg-bot"),
+        Some("suggestion_insert"),
+        Some(&chapter.id),
+    )
+    .unwrap();
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let main = repo.head_oid().unwrap().unwrap();
+    let text = String::from_utf8(
+        repo.file_bytes(&main, "comments/cthread-bot.json")
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(text.contains("\"resolvedAt\": \""));
+    let row = store
+        .comments_for_manuscript(&m.id)
+        .unwrap()
+        .into_iter()
+        .find(|c| c.id == "cthread-bot")
+        .unwrap();
+    assert!(row.resolved_at.is_some());
+}
+
+#[test]
+fn rejecting_one_suggestion_still_lets_the_other_be_accepted() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "bot-one-of-two.draft");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap();
+    set_chapter_marks(
+        &store,
+        &chapter.doc_id,
+        &[("chg-a", "first"), ("chg-b", "second")],
+    );
+    for (id, body) in [
+        ("c-a", "Comment on the first."),
+        ("c-b", "Comment on the second."),
+    ] {
+        let mut comment = sample_comment(id, &chapter.id, body);
+        comment.author.kind = "agent".into();
+        comment.author.id = "agent-test-1".into();
+        comment.author.name = "Line Editor".into();
+        store.insert_comment(&m.id, &comment).unwrap();
+    }
+    svc.commit_bot_suggestion(&store, &m.id, "agent-test-1", "Line Editor", "Bot comments")
+        .unwrap()
+        .expect("bot comments");
+    svc.commit_review_decision(
+        &store,
+        &m.id,
+        false,
+        "Line Editor",
+        &chapter.title,
+        "author",
+        Some("agent-test-1"),
+        Some("chg-a"),
+        Some("suggestion_insert"),
+        Some(&chapter.id),
+    )
+    .unwrap();
+    for row in store.comments_for_manuscript(&m.id).unwrap() {
+        assert!(
+            row.resolved_at.is_none(),
+            "{} was resolved by one suggestion reject",
+            row.id
+        );
+    }
+    assert!(svc
+        .bot_branch_exists(&store, &m.id, "agent-test-1", "Line Editor")
+        .unwrap());
+    svc.commit_review_decision(
+        &store,
+        &m.id,
+        true,
+        "Line Editor",
+        &chapter.title,
+        "author",
+        Some("agent-test-1"),
+        Some("chg-b"),
+        Some("suggestion_insert"),
+        Some(&chapter.id),
+    )
+    .unwrap();
+    assert!(svc
+        .history(&store, &m.id, 10, 0)
+        .unwrap()
+        .iter()
+        .any(|c| c.message.starts_with("Merged bot/")));
+    assert!(svc
+        .bot_branch_exists(&store, &m.id, "agent-test-1", "Line Editor")
+        .is_err());
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let main = repo.head_oid().unwrap().unwrap();
+    for (path, body) in [
+        ("comments/c-a.json", "Comment on the first."),
+        ("comments/c-b.json", "Comment on the second."),
+    ] {
+        let text = String::from_utf8(repo.file_bytes(&main, path).unwrap().expect(path)).unwrap();
+        assert!(text.contains(body), "{path} missing on main");
+    }
+    let still_open = store
+        .comments_for_manuscript(&m.id)
+        .unwrap()
+        .into_iter()
+        .find(|c| c.id == "c-b")
+        .unwrap();
+    assert!(still_open.resolved_at.is_none());
+}
+
+fn set_chapter_marks(store: &Store, doc_id: &str, marks: &[(&str, &str)]) {
+    let content: Vec<_> = marks
+        .iter()
+        .map(|(id, text)| {
+            json!({
+                "type": "text",
+                "text": text,
+                "marks": [{
+                    "type": "suggestion_insert",
+                    "attrs": {"id": id, "author": "agent:agent-test-1", "ts": "t"}
+                }]
+            })
+        })
+        .collect();
+    let doc = content::new_doc();
+    content::encode(
+        &doc,
+        &json!({"type":"doc","content":[{"type":"paragraph","content": content}]}),
+    )
+    .unwrap();
+    let state = doc
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    store.replace_doc_state(doc_id, &state).unwrap();
+}
+
+#[test]
+fn restore_before_a_later_chapter_keeps_its_comment_and_decision() {
+    let (dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored).clone();
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "restore-later-chapter.draft");
+    set_chapter_plain(&store, &chapter.doc_id, "version-one");
+    let first = svc
+        .commit_now(&store, &m.id, "First", "Author", "author@swarmdraft.local")
+        .unwrap()
+        .expect("first");
+    let added = store.add_section(&m.id, "chapter", "Later", None).unwrap();
+    set_chapter_mark(&store, &added.doc_id, "chg-added", "new chapter");
+    store
+        .insert_comment(
+            &m.id,
+            &sample_comment("c-added", &added.id, "On the later chapter."),
+        )
+        .unwrap();
+    svc.commit_review_decision(
+        &store,
+        &m.id,
+        true,
+        "Line Editor",
+        &added.title,
+        "author",
+        None,
+        Some("chg-added"),
+        Some("suggestion_insert"),
+        Some(&added.id),
+    )
+    .unwrap()
+    .expect("accept");
+    svc.restore(&store, &m.id, &first, "Author")
+        .expect("restore finishes when the decision names a removed chapter");
+    assert!(chapter_text(&store, &chapter.doc_id).contains("version-one"));
+    assert!(store
+        .list_sections(&m.id)
+        .unwrap()
+        .iter()
+        .all(|s| s.id != added.id));
+    let comment = store
+        .comments_for_manuscript(&m.id)
+        .unwrap()
+        .into_iter()
+        .find(|c| c.id == "c-added")
+        .expect("comment stays in the cache");
+    assert_eq!(comment.body, "On the later chapter.");
+    let kept = store
+        .review_decisions_for_manuscript(&m.id)
+        .unwrap()
+        .get(&added.id)
+        .expect("decision stays in the cache")
+        .iter()
+        .find(|row| row.id == "chg-added")
+        .unwrap()
+        .clone();
+    assert_eq!(kept.status, "accepted");
+    set_chapter_plain(&store, &chapter.doc_id, "after restore");
+    let follow = svc
+        .commit_now(
+            &store,
+            &m.id,
+            "After restore",
+            "Author",
+            "author@swarmdraft.local",
+        )
+        .unwrap()
+        .expect("next commit");
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let book = String::from_utf8(repo.file_bytes(&follow, "book.json").unwrap().unwrap()).unwrap();
+    assert!(!book.contains(&added.id));
+    let comment_file = String::from_utf8(
+        repo.file_bytes(&follow, "comments/c-added.json")
+            .unwrap()
+            .expect("comment stays in git"),
+    )
+    .unwrap();
+    assert!(comment_file.contains("On the later chapter."));
+    let changes = String::from_utf8(
+        repo.file_bytes(&follow, "review/changes.json")
+            .unwrap()
+            .expect("decision stays in git"),
+    )
+    .unwrap();
+    assert!(changes.contains("chg-added"));
+    assert!(changes.contains(&added.id));
+    assert!(changes.contains("\"status\": \"accepted\""));
+
+    let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
+    let data = dir.path().to_path_buf();
+    drop(store);
+    drop(svc);
+    for name in ["swarmdraft.db", "swarmdraft.db-wal", "swarmdraft.db-shm"] {
+        let path = data.join(name);
+        if path.exists() {
+            fs::remove_file(&path).unwrap();
+        }
+    }
+    let store2 = Store::open(&data).unwrap();
+    let svc2 = DraftService::new(data, "0.2.1".into());
+    let opened = svc2
+        .open_draft_path(&store2, &draft_path, true)
+        .unwrap()
+        .unwrap();
+    assert!(store2
+        .list_sections(&opened.manuscript_id)
+        .unwrap()
+        .iter()
+        .all(|s| s.id != added.id));
+    assert!(store2
+        .comments_for_manuscript(&opened.manuscript_id)
+        .unwrap()
+        .iter()
+        .any(|c| c.id == "c-added" && c.body == "On the later chapter."));
+    assert!(store2
+        .review_decisions_for_manuscript(&opened.manuscript_id)
+        .unwrap()
+        .get(&added.id)
+        .expect("reopen restores the decision")
+        .iter()
+        .any(|row| row.id == "chg-added" && row.status == "accepted"));
 }
