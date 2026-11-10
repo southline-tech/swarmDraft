@@ -414,6 +414,28 @@ export async function listenOpenDraftPath(onPath: (path: string) => void): Promi
   }
 }
 
+/** Rust `menu::QUIT_EVENT`. Native Quit emits this; the window flushes, then destroys. */
+export const MACOS_QUIT_EVENT = 'macos-quit';
+
+export async function listenMacosQuit(onQuit: () => void): Promise<UnlistenFn> {
+  if (!isTauri()) return () => {};
+  try {
+    return await listen(MACOS_QUIT_EVENT, () => onQuit());
+  } catch {
+    return () => {};
+  }
+}
+
+/** The window stayed open after a macOS quit. The next Dock Quit may flush again. */
+export async function macosQuitCancelled(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke('macos_quit_cancelled');
+  } catch (e) {
+    console.error('Could not reset macOS quit', e);
+  }
+}
+
 /** Cold-start `.draft` from argv; returned once then cleared on the backend. */
 export async function draftTakeLaunchPath(): Promise<string | null> {
   if (!isTauri()) return null;

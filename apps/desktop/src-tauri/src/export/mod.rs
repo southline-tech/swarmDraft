@@ -208,4 +208,15 @@ mod tests {
         let store = Store::open(dir.path()).unwrap();
         assert_eq!(store.pandoc_root_dir(), dir.path().join("pandoc"));
     }
+
+    #[test]
+    fn exports_dir_is_the_app_data_exports_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        assert_eq!(store.exports_dir(), dir.path().join("exports"));
+        assert_eq!(
+            store.exports_dir(),
+            crate::platform::exports_dir(store.data_dir())
+        );
+    }
 }

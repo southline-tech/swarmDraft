@@ -380,10 +380,31 @@ impl Store {
     }
 }
 
+/// File a paired bot saves its key in (#188, #193).
+///
+/// Windows scripts keep `%USERPROFILE%\swarmdraft-bot\key.txt`. macOS and Linux use the
+/// same folder name under the user home directory (`~/swarmdraft-bot/key.txt`). The app
+/// itself still stores tokens in its own data directory; this path is only the bot-side file.
+pub fn pairing_key_file(home: &std::path::Path) -> std::path::PathBuf {
+    home.join("swarmdraft-bot").join("key.txt")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::agents::DEFAULT_AGENT_NAME;
+    use std::path::Path;
+
+    #[test]
+    fn pairing_key_file_lives_under_the_user_profile() {
+        let home = Path::new("/Users/writer");
+        let key = pairing_key_file(home);
+        assert_eq!(key, home.join("swarmdraft-bot").join("key.txt"));
+        assert!(key.starts_with(home));
+        let win = pairing_key_file(Path::new(r"C:\Users\writer"));
+        assert!(win.ends_with("key.txt"));
+        assert!(win.starts_with(Path::new(r"C:\Users\writer")));
+    }
 
     fn store() -> (tempfile::TempDir, Store) {
         let tmp = tempfile::tempdir().unwrap();

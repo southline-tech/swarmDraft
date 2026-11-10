@@ -1,17 +1,28 @@
 <script setup lang="ts">
 /**
- * Keyboard shortcuts sheet (wp7, #56). Lists Windows shortcuts from {@link SHORTCUT_SHEET_GROUPS}.
+ * Keyboard shortcuts sheet (wp7, #56). Lists chords from {@link SHORTCUT_SHEET_GROUPS}.
+ * macOS shows Command glyphs; other platforms show Control.
  * Takes focus, closes on Esc or the close button, and the opener gets focus back.
  */
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import AppIcon from '../icons/AppIcon.vue';
-import { MANUSCRIPT_SHORTCUTS, SHORTCUT_SHEET_GROUPS, shortcutParts } from './app-shortcuts';
+import {
+  displayChord,
+  isMacPlatform,
+  MANUSCRIPT_SHORTCUTS,
+  SHORTCUT_SHEET_GROUPS,
+  shortcutParts,
+} from './app-shortcuts';
 import { shortcutSheet } from '../copy-deck';
 
 const emit = defineEmits<{ close: [] }>();
 const closeBtn = ref<HTMLButtonElement>();
 const opener = document.activeElement as HTMLElement | null;
 
+const conventionsLead = isMacPlatform()
+  ? shortcutSheet.macConventionsLead
+  : shortcutSheet.windowsConventionsLead;
+const sheetOpener = displayChord(MANUSCRIPT_SHORTCUTS.shortcutsSheet);
 const GROUPS = SHORTCUT_SHEET_GROUPS.map((g) => ({
   title: g.title,
   rows: g.rows.map((r) => [r.label, shortcutParts(r.chord)] as [string, string[]]),
@@ -57,8 +68,7 @@ onBeforeUnmount(() => opener?.focus?.());
         </button>
       </div>
       <p class="sh-subt">
-        {{ shortcutSheet.windowsConventionsLead
-        }}<kbd class="sh-kbd">{{ MANUSCRIPT_SHORTCUTS.shortcutsSheet }}</kbd
+        {{ conventionsLead }}<kbd class="sh-kbd">{{ sheetOpener }}</kbd
         >{{ shortcutSheet.windowsConventionsTrail }}
       </p>
       <div class="sh-cols">

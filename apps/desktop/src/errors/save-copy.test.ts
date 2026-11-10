@@ -179,6 +179,7 @@ describe('displayUserPath', () => {
     expect(displayUserPath(String.raw`\\?\UNC\server\share\book (copy).docx`)).toBe(
       String.raw`\\server\share\book (copy).docx`,
     );
+    expect(displayUserPath('/Users/a/book (copy).docx')).toBe('/Users/a/book (copy).docx');
   });
 });
 
