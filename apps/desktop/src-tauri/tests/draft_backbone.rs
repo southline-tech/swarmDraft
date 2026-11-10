@@ -6,11 +6,11 @@ use std::path::Path;
 use serde_json::json;
 use swarmdraft_lib::content::{self, decode};
 use swarmdraft_lib::draft::{
-    pack_draft, BotRetention, CommitOptions, DraftChangeResolve, DraftManifest, DraftRepo,
-    DraftService, DRAFT_FORMAT, DRAFT_FORMAT_VERSION,
+    pack_draft, unpack_draft, BotRetention, CommitOptions, DraftChangeResolve, DraftManifest,
+    DraftRepo, DraftService, DRAFT_FORMAT, DRAFT_FORMAT_VERSION,
 };
 use swarmdraft_lib::manuscripts::{
-    doc_update_since, state_vector, Author, Comment, ReviewDecisionRecord,
+    doc_update_since, state_vector, Author, Comment, OutlineEntry, ReviewDecisionRecord,
 };
 use swarmdraft_lib::storage::Store;
 use yrs::updates::decoder::Decode;
@@ -1534,6 +1534,156 @@ fn assert_accepted_chapter(text: &str, accepted: &str) {
         !text.contains("suggestion:chg-pending"),
         "suggestion mark replaced the accepted chapter: {text}"
     );
+}
+
+/// The bot snapshot copies a chapter that is not on `main` yet. The writer
+/// deletes it and accepts. The merge records the bot parent and keeps the
+/// accept tree, so the chapter is gone on HEAD, in the packed file, and after
+/// reopen.
+#[test]
+fn accepting_after_the_writer_deletes_a_chapter_the_bot_snapshot_copied() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored).clone();
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "bot-accept-deleted-chapter.draft");
+    set_chapter_plain(&store, &chapter.doc_id, "version-one");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap()
+    .expect("baseline");
+    let added = store
+        .add_section(&m.id, "chapter", "Gone Chapter", None)
+        .unwrap();
+    set_chapter_plain(&store, &added.doc_id, "temporary chapter");
+    svc.commit_bot_suggestion(
+        &store,
+        &m.id,
+        "agent-test-1",
+        "Line Editor",
+        "Bot suggestion",
+    )
+    .unwrap()
+    .expect("bot suggestion");
+    let kept: Vec<OutlineEntry> = store
+        .list_sections(&m.id)
+        .unwrap()
+        .into_iter()
+        .filter(|s| s.id != added.id)
+        .map(|s| OutlineEntry {
+            id: s.id,
+            parent_id: s.parent_id,
+            kind: s.kind,
+            title: s.title,
+            doc_id: s.doc_id,
+        })
+        .collect();
+    store.save_outline(&m.id, &kept).unwrap();
+    assert!(store
+        .list_sections(&m.id)
+        .unwrap()
+        .iter()
+        .all(|s| s.id != added.id));
+    svc.commit_review_decision(
+        &store,
+        &m.id,
+        true,
+        "Line Editor",
+        &chapter.title,
+        "author",
+        Some("agent-test-1"),
+        Some("chg-pending"),
+        Some("suggestion_insert"),
+        Some(&chapter.id),
+    )
+    .unwrap();
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let main = repo.head_oid().unwrap().unwrap();
+    assert!(
+        repo.commit_message(&main)
+            .unwrap()
+            .starts_with("Merged bot/"),
+        "accept did not record the bot parent"
+    );
+    let accept = repo.parent_oid(&main).unwrap().unwrap();
+    assert!(repo
+        .commit_message(&accept)
+        .unwrap()
+        .starts_with("Accepted Line Editor"));
+    assert_deleted_chapter_absent(&repo, &main, &added.id);
+    assert_deleted_chapter_absent(&repo, &accept, &added.id);
+    let accept_book = repo.file_bytes(&accept, "book.json").unwrap().unwrap();
+    let head_book = repo.file_bytes(&main, "book.json").unwrap().unwrap();
+    assert_eq!(
+        head_book, accept_book,
+        "merge tree diverged from the accept commit"
+    );
+    let bot = repo
+        .search_ref_tips()
+        .unwrap()
+        .into_iter()
+        .find(|tip| tip.name.starts_with("bot/"))
+        .expect("bot snapshot");
+    let bot_book =
+        String::from_utf8(repo.file_bytes(&bot.oid, "book.json").unwrap().unwrap()).unwrap();
+    assert!(
+        bot_book.contains("Gone Chapter") && bot_book.contains(&added.id),
+        "bot snapshot never copied the chapter: {bot_book}"
+    );
+    let chapter_path = format!("chapters/{}.md", added.id);
+    let yjs_path = format!("yjs/{}.bin", added.id);
+    assert!(repo.file_bytes(&bot.oid, &chapter_path).unwrap().is_some());
+    assert!(repo.file_bytes(&bot.oid, &yjs_path).unwrap().is_some());
+    let work = svc.worktree_path(&m.id);
+    assert!(!work.join(&chapter_path).exists());
+    assert!(!work.join(&yjs_path).exists());
+    assert_accepted_chapter(&chapter_text(&store, &chapter.doc_id), "version-one");
+
+    let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
+    let unpacked = tempfile::tempdir().unwrap();
+    unpack_draft(Path::new(&draft_path), unpacked.path()).unwrap();
+    let packed = DraftRepo::open_working(&unpacked.path().join("repo.git")).unwrap();
+    let packed_head = packed.head_oid().unwrap().unwrap();
+    assert_eq!(packed_head, main, "packed file is not the merge commit");
+    assert_deleted_chapter_absent(&packed, &packed_head, &added.id);
+
+    let opened = svc
+        .open_draft_path(&store, &draft_path, false)
+        .unwrap()
+        .unwrap();
+    assert!(
+        opened.recovery.is_none(),
+        "reopen asked to save a newer copy"
+    );
+    assert_eq!(opened.manuscript_id, m.id);
+    assert!(store
+        .list_sections(&m.id)
+        .unwrap()
+        .iter()
+        .all(|s| s.id != added.id && s.title != "Gone Chapter"));
+    assert_accepted_chapter(&chapter_text(&store, &chapter.doc_id), "version-one");
+}
+
+fn assert_deleted_chapter_absent(repo: &DraftRepo, oid: &str, section_id: &str) {
+    let book = String::from_utf8(repo.file_bytes(oid, "book.json").unwrap().unwrap()).unwrap();
+    assert!(
+        !book.contains(section_id) && !book.contains("Gone Chapter"),
+        "deleted chapter is back in {oid} book.json: {book}"
+    );
+    assert!(repo
+        .file_bytes(oid, &format!("chapters/{section_id}.md"))
+        .unwrap()
+        .is_none());
+    assert!(repo
+        .file_bytes(oid, &format!("yjs/{section_id}.bin"))
+        .unwrap()
+        .is_none());
 }
 
 #[test]

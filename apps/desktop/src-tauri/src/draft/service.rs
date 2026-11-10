@@ -447,7 +447,8 @@ impl DraftService {
                         .map_err(|e| format!("Couldn't merge bot changes: {e}"))?;
                     self.end_bot_session(manuscript_id, bot_agent_id, bot_name);
                     // commit_now_inner packed the accept commit, before this merge.
-                    // Pack the merge, which still has the accepted chapter.
+                    // The merge keeps that tree, so pack the commit that still
+                    // has the accepted chapter and omits a path the writer removed.
                     self.pack_if_linked_inner(store, manuscript_id)?;
                 }
             }
