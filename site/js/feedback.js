@@ -217,7 +217,7 @@ function showSuccessPanel(dialog) {
   }
 }
 
-/** Pixels the software keyboard covers, so sticky actions can sit above it. */
+/** Pixels the software keyboard covers, so the dialog card can sit in the visible gap. */
 export function feedbackKeyboardInsetPx(innerHeight, viewport) {
   if (!viewport || typeof viewport.height !== 'number') return 0;
   const offsetTop = typeof viewport.offsetTop === 'number' ? viewport.offsetTop : 0;

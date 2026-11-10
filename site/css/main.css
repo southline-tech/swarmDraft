@@ -547,8 +547,7 @@ a:hover {
   gap: var(--ct-space-3);
   justify-content: flex-end;
   position: sticky;
-  /* Sticky bottom tracks the scrollport. Padding the card left this row under the keyboard. */
-  bottom: var(--feedback-keyboard-inset, 0px);
+  bottom: 0;
   margin-top: var(--ct-space-2);
   padding-top: var(--ct-space-3);
   background: var(--ct-surface);
@@ -618,6 +617,10 @@ a:hover {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
+  /* The inset is the covered band. Margin lifts the whole card; max-height caps it
+     to the visual viewport. The dialog's transform stays the open scale animation. */
+  margin-bottom: var(--feedback-keyboard-inset, 0px);
+  max-height: calc(100vh - var(--feedback-keyboard-inset, 0px));
   padding: var(--ct-space-6);
   padding-bottom: calc(var(--ct-space-6) + env(safe-area-inset-bottom, 0px));
   background: var(--ct-surface);
@@ -795,7 +798,8 @@ a:hover {
 
   .feedback-dialog__card {
     border-radius: var(--ct-radius-lg) var(--ct-radius-lg) 0 0;
-    max-height: 92vh;
+    margin-bottom: var(--feedback-keyboard-inset, 0px);
+    max-height: min(92vh, calc(100vh - var(--feedback-keyboard-inset, 0px)));
     overflow: auto;
   }
 

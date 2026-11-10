@@ -83,6 +83,7 @@ import {
   seedProfileForTracking,
   type Profile,
 } from './settings/prefs';
+import { useBookTracking } from './settings/tracking-state';
 import {
   ariaKeyshortcuts,
   isTrackChangesChord,
@@ -305,7 +306,7 @@ const spellPrefs = ref(loadSpellPrefs());
 const shortcutsOpen = shallowRef(Boolean(import.meta.env.DEV && props.initialShortcutsOpen));
 const focusMode = shallowRef(Boolean(import.meta.env.DEV && props.initialFocusMode));
 const prefStore = () => props.storage ?? globalThis.localStorage;
-/** Track changes (#57): persisted on/off; first enable may show the tc3 name prompt. */
+/** Track changes (#57): one book-wide on/off. The lead persists it and may show the tc3 name prompt. */
 const storedTracking = loadTracking(prefStore());
 /**
  * Dev evidence (`initialTracking`) may show the toggle on for screenshots.
@@ -313,9 +314,12 @@ const storedTracking = loadTracking(prefStore());
  * while a later user toggle still writes the preference.
  */
 const trackingForcedOn = Boolean(import.meta.env.DEV && props.initialTracking) && !storedTracking;
-const tracking = shallowRef(storedTracking);
-let skipForcedTrackingPersist = trackingForcedOn;
+const tracking = useBookTracking(storedTracking);
+let skipForcedTrackingPersist = false;
 watch(tracking, (on) => {
+  // Background sections share the flag. Only the lead writes the preference,
+  // so an evidence force-on is not saved by a slice mounted beside it.
+  if (props.sliceMode) return;
   if (skipForcedTrackingPersist && on) {
     skipForcedTrackingPersist = false;
     return;
@@ -323,7 +327,10 @@ watch(tracking, (on) => {
   skipForcedTrackingPersist = false;
   saveTracking(on, prefStore());
 });
-if (trackingForcedOn) tracking.value = true;
+if (trackingForcedOn && !tracking.value) {
+  skipForcedTrackingPersist = true;
+  tracking.value = true;
+}
 const writerProfile = shallowRef<Profile>(loadProfile(prefStore()));
 const namePromptOpen = shallowRef(false);
 const nameColorPromptOpen = shallowRef(false);

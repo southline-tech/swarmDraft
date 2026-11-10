@@ -403,15 +403,33 @@ describe('UI shells (Part of #36)', () => {
     await flushPromises();
     // Caret in the other section still toggles the lead, once, so the toolbar and the
     // saved preference stay together. A second editor must not flip them back.
-    expect(toggle.attributes('aria-pressed')).toBe('true');
+    expect(toggle.attributes('aria-pressed')).toBe(String(loadTracking()));
     expect(loadTracking()).toBe(true);
     expect(lead.find('[data-test="name-prompt"]').exists()).toBe(true);
     expect(slice.find('[data-test="name-prompt"]').exists()).toBe(false);
+
+    const sliceEditor = (
+      slice.get('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+    ).editor;
+    sliceEditor.view.dispatch(
+      sliceEditor.state.tr.insertText('!', sliceEditor.state.doc.content.size - 1),
+    );
+    await flushPromises();
+    expect(
+      listSuggestions(sliceEditor.getJSON() as never).some(
+        (item) => item.kind === 'suggestion_insert' && item.text === '!',
+      ),
+    ).toBe(true);
 
     chord(slice.get('.tiptap').element, true);
     await flushPromises();
     expect(toggle.attributes('aria-pressed')).toBe('true');
     expect(loadTracking()).toBe(true);
+    expect(
+      listSuggestions(sliceEditor.getJSON() as never).some(
+        (item) => item.kind === 'suggestion_insert' && item.text === '!',
+      ),
+    ).toBe(true);
 
     chord(toggle.element);
     await flushPromises();
@@ -429,6 +447,9 @@ describe('UI shells (Part of #36)', () => {
     await flushPromises();
     expect(slice.find('[data-test="name-prompt"]').exists()).toBe(false);
     expect(document.querySelectorAll('[data-test="name-prompt"]').length).toBe(0);
+    expect(slice.get('[data-test="track-changes-toggle"]').attributes('aria-pressed')).toBe(
+      String(loadTracking()),
+    );
 
     lead.unmount();
     slice.unmount();
