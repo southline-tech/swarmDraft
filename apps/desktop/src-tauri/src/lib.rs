@@ -16,6 +16,7 @@ pub mod dictionary;
 pub mod draft;
 pub mod export;
 pub mod feedback;
+pub mod links;
 pub mod manuscripts;
 pub mod mcp;
 pub mod menu;
@@ -31,6 +32,7 @@ use serde::Serialize;
 use std::sync::Arc;
 use tauri::Emitter;
 use tauri::Manager;
+use tauri_plugin_deep_link::DeepLinkExt;
 
 use dictionary::{
     spell_dictionary_add, spell_dictionary_ignore, spell_dictionary_list, spell_dictionary_remove,
@@ -1332,6 +1334,45 @@ fn draft_take_launch_path(
     Some(first)
 }
 
+/// Cold-start change link, returned once. Later opens arrive on `open-change-link`
+/// and `deep-link://new-url`.
+#[tauri::command]
+fn links_take_launch_url(
+    app: tauri::AppHandle,
+    gate: tauri::State<'_, links::LaunchGate>,
+) -> Option<String> {
+    let url = launch_change_url(&app)?;
+    gate.take(url)
+}
+
+fn launch_change_url(app: &tauri::AppHandle) -> Option<String> {
+    if let Ok(Some(urls)) = app.deep_link().get_current() {
+        for url in urls {
+            let text = url.to_string();
+            if links::parse_change_link(&text).is_some() {
+                return Some(text);
+            }
+        }
+    }
+    links::first_change_link(&std::env::args().collect::<Vec<_>>())
+}
+
+#[tauri::command]
+async fn links_resolve(
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+    change_id: String,
+) -> Result<links::LinkResolution, String> {
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        links::resolve_open_link(&drafts, &store, &manuscript_id, &change_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 fn draft_author_name(store: &storage::Store) -> String {
     store
         .user_display_name()
@@ -1346,10 +1387,14 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             focus_main_window(app);
             if let Some(path) = draft_path_from_argv(&argv) {
                 platform::deliver_opened_draft(app, path);
+            }
+            if let Some(url) = links::first_change_link(&argv) {
+                let _ = app.emit("open-change-link", url);
             }
         }));
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -1413,6 +1458,11 @@ pub fn run() {
                 let _ = launch_draft.offer(path);
             }
             app.manage(launch_draft);
+            app.manage(links::LaunchGate::default());
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            if let Err(e) = app.deep_link().register_all() {
+                eprintln!("swarmDraft: deep link scheme not registered: {e}");
+            }
             // macOS: App / File / Edit / Window. Edit supplies copy and paste. No-op elsewhere.
             menu::install(app.handle())?;
             app.manage(export::PandocDownloadState::default());
@@ -1543,7 +1593,9 @@ pub fn run() {
             draft_begin_session,
             draft_end_session,
             draft_abandon_session,
-            draft_resolve_change
+            draft_resolve_change,
+            links_take_launch_url,
+            links_resolve
         ])
         .build(tauri::generate_context!())
         .expect("error while building swarmDraft")
