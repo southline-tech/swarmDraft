@@ -1485,6 +1485,21 @@ fn unmerged_bot_omit(repo: &DraftRepo) -> Result<sync::SyncOmit, String> {
     let Some(main) = repo.head_oid().map_err(|e| e.to_string())? else {
         return Ok(omit);
     };
+    // A later commit on another open branch snapshots the whole cache, so it
+    // copies a comment and a decision that already merged. Those stay on main.
+    // This pass only withholds a row the open branch introduced that main lacks.
+    let main_decided: std::collections::HashSet<String> = changes::changes_in_commit(repo, &main)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|entry| entry.status == "accepted" || entry.status == "rejected")
+        .map(|entry| entry.id)
+        .collect();
+    let main_comments: std::collections::HashSet<String> =
+        sync::comment_rows_in_commit(repo, &main)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|row| row.comment.id)
+            .collect();
     for tip in repo.search_ref_tips().map_err(|e| e.to_string())? {
         if !tip.name.starts_with("bot/") {
             continue;
@@ -1509,12 +1524,18 @@ fn unmerged_bot_omit(repo: &DraftRepo) -> Result<sync::SyncOmit, String> {
             if entry.author_kind != "agent" || base_ids.contains(&entry.id) {
                 continue;
             }
+            if main_decided.contains(&entry.id) {
+                continue;
+            }
             omit.change_status
                 .insert(entry.id.clone(), entry.status.clone());
             omit.change_ids.insert(entry.id);
         }
         for row in sync::comment_rows_in_commit(repo, &tip.oid).map_err(|e| e.to_string())? {
             if row.comment.author.kind != "agent" || base_comments.contains(&row.comment.id) {
+                continue;
+            }
+            if main_comments.contains(&row.comment.id) {
                 continue;
             }
             omit.comment_ids.insert(row.comment.id);

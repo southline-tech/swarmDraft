@@ -86,6 +86,7 @@ Run this consolidated pass in order; do not hand off until every line that appli
 
 Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
 
+- 2026-11-10 · #344 · PR #345 · a later commit from another bot copied a comment that had already merged, and the next checkpoint deleted it from main, so a resolve was gone after rebuild · a checkpoint only omits a comment or a decision this open branch introduced that main does not already have
 - 2026-11-10 · #344 · PR #345 · accepting a suggestion before any checkpoint failed because main was unborn, and a history link read the decision only on main HEAD · the first checkpoint is written before the bot branch is created, and Decided-By is read from that branch or from a merge parent
 - 2026-11-10 · #344 · PR #345 · resolving a bot comment, or replying so a resolved one reopens, stayed off the bot branch until the next decision · the save that records the resolve or the reply writes that `resolvedAt` onto the open bot branch
 - 2026-11-10 · #344 · PR #345 · merging the bot branch replaced a comment thread with the bot snapshot and dropped a reply that was already on main · the merge keeps every human row and tombstone on main and adds the bot's rows

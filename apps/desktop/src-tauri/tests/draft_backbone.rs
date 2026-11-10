@@ -3443,6 +3443,176 @@ fn resolving_a_bot_comment_stays_resolved_after_reopen() {
     );
 }
 
+/// Bot B's branch exists first. Bot A's comment merges onto main. B commits again
+/// and the snapshot copies that comment. The next checkpoint has to leave it on
+/// main, and a resolve has to survive deleting the database.
+#[test]
+fn merged_comment_stays_resolved_after_another_bot_commits() {
+    let (dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "two-bots.draft");
+    set_chapter_plain(&store, &chapter.doc_id, "chapter start");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap()
+    .expect("baseline");
+
+    set_chapter_authored_marks(
+        &store,
+        &chapter.doc_id,
+        &[("chg-b", "still open", "agent:b-bot")],
+    );
+    svc.commit_bot_suggestion(&store, &m.id, "b-bot", "Copy Editor", "Bot B suggestion")
+        .unwrap()
+        .expect("bot B branch");
+    assert!(svc
+        .bot_branch_exists(&store, &m.id, "b-bot", "Copy Editor")
+        .unwrap());
+
+    set_chapter_authored_marks(
+        &store,
+        &chapter.doc_id,
+        &[("chg-a", "from a", "agent:a-bot")],
+    );
+    let mut comment = sample_comment("c-a", &chapter.id, "Note from A.");
+    comment.author.kind = "agent".into();
+    comment.author.id = "a-bot".into();
+    comment.author.name = "Line Editor".into();
+    store.insert_comment(&m.id, &comment).unwrap();
+    svc.commit_bot_suggestion(&store, &m.id, "a-bot", "Line Editor", "Bot A comment")
+        .unwrap()
+        .expect("bot A comment");
+    set_chapter_plain(&store, &chapter.doc_id, "from a");
+    svc.commit_review_decision(
+        &store,
+        &m.id,
+        true,
+        "Line Editor",
+        &chapter.title,
+        "author",
+        Some("a-bot"),
+        Some("chg-a"),
+        Some("suggestion_insert"),
+        Some(&chapter.id),
+    )
+    .unwrap();
+    assert!(svc
+        .bot_branch_exists(&store, &m.id, "a-bot", "Line Editor")
+        .is_err());
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let main = repo.head_oid().unwrap().unwrap();
+    assert!(
+        repo.file_bytes(&main, "comments/c-a.json")
+            .unwrap()
+            .is_some(),
+        "A's merge did not put the comment on main"
+    );
+    let changes = String::from_utf8(
+        repo.file_bytes(&main, "review/changes.json")
+            .unwrap()
+            .expect("decisions"),
+    )
+    .unwrap();
+    assert_eq!(
+        change_status(&changes, "chg-a").as_deref(),
+        Some("accepted")
+    );
+    drop(repo);
+
+    // Put the suggestion mark back so the other bot's snapshot records this
+    // decision as the agent's. The checkpoint has to keep it on main anyway.
+    set_chapter_authored_marks(
+        &store,
+        &chapter.doc_id,
+        &[("chg-a", "from a", "agent:a-bot")],
+    );
+    svc.commit_bot_suggestion(&store, &m.id, "b-bot", "Copy Editor", "Bot B again")
+        .unwrap()
+        .expect("bot B copied the cache");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Checkpoint",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap()
+    .expect("checkpoint");
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let main = repo.head_oid().unwrap().unwrap();
+    let comment_file = repo
+        .file_bytes(&main, "comments/c-a.json")
+        .unwrap()
+        .expect("checkpoint deleted the merged comment");
+    assert!(
+        String::from_utf8_lossy(&comment_file).contains("Note from A."),
+        "checkpoint rewrote the merged comment"
+    );
+    let changes = String::from_utf8(
+        repo.file_bytes(&main, "review/changes.json")
+            .unwrap()
+            .expect("decisions"),
+    )
+    .unwrap();
+    assert_eq!(
+        change_status(&changes, "chg-a").as_deref(),
+        Some("accepted"),
+        "checkpoint dropped the decision already on main: {changes}"
+    );
+    drop(repo);
+
+    store
+        .set_comment_thread_resolved(&m.id, &chapter.id, "c-a", true)
+        .unwrap();
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Resolved comment",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap()
+    .expect("resolve");
+    let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
+    let data = dir.path().to_path_buf();
+    drop(svc);
+    drop(store);
+    drop_database(&data);
+    let store = Store::open(&data).unwrap();
+    let svc = DraftService::new(data, "0.2.1".into());
+    let opened = svc
+        .open_draft_path(&store, &draft_path, true)
+        .unwrap()
+        .unwrap();
+    let comment = store
+        .comments_for_manuscript(&opened.manuscript_id)
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id == "c-a")
+        .expect("merged comment");
+    assert!(
+        comment.resolved_at.is_some(),
+        "reopen showed the resolved comment as open"
+    );
+    let decisions = store
+        .review_decisions_for_manuscript(&opened.manuscript_id)
+        .unwrap();
+    let rows: Vec<_> = decisions.values().flatten().collect();
+    assert!(
+        rows.iter()
+            .any(|row| row.id == "chg-a" && row.status == "accepted"),
+        "reopen lost the decision already on main: {rows:?}"
+    );
+}
+
 /// A reject writes `resolvedAt` on the bot branch. A reply that reopens the thread
 /// has to clear it there before the other suggestion is decided, or a rebuild
 /// shows the comment resolved again.
