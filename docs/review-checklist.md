@@ -86,6 +86,13 @@ Run this consolidated pass in order; do not hand off until every line that appli
 
 Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
 
+- 2026-11-09 · #116 · PR #341 · opening or restoring a `.draft` replaced comment rows and dropped any id the tree did not have · import uses `insert_comment_if_missing` on open and restore; local rows, including a bot comment only on `bot/*`, stay and are not duplicated
+- 2026-11-09 · #116 · PR #341 · review decision `kind` was accepted and discarded · the commit message stores it as a `Kind` trailer when it is non-empty
+- 2026-11-09 · #116 · PR #341 · a cache miss walked change history while holding the draft op lock · the walk runs after the lock is released; the cache check stays inside it
+- 2026-11-09 · #116 · PR #341 · Accept all committed only the last change id · `onSectionDecisions` commits every new id; an accept-all test emits two ids and expects two review commits
+- 2026-11-09 · #116 · PR #341 · change lookup treated the first `main` snapshot as the introduction and cached only HEAD · introducing commit is the earliest add, including `bot/*`; cache key includes bot and session tips; each commit is walked once
+- 2026-11-09 · #116 · PR #341 · comment hydrate inserted missing ids and left local rows, and a reply inside the idle window never committed · archives with `comments/` replace local rows; legacy archives without that directory keep them; bot comments commit on the bot branch; reply and resolve commit immediately
+- 2026-11-09 · #116 · PR #341 · a failed session end cleared the session and only logged the error · drop the session only after the commit succeeds; close surfaces the failure on the save banner
 - 2026-11-05 · #332 · PR #335 · release note named a competitor in Word icon copy · `docs/releases/v0.2.1.md` uses “not a trademarked product logo” (matches `icons.ts` comment); no competitor names in docs
 - 2026-11-05 · #314 · PR #316 · NSIS sidebar 72px mark used simplified small SVG · `generate.py` sidebar uses `render(72)` (full 5-hex); header stays `render_small(36)`
 - 2026-11-04 · #310 · PR #318 · install failure reused check-for-updates copy · `install-failed` manual message + `onInstallFailed`; distinct install copy in `manualMessageCopy`

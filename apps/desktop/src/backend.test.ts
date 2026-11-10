@@ -26,6 +26,62 @@ describe('sectionReviewMeta browser path (#60)', () => {
   });
 });
 
+describe('draft backbone commands (#116)', () => {
+  it('returns null when not in Tauri', async () => {
+    const { draftResolveChange, draftReviewCommit, draftBeginSession } = await import('./backend');
+    await expect(draftResolveChange('m', 'c')).resolves.toBeNull();
+    await expect(
+      draftReviewCommit({
+        manuscriptId: 'm',
+        accepted: true,
+        botName: 'Bot',
+        chapterTitle: 'One',
+        suggestionId: 'chg-1',
+        kind: 'suggestion_insert',
+        sectionId: 'sec',
+      }),
+    ).resolves.toBeNull();
+    await expect(draftBeginSession('m')).resolves.toBeNull();
+  });
+
+  it('invokes draft_resolve_change and draft_review_commit when in Tauri', async () => {
+    vi.resetModules();
+    const invoke = vi.fn(async (cmd: string) =>
+      cmd === 'draft_resolve_change' ? { result: 'notFound', changeId: 'missing' } : null,
+    );
+    vi.doMock('@tauri-apps/api/core', () => ({
+      isTauri: () => true,
+      invoke,
+    }));
+    const { draftResolveChange, draftReviewCommit } = await import('./backend');
+    await draftResolveChange('m1', 'chg-1');
+    await draftReviewCommit({
+      manuscriptId: 'm1',
+      accepted: false,
+      botName: 'Bot',
+      chapterTitle: 'One',
+      suggestionId: 'chg-1',
+      kind: 'suggestion_delete',
+      sectionId: 'sec-1',
+    });
+    expect(invoke).toHaveBeenCalledWith('draft_resolve_change', {
+      manuscriptId: 'm1',
+      changeId: 'chg-1',
+    });
+    expect(invoke).toHaveBeenCalledWith('draft_review_commit', {
+      manuscriptId: 'm1',
+      accepted: false,
+      botName: 'Bot',
+      chapterTitle: 'One',
+      suggestionId: 'chg-1',
+      kind: 'suggestion_delete',
+      sectionId: 'sec-1',
+    });
+    vi.doUnmock('@tauri-apps/api/core');
+    vi.resetModules();
+  });
+});
+
 describe('draftTakeLaunchPath (#302)', () => {
   it('returns null when not in Tauri', async () => {
     const { draftTakeLaunchPath } = await import('./backend');

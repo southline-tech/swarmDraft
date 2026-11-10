@@ -40,6 +40,9 @@ import {
   draftSave,
   draftSaveAs,
   draftCheckpoint,
+  draftAbandonSession,
+  draftBeginSession,
+  draftEndSession,
   draftReviewCommit,
   type OpenDraftResult,
 } from './backend';
@@ -389,6 +392,41 @@ const persistHooks = {
     }
   },
 };
+function checkpointOpenDraft(immediate = false) {
+  const id = session.value?.id;
+  if (!id || !isTauri()) return;
+  const title =
+    session.value?.outline.value.find((s) => s.id === selectedId.value)?.title ?? 'chapter';
+  void draftCheckpoint(id, `Edited ${title}`, immediate).catch((err) => {
+    console.error('Draft checkpoint failed', err);
+    saveFailure.value = saveFailed(saveFailure.value, err);
+  });
+}
+function failDraftSessionEnd(err: unknown) {
+  console.error('Draft session end failed', err);
+  saveFailure.value = saveFailed(saveFailure.value, err);
+}
+async function settleDraftSession(prev: ManuscriptSession | null, nextId: string) {
+  const switchingBook = !!prev && prev.id !== nextId;
+  if (prev) {
+    try {
+      await prev.close();
+    } catch (err) {
+      console.error('Edits not saved yet; retrying', err);
+      return;
+    }
+  }
+  if (!isTauri()) return;
+  // A reload of the same book keeps the editing session. Ending it would add another commit.
+  if (switchingBook) {
+    await draftEndSession(prev.id).catch((err) => failDraftSessionEnd(err));
+  }
+  if (!prev || switchingBook) {
+    await draftBeginSession(nextId).catch((err) =>
+      console.error('Draft session start failed', err),
+    );
+  }
+}
 const manuscriptSave = computed((): ManuscriptSaveView | undefined => {
   if (!session.value || choosingBook.value) return undefined;
   if (saveError.value) {
@@ -621,20 +659,31 @@ function onSectionDecisions(
   decisionRecordsBySection.value = { ...decisionRecordsBySection.value, [sectionId]: records };
   void saveSectionReviewDecisions(session.value.id, sectionId, records)
     .then(async () => {
-      if (!isTauri() || records.length <= prev.length) return;
-      const latest = records[records.length - 1];
-      if (!latest) return;
+      if (!isTauri()) return;
+      const prevIds = new Set(prev.map((row) => row.id));
+      const fresh = records.filter((row) => !prevIds.has(row.id));
+      if (fresh.length === 0) return;
+      const manuscriptId = session.value?.id;
+      if (!manuscriptId) return;
       await session.value?.flush();
       const chapter =
         session.value?.outline.value.find((s) => s.id === sectionId)?.title ?? 'chapter';
       const botName = suggestionAuthor || 'editor';
-      await draftReviewCommit({
-        manuscriptId: session.value!.id,
-        accepted: latest.status === 'accepted',
-        botName,
-        chapterTitle: chapter,
-        botAgentId: agentIdFromSuggestionAuthor(suggestionAuthor),
-      }).catch((err) => console.error('Draft review commit failed', err));
+      for (const latest of fresh) {
+        await draftReviewCommit({
+          manuscriptId,
+          accepted: latest.status === 'accepted',
+          botName,
+          chapterTitle: chapter,
+          botAgentId: agentIdFromSuggestionAuthor(suggestionAuthor),
+          suggestionId: latest.id,
+          kind: latest.kind,
+          sectionId,
+        }).catch((err) => {
+          console.error('Draft review commit failed', err);
+          saveFailure.value = saveFailed(saveFailure.value, err);
+        });
+      }
     })
     .catch((err) => {
       console.error('Review decision save failed; next change will retry', err);
@@ -647,6 +696,7 @@ async function onCommentReply(sectionId: string, threadId: string, body: string)
   try {
     await sectionCommentReply(session.value.id, sectionId, threadId, body, profile.name, 'local');
     commentMetaVersion.value++;
+    checkpointOpenDraft(true);
   } catch (err) {
     console.error('Comment reply save failed', err);
     saveFailure.value = saveFailed(saveFailure.value, err);
@@ -657,6 +707,7 @@ async function onCommentResolve(sectionId: string, threadId: string, resolved: b
   try {
     await sectionCommentResolve(session.value.id, sectionId, threadId, resolved);
     commentMetaVersion.value++;
+    checkpointOpenDraft(true);
   } catch (err) {
     console.error('Comment resolve save failed', err);
     saveFailure.value = saveFailed(saveFailure.value, err);
@@ -1292,7 +1343,11 @@ onMounted(async () => {
   }
   stopCloseFlush = await flushOnClose(async () => {
     persistReadingPositionForClose();
+    const id = session.value?.id;
     await (session.value?.flush() ?? Promise.resolve());
+    if (id && isTauri()) {
+      await draftEndSession(id).catch((err) => failDraftSessionEnd(err));
+    }
   });
   if (isTauri()) {
     appUpdater = createAppUpdater(defaultUpdaterDeps(), (s) => {
@@ -1383,7 +1438,15 @@ onBeforeUnmount(() => {
   stopCloseFlush();
   stopOpeningProgress();
   clearTimeout(openingRevealTimer);
-  closeQuietly(session.value);
+  const id = session.value?.id;
+  void session.value
+    ?.close()
+    .catch((err: unknown) => console.error('Edits not saved yet; retrying', err))
+    .finally(() => {
+      if (id && isTauri()) {
+        void draftEndSession(id).catch((err) => failDraftSessionEnd(err));
+      }
+    });
 });
 
 function syncWindowTitle(title: string) {
@@ -1396,6 +1459,7 @@ function syncWindowTitle(title: string) {
 
 /** Close the open manuscript, if any, and clear the selection. */
 function closeSession() {
+  const id = session.value?.id;
   // Storage was replaced: drop pending edits rather than write them into the restored data.
   void session.value?.close({ discard: true });
   void notesSession.value?.close({ discard: true });
@@ -1409,12 +1473,10 @@ function closeSession() {
   selectedId.value = undefined;
   choosingBook.value = false;
   syncWindowTitle(PRODUCT_NAME);
+  if (id && isTauri()) {
+    void draftAbandonSession(id).catch((err) => console.error('Draft session end failed', err));
+  }
 }
-
-/** Open an imported manuscript (exposed for tests and the Tauri open-file flow). */
-/** A rejected close keeps that session open and retrying; just log it. */
-const closeQuietly = (s?: ManuscriptSession | null) =>
-  void s?.close().catch((err: unknown) => console.error('Edits not saved yet; retrying', err));
 
 async function onHistoryBeforeRestore() {
   if (!session.value) return;
@@ -1450,11 +1512,14 @@ async function reloadOpenManuscript() {
   }
 }
 
+/** Open an imported manuscript (exposed for tests and the Tauri open-file flow). */
 function open(next: ManuscriptSession) {
-  if (session.value !== next) {
-    closeQuietly(session.value);
+  const switching = session.value !== next;
+  const prev = switching ? session.value : null;
+  if (switching) {
     // Author color slots are per manuscript: numbering restarts for each book opened (#72).
     resetCollabSlots();
+    void settleDraftSession(prev, next.id);
   }
   // A toast from an earlier book must never describe this one; callers re-show it on success.
   dismissToast();

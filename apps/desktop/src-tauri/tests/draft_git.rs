@@ -67,6 +67,12 @@ fn restore_creates_new_commit_without_deleting_history() {
     svc.commit_now(&store, &m.id, "First", "Author", "author@swarmdraft.local")
         .unwrap_or_else(|e| panic!("first commit: {e}"));
     let first = svc.history(&store, &m.id, 1, 0).unwrap()[0].oid.clone();
+    let chapter = stored
+        .sections
+        .iter()
+        .find(|s| s.section.kind == "chapter")
+        .unwrap();
+    set_chapter_plain(&store, &chapter.section.doc_id, "second-edit");
     svc.commit_now(&store, &m.id, "Second", "Author", "author@swarmdraft.local")
         .unwrap();
     let new_oid = svc.restore(&store, &m.id, &first, "Author").unwrap();
@@ -192,6 +198,9 @@ fn review_commit_uses_bot_as_git_committer() {
         "New chapter",
         "Author Name",
         None,
+        None,
+        None,
+        None,
     )
     .unwrap();
     let entry = svc
@@ -285,6 +294,9 @@ fn bot_branch_exists_before_accept_and_merges_after() {
         "Chapter",
         "Author",
         Some(bot_id),
+        None,
+        None,
+        None,
     )
     .unwrap();
     let history = svc.history(&store, &m.id, 10, 0).unwrap();
