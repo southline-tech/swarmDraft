@@ -10,12 +10,15 @@ use yrs::{Array, Doc, Map, MapPrelim, ReadTxn, StateVector, Transact};
 
 use crate::agent_access::{ACCESS_MODE_ALL, ACCESS_MODE_SELECTED};
 use crate::content::{self, decode};
-use crate::manuscripts::{Comment, OutlineEntry, DEFAULT_NUMBERING_STYLE, SECTION_KINDS};
+use crate::manuscripts::{
+    Comment, CommentTombstone, OutlineEntry, ReviewDecisionRecord, DEFAULT_NUMBERING_STYLE,
+    SECTION_KINDS,
+};
 use crate::notes;
 use crate::storage::{StorageError, Store};
 
-use super::changes;
-use super::repo::DraftRepoError;
+use super::changes::{self, map_kind};
+use super::repo::{DraftRepo, DraftRepoError};
 use super::sessions::safe_file_id;
 
 #[derive(Debug, Deserialize)]
@@ -102,6 +105,7 @@ pub fn sync_worktree_to_store(
     }
     import_notes_from_worktree(store, manuscript_id, worktree)?;
     import_comments_from_worktree(store, manuscript_id, worktree)?;
+    import_decisions_from_worktree(store, manuscript_id, worktree)?;
     Ok(())
 }
 
@@ -206,6 +210,13 @@ struct CommentRowFile {
     author_name: String,
     created_at: String,
     resolved_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    deleted_at: Option<String>,
+}
+
+pub(crate) struct GitComment {
+    pub comment: Comment,
+    pub deleted_at: Option<String>,
 }
 
 fn sync_comments(
@@ -216,26 +227,53 @@ fn sync_comments(
     let comments = store
         .comments_for_manuscript(manuscript_id)
         .map_err(storage_err)?;
-    let mut groups: BTreeMap<String, Vec<Comment>> = BTreeMap::new();
+    let tombstones = store
+        .comment_tombstones(manuscript_id)
+        .map_err(storage_err)?;
+    let mut groups: BTreeMap<String, Vec<GitComment>> = BTreeMap::new();
     for comment in comments {
-        let key = comment
-            .thread_id
-            .clone()
-            .filter(|id| safe_file_id(id))
-            .unwrap_or_else(|| comment.id.clone());
-        if !safe_file_id(&key) {
-            continue;
-        }
-        groups.entry(key).or_default().push(comment);
+        push_thread_row(
+            &mut groups,
+            GitComment {
+                comment,
+                deleted_at: None,
+            },
+        );
+    }
+    for tomb in tombstones {
+        let deleted_at = tomb.deleted_at.clone();
+        push_thread_row(
+            &mut groups,
+            GitComment {
+                comment: tomb.comment,
+                deleted_at: Some(deleted_at),
+            },
+        );
     }
     let dir = worktree.join("comments");
     fs::create_dir_all(&dir)?;
-    // Git does not store an empty directory. The placeholder keeps `comments/` in the
-    // tree when a book has no threads, so open and restore can clear local rows.
+    // Git does not store an empty directory. The placeholder keeps `comments/` in the tree.
     write_stable(&dir.join(".keep"), b"")?;
     let mut keep = HashSet::new();
-    for (thread_id, mut rows) in groups {
-        rows.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
+    for (thread_id, rows) in groups {
+        let mut by_id: BTreeMap<String, GitComment> = BTreeMap::new();
+        for row in rows {
+            let id = row.comment.id.clone();
+            let tombstone_wins = by_id
+                .get(&id)
+                .map(|prev| prev.deleted_at.is_some())
+                .unwrap_or(false);
+            if !tombstone_wins {
+                by_id.insert(id, row);
+            }
+        }
+        let mut rows: Vec<GitComment> = by_id.into_values().collect();
+        rows.sort_by(|a, b| {
+            a.comment
+                .created_at
+                .cmp(&b.comment.created_at)
+                .then(a.comment.id.cmp(&b.comment.id))
+        });
         let file_name = format!("{thread_id}.json");
         keep.insert(file_name.clone());
         let payload = CommentThreadFile {
@@ -244,6 +282,8 @@ fn sync_comments(
         };
         write_stable(&dir.join(&file_name), &to_pretty(&payload)?)?;
     }
+    // A delete keeps its file (the rows are tombstones). Drop only a thread file that
+    // git no longer lists because the cache has neither a live row nor a tombstone.
     for entry in fs::read_dir(&dir)? {
         let entry = entry?;
         if !entry.file_type()?.is_file() {
@@ -258,47 +298,197 @@ fn sync_comments(
     Ok(())
 }
 
+fn push_thread_row(groups: &mut BTreeMap<String, Vec<GitComment>>, row: GitComment) {
+    let key = row
+        .comment
+        .thread_id
+        .clone()
+        .filter(|id| safe_file_id(id))
+        .unwrap_or_else(|| row.comment.id.clone());
+    if !safe_file_id(&key) {
+        return;
+    }
+    groups.entry(key).or_default().push(row);
+}
+
 fn import_comments_from_worktree(
     store: &Store,
     manuscript_id: &str,
     worktree: &Path,
 ) -> Result<(), DraftRepoError> {
+    let mut live: BTreeMap<String, Comment> = BTreeMap::new();
+    let mut tombs: BTreeMap<String, CommentTombstone> = BTreeMap::new();
     let dir = worktree.join("comments");
-    // A legacy archive has no comments directory. Leave the local rows alone.
-    // An id already stored is left as it is. This never deletes a local row:
-    // a comment not yet packed, one added after a restored commit, or a bot
-    // comment that exists only on a bot branch stays in SQLite.
-    if !dir.is_dir() {
-        return Ok(());
-    }
-    for entry in fs::read_dir(&dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        let bytes = fs::read(&path)?;
-        let Ok(file) = serde_json::from_slice::<CommentThreadFile>(&bytes) else {
-            eprintln!(
-                "draft comment file skipped (unreadable): {}",
-                path.display()
-            );
-            continue;
-        };
-        for row in file.rows {
-            let Some(comment) = row.into_comment(&file.thread_id) else {
+    if dir.is_dir() {
+        for entry in fs::read_dir(&dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
-            };
-            if let Err(e) = store.insert_comment_if_missing(manuscript_id, &comment) {
-                eprintln!("draft comment import skipped {}: {e}", comment.id);
+            }
+            let bytes = fs::read(&path)?;
+            absorb_comment_bytes(&bytes, false, &mut live, &mut tombs);
+        }
+    }
+    // In-flight bot comments are not on main yet. A tombstone already on main wins.
+    if let Ok(repo) = DraftRepo::open_working(worktree) {
+        if let Ok(tips) = repo.search_ref_tips() {
+            for tip in tips {
+                if !tip.name.starts_with("bot/") {
+                    continue;
+                }
+                let Ok(paths) = repo.list_tree_files(&tip.oid, "comments/") else {
+                    continue;
+                };
+                for path in paths {
+                    if !path.ends_with(".json") {
+                        continue;
+                    }
+                    let Ok(Some(bytes)) = repo.file_bytes(&tip.oid, &path) else {
+                        continue;
+                    };
+                    absorb_comment_bytes(&bytes, true, &mut live, &mut tombs);
+                }
             }
         }
     }
+    let live_rows: Vec<Comment> = live.into_values().collect();
+    let tomb_rows: Vec<CommentTombstone> = tombs.into_values().collect();
+    store
+        .reconcile_comments_from_git(manuscript_id, &live_rows, &tomb_rows)
+        .map_err(storage_err)?;
     Ok(())
 }
 
-impl From<Comment> for CommentRowFile {
-    fn from(c: Comment) -> Self {
+fn absorb_comment_bytes(
+    bytes: &[u8],
+    from_bot: bool,
+    live: &mut BTreeMap<String, Comment>,
+    tombs: &mut BTreeMap<String, CommentTombstone>,
+) {
+    let Ok(file) = serde_json::from_slice::<CommentThreadFile>(bytes) else {
+        eprintln!("draft comment file skipped (unreadable)");
+        return;
+    };
+    for row in file.rows {
+        let deleted_at = row.deleted_at.clone();
+        let Some(comment) = row.into_comment(&file.thread_id) else {
+            continue;
+        };
+        let id = comment.id.clone();
+        if let Some(deleted_at) = deleted_at {
+            if from_bot && live.contains_key(&id) {
+                continue;
+            }
+            live.remove(&id);
+            tombs.insert(
+                id,
+                CommentTombstone {
+                    comment,
+                    deleted_at,
+                },
+            );
+            continue;
+        }
+        if tombs.contains_key(&id) {
+            continue;
+        }
+        if from_bot && live.contains_key(&id) {
+            continue;
+        }
+        live.insert(id, comment);
+    }
+}
+
+/// Comment row ids stored on one commit, including tombstones. Empty when the tree has none.
+pub(crate) fn comment_rows_in_commit(
+    repo: &DraftRepo,
+    oid: &str,
+) -> Result<Vec<GitComment>, DraftRepoError> {
+    let mut out = Vec::new();
+    for path in repo.list_tree_files(oid, "comments/")? {
+        if !path.ends_with(".json") {
+            continue;
+        }
+        let Some(bytes) = repo.file_bytes(oid, &path)? else {
+            continue;
+        };
+        let Ok(file) = serde_json::from_slice::<CommentThreadFile>(&bytes) else {
+            continue;
+        };
+        for row in file.rows {
+            let deleted_at = row.deleted_at.clone();
+            let Some(comment) = row.into_comment(&file.thread_id) else {
+                continue;
+            };
+            out.push(GitComment {
+                comment,
+                deleted_at,
+            });
+        }
+    }
+    Ok(out)
+}
+
+fn import_decisions_from_worktree(
+    store: &Store,
+    manuscript_id: &str,
+    worktree: &Path,
+) -> Result<(), DraftRepoError> {
+    let path = worktree.join("review").join("changes.json");
+    if !path.is_file() {
+        store
+            .replace_manuscript_review_decisions(manuscript_id, &[])
+            .map_err(storage_err)?;
+        return Ok(());
+    }
+    let bytes = fs::read(&path)?;
+    let entries = match changes::parse_change_index(&bytes) {
+        Ok(entries) => entries,
+        Err(()) => {
+            eprintln!(
+                "draft change index skipped (unreadable): {}",
+                path.display()
+            );
+            return Ok(());
+        }
+    };
+    let mut records = Vec::new();
+    for entry in entries {
+        if entry.status != "accepted" && entry.status != "rejected" {
+            continue;
+        }
+        if entry.section_id.is_empty() || entry.id.is_empty() {
+            continue;
+        }
+        let decided_by = entry
+            .decided_by
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "author".into());
+        let decided_at = entry
+            .decided_at
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "1970-01-01T00:00:00.000Z".into());
+        records.push((
+            entry.section_id.clone(),
+            ReviewDecisionRecord {
+                kind: map_kind(&entry.kind).into(),
+                id: entry.id,
+                status: entry.status,
+                decided_at,
+                decided_by,
+            },
+        ));
+    }
+    store
+        .replace_manuscript_review_decisions(manuscript_id, &records)
+        .map_err(storage_err)?;
+    Ok(())
+}
+
+impl From<GitComment> for CommentRowFile {
+    fn from(row: GitComment) -> Self {
+        let c = row.comment;
         Self {
             id: c.id,
             section_id: c.section_id,
@@ -311,6 +501,7 @@ impl From<Comment> for CommentRowFile {
             author_name: c.author.name,
             created_at: c.created_at,
             resolved_at: c.resolved_at,
+            deleted_at: row.deleted_at,
         }
     }
 }

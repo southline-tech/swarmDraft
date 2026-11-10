@@ -315,6 +315,8 @@ impl DraftRepo {
         Ok(out)
     }
 
+    /// New commit on the current branch. Manuscript text (`book.json`, `chapters/`, `yjs/`)
+    /// comes from `oid`. Comments, notes, sessions, and the review index stay at HEAD.
     pub fn restore_as_new_commit(
         &self,
         oid: &str,
@@ -323,10 +325,21 @@ impl DraftRepo {
         message: &str,
         advance_branch: Option<&str>,
     ) -> Result<String, DraftRepoError> {
-        let old = self.repo.find_commit(parse_oid(oid)?)?;
-        let tree = old.tree()?;
-        let sig = placeholder_signature(committer_name, committer_email)?;
+        let target = self.repo.find_commit(parse_oid(oid)?)?;
         let parent = self.repo.head()?.peel_to_commit()?;
+        let target_tree = target.tree()?;
+        let parent_tree = parent.tree()?;
+        let mut builder = self.repo.treebuilder(Some(&target_tree))?;
+        for name in ["comments", "notes", "sessions", "review"] {
+            if let Some(entry) = parent_tree.get_name(name) {
+                builder.insert(name, entry.id(), entry.filemode())?;
+            } else if builder.get(name)?.is_some() {
+                builder.remove(name)?;
+            }
+        }
+        let tree_id = builder.write()?;
+        let tree = self.repo.find_tree(tree_id)?;
+        let sig = placeholder_signature(committer_name, committer_email)?;
         let new_oid = self
             .repo
             .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?;
@@ -335,6 +348,29 @@ impl DraftRepo {
             self.point_branch(branch, &new_oid.to_string())?;
         }
         Ok(new_oid.to_string())
+    }
+
+    /// Blob paths under `prefix` (`comments/` includes `comments/thread.json`).
+    pub fn list_tree_files(&self, oid: &str, prefix: &str) -> Result<Vec<String>, DraftRepoError> {
+        let commit = self.repo.find_commit(parse_oid(oid)?)?;
+        let tree = commit.tree()?;
+        let mut out = Vec::new();
+        tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
+            if entry.kind() != Some(git2::ObjectType::Blob) {
+                return git2::TreeWalkResult::Ok;
+            }
+            let name = entry.name().unwrap_or("");
+            let path = if root.is_empty() {
+                name.to_string()
+            } else {
+                format!("{root}{name}")
+            };
+            if path.starts_with(prefix) {
+                out.push(path);
+            }
+            git2::TreeWalkResult::Ok
+        })?;
+        Ok(out)
     }
 
     pub fn checkout_head(&self) -> Result<(), DraftRepoError> {

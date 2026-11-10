@@ -12,7 +12,7 @@ use crate::storage::{StorageError, Store};
 pub(crate) const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 pub const SECTION_KINDS: &[&str] = &["front_matter", "part", "chapter", "back_matter"];
 
-const DECISION_KINDS: &[&str] = &["suggestion_insert", "suggestion_delete"];
+const DECISION_KINDS: &[&str] = &["suggestion_insert", "suggestion_delete", "format_change"];
 const DECISION_STATUS: &[&str] = &["accepted", "rejected"];
 
 /// Human accept/reject of a tracked-change mark (#51). Mirrors `@swarmdraft/editor` `DecisionRecord`.
@@ -1196,50 +1196,6 @@ impl Store {
         })
     }
 
-    /// Insert a comment when its id is not already stored. Existing rows are left as they are.
-    pub fn insert_comment_if_missing(
-        &self,
-        manuscript_id: &str,
-        c: &Comment,
-    ) -> Result<bool, StorageError> {
-        if c.author.kind != "human" && c.author.kind != "agent" {
-            return Err(StorageError::Invalid("bad author kind".into()));
-        }
-        if c.id.is_empty() || c.body.is_empty() {
-            return Err(StorageError::Invalid("empty comment field".into()));
-        }
-        self.with_conn(|conn| {
-            let exists: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM comments WHERE id = ?1",
-                [&c.id],
-                |r| r.get(0),
-            )?;
-            if exists > 0 {
-                return Ok(false);
-            }
-            conn.execute(
-                "INSERT INTO comments (id, manuscript_id, section_id, block_id, quote, body, thread_id,
-                   author_kind, author_id, author_name, created_at, resolved_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-                params![
-                    c.id,
-                    manuscript_id,
-                    c.section_id,
-                    c.block_id,
-                    c.quote,
-                    c.body,
-                    c.thread_id,
-                    c.author.kind,
-                    c.author.id,
-                    c.author.name,
-                    c.created_at,
-                    c.resolved_at
-                ],
-            )?;
-            Ok(true)
-        })
-    }
-
     /// Every unresolved comment in a manuscript, for building a .docx copy (#74).
     pub fn open_comments_for_manuscript(
         &self,
@@ -1457,6 +1413,314 @@ impl Store {
             Ok(())
         })
     }
+
+    /// Record one accept or reject. An existing row keeps its `decided_at` and updates status.
+    pub fn ensure_review_decision(
+        &self,
+        manuscript_id: &str,
+        section_id: &str,
+        record: &ReviewDecisionRecord,
+    ) -> Result<(), StorageError> {
+        validate_decision_record(record)?;
+        self.with_conn(|c| {
+            let tx = c.unchecked_transaction()?;
+            let owner: Option<String> = tx
+                .query_row(
+                    "SELECT manuscript_id FROM sections WHERE id = ?1",
+                    [section_id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            match owner.as_deref() {
+                Some(mid) if mid == manuscript_id => {}
+                Some(_) => {
+                    return Err(StorageError::Invalid(
+                        "section belongs to another manuscript".into(),
+                    ))
+                }
+                None => return Err(StorageError::NotFound(section_id.into())),
+            }
+            tx.execute(
+                "INSERT INTO review_decisions (section_id, kind, suggestion_id, status, decided_at, decided_by)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(section_id, kind, suggestion_id) DO UPDATE SET
+                   status = excluded.status,
+                   decided_by = excluded.decided_by",
+                params![
+                    section_id,
+                    record.kind,
+                    record.id,
+                    record.status,
+                    record.decided_at,
+                    record.decided_by
+                ],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    /// Replace every accept/reject row for a manuscript with `records` (git wins on open).
+    pub fn replace_manuscript_review_decisions(
+        &self,
+        manuscript_id: &str,
+        records: &[(String, ReviewDecisionRecord)],
+    ) -> Result<(), StorageError> {
+        for (_, record) in records {
+            validate_decision_record(record)?;
+        }
+        self.get_manuscript(manuscript_id)?;
+        self.with_conn(|c| {
+            let tx = c.unchecked_transaction()?;
+            tx.execute(
+                "DELETE FROM review_decisions WHERE section_id IN (
+                    SELECT id FROM sections WHERE manuscript_id = ?1
+                 )",
+                [manuscript_id],
+            )?;
+            for (section_id, record) in records {
+                let owner: Option<String> = tx
+                    .query_row(
+                        "SELECT manuscript_id FROM sections WHERE id = ?1",
+                        [section_id],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                match owner.as_deref() {
+                    Some(mid) if mid == manuscript_id => {}
+                    _ => {
+                        return Err(StorageError::Invalid(format!(
+                            "decision section {section_id} is not in this book"
+                        )))
+                    }
+                }
+                tx.execute(
+                    "INSERT INTO review_decisions (section_id, kind, suggestion_id, status, decided_at, decided_by)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        section_id,
+                        record.kind,
+                        record.id,
+                        record.status,
+                        record.decided_at,
+                        record.decided_by
+                    ],
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    /// Insert a comment, or replace the stored row when the id already exists.
+    pub fn upsert_comment(&self, manuscript_id: &str, c: &Comment) -> Result<(), StorageError> {
+        if c.author.kind != "human" && c.author.kind != "agent" {
+            return Err(StorageError::Invalid("bad author kind".into()));
+        }
+        if c.id.is_empty() || c.body.is_empty() {
+            return Err(StorageError::Invalid("empty comment field".into()));
+        }
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO comments (id, manuscript_id, section_id, block_id, quote, body, thread_id,
+                   author_kind, author_id, author_name, created_at, resolved_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                 ON CONFLICT(id) DO UPDATE SET
+                   manuscript_id = excluded.manuscript_id,
+                   section_id = excluded.section_id,
+                   block_id = excluded.block_id,
+                   quote = excluded.quote,
+                   body = excluded.body,
+                   thread_id = excluded.thread_id,
+                   author_kind = excluded.author_kind,
+                   author_id = excluded.author_id,
+                   author_name = excluded.author_name,
+                   created_at = excluded.created_at,
+                   resolved_at = excluded.resolved_at",
+                params![
+                    c.id,
+                    manuscript_id,
+                    c.section_id,
+                    c.block_id,
+                    c.quote,
+                    c.body,
+                    c.thread_id,
+                    c.author.kind,
+                    c.author.id,
+                    c.author.name,
+                    c.created_at,
+                    c.resolved_at
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Delete one comment as a tombstone. The row leaves the live list and stays in git.
+    pub fn tombstone_comment(
+        &self,
+        manuscript_id: &str,
+        comment_id: &str,
+    ) -> Result<(), StorageError> {
+        self.with_conn(|c| {
+            let tx = c.unchecked_transaction()?;
+            let comment = tx
+                .query_row(
+                    &format!(
+                        "SELECT {COMMENT_COLS} FROM comments WHERE id = ?1 AND manuscript_id = ?2"
+                    ),
+                    params![comment_id, manuscript_id],
+                    row_comment,
+                )
+                .optional()?;
+            let Some(comment) = comment else {
+                return Err(StorageError::NotFound(format!("comment {comment_id}")));
+            };
+            let deleted_at: String = tx.query_row(&format!("SELECT {NOW}"), [], |r| r.get(0))?;
+            insert_tombstone_on(&tx, manuscript_id, &comment, &deleted_at)?;
+            tx.execute(
+                "DELETE FROM comments WHERE id = ?1 AND manuscript_id = ?2",
+                params![comment_id, manuscript_id],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    pub fn comment_tombstones(
+        &self,
+        manuscript_id: &str,
+    ) -> Result<Vec<CommentTombstone>, StorageError> {
+        self.with_conn(|c| {
+            let mut st = c.prepare(
+                "SELECT id, section_id, block_id, quote, body, thread_id, author_kind, author_id,
+                        author_name, created_at, resolved_at, deleted_at
+                 FROM comment_tombstones WHERE manuscript_id = ?1
+                 ORDER BY created_at, id",
+            )?;
+            let rows = st
+                .query_map([manuscript_id], row_tombstone)?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Replace this book's live comments and tombstones with the git snapshot.
+    pub fn reconcile_comments_from_git(
+        &self,
+        manuscript_id: &str,
+        live: &[Comment],
+        tombstones: &[CommentTombstone],
+    ) -> Result<(), StorageError> {
+        for comment in live {
+            if comment.author.kind != "human" && comment.author.kind != "agent" {
+                return Err(StorageError::Invalid("bad author kind".into()));
+            }
+            if comment.id.is_empty() || comment.body.is_empty() {
+                return Err(StorageError::Invalid("empty comment field".into()));
+            }
+        }
+        self.get_manuscript(manuscript_id)?;
+        self.with_conn(|c| {
+            let tx = c.unchecked_transaction()?;
+            tx.execute(
+                "DELETE FROM comments WHERE manuscript_id = ?1",
+                [manuscript_id],
+            )?;
+            tx.execute(
+                "DELETE FROM comment_tombstones WHERE manuscript_id = ?1",
+                [manuscript_id],
+            )?;
+            for comment in live {
+                tx.execute(
+                    "INSERT INTO comments (id, manuscript_id, section_id, block_id, quote, body, thread_id,
+                       author_kind, author_id, author_name, created_at, resolved_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                    params![
+                        comment.id,
+                        manuscript_id,
+                        comment.section_id,
+                        comment.block_id,
+                        comment.quote,
+                        comment.body,
+                        comment.thread_id,
+                        comment.author.kind,
+                        comment.author.id,
+                        comment.author.name,
+                        comment.created_at,
+                        comment.resolved_at
+                    ],
+                )?;
+            }
+            for tomb in tombstones {
+                insert_tombstone_on(&tx, manuscript_id, &tomb.comment, &tomb.deleted_at)?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommentTombstone {
+    pub comment: Comment,
+    pub deleted_at: String,
+}
+
+fn row_tombstone(r: &rusqlite::Row<'_>) -> rusqlite::Result<CommentTombstone> {
+    Ok(CommentTombstone {
+        comment: Comment {
+            id: r.get(0)?,
+            section_id: r.get(1)?,
+            block_id: r.get(2)?,
+            quote: r.get(3)?,
+            body: r.get(4)?,
+            thread_id: r.get(5)?,
+            author: Author {
+                kind: r.get(6)?,
+                id: r.get(7)?,
+                name: r.get(8)?,
+            },
+            created_at: r.get(9)?,
+            resolved_at: r.get(10)?,
+        },
+        deleted_at: r.get(11)?,
+    })
+}
+
+fn insert_tombstone_on(
+    conn: &rusqlite::Connection,
+    manuscript_id: &str,
+    comment: &Comment,
+    deleted_at: &str,
+) -> Result<(), StorageError> {
+    let thread_id = comment
+        .thread_id
+        .clone()
+        .filter(|id| !id.is_empty())
+        .unwrap_or_else(|| comment.id.clone());
+    conn.execute(
+        "INSERT OR REPLACE INTO comment_tombstones (
+            id, manuscript_id, thread_id, section_id, block_id, quote, body,
+            author_kind, author_id, author_name, created_at, resolved_at, deleted_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        params![
+            comment.id,
+            manuscript_id,
+            thread_id,
+            comment.section_id,
+            comment.block_id,
+            comment.quote,
+            comment.body,
+            comment.author.kind,
+            comment.author.id,
+            comment.author.name,
+            comment.created_at,
+            comment.resolved_at,
+            deleted_at
+        ],
+    )?;
+    Ok(())
 }
 
 #[derive(Default)]
@@ -1603,13 +1867,22 @@ fn upsert_human_suggestions_from_doc(
     Ok(())
 }
 
+fn suggestion_index_kind(kind: &str) -> &'static str {
+    match kind {
+        "delete" | "suggestion_delete" => "delete",
+        "style" | "format_change" => "style",
+        "replace" => "replace",
+        _ => "insert",
+    }
+}
+
 fn sync_suggestion_index_for_decisions(
     tx: &rusqlite::Transaction<'_>,
     manuscript_id: &str,
     section_id: &str,
     records: &[ReviewDecisionRecord],
 ) -> Result<(), StorageError> {
-    let mut decided: std::collections::HashMap<&str, (&str, &str, &str)> =
+    let mut decided: std::collections::HashMap<&str, (&str, &str, &str, &str)> =
         std::collections::HashMap::new();
     for r in records {
         decided.insert(
@@ -1618,10 +1891,11 @@ fn sync_suggestion_index_for_decisions(
                 r.status.as_str(),
                 r.decided_at.as_str(),
                 r.decided_by.as_str(),
+                r.kind.as_str(),
             ),
         );
     }
-    for (id, (status, at, by)) in &decided {
+    for (id, (status, at, by, kind)) in &decided {
         let n = tx.execute(
             "UPDATE suggestions SET status = ?1, decided_at = ?2, decided_by = ?3
              WHERE id = ?4 AND section_id = ?5",
@@ -1631,8 +1905,17 @@ fn sync_suggestion_index_for_decisions(
             tx.execute(
                 "INSERT INTO suggestions (id, manuscript_id, section_id, block_id, kind, quote, replacement,
                    rationale, author_kind, author_id, author_name, status, created_at, decided_at, decided_by)
-                 VALUES (?1, ?2, ?3, NULL, 'insert', NULL, NULL, NULL, 'human', ?4, ?4, ?5, ?6, ?6, ?7)",
-                params![id, manuscript_id, section_id, by, status, at, by],
+                 VALUES (?1, ?2, ?3, NULL, ?8, NULL, NULL, NULL, 'human', ?4, ?4, ?5, ?6, ?6, ?7)",
+                params![
+                    id,
+                    manuscript_id,
+                    section_id,
+                    by,
+                    status,
+                    at,
+                    by,
+                    suggestion_index_kind(kind)
+                ],
             )?;
         }
     }

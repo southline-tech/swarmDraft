@@ -2,13 +2,14 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use chrono::{Local, TimeZone};
 use serde::Serialize;
 use tauri::Window;
 use tauri_plugin_dialog::DialogExt;
 
+use crate::manuscripts::ReviewDecisionRecord;
 use crate::storage::Store;
 
 use super::changes::{self, DraftChangeResolve};
@@ -251,11 +252,26 @@ impl DraftService {
         change_kind: Option<&str>,
         change_section_id: Option<&str>,
     ) -> Result<Option<String>, String> {
-        let _ = decided_by;
         self.with_op(|| {
             let verb = if accepted { "Accepted" } else { "Rejected" };
             let base = format!("{verb} {bot_name}'s change in {chapter_title}");
             let decision = if accepted { "accepted" } else { "rejected" };
+            if !accepted {
+                if let Some(branch) = self.active_bot_branch(manuscript_id, bot_agent_id, bot_name)
+                {
+                    self.resolve_bot_only_comments(store, manuscript_id, &branch)?;
+                    self.end_bot_session(manuscript_id, bot_agent_id, bot_name);
+                }
+            }
+            self.persist_review_decision(
+                store,
+                manuscript_id,
+                decision,
+                decided_by,
+                change_id,
+                change_kind,
+                change_section_id,
+            )?;
             let msg = match (change_id, change_kind, change_section_id) {
                 (Some(id), kind, Some(section)) if !id.is_empty() && !section.is_empty() => {
                     let mut trailers = vec![("Change-Id", id), ("Decision", decision)];
@@ -263,6 +279,9 @@ impl DraftService {
                         trailers.push(("Kind", kind));
                     }
                     trailers.push(("Section", section));
+                    if !decided_by.is_empty() {
+                        trailers.push(("Decided-By", decided_by));
+                    }
                     append_trailers(&base, &trailers)
                 }
                 _ => base,
@@ -316,6 +335,9 @@ impl DraftService {
                 if let Err(e) = sessions::write_session_file(&dir, &record) {
                     eprintln!("draft session file not rewritten after bot commit: {e}");
                 }
+            }
+            if oid.is_some() {
+                self.pack_if_linked_inner(store, manuscript_id)?;
             }
             Ok(oid)
         })
@@ -832,6 +854,85 @@ fn message_with_session(message: &str, session_id: Option<&str>) -> String {
 }
 
 impl DraftService {
+    #[allow(clippy::too_many_arguments)]
+    fn persist_review_decision(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        decision: &str,
+        decided_by: &str,
+        change_id: Option<&str>,
+        change_kind: Option<&str>,
+        change_section_id: Option<&str>,
+    ) -> Result<(), String> {
+        let (Some(id), Some(kind), Some(section)) = (change_id, change_kind, change_section_id)
+        else {
+            return Ok(());
+        };
+        if id.is_empty() || kind.is_empty() || section.is_empty() {
+            return Ok(());
+        }
+        let decided_by = if decided_by.is_empty() {
+            "author"
+        } else {
+            decided_by
+        };
+        let decided_at = store.now().map_err(|e| e.to_string())?;
+        match store.ensure_review_decision(
+            manuscript_id,
+            section,
+            &ReviewDecisionRecord {
+                kind: super::changes::map_kind(kind).into(),
+                id: id.to_string(),
+                status: decision.to_string(),
+                decided_at,
+                decided_by: decided_by.to_string(),
+            },
+        ) {
+            Ok(()) => Ok(()),
+            // A trailer-only decision (no real section row) still commits. The message keeps the kind.
+            Err(crate::storage::StorageError::NotFound(_)) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    /// Comments that exist only on `branch` are marked resolved so the next main commit
+    /// keeps them, instead of leaving them on the bot branch.
+    fn resolve_bot_only_comments(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        branch: &str,
+    ) -> Result<(), String> {
+        let dir = self.ensure_open_inner(store, manuscript_id)?;
+        let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+        let Some(bot_oid) = repo.branch_target(branch).map_err(|e| e.to_string())? else {
+            return Ok(());
+        };
+        let main_ids = match repo.head_oid().map_err(|e| e.to_string())? {
+            Some(oid) => sync::comment_rows_in_commit(&repo, &oid)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|row| row.comment.id)
+                .collect::<std::collections::HashSet<_>>(),
+            None => std::collections::HashSet::new(),
+        };
+        let now = store.now().map_err(|e| e.to_string())?;
+        for row in sync::comment_rows_in_commit(&repo, &bot_oid).map_err(|e| e.to_string())? {
+            if row.deleted_at.is_some() || main_ids.contains(&row.comment.id) {
+                continue;
+            }
+            let mut comment = row.comment;
+            if comment.resolved_at.is_none() {
+                comment.resolved_at = Some(now.clone());
+            }
+            store
+                .upsert_comment(manuscript_id, &comment)
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
     fn active_record(&self, manuscript_id: &str) -> Option<SessionRecord> {
         self.human_sessions
             .lock()
@@ -1127,6 +1228,44 @@ pub(crate) fn sanitize_filename(title: &str) -> String {
     }
 }
 
+/// Commit the open book on `main` without blocking the caller. Comment create, reply,
+/// resolve, reopen, and delete use this so git never runs on the UI or request thread.
+pub fn queue_main_commit(
+    drafts: &Arc<DraftService>,
+    store: &Store,
+    manuscript_id: &str,
+    message: &str,
+) {
+    let drafts = Arc::clone(drafts);
+    let store = store.clone();
+    let manuscript_id = manuscript_id.to_string();
+    let message = message.to_string();
+    let work = move || {
+        let name = author_name(&store);
+        if let Err(e) = drafts.commit_now(
+            &store,
+            &manuscript_id,
+            &message,
+            &name,
+            "author@swarmdraft.local",
+        ) {
+            eprintln!("draft comment commit: {e}");
+        }
+    };
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => {
+            let _task = handle.spawn(async move {
+                if let Err(e) = tokio::task::spawn_blocking(work).await {
+                    eprintln!("draft comment commit task failed: {e}");
+                }
+            });
+        }
+        Err(_) => {
+            std::thread::spawn(work);
+        }
+    }
+}
+
 fn now_ms() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1221,5 +1360,73 @@ mod save_as_lock_tests {
             store.draft_file_path(&id).unwrap().as_deref(),
             Some(path.to_str().unwrap())
         );
+    }
+
+    /// The caller returns while the draft op lock is still held, so the git commit cannot
+    /// be running on this thread.
+    #[test]
+    fn comment_commit_queue_returns_while_the_op_lock_is_held() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+        let id = stored.manuscript.id.clone();
+        let chapter = stored
+            .sections
+            .iter()
+            .find(|s| s.section.kind == "chapter")
+            .unwrap();
+        let svc = Arc::new(DraftService::new(
+            store.data_dir().to_path_buf(),
+            "0.2.2".into(),
+        ));
+        svc.commit_now(&store, &id, "Baseline", "Author", "author@swarmdraft.local")
+            .unwrap();
+        store
+            .insert_comment(
+                &id,
+                &crate::manuscripts::Comment {
+                    id: "cq1".into(),
+                    section_id: chapter.section.id.clone(),
+                    block_id: None,
+                    quote: None,
+                    body: "Queued.".into(),
+                    thread_id: Some("cq1".into()),
+                    author: crate::manuscripts::Author {
+                        kind: "human".into(),
+                        id: "local".into(),
+                        name: "Author".into(),
+                    },
+                    created_at: "2026-03-01T00:00:00.000Z".into(),
+                    resolved_at: None,
+                },
+            )
+            .unwrap();
+        let guard = svc.op.lock().expect("draft op");
+        let started = Instant::now();
+        queue_main_commit(&svc, &store, &id, "Comment reply");
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "queueing a comment commit waited on git"
+        );
+        drop(guard);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let repo = DraftRepo::open_working(&svc.worktree_path(&id)).unwrap();
+            let head = repo.head_oid().unwrap().unwrap();
+            let message = repo.commit_message(&head).unwrap();
+            if message.starts_with("Comment reply") {
+                let bytes = repo
+                    .file_bytes(&head, "comments/cq1.json")
+                    .unwrap()
+                    .expect("queued comment file");
+                assert!(String::from_utf8(bytes).unwrap().contains("Queued."));
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "queued comment commit did not land"
+            );
+            thread::sleep(Duration::from_millis(30));
+        }
     }
 }

@@ -26,6 +26,11 @@ pub struct ChangeEntry {
     pub author_name: String,
     pub status: String,
     pub quote: String,
+    /// Set when `status` is accepted or rejected. Omitted for an open change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decided_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decided_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -136,6 +141,8 @@ pub fn build_change_index(
                     },
                     status: "open".into(),
                     quote: clip_quote(&quote),
+                    decided_by: None,
+                    decided_at: None,
                 },
             );
         }
@@ -205,6 +212,8 @@ fn apply_suggestion(by_id: &mut HashMap<String, ChangeEntry>, suggestion: &Sugge
                     author_name: suggestion.author.name.clone(),
                     status,
                     quote,
+                    decided_by: None,
+                    decided_at: None,
                 },
             );
         }
@@ -217,13 +226,19 @@ fn apply_decision(
     record: &ReviewDecisionRecord,
 ) {
     let status = normalize_status(&record.status);
+    let decided_by = Some(record.decided_by.clone());
+    let decided_at = Some(record.decided_at.clone());
     match by_id.get_mut(&record.id) {
         Some(entry) => {
             entry.status = status;
+            entry.decided_by = decided_by;
+            entry.decided_at = decided_at;
             if entry.section_id.is_empty() {
                 entry.section_id = section_id.to_string();
             }
-            if entry.kind.is_empty() {
+            // The decision row is the source of truth. A suggestion stub created
+            // for the same id defaults to insert and must not hide accept vs reject kind.
+            if !record.kind.is_empty() || entry.kind.is_empty() {
                 entry.kind = map_kind(&record.kind).into();
             }
         }
@@ -239,6 +254,8 @@ fn apply_decision(
                     author_name: record.decided_by.clone(),
                     status,
                     quote: String::new(),
+                    decided_by,
+                    decided_at,
                 },
             );
         }
@@ -347,7 +364,7 @@ fn author_parts(author: &str) -> (String, String, String) {
     }
 }
 
-fn map_kind(kind: &str) -> &'static str {
+pub(crate) fn map_kind(kind: &str) -> &'static str {
     match kind {
         "delete" | "suggestion_delete" => "suggestion_delete",
         "style" | "format_change" => "format_change",
@@ -603,6 +620,8 @@ mod tests {
             author_name: "Author".into(),
             status: "open".into(),
             quote: quote.into(),
+            decided_by: None,
+            decided_at: None,
         }
     }
 

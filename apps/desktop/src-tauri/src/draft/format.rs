@@ -10,7 +10,7 @@ use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
 pub const DRAFT_FORMAT: &str = "swarmdraft-draft";
-pub const DRAFT_FORMAT_VERSION: u32 = 1;
+pub const DRAFT_FORMAT_VERSION: u32 = 2;
 pub const MANIFEST_NAME: &str = "manifest.json";
 pub const REPO_DIR: &str = "repo.git";
 
@@ -53,8 +53,8 @@ pub fn read_manifest(bytes: &[u8]) -> Result<DraftManifest, DraftFormatError> {
     if m.format != DRAFT_FORMAT {
         return Err(invalid("unknown draft format"));
     }
-    if m.format_version > DRAFT_FORMAT_VERSION {
-        return Err(invalid("draft format version is newer than this app"));
+    if m.format_version != DRAFT_FORMAT_VERSION {
+        return Err(invalid("unsupported format version"));
     }
     Ok(m)
 }

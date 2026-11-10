@@ -1,8 +1,8 @@
 # Git backbone
 
-A `.draft` file is a zip of `manifest.json` plus a bare git repository. The open book also keeps a working git checkout under the app data directory. SQLite and Yjs stay the live editing layer. Git is the durable, portable history. A git failure is logged and does not roll back text the writer has already typed.
+A `.draft` file is a zip of `manifest.json` plus a bare git repository. The open book also keeps a working git checkout under the app data directory. SQLite and Yjs are a cache of that git history. Git wins when a book is opened: the cache is rebuilt from the tree, and a tombstone removes the matching row. A git failure is logged and does not roll back text the writer has already typed.
 
-The `.draft` format version is unchanged. New paths below are files inside the git tree.
+The `.draft` format version is **2** (`manifest.json` `formatVersion`). A file with any other version fails to open with `unsupported format version`. There is no reader for older books.
 
 ## Worktree layout
 
@@ -16,9 +16,13 @@ The `.draft` format version is unchanged. New paths below are files inside the g
 | `review/changes.json`       | Every tracked change, sorted by id                                   |
 | `sessions/<sessionId>.json` | One human editing session                                            |
 
-`review/changes.json` is a JSON array. Each object has `id`, `kind` (`suggestion_insert`, `suggestion_delete`, or `format_change`), `sectionId`, `authorKind`, `authorId`, `authorName`, `status` (`open`, `accepted`, or `rejected`), and `quote` (at most 200 characters). The bytes stay the same when nothing in the book changed, so a second save does not add an empty commit.
+`review/changes.json` is a JSON array. Each object has `id`, `kind` (`suggestion_insert`, `suggestion_delete`, or `format_change`), `sectionId`, `authorKind`, `authorId`, `authorName`, `status` (`open`, `accepted`, or `rejected`), and `quote` (at most 200 characters). An accepted or rejected row also has `decidedBy` and `decidedAt`. The bytes stay the same when nothing in the book changed, so a second save does not add an empty commit.
 
-A comment file has `threadId` and `rows`. Each row has `id`, `sectionId`, `blockId`, `quote`, `body`, `threadId`, `authorKind`, `authorId`, `authorName`, `createdAt`, and `resolvedAt`. Opening or restoring copies missing rows into the local comment list by `id`. Rows already stored are left as they are, and local rows are not deleted. That includes a comment not yet packed, a comment added after the restored commit, and a bot comment that exists only on a `bot/*` branch. A save writes `comments/.keep` so the directory stays in git when there are no threads. A legacy archive with no `comments/` directory keeps the local rows. A `.draft` packed before these paths existed still opens; the next save adds the files.
+A comment file has `threadId` and `rows`. Each row has `id`, `sectionId`, `blockId`, `quote`, `body`, `threadId`, `authorKind`, `authorId`, `authorName`, `createdAt`, and `resolvedAt`. A deleted row also has `deletedAt`. That row is a tombstone: the file stays in git, and opening the book removes the live cache row. A save writes `comments/.keep` so the directory stays in git when there are no threads.
+
+Opening a book replaces the cache with git. Live rows on `main` are the comment list. A tombstone on `main` removes that id. A comment that is only on a `bot/*` tip is still loaded, until that branch is accepted or rejected. A row that exists only in the local database, and not in git, is deleted.
+
+`review/changes.json` records `decidedBy` and `decidedAt` when `status` is `accepted` or `rejected`. Opening the book writes those rows back into the decision log.
 
 A session file has `id`, `authorName`, `startedAt`, `baseCommit`, and `endedAt` (`null` until the book is closed).
 
@@ -26,9 +30,9 @@ A session file has `id`, `authorName`, `startedAt`, `baseCommit`, and `endedAt` 
 
 | Ref                   | When it moves                                                                                                                                                        |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `main`                | Every human checkpoint, Save, accept/reject, and Restore. HEAD stays here                                                                                            |
+| `main`                | Every human checkpoint, Save, comment write, accept/reject, and Restore. HEAD stays here                                                                             |
 | `session/<sessionId>` | Created at the current `main` tip when the book is opened. Each commit on `main` during that session moves it to the new tip. The ref is kept after the session ends |
-| `bot/<bot>/<session>` | Bot suggestions. Accept merges that branch into `main`                                                                                                               |
+| `bot/<bot>/<session>` | Bot suggestions and bot comments. Accept merges that branch into `main`. Reject keeps that branch's comments on `main` and marks them resolved                       |
 
 Session ids are new each time a book is opened. Bot branch names are unchanged.
 
@@ -49,10 +53,11 @@ Change-Id: <suggestionId>
 Decision: accepted|rejected
 Kind: <suggestion_insert|suggestion_delete|format_change>
 Section: <sectionId>
+Decided-By: <author id>
 Session: <sessionId>
 ```
 
-`Kind` is omitted when the decision has no change kind.
+`Kind` is omitted when the decision has no change kind. `Decided-By` is omitted when the decider is empty. The same accept or reject is written into the decision log before the commit, so a rebuilt cache still knows which way it went.
 
 One accept or reject is one commit, including each id in an accept-all or reject-all batch. The deciding commit is the newest one whose `Change-Id` trailer matches. A commit that lists more than one `Change-Id` decides each of those ids.
 
@@ -63,11 +68,11 @@ Live typing updates the Yjs document and SQLite on the existing save timer. It d
 1. Idle checkpoint, about 5 seconds after a successful save (`draft_checkpoint`).
 2. Save and Save As.
 3. Each accept or reject.
-4. A comment reply or resolve, which commits immediately so it is not dropped inside the idle window.
+4. Each comment create, reply, resolve, reopen, and delete, queued off the caller so the UI thread, the request thread, and a bot MCP call do not wait on git. A human comment commits on `main`. A bot comment commits on that bot's branch. A delete writes a tombstone row; it does not remove the comment file.
 5. Close, which finishes the editing session (`endedAt`) after the last flush. If that commit fails, the session stays active and the save failure is shown.
-6. Restore, which adds a new commit and reloads the book from that tree.
+6. Restore, which adds a new commit on `main` and reloads the book from that tree. The new tree's manuscript text (`book.json`, `chapters/`, `yjs/`) is the restored version. Comments, notes, sessions, and `review/` stay as they are on the previous tip, so a comment made after the restored point is still there. Restore never resets or rewinds a branch.
 
-A bot comment is committed on the bot branch the same way as a bot suggestion. The comment list on screen still reads from SQLite.
+Accepting a bot change merges that `bot/*` branch into `main`, comments included. Rejecting it does not take the bot's text. Comments that exist only on that branch are committed onto `main` with `resolvedAt` set, and the bot session ends. The comment list on screen still reads from SQLite.
 
 ## Finding a change
 

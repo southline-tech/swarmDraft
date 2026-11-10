@@ -247,6 +247,40 @@ const MIGRATIONS: &[&str] = &[
      );
      CREATE INDEX IF NOT EXISTS feedback_pending_status ON feedback_pending(status, expires_at);",
     DRAFT_FILE_PATH_MIGRATION,
+    // #344: comment deletes are tombstones, and format decisions can be stored.
+    // Idempotent: the book-author repair test rewinds one version and reopens.
+    "CREATE TABLE IF NOT EXISTS comment_tombstones (
+        id TEXT PRIMARY KEY,
+        manuscript_id TEXT NOT NULL,
+        thread_id TEXT NOT NULL,
+        section_id TEXT NOT NULL,
+        block_id TEXT,
+        quote TEXT,
+        body TEXT NOT NULL,
+        author_kind TEXT NOT NULL,
+        author_id TEXT NOT NULL,
+        author_name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        resolved_at TEXT,
+        deleted_at TEXT NOT NULL
+     );
+     CREATE INDEX IF NOT EXISTS comment_tombstones_manuscript ON comment_tombstones(manuscript_id);
+     PRAGMA foreign_keys=OFF;
+     CREATE TABLE review_decisions_v2 (
+        section_id TEXT NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('suggestion_insert','suggestion_delete','format_change')),
+        suggestion_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('accepted','rejected')),
+        decided_at TEXT NOT NULL,
+        decided_by TEXT NOT NULL,
+        PRIMARY KEY (section_id, kind, suggestion_id)
+     );
+     INSERT INTO review_decisions_v2
+       SELECT section_id, kind, suggestion_id, status, decided_at, decided_by FROM review_decisions;
+     DROP TABLE review_decisions;
+     ALTER TABLE review_decisions_v2 RENAME TO review_decisions;
+     CREATE INDEX review_decisions_section ON review_decisions(section_id);
+     PRAGMA foreign_keys=ON;",
 ];
 
 /// Sentinel for the #259 trailing repair; not executed as SQL.
