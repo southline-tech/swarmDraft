@@ -184,8 +184,39 @@ pub fn sync_store_to_worktree(
 
     sync_notes(store, manuscript_id, worktree)?;
     sync_comments(store, manuscript_id, worktree, &omit.comment_ids)?;
+    // An accept or reject is stored in sqlite before this sync. That id stays in the
+    // index even when the suggestion bytes are still waiting for a `bot/*` commit.
+    let pending_change_ids = without_decided_changes(store, manuscript_id, pending_change_ids)?;
     changes::write_change_index(store, manuscript_id, worktree, &pending_change_ids)?;
     Ok(discovered)
+}
+
+/// Suggestion ids with an accept or reject already recorded. Those rows are the
+/// decision, so a checkpoint must not leave them out of `review/changes.json`.
+fn without_decided_changes(
+    store: &Store,
+    manuscript_id: &str,
+    mut ids: HashSet<String>,
+) -> Result<HashSet<String>, DraftRepoError> {
+    if ids.is_empty() {
+        return Ok(ids);
+    }
+    let decisions = store
+        .review_decisions_for_manuscript(manuscript_id)
+        .map_err(storage_err)?;
+    let mut decided = HashSet::new();
+    for records in decisions.values() {
+        for record in records {
+            if record.status == "accepted" || record.status == "rejected" {
+                decided.insert(record.id.clone());
+            }
+        }
+    }
+    if decided.is_empty() {
+        return Ok(ids);
+    }
+    ids.retain(|id| !decided.contains(id));
+    Ok(ids)
 }
 
 /// Chapter document to write. Pending bot updates are left out when the rest of the

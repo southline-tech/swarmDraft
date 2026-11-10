@@ -397,7 +397,12 @@ impl DraftService {
             )?;
             // One suggestion reject records that id only. The bot branch ends when every
             // change that bot introduced has been rejected, so a later accept can still merge.
+            // A reject before that branch exists still resolves the comment saved with the
+            // change, and the commit below writes both the decision and that resolution.
             if !accepted {
+                if let Some(id) = change_id.filter(|id| !id.is_empty()) {
+                    self.resolve_rejected_pending_comments(store, manuscript_id, id)?;
+                }
                 if let Some(branch) = self.active_bot_branch(manuscript_id, bot_agent_id, bot_name)
                 {
                     if self.bot_branch_fully_rejected(
@@ -474,7 +479,9 @@ impl DraftService {
             let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
             repo.checkout_branch(&branch)
                 .map_err(|e| format!("checkout bot branch: {e}"))?;
-            // This commit is what publishes the pending rows. A main checkpoint omits them.
+            // This commit publishes the pending rows on `bot/*`. A decision already on
+            // `main` stays there: this sync does not check out `main`, and the index keeps
+            // the decided status from sqlite instead of writing the suggestion as open.
             let _published = sync::sync_store_to_worktree(
                 store,
                 manuscript_id,
@@ -530,7 +537,8 @@ impl DraftService {
     /// `bot/*` commit has not landed. The lock covers the skip set and the sync, so a bot
     /// write cannot enter SQLite in between and get published onto `main`. A keystroke
     /// that does not apply without one of those suggestions stays in the chapter. The
-    /// suggestion id stays out of `review/changes.json`.
+    /// suggestion id stays out of `review/changes.json` until an accept or reject records
+    /// it. A comment already resolved is part of that decision and is written here.
     fn sync_main_worktree(
         &self,
         store: &Store,
@@ -545,7 +553,9 @@ impl DraftService {
             .filter(|write| write.manuscript_id == manuscript_id)
         {
             if let Some(comment) = &write.comment {
-                omit.comment_ids.insert(comment.id.clone());
+                if comment.resolved_at.is_none() {
+                    omit.comment_ids.insert(comment.id.clone());
+                }
             }
             if let (Some(doc_id), Some(update)) = (&write.doc_id, &write.doc_update) {
                 if update.len() > 2 {
@@ -1151,6 +1161,65 @@ impl DraftService {
             Err(crate::storage::StorageError::NotFound(_)) => Ok(()),
             Err(e) => Err(e.to_string()),
         }
+    }
+
+    /// A reject before `bot/*` exists still resolves the comment saved with that change.
+    /// The comment may sit on the same pending write or on its own write. Resolving every
+    /// pending comment waits until every pending change is rejected, matching a branch
+    /// reject. The pending copy is updated too, so the later bot commit does not write
+    /// the unresolved snapshot back over this one.
+    fn resolve_rejected_pending_comments(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        change_id: &str,
+    ) -> Result<(), String> {
+        let now = store.now().map_err(|e| e.to_string())?;
+        let decisions = store
+            .review_decisions_for_manuscript(manuscript_id)
+            .map_err(|e| e.to_string())?;
+        let rejected = |id: &str| {
+            decisions
+                .values()
+                .flatten()
+                .any(|row| row.id == id && row.status == "rejected")
+        };
+        let mut guard = self.bot_writes.lock().expect("bot writes");
+        let indexes: Vec<usize> = guard
+            .pending
+            .iter()
+            .enumerate()
+            .filter(|(_, write)| write.manuscript_id == manuscript_id)
+            .map(|(index, _)| index)
+            .collect();
+        let mut all_ids = Vec::new();
+        for index in &indexes {
+            all_ids.extend(guard.pending[*index].change_ids.iter().cloned());
+        }
+        all_ids.sort();
+        all_ids.dedup();
+        let all_rejected = !all_ids.is_empty() && all_ids.iter().all(|id| rejected(id));
+        let mut comments = Vec::new();
+        for index in indexes {
+            let write = &mut guard.pending[index];
+            let linked = write.change_ids.iter().any(|id| id == change_id);
+            if !linked && !all_rejected {
+                continue;
+            }
+            if let Some(comment) = write.comment.as_mut() {
+                if comment.resolved_at.is_none() {
+                    comment.resolved_at = Some(now.clone());
+                }
+                comments.push(comment.clone());
+            }
+        }
+        drop(guard);
+        for comment in comments {
+            store
+                .upsert_comment(manuscript_id, &comment)
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 
     /// True when `branch` introduced at least one of this bot's changes and every one of
