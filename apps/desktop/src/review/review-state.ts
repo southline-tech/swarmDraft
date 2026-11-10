@@ -104,6 +104,11 @@ export function bulkActionLabel(
   return filter ? `${verb} from ${displayName}` : verb;
 }
 
+/** Accept all / Reject all while a review link is the visible set, not an author filter. */
+export function selectedBulkActionLabel(decision: 'accept' | 'reject'): string {
+  return decision === 'accept' ? 'Accept all selected' : 'Reject all selected';
+}
+
 export const REVIEW_VIEW_CYCLE = { next: 'Alt+]', prev: 'Alt+[' } as const;
 
 export function reviewViewCycleFor(e: KeyboardEvent): 1 | -1 | null {

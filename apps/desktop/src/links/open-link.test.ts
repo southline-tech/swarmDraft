@@ -352,11 +352,11 @@ describe('open review link (#119)', () => {
       }),
     );
     expect(r.toast).toHaveBeenCalledWith(
-      "1 change isn't in this book's history. The others are in your review list.",
+      "1 change isn't in this book's history. The other is in your review list.",
     );
   });
 
-  it('says several missing changes left the others in the review list', async () => {
+  it('says the other change is in the review list when one remains', async () => {
     const r = route();
     const url = 'swarmdraft://review?draft=book-1&changes=chg-1,missing-a,missing-b';
     await openReviewLink(url, r, async (_manuscriptId, changeId) => {
@@ -370,7 +370,33 @@ describe('open review link (#119)', () => {
     });
     expect(r.selected).toHaveBeenCalledWith(['chg-1']);
     expect(r.toast).toHaveBeenCalledWith(
-      "2 changes aren't in this book's history. The others are in your review list.",
+      "2 changes aren't in this book's history. The other is in your review list.",
+    );
+  });
+
+  it('says the book stayed on the full list when every found change is already decided', async () => {
+    const r = route();
+    const url = 'swarmdraft://review?draft=book-1&changes=acc-1,missing';
+    await openReviewLink(url, r, async (_manuscriptId, changeId) => {
+      if (changeId === 'missing') return { action: 'unknown', manuscriptId: 'book-1' };
+      return {
+        action: 'history',
+        manuscriptId: 'book-1',
+        changeId,
+        sectionId: 'sec-1',
+        quote: 'guttered',
+        kind: 'suggestion_insert',
+        authorKind: 'agent',
+        authorName: 'Line Editor',
+        outcome: 'accepted',
+        decidedBy: 'Sam',
+        decidedAt: 1700000000,
+      };
+    });
+    expect(r.selected).not.toHaveBeenCalled();
+    expect(r.history).toHaveBeenCalledWith(expect.objectContaining({ changeId: 'acc-1' }));
+    expect(r.toast).toHaveBeenCalledWith(
+      "1 change isn't in this book's history. Your book stayed on the full list.",
     );
   });
 

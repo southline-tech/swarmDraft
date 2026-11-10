@@ -933,4 +933,54 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     expect(w.find('[data-test="view-switcher"]').exists()).toBe(false);
     w.unmount();
   });
+
+  it('describes the review-link selection when an author filter is still set (#119)', async () => {
+    const doc = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              marks: [
+                { type: 'suggestion_insert', attrs: { id: 's-mara', author: 'Mara', ts: 't' } },
+              ],
+              text: 'mara',
+            },
+            { type: 'text', text: ' ' },
+            {
+              type: 'text',
+              marks: [
+                {
+                  type: 'suggestion_insert',
+                  attrs: { id: 's-line', author: 'Line Editor', ts: 't' },
+                },
+              ],
+              text: 'line',
+            },
+          ],
+        },
+      ],
+    };
+    const w = mount(ManuscriptEditor, { props: { content: doc }, attachTo: document.body });
+    await flushPromises();
+    await pickReviewViewAuthor(w, 0);
+    expect(w.find('[data-test="accept-all"]').text()).toBe('Accept all from Mara');
+    expect(w.find('[data-test="view-scope-live"]').text()).toBe('Showing 1 change from Mara');
+
+    await w.setProps({ changeIds: ['s-line'] });
+    await flushPromises();
+    expect(w.find('[data-test="accept-all"]').text()).toBe('Accept all selected');
+    expect(w.find('[data-test="reject-all"]').text()).toBe('Reject all selected');
+    expect(w.find('[data-test="view-scope-live"]').text()).toBe('Showing 1 selected change');
+    expect(w.find('[data-test="accept-all"]').text()).not.toContain('Mara');
+    expect(w.find('[data-test="view-scope-live"]').text()).not.toContain('Mara');
+
+    await w.find('[data-test="accept-all"]').trigger('click');
+    const confirm = w.find('[data-test="confirm"]').text();
+    expect(confirm).toContain('Line Editor');
+    expect(confirm).not.toContain('Mara');
+    w.unmount();
+  });
 });

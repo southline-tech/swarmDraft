@@ -17,16 +17,24 @@ export const UNKNOWN_CHANGE_TOAST =
 
 /**
  * What happens when a review link names changes this book does not have.
- * `missing` is how many ids were unknown. `remaining` is how many were found
- * (still open, or already decided). Shown on the existing link toast.
+ * `missing` is how many ids were unknown. `inReviewList` is how many still-open
+ * ids were passed to the review filter. `inHistory` is how many decided ids
+ * opened the history view. The review list is named only for ids in that filter.
+ * When every found id is a history view, the book stayed on the full list.
  */
-export function unknownChangesToast(missing: number, remaining: number): string {
-  if (remaining > 0) {
-    if (missing === 1) {
-      return "1 change isn't in this book's history. The others are in your review list.";
-    }
-    return `${missing} changes aren't in this book's history. The others are in your review list.`;
+export function unknownChangesToast(missing: number, inReviewList: number, inHistory = 0): string {
+  const absent =
+    missing === 1
+      ? "1 change isn't in this book's history."
+      : `${missing} changes aren't in this book's history.`;
+  if (inReviewList > 0) {
+    const rest =
+      inReviewList === 1
+        ? 'The other is in your review list.'
+        : 'The others are in your review list.';
+    return `${absent} ${rest}`;
   }
+  if (inHistory > 0) return `${absent} Your book stayed on the full list.`;
   if (missing === 1) return UNKNOWN_CHANGE_TOAST;
   return "None of those changes are in this book's history. Your book is open where you left off.";
 }
@@ -122,8 +130,9 @@ export async function openChangeLink(
 /**
  * Open a review link: filter Review to the still-open changes.
  * Each decided or no-longer-present change uses the same history view as one edit link.
- * Unknown ids are left out. The toast says whether the rest are in the review
- * list, or that the book stayed where it was.
+ * Unknown ids are left out. The toast names the review list only for changes
+ * still open there, and says the book stayed on the full list when every found
+ * change is a history view.
  */
 export async function openReviewLink(
   raw: string,
@@ -171,7 +180,7 @@ export async function openReviewLink(
   route.resetLinkUi();
   if (focusIds.length) route.showSelectedChanges(focusIds);
   for (const view of history) route.showHistory(view);
-  if (unknown) route.showToast(unknownChangesToast(unknown, focusIds.length + history.length));
+  if (unknown) route.showToast(unknownChangesToast(unknown, focusIds.length, history.length));
   return 'opened';
 }
 

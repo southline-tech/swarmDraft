@@ -16,6 +16,7 @@ import {
   authorKind,
   authorsOf,
   bulkActionLabel,
+  selectedBulkActionLabel,
   groupChanges,
   outdatedCountForAuthor,
   pendingCountForAuthor,
@@ -195,10 +196,14 @@ function pickView(author: string | null) {
   closeViewMenu(true);
 }
 const acceptAllLabel = computed(() =>
-  bulkActionLabel('accept', props.filter, props.filter ? name(props.filter) : ''),
+  props.changeIds
+    ? selectedBulkActionLabel('accept')
+    : bulkActionLabel('accept', props.filter, props.filter ? name(props.filter) : ''),
 );
 const rejectAllLabel = computed(() =>
-  bulkActionLabel('reject', props.filter, props.filter ? name(props.filter) : ''),
+  props.changeIds
+    ? selectedBulkActionLabel('reject')
+    : bulkActionLabel('reject', props.filter, props.filter ? name(props.filter) : ''),
 );
 /** Theme-aware author color: a --ct-collab-N token keyed by the raw author id, never the name. */
 const hue = (a: string) => ({ '--ct-suggester': collabColor(a) });

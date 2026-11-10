@@ -52,6 +52,7 @@ import {
   authorsOf,
   cycleAuthorView,
   selectAuthorView,
+  selectedChangesLabel,
   viewScopeAnnouncement,
   reviewViewCycleFor,
   type AuthorFilter,
@@ -924,12 +925,14 @@ function refreshReview(e: Editor) {
   announceViewScope();
 }
 function announceViewScope() {
+  const count = filteredSuggestions.value.length;
+  // A review link ignores the author filter. The live region has to say so too.
+  if (reviewSelection.value) {
+    viewScopeLive.value = selectedChangesLabel(count);
+    return;
+  }
   const display = filter.value ? labelAuthor(filter.value).name : 'everyone';
-  viewScopeLive.value = viewScopeAnnouncement(
-    filter.value,
-    display,
-    filteredSuggestions.value.length,
-  );
+  viewScopeLive.value = viewScopeAnnouncement(filter.value, display, count);
 }
 function refreshAuthorFilterDecorations() {
   const e = editor.value;

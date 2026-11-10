@@ -86,6 +86,9 @@ Run this consolidated pass in order; do not hand off until every line that appli
 
 Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
 
+- 2026-11-10 · #119 · PR #347 · an unknown-id toast said “the others are in your review list” for one remaining change and for a history view · “the other” when one id is in the review list; the list is named only for ids passed to `showSelectedChanges`; history-only says the book stayed on the full list
+- 2026-11-10 · #119 · PR #347 · Accept all, Reject all, and the scope announcement still used the author filter during a review link · those labels and `view-scope-live` describe the selection (`Accept all selected`, `Showing N selected changes`)
+- 2026-11-10 · #119 · PR #347 · the PR summary still said the settings row is “Bots connected” · the summary matches the row, which says “Connected”
 - 2026-11-10 · #119 · PR #347 · Clear unmounted the selection chip and focus landed on the body · `clearSelection` emits, then focuses the Show changes from toggle, else the first list row, else the panel (`tabindex="-1"`)
 - 2026-11-10 · #119 · PR #347 · an unknown-id toast only named a count · the four copies say the rest are in the review list, or that the book stayed where you left off, on the existing AppToast
 - 2026-11-10 · #119 · PR #347 · Clear had no accessible name, the whole chip was `role=status`, and its hit target had no padding · `aria-label="Clear selected changes"`, `role=status` on the label span, padding `var(--ct-space-1) var(--ct-space-2)` with a 24px minimum

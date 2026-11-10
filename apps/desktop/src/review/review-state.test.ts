@@ -3,6 +3,7 @@ import type { DecisionRecord, SuggestionItem } from '@swarmdraft/editor';
 import {
   DecisionLog,
   bulkActionLabel,
+  selectedBulkActionLabel,
   groupChanges,
   withSuggestionReasons,
   resolveCurrent,
@@ -65,6 +66,8 @@ describe('review state (RAD-258)', () => {
     );
     expect(bulkActionLabel('accept', null, '')).toBe('Accept all');
     expect(bulkActionLabel('accept', 'agent:x', 'Line Editor')).toBe('Accept all from Line Editor');
+    expect(selectedBulkActionLabel('accept')).toBe('Accept all selected');
+    expect(selectedBulkActionLabel('reject')).toBe('Reject all selected');
     const outdated = [
       {
         id: 's1',
