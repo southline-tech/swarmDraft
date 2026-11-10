@@ -1,5 +1,6 @@
 //! Embedded git (git2-rs) for draft working repos.
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use git2::{BranchType, Commit, Repository, Signature};
@@ -416,6 +417,11 @@ impl DraftRepo {
         Ok(())
     }
 
+    /// Merge `branch_name` into `main`. The ancestor is the branch point
+    /// (`merge-base` of `main` and the bot tip). An edit on `main` after that
+    /// point stays when the bot did not change that path. A path both sides
+    /// changed keeps `main`, so the accepted chapter is not blended with the
+    /// bot snapshot. A path only the bot changed comes from the bot branch.
     pub fn merge_bot_branch(
         &self,
         branch_name: &str,
@@ -434,12 +440,30 @@ impl DraftRepo {
             .find_branch(branch_name, BranchType::Local)?
             .get()
             .peel_to_commit()?;
+        let base_oid = match self.repo.merge_base(main_commit.id(), bot_commit.id()) {
+            Ok(oid) => oid,
+            Err(e) if e.code() == git2::ErrorCode::NotFound => {
+                return Err(DraftRepoError::Invalid(
+                    "bot branch has no common ancestor with main".into(),
+                ));
+            }
+            Err(e) => return Err(e.into()),
+        };
+        let base_tree = self.repo.find_commit(base_oid)?.tree()?;
         let main_tree = main_commit.tree()?;
         let bot_tree = bot_commit.tree()?;
-        let merged_tree = self
+        let mut opts = git2::MergeOptions::new();
+        opts.file_favor(git2::FileFavor::Ours);
+        let mut index = self
             .repo
-            .merge_trees(&main_tree, &main_tree, &bot_tree, None)?
-            .write_tree_to(&self.repo)?;
+            .merge_trees(&base_tree, &main_tree, &bot_tree, Some(&opts))?;
+        keep_main_when_both_changed(&mut index, &base_tree, &main_tree, &bot_tree)?;
+        if index.has_conflicts() {
+            return Err(DraftRepoError::Invalid(
+                "bot merge still has conflicts".into(),
+            ));
+        }
+        let merged_tree = index.write_tree_to(&self.repo)?;
         let merged = self.repo.find_tree(merged_tree)?;
         let oid = self.repo.commit(
             Some("refs/heads/main"),
@@ -470,6 +494,78 @@ impl DraftRepo {
         }
         copy_dir_all(&git_dir, bare_path)?;
         Ok(())
+    }
+}
+
+/// Blob id and file mode for every file in `tree`.
+fn tree_blobs(tree: &git2::Tree<'_>) -> Result<HashMap<String, (git2::Oid, i32)>, DraftRepoError> {
+    let mut out = HashMap::new();
+    tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
+        if entry.kind() != Some(git2::ObjectType::Blob) {
+            return git2::TreeWalkResult::Ok;
+        }
+        let name = entry.name().unwrap_or("");
+        let path = if root.is_empty() {
+            name.to_string()
+        } else {
+            format!("{root}{name}")
+        };
+        out.insert(path, (entry.id(), entry.filemode()));
+        git2::TreeWalkResult::Ok
+    })?;
+    Ok(out)
+}
+
+/// Where both sides rewrote a path since the branch point, put `main`'s blob
+/// back. A hunk merge would otherwise weave the bot snapshot into the accepted
+/// chapter. Paths the bot did not touch are left as the merge wrote them.
+fn keep_main_when_both_changed(
+    index: &mut git2::Index,
+    base: &git2::Tree<'_>,
+    main: &git2::Tree<'_>,
+    bot: &git2::Tree<'_>,
+) -> Result<(), DraftRepoError> {
+    let base_blobs = tree_blobs(base)?;
+    let main_blobs = tree_blobs(main)?;
+    let bot_blobs = tree_blobs(bot)?;
+    let mut paths = HashSet::new();
+    paths.extend(base_blobs.keys().cloned());
+    paths.extend(main_blobs.keys().cloned());
+    paths.extend(bot_blobs.keys().cloned());
+    for path in paths {
+        let base_id = base_blobs.get(&path).map(|(id, _)| *id);
+        let main_blob = main_blobs.get(&path).copied();
+        let bot_id = bot_blobs.get(&path).map(|(id, _)| *id);
+        let main_id = main_blob.map(|(id, _)| id);
+        if main_id == base_id || bot_id == base_id {
+            continue;
+        }
+        match index.remove_path(Path::new(&path)) {
+            Ok(()) => {}
+            Err(e) if e.code() == git2::ErrorCode::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+        if let Some((id, mode)) = main_blob {
+            index.add(&blob_index_entry(&path, id, mode))?;
+        }
+    }
+    Ok(())
+}
+
+fn blob_index_entry(path: &str, id: git2::Oid, mode: i32) -> git2::IndexEntry {
+    git2::IndexEntry {
+        ctime: git2::IndexTime::new(0, 0),
+        mtime: git2::IndexTime::new(0, 0),
+        dev: 0,
+        ino: 0,
+        mode: mode as u32,
+        uid: 0,
+        gid: 0,
+        file_size: 0,
+        id,
+        flags: 0,
+        flags_extended: 0,
+        path: path.as_bytes().to_vec(),
     }
 }
 

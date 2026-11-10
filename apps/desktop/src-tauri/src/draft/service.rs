@@ -446,6 +446,9 @@ impl DraftService {
                     repo.merge_bot_branch(&branch, &author_name(store), advance.as_deref())
                         .map_err(|e| format!("Couldn't merge bot changes: {e}"))?;
                     self.end_bot_session(manuscript_id, bot_agent_id, bot_name);
+                    // commit_now_inner packed the accept commit, before this merge.
+                    // Pack the merge, which still has the accepted chapter.
+                    self.pack_if_linked_inner(store, manuscript_id)?;
                 }
             }
             Ok(oid)

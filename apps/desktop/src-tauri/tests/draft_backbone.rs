@@ -68,6 +68,14 @@ fn chapter_text(store: &Store, doc_id: &str) -> String {
     content::markdown(&decode(&doc))
 }
 
+fn markdown_from_yjs(bytes: &[u8]) -> String {
+    let doc = content::new_doc();
+    doc.transact_mut()
+        .apply_update(Update::decode_v1(bytes).unwrap())
+        .unwrap();
+    content::markdown(&decode(&doc))
+}
+
 /// Insert `extra` at the end of the text run that contains `needle`.
 fn insert_into_text(doc: &yrs::Doc, needle: &str, extra: &str) {
     use yrs::{GetString, Text, Transact, XmlFragment, XmlOut};
@@ -1415,6 +1423,117 @@ fn accepting_a_bot_change_brings_its_comment_onto_main() {
         .find(|c| c.id == "cthread-bot")
         .unwrap();
     assert!(row.resolved_at.is_none());
+}
+
+/// The author edits the chapter after the bot snapshot, then accepts. The
+/// accepted sentence stays on HEAD, in the worktree, and in the packed file.
+/// A title edited on main after the branch point stays too. Reopen does not
+/// offer to save a newer copy.
+#[test]
+fn accepting_after_an_author_edit_keeps_the_accepted_chapter() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "bot-accept-edited.draft");
+    set_chapter_plain(&store, &chapter.doc_id, "version-one");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap()
+    .expect("baseline");
+    set_chapter_mark(&store, &chapter.doc_id, "chg-pending", "guttered");
+    let mut comment = sample_comment("cthread-pending", &chapter.id, "On the suggestion.");
+    comment.author.kind = "agent".into();
+    comment.author.id = "agent-test-1".into();
+    comment.author.name = "Line Editor".into();
+    store.insert_comment(&m.id, &comment).unwrap();
+    svc.commit_bot_suggestion(
+        &store,
+        &m.id,
+        "agent-test-1",
+        "Line Editor",
+        "Bot suggestion",
+    )
+    .unwrap()
+    .expect("bot suggestion");
+    let accepted = "version-one OUTSIDE guttered KEPT";
+    set_chapter_plain(&store, &chapter.doc_id, accepted);
+    let style = store.get_manuscript(&m.id).unwrap().numbering_style;
+    store
+        .update_manuscript_metadata(&m.id, "Title Kept After Branch", &style, None)
+        .unwrap();
+    svc.commit_review_decision(
+        &store,
+        &m.id,
+        true,
+        "Line Editor",
+        &chapter.title,
+        "author",
+        Some("agent-test-1"),
+        Some("chg-pending"),
+        Some("suggestion_insert"),
+        Some(&chapter.id),
+    )
+    .unwrap();
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let main = repo.head_oid().unwrap().unwrap();
+    let chapter_path = format!("chapters/{}.md", chapter.id);
+    let yjs_path = format!("yjs/{}.bin", chapter.id);
+    let head_md = String::from_utf8(
+        repo.file_bytes(&main, &chapter_path)
+            .unwrap()
+            .expect("chapter on HEAD"),
+    )
+    .unwrap();
+    assert_accepted_chapter(&head_md, accepted);
+    let work_md = fs::read_to_string(svc.worktree_path(&m.id).join(&chapter_path)).unwrap();
+    assert_eq!(work_md, head_md, "worktree chapter disagrees with HEAD");
+    let head_yjs = repo
+        .file_bytes(&main, &yjs_path)
+        .unwrap()
+        .expect("yjs on HEAD");
+    let work_yjs = fs::read(svc.worktree_path(&m.id).join(&yjs_path)).unwrap();
+    assert_eq!(work_yjs, head_yjs, "worktree yjs disagrees with HEAD");
+    assert_accepted_chapter(&markdown_from_yjs(&head_yjs), accepted);
+    let book = String::from_utf8(repo.file_bytes(&main, "book.json").unwrap().unwrap()).unwrap();
+    assert!(
+        book.contains("Title Kept After Branch"),
+        "an edit the bot did not touch was replaced by the snapshot: {book}"
+    );
+    let comment_on_main = String::from_utf8(
+        repo.file_bytes(&main, "comments/cthread-pending.json")
+            .unwrap()
+            .expect("bot comment is on main"),
+    )
+    .unwrap();
+    assert!(comment_on_main.contains("On the suggestion."));
+    let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
+    let opened = svc
+        .open_draft_path(&store, &draft_path, false)
+        .unwrap()
+        .unwrap();
+    assert!(
+        opened.recovery.is_none(),
+        "reopen asked to save a newer copy"
+    );
+    assert_eq!(opened.manuscript_id, m.id);
+    assert_accepted_chapter(&chapter_text(&store, &chapter.doc_id), accepted);
+    let reopened_title = store.get_manuscript(&m.id).unwrap().title;
+    assert_eq!(reopened_title, "Title Kept After Branch");
+}
+
+fn assert_accepted_chapter(text: &str, accepted: &str) {
+    assert!(text.contains(accepted), "accepted text missing: {text}");
+    assert!(
+        !text.contains("suggestion:chg-pending"),
+        "suggestion mark replaced the accepted chapter: {text}"
+    );
 }
 
 #[test]
