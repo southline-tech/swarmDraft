@@ -1,15 +1,16 @@
 //! Deep links to a tracked change (`swarmdraft://open?draft=&change=`).
 //!
-//! Resolution goes through [`draft::DraftService::resolve_change`] (git history). This module
-//! only reads that result and the change index; it does not write the draft.
+//! Resolution goes through [`draft::DraftService::resolve_change`] (git history) only after the
+//! manuscript id is one path segment and an existing row. Anything else is the unknown result
+//! and does not open or create a repo.
 
-use std::path::Path;
+use std::path::{Component, Path};
 use std::sync::Mutex;
 
 use serde::Serialize;
 
 use crate::draft::{DraftChangeResolve, DraftRepo, DraftService};
-use crate::storage::Store;
+use crate::storage::{StorageError, Store};
 
 const SCHEME: &str = "swarmdraft://";
 
@@ -266,7 +267,7 @@ pub fn committer_name(worktree: &Path, oid: &str) -> Option<String> {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", tag = "action")]
 pub enum LinkResolution {
     Focus {
@@ -290,13 +291,49 @@ pub enum LinkResolution {
     },
 }
 
+/// One path segment: not absolute, not `.` or `..`, and no separator.
+/// `Path::join` would otherwise replace the data directory or walk out of it.
+fn manuscript_id_is_single_segment(id: &str) -> bool {
+    if id.is_empty() || id.contains('/') || id.contains('\\') || id.contains('\0') {
+        return false;
+    }
+    let mut components = Path::new(id).components();
+    let Some(component) = components.next() else {
+        return false;
+    };
+    if components.next().is_some() {
+        return false;
+    }
+    match component {
+        Component::Normal(part) => part != "." && part != "..",
+        _ => false,
+    }
+}
+
 /// Resolve one change link through git history.
+///
+/// A missing row or an id that is not a single path segment is [`LinkResolution::Unknown`]
+/// and does not call [`DraftService::resolve_change`], which would create a repo.
 pub fn resolve_open_link(
     drafts: &DraftService,
     store: &Store,
     manuscript_id: &str,
     change_id: &str,
 ) -> Result<LinkResolution, String> {
+    if !manuscript_id_is_single_segment(manuscript_id) {
+        return Ok(LinkResolution::Unknown {
+            manuscript_id: manuscript_id.to_string(),
+        });
+    }
+    match store.get_manuscript(manuscript_id) {
+        Ok(_) => {}
+        Err(StorageError::NotFound(_)) => {
+            return Ok(LinkResolution::Unknown {
+                manuscript_id: manuscript_id.to_string(),
+            });
+        }
+        Err(err) => return Err(err.to_string()),
+    }
     let resolved = drafts.resolve_change(store, manuscript_id, change_id)?;
     Ok(resolution_from(drafts, manuscript_id, &resolved))
 }
@@ -555,6 +592,49 @@ mod tests {
             change_id: "nope".into(),
         };
         assert_eq!(classify_change(&missing), ChangeLinkClass::Unknown);
+    }
+
+    #[test]
+    fn traversal_and_unknown_ids_do_not_create_a_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let drafts = DraftService::new(dir.path().to_path_buf(), "0.0.0".into());
+        let outside = tempfile::tempdir().unwrap();
+        let escaped = outside.path().join("from-link");
+        let ids = [
+            "..".to_string(),
+            ".".to_string(),
+            escaped.to_string_lossy().into_owned(),
+            "../../tmp/evil".to_string(),
+            "a/b".to_string(),
+            r"a\b".to_string(),
+        ];
+        for id in &ids {
+            let result = resolve_open_link(&drafts, &store, id, "chg").unwrap();
+            assert!(
+                matches!(result, LinkResolution::Unknown { .. }),
+                "{id} -> {result:?}"
+            );
+        }
+        assert!(!dir.path().join(".git").exists());
+        assert!(!dir.path().join("draft-repos").exists());
+        assert!(!escaped.exists());
+
+        let unknown = resolve_open_link(&drafts, &store, "not-a-book", "chg").unwrap();
+        assert_eq!(
+            unknown,
+            LinkResolution::Unknown {
+                manuscript_id: "not-a-book".into(),
+            }
+        );
+        assert!(!dir.path().join("draft-repos").join("not-a-book").exists());
+
+        let created = store.create_manuscript("Book").unwrap();
+        let missing = resolve_open_link(&drafts, &store, &created.id, "no-such-change").unwrap();
+        assert!(matches!(missing, LinkResolution::Unknown { .. }));
+        let repo = dir.path().join("draft-repos").join(&created.id);
+        assert!(repo.starts_with(dir.path()));
+        assert!(repo.join(".git").is_dir());
     }
 
     #[test]

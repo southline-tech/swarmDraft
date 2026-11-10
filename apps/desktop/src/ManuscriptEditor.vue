@@ -161,7 +161,7 @@ import {
   CONTINUOUS_SCROLL_ROOT,
   changeKeyMatches,
 } from './continuous-review-nav';
-import { writeChangeLink } from './links/link-codec';
+import { COPY_LINK_DISABLED_REASON, writeChangeLink } from './links/link-codec';
 import { reviewComposerHasFocus } from './review/review-focus-policy';
 import type { ReviewChange } from './review/review-state';
 import { SECTION_LOAD_ERROR_COPY } from './errors/map-error';
@@ -296,6 +296,8 @@ const emit = defineEmits<{
   'comment-resolve': [threadId: string, resolved: boolean];
   'split-chapter': [payload: { blockIndex: number; title: string; removeLine: boolean }];
   'merge-prev-chapter': [];
+  /** Clipboard result for a change link (#117). The parent shows the toast. */
+  'copy-link': [ok: boolean];
 }>();
 
 const appFooterEditor = inject(APP_FOOTER_EDITOR_KEY, null);
@@ -567,12 +569,16 @@ const mergePrevDisabledReason = computed((): string | undefined => {
   if (!props.canMergePrevChapter) return 'No previous chapter';
   return undefined;
 });
-const menuDisabled = computed(() =>
-  contextMenuDisabled(editor.value, {
-    splitBlocked: !!splitDisabledReason.value,
-    canMergePrev: !!props.canMergePrevChapter,
-  }),
-);
+const menuDisabled = computed(() => {
+  const out = new Set(
+    contextMenuDisabled(editor.value, {
+      splitBlocked: !!splitDisabledReason.value,
+      canMergePrev: !!props.canMergePrevChapter,
+    }),
+  );
+  if (!menuAt.value?.changeId) out.add('copy_link');
+  return out;
+});
 const splitPopover = shallowRef<{
   x: number;
   y: number;
@@ -641,7 +647,8 @@ async function onContextMenuSelect(action: ContextMenuAction) {
   menuAt.value = null;
   if (action === 'copy_link') {
     const id = at?.changeId;
-    if (id && props.manuscriptId) await writeChangeLink(props.manuscriptId, id);
+    const ok = id && props.manuscriptId ? await writeChangeLink(props.manuscriptId, id) : false;
+    emit('copy-link', ok);
     editor.value?.view.focus();
     return;
   }
@@ -2086,7 +2093,7 @@ onBeforeUnmount(() => {
       :show-chapter-group="!!chapterOpsEnabled && !sliceMode"
       :split-title="splitDisabledReason ?? undefined"
       :merge-prev-title="mergePrevDisabledReason"
-      :show-copy-link="!!menuAt.changeId"
+      :copy-link-title="COPY_LINK_DISABLED_REASON"
       @select="onContextMenuSelect"
       @close="menuAt = null"
     />

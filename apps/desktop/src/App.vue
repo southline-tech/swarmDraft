@@ -91,6 +91,7 @@ import Rad3441PilotEvidence from './evidence/Rad3441PilotEvidence.vue';
 import { readEvidenceQuery } from './evidence/evidence-routes';
 import AppToast from './shells/AppToast.vue';
 import OldChangeView from './links/OldChangeView.vue';
+import { COPY_LINK_FAILURE, COPY_LINK_SUCCESS } from './links/link-codec';
 import { startChangeLinkRoute, type OldChangeViewModel } from './links/open-link';
 import UpdatePromptToast from './updater/UpdatePromptToast.vue';
 import {
@@ -1306,11 +1307,12 @@ onMounted(() => {
     },
     showHistory: (view) => {
       dismissLinkToast();
+      dismissToast();
       oldChange.value = view;
     },
     showToast: (message) => {
       oldChange.value = null;
-      showLinkToast(message);
+      showLinkToast(message, 'alert');
     },
     clearOpenError: () => {
       openError.value = '';
@@ -1557,6 +1559,10 @@ async function ensureManuscriptForLink(manuscriptId: string): Promise<boolean> {
     await session.value?.flush();
   } catch (e) {
     console.error('Flush before change link failed', e);
+    // Stay on this book. Opening the other one would drop the unsaved text and clear the banner.
+    openError.value = `Couldn't switch books: ${errorLine(e, 'save')}`;
+    saveFailure.value = saveFailed(saveFailure.value, e);
+    return false;
   }
   try {
     const stored = await loadManuscript(manuscriptId);
@@ -1646,20 +1652,43 @@ async function reopenAfterFailure(delays = REOPEN_BACKOFF_MS): Promise<Manuscrip
 /** ob7: "Your book is open" toast after a successful open/import; hides itself after a while. */
 const openToast = ref('');
 const linkToast = ref('');
+const linkToastIcon = ref<'check' | 'alert'>('alert');
 const oldChange = ref<OldChangeViewModel | null>(null);
 let linkToastTimer: ReturnType<typeof setTimeout> | undefined;
 function dismissLinkToast() {
   clearTimeout(linkToastTimer);
   linkToast.value = '';
 }
-function showLinkToast(message: string) {
+function showLinkToast(message: string, icon: 'check' | 'alert' = 'alert') {
+  dismissToast();
   clearTimeout(linkToastTimer);
+  linkToastIcon.value = icon;
   linkToast.value = '';
   void nextTick(() => {
     linkToast.value = message;
     linkToastTimer = setTimeout(dismissLinkToast, TOAST_MS);
   });
 }
+function onCopyLink(ok: boolean) {
+  showLinkToast(ok ? COPY_LINK_SUCCESS : COPY_LINK_FAILURE, ok ? 'check' : 'alert');
+}
+function focusEditorAfterOldChange() {
+  void nextTick(() => editorPane.value?.focusBody());
+}
+function onOldChangeGoChapter() {
+  const id = oldChange.value?.sectionId;
+  oldChange.value = null;
+  if (!id) return;
+  selectedId.value = id;
+  void nextTick(() => editorPane.value?.focusSection(id));
+}
+const oldChangeChapter = computed(() => {
+  const view = oldChange.value;
+  const outline = session.value?.outline.value;
+  if (!view || !outline) return null;
+  const { index } = chapterNeighbors(outline, view.sectionId);
+  return index >= 0 ? index + 1 : null;
+});
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 let toastToken = 0;
 function dismissToast() {
@@ -1684,6 +1713,7 @@ function showOpenToast(next: ManuscriptSession) {
   const token = ++toastToken;
   void nextTick(() => {
     if (token !== toastToken) return;
+    if (linkToast.value || oldChange.value) return;
     openToast.value = text;
     toastTimer = setTimeout(dismissToast, TOAST_MS);
   });
@@ -2428,7 +2458,14 @@ defineExpose({ open, closeSession });
         :offer-relink="saveCopyRelinkOffer"
         @relink="() => void onSaveCopyRelink()"
       />
-      <OldChangeView v-if="oldChange" :view="oldChange" @close="oldChange = null" />
+      <OldChangeView
+        v-if="oldChange"
+        :view="oldChange"
+        :chapter-number="oldChangeChapter"
+        :focus-editor="focusEditorAfterOldChange"
+        @close="oldChange = null"
+        @go-chapter="onOldChangeGoChapter"
+      />
       <HistoryPanel
         v-if="isTauri()"
         :open="historyOpen"
@@ -2466,7 +2503,11 @@ defineExpose({ open, closeSession });
         >
           <!-- #98: the no-room cue shares this one polite region with the open-book toast. -->
           <AppToast
-            :open="(!!openToast || noRoomToast) && !!session && !chapterToast"
+            :open="
+              ((!!openToast && !linkToast && !oldChange) || noRoomToast) &&
+              !!session &&
+              !chapterToast
+            "
             :lead="noRoomToast ? undefined : 'Your book is open.'"
             :message="noRoomToast ? NO_ROOM_COPY : openToast"
             :action="noRoomToast ? 'Hide notes' : undefined"
@@ -2477,7 +2518,7 @@ defineExpose({ open, closeSession });
             data-test="change-link-toast"
             :open="!!linkToast"
             :message="linkToast"
-            icon="alert"
+            :icon="linkToastIcon"
             @dismiss="dismissLinkToast"
           />
           <AppToast
@@ -2644,6 +2685,7 @@ defineExpose({ open, closeSession });
               @update:selected-id="selectedId = $event"
               @split-chapter="onEditorSplitChapter"
               @merge-prev-chapter="onEditorMergePrev"
+              @copy-link="onCopyLink"
               @load-error="editorLoadError = $event"
               @reload="reloadSection"
               @toggle-navigator="outlineAuto.toggleByHand()"

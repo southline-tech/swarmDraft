@@ -11,7 +11,8 @@ import {
 } from '../backend';
 import { parseChangeLink } from './link-codec';
 
-export const UNKNOWN_CHANGE_TOAST = "That change isn't in this book's history.";
+export const UNKNOWN_CHANGE_TOAST =
+  "That change isn't in this book's history. Your book is open where you left off.";
 
 export type { LinkResolution };
 
@@ -101,10 +102,16 @@ export function startChangeLinkRoute(route: ChangeLinkRoute): () => void {
   };
   void (async () => {
     try {
+      // Subscribe first. On macOS the launch URL is stored and emitted from the same
+      // Opened event; taking it before the listener drops a cold-start link in that gap.
+      const unlisten = await listenChangeLinks(deliver);
+      if (stopped) {
+        unlisten();
+        return;
+      }
+      stop = unlisten;
       const launch = await linksTakeLaunchUrl();
       if (!stopped && launch) deliver(launch);
-      if (stopped) return;
-      stop = await listenChangeLinks(deliver);
     } catch (err) {
       console.error('Change link route failed', err);
     }

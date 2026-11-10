@@ -158,6 +158,7 @@ const emit = defineEmits<{
   'split-chapter': [payload: { blockIndex: number; title: string; removeLine: boolean }];
   'merge-prev-chapter': [];
   'reading-position': [pos: ReadingPosition];
+  'copy-link': [ok: boolean];
 }>();
 
 const suggestionsBySection = shallowRef(new Map<string, SuggestionItem[]>());
@@ -621,6 +622,7 @@ onBeforeUnmount(() => {
             @update:author-filter="authorFilter = $event"
             @split-chapter="emit('split-chapter', $event)"
             @merge-prev-chapter="emit('merge-prev-chapter')"
+            @copy-link="emit('copy-link', $event)"
             @reload="emit('reload')"
             @toggle-navigator="emit('toggle-navigator')"
             @open-settings="emit('open-settings')"

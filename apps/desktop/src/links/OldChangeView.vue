@@ -1,51 +1,96 @@
 <script setup lang="ts">
 /**
- * Read-only view of a change that has already been accepted or rejected (#123).
- * Reuses the shell scrim and dialog card. No new stacking.
+ * Read-only view of a change that has already been accepted, rejected, or edited later (#123).
+ * Layout lives in shells.css next to `.st-dlg` (the node is teleported).
  */
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import AppIcon from '../icons/AppIcon.vue';
 import { ensureOverlayLayer, APP_OVERLAY_LAYER } from '../overlay/layer';
 import { trapTab } from '../settings/focus-trap';
 import '../shells/shells.css';
 import type { OldChangeViewModel } from './open-link';
 
-const props = defineProps<{ view: OldChangeViewModel }>();
-const emit = defineEmits<{ close: [] }>();
+const props = defineProps<{
+  view: OldChangeViewModel;
+  /** 1-based chapter index when the change's section is still a chapter. */
+  chapterNumber?: number | null;
+  /** Focus the editor when the opener is the document body, or Back to my book is used. */
+  focusEditor?: () => void;
+}>();
+const emit = defineEmits<{ close: []; 'go-chapter': [] }>();
 
 const panel = ref<HTMLElement | null>(null);
-const closeBtn = ref<HTMLButtonElement | null>(null);
+const backBtn = ref<HTMLButtonElement | null>(null);
 const overlayReady = ref(false);
 let opener: HTMLElement | null = null;
+/** `editor` always returns to the manuscript. `none` leaves focus to Go to Chapter. */
+let focusPlan: 'opener' | 'editor' | 'none' = 'opener';
+
+const settled = computed(
+  () => props.view.outcome === 'accepted' || props.view.outcome === 'rejected',
+);
+const decider = computed(() => props.view.decidedBy.trim());
+const author = computed(() => props.view.authorName.trim());
+const verb = computed(() => (props.view.outcome === 'rejected' ? 'rejected' : 'accepted'));
 
 function heading(outcome: string): string {
-  if (outcome === 'accepted') return 'Accepted';
-  if (outcome === 'rejected') return 'Rejected';
-  return 'Recorded';
+  if (outcome === 'accepted') return 'This change was accepted';
+  if (outcome === 'rejected') return 'This change was rejected';
+  return 'This change was edited later';
 }
 
 function kindLabel(kind: string): string {
-  if (kind === 'suggestion_delete') return 'Delete';
-  if (kind === 'format_change') return 'Format';
-  if (kind === 'suggestion_insert') return 'Insert';
-  return kind;
+  if (kind === 'suggestion_insert') return 'Added text';
+  if (kind === 'suggestion_delete') return 'Removed text';
+  if (kind === 'format_change') return 'Formatting';
+  return 'Change';
 }
 
 function whenLabel(unix: number | null): string {
   if (unix == null) return '';
-  const d = new Date(unix * 1000);
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(d.getUTCDate()).padStart(2, '0');
-  const hh = String(d.getUTCHours()).padStart(2, '0');
-  const mm = String(d.getUTCMinutes()).padStart(2, '0');
-  return `${y}-${m}-${day} ${hh}:${mm} UTC`;
+  return new Date(unix * 1000).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
-const who = () => props.view.decidedBy.trim() || props.view.authorName.trim();
+const whenText = computed(() => whenLabel(props.view.decidedAt));
+const settledMiddle = computed(() =>
+  decider.value ? ` ${verb.value} ` : verb.value === 'rejected' ? 'Rejected ' : 'Accepted ',
+);
+const authorSuffix = computed(() => (author.value ? "'s change" : 'this change'));
+const whenSuffix = computed(() => (whenText.value ? ` · ${whenText.value}` : ''));
+const editedRest = computed(() =>
+  author.value
+    ? " suggested this change. It was changed again later, so it's no longer in your book."
+    : "This change was suggested. It was changed again later, so it's no longer in your book.",
+);
+const quoteClass = computed(() => {
+  if (props.view.kind === 'suggestion_insert') return 'old-change__quote--insert';
+  if (props.view.kind === 'suggestion_delete') return 'old-change__quote--delete';
+  if (props.view.kind === 'format_change') return 'old-change__quote--format';
+  return undefined;
+});
+
+function usefulOpener(el: HTMLElement | null): el is HTMLElement {
+  return !!el && el !== document.body && el.isConnected;
+}
 
 function close() {
+  focusPlan = 'opener';
   emit('close');
+}
+
+function backToBook() {
+  focusPlan = 'editor';
+  emit('close');
+}
+
+function goChapter() {
+  focusPlan = 'none';
+  emit('go-chapter');
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -62,28 +107,34 @@ onMounted(() => {
   opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   ensureOverlayLayer();
   overlayReady.value = true;
-  void nextTick(() => closeBtn.value?.focus());
+  void nextTick(() => backBtn.value?.focus());
 });
 
 onBeforeUnmount(() => {
-  opener?.focus();
+  if (focusPlan === 'none') return;
+  if (focusPlan === 'editor' || !usefulOpener(opener)) {
+    props.focusEditor?.();
+    return;
+  }
+  opener.focus();
 });
 </script>
 
 <template>
   <Teleport v-if="overlayReady" :to="APP_OVERLAY_LAYER">
     <div
-      class="sh-scrim scrim"
+      class="st-dlg-scrim"
       data-test="old-change-scrim"
       @mousedown.self="close"
       @keydown="onKeydown"
     >
       <div
         ref="panel"
-        class="st-dlg card dlg old-change"
+        class="st-dlg old-change"
         role="dialog"
         aria-modal="true"
         aria-labelledby="old-change-title"
+        aria-describedby="old-change-summary"
         data-test="old-change-view"
         tabindex="-1"
         @keydown="onKeydown"
@@ -91,7 +142,6 @@ onBeforeUnmount(() => {
         <header class="old-change__head">
           <h2 id="old-change-title" data-test="old-change-outcome">{{ heading(view.outcome) }}</h2>
           <button
-            ref="closeBtn"
             type="button"
             class="sh-tbtn sh-icon"
             data-test="old-change-close"
@@ -101,63 +151,46 @@ onBeforeUnmount(() => {
             <AppIcon name="x" />
           </button>
         </header>
-        <p v-if="who()" class="old-change__who" data-test="old-change-who">
-          By <bdi dir="auto">{{ who() }}</bdi>
+        <!-- prettier-ignore -->
+        <p id="old-change-summary" class="old-change__summary" data-test="old-change-summary">
+          <template v-if="settled"><bdi v-if="decider" dir="auto">{{ decider }}</bdi>{{ settledMiddle }}<bdi v-if="author" dir="auto">{{ author }}</bdi>{{ authorSuffix }}<span v-if="whenText" data-test="old-change-when">{{ whenSuffix }}</span></template>
+          <template v-else><bdi v-if="author" dir="auto">{{ author }}</bdi>{{ editedRest }}</template>
         </p>
-        <p v-if="whenLabel(view.decidedAt)" class="old-change__when" data-test="old-change-when">
-          {{ whenLabel(view.decidedAt) }}
-        </p>
-        <p v-if="kindLabel(view.kind)" class="old-change__kind" data-test="old-change-kind">
-          {{ kindLabel(view.kind) }}
-        </p>
-        <blockquote v-if="view.quote" class="old-change__quote" data-test="old-change-quote">
+        <p class="old-change__kind" data-test="old-change-kind">{{ kindLabel(view.kind) }}</p>
+        <p class="old-change__label" data-test="old-change-quote-label">Original wording</p>
+        <blockquote
+          v-if="view.quote"
+          class="old-change__quote"
+          :class="quoteClass"
+          data-suggester=""
+          data-test="old-change-quote"
+        >
           {{ view.quote }}
         </blockquote>
-        <p v-else class="old-change__quote" data-test="old-change-quote">
-          The original wording is not stored with this decision.
+        <p v-else class="old-change__missing" data-test="old-change-quote">
+          The original wording wasn't saved with this change.
         </p>
+        <div class="old-change__actions">
+          <button
+            v-if="chapterNumber"
+            type="button"
+            class="sh-btn"
+            data-test="old-change-chapter"
+            @click="goChapter"
+          >
+            Go to Chapter {{ chapterNumber }}
+          </button>
+          <button
+            ref="backBtn"
+            type="button"
+            class="sh-btn sh-btn--primary"
+            data-test="old-change-back"
+            @click="backToBook"
+          >
+            Back to my book
+          </button>
+        </div>
       </div>
     </div>
   </Teleport>
 </template>
-
-<style scoped>
-.old-change {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ct-space-2);
-  width: min(32rem, 100%);
-  max-height: min(70vh, 32rem);
-  overflow: auto;
-  color: var(--ct-text);
-  font-family: var(--ct-font-ui);
-}
-.old-change__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--ct-space-2);
-}
-.old-change h2 {
-  margin: 0;
-  font-size: var(--ct-text-lg);
-  font-weight: var(--ct-weight-semibold);
-}
-.old-change__who,
-.old-change__when,
-.old-change__kind {
-  margin: 0;
-  color: var(--ct-text-muted);
-  font-size: var(--ct-text-sm);
-}
-.old-change__quote {
-  margin: var(--ct-space-2) 0 0;
-  padding: var(--ct-space-3);
-  border: 0;
-  border-left: 3px solid var(--ct-border-strong);
-  background: var(--ct-surface);
-  color: var(--ct-text);
-  font-family: var(--ct-font-manuscript);
-  white-space: pre-wrap;
-}
-</style>

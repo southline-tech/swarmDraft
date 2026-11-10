@@ -16,8 +16,8 @@ const props = defineProps<{
   showChapterGroup?: boolean;
   splitTitle?: string;
   mergePrevTitle?: string;
-  /** Right-click landed on a tracked change (#117). */
-  showCopyLink?: boolean;
+  /** Shown when Copy link to change is disabled (#117). */
+  copyLinkTitle?: string;
 }>();
 const emit = defineEmits<{ close: []; select: [action: ContextMenuAction] }>();
 const root = ref<HTMLElement>();
@@ -49,6 +49,12 @@ function chapterDisabledReason(id: ContextMenuAction): string | undefined {
 
 function chapterReasonId(id: ContextMenuAction) {
   return `ctx-reason-${id}`;
+}
+
+function copyLinkReason(): string | undefined {
+  if (!isDisabled('copy_link')) return undefined;
+  const reason = props.copyLinkTitle?.trim();
+  return reason || undefined;
 }
 const AFTER: { id: ContextMenuAction; label: string; keys: string; icon?: 'sparkle' }[] = [
   { id: 'comment', label: 'Add comment', keys: MANUSCRIPT_SHORTCUTS.comment },
@@ -173,18 +179,6 @@ onMounted(() => nextTick(() => mainMenuItems()[0]?.focus()));
     >
       {{ it.label }}<span class="sh-k">{{ menuShortcutLabel(it.keys) }}</span>
     </button>
-    <button
-      v-if="showCopyLink"
-      type="button"
-      role="menuitem"
-      tabindex="-1"
-      class="sh-mi"
-      data-test="ctx-copy_link"
-      data-action="copy_link"
-      @click="pick('copy_link')"
-    >
-      Copy link
-    </button>
     <div class="sh-sep" role="separator" />
     <div style="position: relative" @mouseenter="subOpen = true" @mouseleave="subOpen = false">
       <button
@@ -259,6 +253,22 @@ onMounted(() => nextTick(() => mainMenuItems()[0]?.focus()));
       </button>
     </template>
     <div class="sh-sep" role="separator" />
+    <button
+      type="button"
+      role="menuitem"
+      tabindex="-1"
+      class="sh-mi sh-mi--stack"
+      data-test="ctx-copy_link"
+      data-action="copy_link"
+      :aria-disabled="isDisabled('copy_link') ? 'true' : undefined"
+      :aria-describedby="copyLinkReason() ? 'ctx-reason-copy_link' : undefined"
+      @click="pick('copy_link')"
+    >
+      <span class="sh-mi-row">Copy link to change</span>
+      <span v-if="copyLinkReason()" id="ctx-reason-copy_link" class="sh-mi-reason">{{
+        copyLinkReason()
+      }}</span>
+    </button>
     <button
       v-for="it in AFTER"
       :key="it.id"

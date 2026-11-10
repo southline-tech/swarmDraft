@@ -1,5 +1,9 @@
 /** `swarmdraft://open?draft=<manuscriptId>&change=<changeId>` (#117). */
 
+export const COPY_LINK_SUCCESS = 'Link copied. Paste it anywhere to come back to this change.';
+export const COPY_LINK_FAILURE = "Couldn't copy the link. Try again.";
+export const COPY_LINK_DISABLED_REASON = 'Right-click a suggested change to copy a link to it.';
+
 export interface ChangeLink {
   manuscriptId: string;
   changeId: string;
