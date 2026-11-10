@@ -203,13 +203,17 @@ fn review_commit_uses_bot_as_git_committer() {
         None,
     )
     .unwrap();
-    let entry = svc
-        .history(&store, &m.id, 5, 0)
+    let repo = swarmdraft_lib::draft::DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let oid = repo
+        .search_ref_tips()
         .unwrap()
         .into_iter()
-        .find(|c| c.message.contains("Accepted Line Editor"))
-        .expect("review commit");
-    assert_eq!(entry.committer_name, "Line Editor");
+        .filter(|tip| tip.name.starts_with("bot/"))
+        .flat_map(|tip| repo.walk_first_parent(&tip.oid).unwrap())
+        .find(|commit| commit.message.contains("Accepted Line Editor"))
+        .expect("review commit")
+        .oid;
+    assert_eq!(repo.committer_name(&oid).unwrap(), "Line Editor");
 }
 
 fn set_chapter_plain(store: &Store, doc_id: &str, text: &str) {

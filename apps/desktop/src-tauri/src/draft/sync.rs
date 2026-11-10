@@ -109,17 +109,19 @@ pub fn sync_worktree_to_store(
     Ok(())
 }
 
-/// Bot comments and document updates saved in SQLite and not yet on a `bot/*` commit.
-/// A main checkpoint passes these so it does not publish them before that branch exists.
+/// Rows a `main` checkpoint must not publish.
+/// Open bot suggestions stay on `bot/*` until that branch merges.
 #[derive(Default)]
 pub(crate) struct SyncOmit {
     pub comment_ids: HashSet<String>,
     /// Exact `doc_updates` bytes still waiting for a `bot/*` commit, keyed by doc id.
     pub doc_updates: HashMap<String, Vec<Vec<u8>>>,
-    /// Suggestion ids already known to belong to a pending bot write. A checkpoint
-    /// omits these even after open squashes the update log and the bytes above no
-    /// longer match a row.
+    /// Suggestion ids that stay out of `review/changes.json` on `main`.
     pub change_ids: HashSet<String>,
+    /// Status of each withheld id (`open`, `accepted`, or `rejected`).
+    /// Used to drop pending and rejected insert text from the chapter on `main`
+    /// while keeping accepted text.
+    pub change_status: HashMap<String, String>,
 }
 
 pub fn sync_store_to_worktree(
@@ -167,11 +169,12 @@ pub fn sync_store_to_worktree(
         if section.kind != "chapter" {
             continue;
         }
-        let (doc, ids) =
+        let (loaded, ids) =
             chapter_doc_for_sync(store, &section.doc_id, omit, &mut pending_change_ids)?;
         if !ids.is_empty() {
             discovered.insert(section.doc_id.clone(), ids);
         }
+        let doc = strip_withheld_marks(&loaded, &omit.change_status).unwrap_or(loaded);
         let state = doc
             .transact()
             .encode_state_as_update_v1(&StateVector::default());
@@ -184,39 +187,112 @@ pub fn sync_store_to_worktree(
 
     sync_notes(store, manuscript_id, worktree)?;
     sync_comments(store, manuscript_id, worktree, &omit.comment_ids)?;
-    // An accept or reject is stored in sqlite before this sync. That id stays in the
-    // index even when the suggestion bytes are still waiting for a `bot/*` commit.
-    let pending_change_ids = without_decided_changes(store, manuscript_id, pending_change_ids)?;
+    // Bot suggestion rows stay off `main` until the branch merges, decided or not.
     changes::write_change_index(store, manuscript_id, worktree, &pending_change_ids)?;
     Ok(discovered)
 }
 
-/// Suggestion ids with an accept or reject already recorded. Those rows are the
-/// decision, so a checkpoint must not leave them out of `review/changes.json`.
-fn without_decided_changes(
-    store: &Store,
-    manuscript_id: &str,
-    mut ids: HashSet<String>,
-) -> Result<HashSet<String>, DraftRepoError> {
-    if ids.is_empty() {
-        return Ok(ids);
+/// Chapter snapshot for `main`. Returns a new doc only when a withheld mark was removed,
+/// so an unchanged chapter keeps its bytes.
+fn strip_withheld_marks(doc: &Doc, status: &HashMap<String, String>) -> Option<Doc> {
+    if status.is_empty() {
+        return None;
     }
-    let decisions = store
-        .review_decisions_for_manuscript(manuscript_id)
-        .map_err(storage_err)?;
-    let mut decided = HashSet::new();
-    for records in decisions.values() {
-        for record in records {
-            if record.status == "accepted" || record.status == "rejected" {
-                decided.insert(record.id.clone());
+    let blocks = decode(doc);
+    if blocks.is_empty() {
+        return None;
+    }
+    let mut changed = false;
+    let mut content = Vec::with_capacity(blocks.len());
+    for block in blocks {
+        let mut node = block.node;
+        if filter_withheld_node(&mut node, status) {
+            changed = true;
+        }
+        content.push(node);
+    }
+    if !changed {
+        return None;
+    }
+    let pm = json!({"type": "doc", "content": content});
+    let out = content::new_doc();
+    content::encode(&out, &pm).ok()?;
+    Some(out)
+}
+
+/// Drop pending and rejected inserts. Keep accepted text without the mark.
+/// Returns whether `node` changed.
+fn filter_withheld_node(node: &mut serde_json::Value, status: &HashMap<String, String>) -> bool {
+    let Some(children) = node
+        .get_mut("content")
+        .and_then(|value| value.as_array_mut())
+    else {
+        return false;
+    };
+    let mut changed = false;
+    let mut kept = Vec::with_capacity(children.len());
+    for mut child in children.drain(..) {
+        if child["type"] == "text" {
+            match withheld_text(&child, status) {
+                WithheldText::Drop => changed = true,
+                WithheldText::Same => kept.push(child),
+                WithheldText::Edited(next) => {
+                    changed = true;
+                    kept.push(next);
+                }
             }
+        } else if filter_withheld_node(&mut child, status) {
+            changed = true;
+            kept.push(child);
+        } else {
+            kept.push(child);
         }
     }
-    if decided.is_empty() {
-        return Ok(ids);
+    *children = kept;
+    changed
+}
+
+enum WithheldText {
+    Drop,
+    Same,
+    Edited(serde_json::Value),
+}
+
+fn withheld_text(node: &serde_json::Value, status: &HashMap<String, String>) -> WithheldText {
+    let Some(marks) = node["marks"].as_array() else {
+        return WithheldText::Same;
+    };
+    let mut drop_text = false;
+    let mut next_marks = Vec::new();
+    let mut edited = false;
+    for mark in marks {
+        let kind = mark["type"].as_str().unwrap_or("");
+        let id = mark["attrs"]["id"].as_str().unwrap_or("");
+        let Some(state) = status.get(id) else {
+            next_marks.push(mark.clone());
+            continue;
+        };
+        let accepted = state == "accepted";
+        match kind {
+            "suggestion_insert" if !accepted => drop_text = true,
+            "suggestion_delete" if accepted => drop_text = true,
+            "suggestion_insert" | "suggestion_delete" | "format_change" => edited = true,
+            _ => next_marks.push(mark.clone()),
+        }
     }
-    ids.retain(|id| !decided.contains(id));
-    Ok(ids)
+    if drop_text {
+        return WithheldText::Drop;
+    }
+    if !edited {
+        return WithheldText::Same;
+    }
+    let mut next = node.clone();
+    if next_marks.is_empty() {
+        next.as_object_mut().map(|object| object.remove("marks"));
+    } else {
+        next["marks"] = serde_json::Value::Array(next_marks);
+    }
+    WithheldText::Edited(next)
 }
 
 /// Chapter document to write. Pending bot updates are left out when the rest of the
@@ -295,9 +371,29 @@ struct CommentRowFile {
     deleted_at: Option<String>,
 }
 
+#[derive(Clone)]
 pub(crate) struct GitComment {
     pub comment: Comment,
     pub deleted_at: Option<String>,
+}
+
+/// One comment thread file, rows sorted by `createdAt` then id.
+pub(crate) fn encode_comment_thread(
+    thread_id: &str,
+    rows: &[GitComment],
+) -> Result<Vec<u8>, DraftRepoError> {
+    let mut rows = rows.to_vec();
+    rows.sort_by(|a, b| {
+        a.comment
+            .created_at
+            .cmp(&b.comment.created_at)
+            .then(a.comment.id.cmp(&b.comment.id))
+    });
+    let payload = CommentThreadFile {
+        thread_id: thread_id.to_string(),
+        rows: rows.into_iter().map(CommentRowFile::from).collect(),
+    };
+    to_pretty(&payload)
 }
 
 fn sync_comments(
@@ -520,31 +616,57 @@ fn import_decisions_from_worktree(
     manuscript_id: &str,
     worktree: &Path,
 ) -> Result<(), DraftRepoError> {
+    // `main` after a merge, and any bot branch that is still open.
+    let mut by_id: BTreeMap<String, (String, ReviewDecisionRecord)> = BTreeMap::new();
     let path = worktree.join("review").join("changes.json");
-    if !path.is_file() {
-        store
-            .replace_manuscript_review_decisions(manuscript_id, &[])
-            .map_err(storage_err)?;
-        return Ok(());
+    if path.is_file() {
+        absorb_decision_bytes(&fs::read(&path)?, false, &mut by_id);
     }
-    let bytes = fs::read(&path)?;
-    let entries = match changes::parse_change_index(&bytes) {
+    if let Ok(repo) = DraftRepo::open_working(worktree) {
+        if let Ok(tips) = repo.search_ref_tips() {
+            for tip in tips {
+                if !tip.name.starts_with("bot/") {
+                    continue;
+                }
+                let Ok(Some(bytes)) = repo.file_bytes(&tip.oid, "review/changes.json") else {
+                    continue;
+                };
+                absorb_decision_bytes(&bytes, true, &mut by_id);
+            }
+        }
+    }
+    let records: Vec<(String, ReviewDecisionRecord)> = by_id.into_values().collect();
+    store
+        .replace_manuscript_review_decisions(manuscript_id, &records)
+        .map_err(storage_err)?;
+    Ok(())
+}
+
+fn absorb_decision_bytes(
+    bytes: &[u8],
+    from_bot: bool,
+    by_id: &mut BTreeMap<String, (String, ReviewDecisionRecord)>,
+) {
+    let entries = match changes::parse_change_index(bytes) {
         Ok(entries) => entries,
         Err(()) => {
-            eprintln!(
-                "draft change index skipped (unreadable): {}",
-                path.display()
-            );
-            return Ok(());
+            eprintln!("draft change index skipped (unreadable)");
+            return;
         }
     };
-    let mut records = Vec::new();
     for entry in entries {
         if entry.status != "accepted" && entry.status != "rejected" {
             continue;
         }
         if entry.section_id.is_empty() || entry.id.is_empty() {
             continue;
+        }
+        if from_bot {
+            if let Some((_, existing)) = by_id.get(&entry.id) {
+                if existing.status == "accepted" || existing.status == "rejected" {
+                    continue;
+                }
+            }
         }
         let decided_by = entry
             .decided_by
@@ -554,21 +676,20 @@ fn import_decisions_from_worktree(
             .decided_at
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "1970-01-01T00:00:00.000Z".into());
-        records.push((
-            entry.section_id.clone(),
-            ReviewDecisionRecord {
-                kind: map_kind(&entry.kind).into(),
-                id: entry.id,
-                status: entry.status,
-                decided_at,
-                decided_by,
-            },
-        ));
+        by_id.insert(
+            entry.id.clone(),
+            (
+                entry.section_id.clone(),
+                ReviewDecisionRecord {
+                    kind: map_kind(&entry.kind).into(),
+                    id: entry.id,
+                    status: entry.status,
+                    decided_at,
+                    decided_by,
+                },
+            ),
+        );
     }
-    store
-        .replace_manuscript_review_decisions(manuscript_id, &records)
-        .map_err(storage_err)?;
-    Ok(())
 }
 
 impl From<GitComment> for CommentRowFile {

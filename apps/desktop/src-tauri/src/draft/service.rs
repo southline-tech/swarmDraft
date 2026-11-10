@@ -14,7 +14,9 @@ use crate::storage::Store;
 
 use super::changes::{self, DraftChangeResolve};
 use super::format::{self, DraftManifest, DRAFT_FORMAT, DRAFT_FORMAT_VERSION, REPO_DIR};
-use super::repo::{append_trailers, message_trailers, CommitEntry, CommitOptions, DraftRepo};
+use super::repo::{
+    append_trailers, message_trailers, CommitEntry, CommitOptions, DraftRepo, DraftRepoError,
+};
 use super::sessions::{self, SessionRecord};
 use super::sync;
 
@@ -41,8 +43,18 @@ pub enum DraftSaveOutcome {
     NeedsSaveAs,
 }
 
+#[derive(Default, Clone)]
+struct BotCommentLinks {
+    /// Suggestion id → comment ids saved with that suggestion.
+    by_change: HashMap<String, Vec<String>>,
+    /// Bot comments saved beside a suggestion, without a change id of their own.
+    unlinked: Vec<String>,
+    change_ids: Vec<String>,
+}
+
 struct BotSession {
     branch: String,
+    links: BotCommentLinks,
 }
 
 type ResolveCache = HashMap<String, (String, HashMap<String, DraftChangeResolve>)>;
@@ -96,10 +108,11 @@ struct PendingBotWrite {
     doc_id: Option<String>,
     doc_update: Option<Vec<u8>>,
     /// Suggestion ids this update added. Captured when the bot write is saved, while
-    /// the mark is still in the chapter, so a reject before the first checkpoint can
-    /// resolve the comment saved with that change. Still left out of
-    /// `review/changes.json` after open squashes the update log.
+    /// the mark is still in the chapter, so a reject can resolve the comment saved
+    /// with that change.
     change_ids: Vec<String>,
+    bot_agent_id: Option<String>,
+    bot_name: Option<String>,
 }
 
 impl DraftService {
@@ -141,6 +154,7 @@ impl DraftService {
     ) -> Result<T, E> {
         let mut guard = self.bot_writes.lock().expect("bot writes");
         let result = write()?;
+        let (bot_agent_id, bot_name) = bot_identity(&retention.comment, store, &retention);
         let doc_update = retention.doc_update.filter(|update| update.len() > 2);
         if retention.comment.is_some() || doc_update.is_some() {
             let change_ids = match (&retention.doc_id, &doc_update) {
@@ -158,6 +172,8 @@ impl DraftService {
                 doc_id: retention.doc_id,
                 doc_update,
                 change_ids,
+                bot_agent_id,
+                bot_name,
             });
         }
         Ok(result)
@@ -357,6 +373,9 @@ impl DraftService {
         let dir = self
             .ensure_open_inner(store, manuscript_id)
             .map_err(|e| format!("ensure_open: {e}"))?;
+        // A checkpoint must not be the first thing that touches a suggestion.
+        // The bot branch commit happens first, then main records the live text.
+        self.flush_pending_bot_suggestions(store, manuscript_id)?;
         let session = self.session_for_commit(store, manuscript_id)?;
         // Held across the read of pending bot writes and the file sync. A bot write
         // waits, then lands in SQLite after this checkpoint's files are already written.
@@ -398,6 +417,18 @@ impl DraftService {
             let verb = if accepted { "Accepted" } else { "Rejected" };
             let base = format!("{verb} {bot_name}'s change in {chapter_title}");
             let decision = if accepted { "accepted" } else { "rejected" };
+            let bot_key = bot_agent_id
+                .filter(|id| !id.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| bot_slug(bot_name));
+            // The suggestion commit lands before this decision, even when the
+            // caller has not run it yet.
+            let linked = if accepted {
+                Vec::new()
+            } else {
+                self.comment_ids_for_reject(store, manuscript_id, &bot_key, change_id.unwrap_or(""))
+            };
+            self.flush_pending_bot_suggestions(store, manuscript_id)?;
             self.persist_review_decision(
                 store,
                 manuscript_id,
@@ -407,67 +438,62 @@ impl DraftService {
                 change_kind,
                 change_section_id,
             )?;
-            // One suggestion reject records that id only. The bot branch ends when every
-            // change that bot introduced has been rejected, so a later accept can still merge.
-            // A reject before that branch exists still resolves the comment saved with the
-            // change, and the commit below writes both the decision and that resolution.
             if !accepted {
-                if let Some(id) = change_id.filter(|id| !id.is_empty()) {
-                    self.resolve_rejected_pending_comments(store, manuscript_id, id)?;
-                }
-                if let Some(branch) = self.active_bot_branch(manuscript_id, bot_agent_id, bot_name)
-                {
-                    if self.bot_branch_fully_rejected(
+                self.resolve_comments(store, manuscript_id, &linked)?;
+            }
+            let branch = self.ensure_bot_session_inner(store, manuscript_id, &bot_key)?;
+            if !accepted && linked.is_empty() {
+                let introduced = self.changes_introduced_on_branch(
+                    store,
+                    manuscript_id,
+                    &branch,
+                    Some(&bot_key),
+                )?;
+                if introduced_all_rejected(store, manuscript_id, &introduced)? {
+                    self.resolve_bot_originated_comments(
                         store,
                         manuscript_id,
                         &branch,
-                        bot_agent_id,
-                    )? {
-                        self.resolve_bot_originated_comments(
-                            store,
-                            manuscript_id,
-                            &branch,
-                            bot_agent_id,
-                        )?;
-                        self.end_bot_session(manuscript_id, bot_agent_id, bot_name);
-                    }
+                        Some(&bot_key),
+                    )?;
                 }
             }
-            let msg = match (change_id, change_kind, change_section_id) {
-                (Some(id), kind, Some(section)) if !id.is_empty() && !section.is_empty() => {
-                    let mut trailers = vec![("Change-Id", id), ("Decision", decision)];
-                    if let Some(kind) = kind.filter(|k| !k.is_empty()) {
-                        trailers.push(("Kind", kind));
-                    }
-                    trailers.push(("Section", section));
-                    if !decided_by.is_empty() {
-                        trailers.push(("Decided-By", decided_by));
-                    }
-                    append_trailers(&base, &trailers)
-                }
-                _ => base,
-            };
-            let bot_email = bot_agent_id
-                .map(bot_committer_email)
-                .unwrap_or_else(|| "bot@swarmdraft.local".into());
-            let oid =
-                self.commit_now_inner(store, manuscript_id, &msg, bot_name, &bot_email, true)?;
-            if accepted {
-                if let Some(branch) = self.active_bot_branch(manuscript_id, bot_agent_id, bot_name)
-                {
-                    let dir = self.ensure_open_inner(store, manuscript_id)?;
-                    let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
-                    let advance = self
-                        .active_record(manuscript_id)
-                        .map(|s| format!("session/{}", s.id));
-                    repo.merge_bot_branch(&branch, &author_name(store), advance.as_deref())
-                        .map_err(|e| format!("Couldn't merge bot changes: {e}"))?;
-                    self.end_bot_session(manuscript_id, bot_agent_id, bot_name);
-                    // commit_now_inner packed the accept commit, before this merge.
-                    // The merge keeps that tree, so pack the commit that still
-                    // has the accepted chapter and omits a path the writer removed.
-                    self.pack_if_linked_inner(store, manuscript_id)?;
-                }
+            let session_id = self.active_record(manuscript_id).map(|record| record.id);
+            let msg = decision_message(
+                &base,
+                decision,
+                decided_by,
+                change_id,
+                change_kind,
+                change_section_id,
+                session_id.as_deref(),
+            );
+            let bot_email = bot_committer_email(&bot_key);
+            let oid = self.commit_decision_on_bot_branch(
+                store,
+                manuscript_id,
+                &branch,
+                &bot_key,
+                &msg,
+                bot_name,
+                &bot_email,
+                decision,
+                decided_by,
+                change_id,
+                change_kind,
+                change_section_id,
+            )?;
+            // Main keeps the live chapter. The decision itself stays on the bot branch.
+            self.commit_now_inner(
+                store,
+                manuscript_id,
+                "Edited chapter",
+                &author_name(store),
+                "author@swarmdraft.local",
+                false,
+            )?;
+            if self.bot_branch_is_settled(store, manuscript_id, &branch, &bot_key)? {
+                self.merge_settled_bot_branch(store, manuscript_id, &branch, &bot_key)?;
             }
             Ok(oid)
         })
@@ -475,7 +501,9 @@ impl DraftService {
 
     /// Start or reuse `bot/{bot}/{session}` from main and commit bot-side suggestions on it.
     /// Pending bot writes are put back into the cache first, so the commit records the row
-    /// from the write after a rebuild has replaced the cache.
+    /// from the write after a rebuild has replaced the cache. A document the editor has
+    /// already replaced is restored after that commit, so the suggestion text stays in
+    /// the branch history and the live chapter stays as the editor left it.
     pub fn commit_bot_suggestion(
         &self,
         store: &Store,
@@ -485,39 +513,112 @@ impl DraftService {
         message: &str,
     ) -> Result<Option<String>, String> {
         self.with_op(|| {
-            let branch = self.ensure_bot_session_inner(store, manuscript_id, bot_agent_id)?;
-            let dir = self.ensure_open_inner(store, manuscript_id)?;
-            let tokens = self.reapply_pending_bot_writes(store, manuscript_id)?;
-            let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
-            repo.checkout_branch(&branch)
-                .map_err(|e| format!("checkout bot branch: {e}"))?;
-            // This commit publishes the pending rows on `bot/*`. A decision already on
-            // `main` stays there: this sync does not check out `main`, and the index keeps
-            // the decided status from sqlite instead of writing the suggestion as open.
-            let _published = sync::sync_store_to_worktree(
+            self.commit_bot_suggestion_inner(
                 store,
                 manuscript_id,
-                &dir,
-                &sync::SyncOmit::default(),
+                bot_agent_id,
+                bot_display_name,
+                message,
+                None,
             )
-            .map_err(|e| format!("sync: {e}"))?;
-            let email = bot_committer_email(bot_agent_id);
-            let oid = repo
-                .commit_all(message, bot_display_name, &email, &CommitOptions::default())
-                .map_err(|e| format!("commit: {e}"))?;
-            repo.checkout_main()
-                .map_err(|e| format!("checkout main: {e}"))?;
-            if let Some(record) = self.active_record(manuscript_id) {
-                if let Err(e) = sessions::write_session_file(&dir, &record) {
-                    eprintln!("draft session file not rewritten after bot commit: {e}");
-                }
-            }
-            if oid.is_some() {
-                self.clear_pending_bot_writes(&tokens);
-                self.pack_if_linked_inner(store, manuscript_id)?;
-            }
-            Ok(oid)
         })
+    }
+
+    fn commit_bot_suggestion_inner(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        bot_agent_id: &str,
+        bot_display_name: &str,
+        message: &str,
+        only_tokens: Option<&[u64]>,
+    ) -> Result<Option<String>, String> {
+        let branch = self.ensure_bot_session_inner(store, manuscript_id, bot_agent_id)?;
+        let dir = self.ensure_open_inner(store, manuscript_id)?;
+        let pending = self.pending_bot_writes(manuscript_id, only_tokens);
+        self.absorb_bot_links(manuscript_id, bot_agent_id, &pending);
+        let snapshots = doc_snapshots_for_reapply(store, &pending)?;
+        let tokens = self.reapply_pending_bot_writes(store, manuscript_id, only_tokens)?;
+        let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+        repo.checkout_branch(&branch)
+            .map_err(|e| format!("checkout bot branch: {e}"))?;
+        let _published =
+            sync::sync_store_to_worktree(store, manuscript_id, &dir, &sync::SyncOmit::default())
+                .map_err(|e| format!("sync: {e}"))?;
+        let email = bot_committer_email(bot_agent_id);
+        let oid = repo
+            .commit_all(message, bot_display_name, &email, &CommitOptions::default())
+            .map_err(|e| format!("commit: {e}"))?;
+        repo.checkout_main()
+            .map_err(|e| format!("checkout main: {e}"))?;
+        for (doc_id, bytes) in &snapshots {
+            store
+                .replace_doc_state(doc_id, bytes)
+                .map_err(|e| e.to_string())?;
+        }
+        if let Some(record) = self.active_record(manuscript_id) {
+            if let Err(e) = sessions::write_session_file(&dir, &record) {
+                eprintln!("draft session file not rewritten after bot commit: {e}");
+            }
+        }
+        // A tree that already matches the branch still means the suggestion is in git.
+        self.clear_pending_bot_writes(&tokens);
+        if oid.is_some() {
+            self.pack_if_linked_inner(store, manuscript_id)?;
+        }
+        Ok(oid)
+    }
+
+    /// Commit every saved bot write onto its branch before a checkpoint or a decision.
+    fn flush_pending_bot_suggestions(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+    ) -> Result<(), String> {
+        let pending = self.pending_bot_writes(manuscript_id, None);
+        if pending.is_empty() {
+            return Ok(());
+        }
+        let mut groups: Vec<(String, String, Vec<u64>)> = Vec::new();
+        for write in &pending {
+            let (id, name) = pending_bot_identity(write);
+            if let Some(group) = groups.iter_mut().find(|(bot_id, _, _)| bot_id == &id) {
+                group.2.push(write.token);
+            } else {
+                groups.push((id, name, vec![write.token]));
+            }
+        }
+        for (bot_id, bot_name, tokens) in groups {
+            self.commit_bot_suggestion_inner(
+                store,
+                manuscript_id,
+                &bot_id,
+                &bot_name,
+                "Bot suggestions",
+                Some(&tokens),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn pending_bot_writes(
+        &self,
+        manuscript_id: &str,
+        only_tokens: Option<&[u64]>,
+    ) -> Vec<PendingBotWrite> {
+        self.bot_writes
+            .lock()
+            .expect("bot writes")
+            .pending
+            .iter()
+            .filter(|write| write.manuscript_id == manuscript_id)
+            .filter(|write| {
+                only_tokens
+                    .map(|tokens| tokens.contains(&write.token))
+                    .unwrap_or(true)
+            })
+            .cloned()
+            .collect()
     }
 
     /// Put this book's saved bot writes back into SQLite. Returns their tokens so a
@@ -526,14 +627,9 @@ impl DraftService {
         &self,
         store: &Store,
         manuscript_id: &str,
+        only_tokens: Option<&[u64]>,
     ) -> Result<Vec<u64>, String> {
-        let guard = self.bot_writes.lock().expect("bot writes");
-        let pending: Vec<PendingBotWrite> = guard
-            .pending
-            .iter()
-            .filter(|write| write.manuscript_id == manuscript_id)
-            .cloned()
-            .collect();
+        let pending = self.pending_bot_writes(manuscript_id, only_tokens);
         apply_pending_bot_writes(store, manuscript_id, &pending)
     }
 
@@ -545,29 +641,28 @@ impl DraftService {
         guard.pending.retain(|write| !tokens.contains(&write.token));
     }
 
-    /// Write the cache for a `main` commit, skipping bot comments and suggestions whose
-    /// `bot/*` commit has not landed. The lock covers the skip set and the sync, so a bot
-    /// write cannot enter SQLite in between and get published onto `main`. A keystroke
-    /// that does not apply without one of those suggestions stays in the chapter. The
-    /// suggestion id stays out of `review/changes.json` until an accept or reject records
-    /// it. A comment already resolved is part of that decision and is written here.
+    /// Write the cache for a `main` commit. Bot suggestion rows and bot comments stay
+    /// off `main` until that branch merges. Pending insert text is left out; accepted
+    /// text in the live document is kept. The lock covers the skip set and the sync.
     fn sync_main_worktree(
         &self,
         store: &Store,
         manuscript_id: &str,
         dir: &Path,
     ) -> Result<(), String> {
+        let git_omit = DraftRepo::open_working(dir)
+            .ok()
+            .and_then(|repo| unmerged_bot_omit(&repo).ok())
+            .unwrap_or_default();
         let mut guard = self.bot_writes.lock().expect("bot writes");
-        let mut omit = sync::SyncOmit::default();
+        let mut omit = git_omit;
         for write in guard
             .pending
             .iter()
             .filter(|write| write.manuscript_id == manuscript_id)
         {
             if let Some(comment) = &write.comment {
-                if comment.resolved_at.is_none() {
-                    omit.comment_ids.insert(comment.id.clone());
-                }
+                omit.comment_ids.insert(comment.id.clone());
             }
             if let (Some(doc_id), Some(update)) = (&write.doc_id, &write.doc_update) {
                 if update.len() > 2 {
@@ -577,7 +672,12 @@ impl DraftService {
                         .push(update.clone());
                 }
             }
-            omit.change_ids.extend(write.change_ids.iter().cloned());
+            for id in &write.change_ids {
+                omit.change_ids.insert(id.clone());
+                omit.change_status
+                    .entry(id.clone())
+                    .or_insert_with(|| "open".into());
+            }
         }
         let discovered = sync::sync_store_to_worktree(store, manuscript_id, dir, &omit)
             .map_err(|e| format!("sync: {e}"))?;
@@ -1063,6 +1163,505 @@ fn copy_dir(from: &Path, to: &Path) -> Result<(), std::io::Error> {
     Ok(())
 }
 
+fn decision_message(
+    base: &str,
+    decision: &str,
+    decided_by: &str,
+    change_id: Option<&str>,
+    change_kind: Option<&str>,
+    change_section_id: Option<&str>,
+    session_id: Option<&str>,
+) -> String {
+    let msg = match (change_id, change_kind, change_section_id) {
+        (Some(id), kind, Some(section)) if !id.is_empty() && !section.is_empty() => {
+            let mut trailers = vec![("Change-Id", id), ("Decision", decision)];
+            if let Some(kind) = kind.filter(|kind| !kind.is_empty()) {
+                trailers.push(("Kind", kind));
+            }
+            trailers.push(("Section", section));
+            if !decided_by.is_empty() {
+                trailers.push(("Decided-By", decided_by));
+            }
+            append_trailers(base, &trailers)
+        }
+        _ => base.to_string(),
+    };
+    message_with_session(&msg, session_id)
+}
+
+fn decision_timestamp(
+    store: &Store,
+    manuscript_id: &str,
+    change_id: &str,
+) -> Result<String, String> {
+    let decisions = store
+        .review_decisions_for_manuscript(manuscript_id)
+        .map_err(|e| e.to_string())?;
+    if let Some(record) = decisions.values().flatten().find(|row| row.id == change_id) {
+        return Ok(record.decided_at.clone());
+    }
+    store.now().map_err(|e| e.to_string())
+}
+
+fn introduced_all_rejected(
+    store: &Store,
+    manuscript_id: &str,
+    ids: &[String],
+) -> Result<bool, String> {
+    if ids.is_empty() {
+        return Ok(false);
+    }
+    let decisions = store
+        .review_decisions_for_manuscript(manuscript_id)
+        .map_err(|e| e.to_string())?;
+    Ok(ids.iter().all(|id| {
+        decisions
+            .values()
+            .flatten()
+            .any(|row| row.id == *id && row.status == "rejected")
+    }))
+}
+
+fn decided_ids(store: &Store, manuscript_id: &str) -> std::collections::HashSet<String> {
+    let Ok(decisions) = store.review_decisions_for_manuscript(manuscript_id) else {
+        return std::collections::HashSet::new();
+    };
+    decisions
+        .values()
+        .flatten()
+        .filter(|row| row.status == "rejected")
+        .map(|row| row.id.clone())
+        .collect()
+}
+
+fn absorb_write_links(links: &mut BotCommentLinks, write: &PendingBotWrite) {
+    for id in &write.change_ids {
+        if !links.change_ids.iter().any(|existing| existing == id) {
+            links.change_ids.push(id.clone());
+        }
+    }
+    let Some(comment) = &write.comment else {
+        return;
+    };
+    if write.change_ids.is_empty() {
+        if !links.unlinked.iter().any(|id| id == &comment.id) {
+            links.unlinked.push(comment.id.clone());
+        }
+        return;
+    }
+    for id in &write.change_ids {
+        let entry = links.by_change.entry(id.clone()).or_default();
+        if !entry.iter().any(|existing| existing == &comment.id) {
+            entry.push(comment.id.clone());
+        }
+    }
+}
+
+fn pending_bot_identity(write: &PendingBotWrite) -> (String, String) {
+    let id = write
+        .bot_agent_id
+        .clone()
+        .filter(|id| !id.is_empty())
+        .unwrap_or_else(|| "bot".into());
+    let name = write
+        .bot_name
+        .clone()
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| id.clone());
+    (id, name)
+}
+
+fn bot_identity(
+    comment: &Option<crate::manuscripts::Comment>,
+    store: &Store,
+    retention: &BotRetention,
+) -> (Option<String>, Option<String>) {
+    if let Some(comment) = comment {
+        if comment.author.kind == "agent" && !comment.author.id.is_empty() {
+            let name = if comment.author.name.is_empty() {
+                comment.author.id.clone()
+            } else {
+                comment.author.name.clone()
+            };
+            return (Some(comment.author.id.clone()), Some(name));
+        }
+    }
+    if let (Some(doc_id), Some(update)) = (&retention.doc_id, &retention.doc_update) {
+        if let Some(id) = agent_id_in_doc(store, doc_id, update) {
+            return (Some(id.clone()), Some(id));
+        }
+    }
+    (None, None)
+}
+
+fn agent_id_in_doc(store: &Store, doc_id: &str, update: &[u8]) -> Option<String> {
+    if doc_already_has_update(store, doc_id, update) {
+        let doc = store.load_doc(doc_id).ok()?;
+        return first_agent_author(&doc);
+    }
+    let doc = store.load_doc(doc_id).ok()?;
+    use yrs::updates::decoder::Decode;
+    use yrs::{Transact, Update};
+    let decoded = Update::decode_v1(update).ok()?;
+    doc.transact_mut().apply_update(decoded).ok()?;
+    first_agent_author(&doc)
+}
+
+fn first_agent_author(doc: &yrs::Doc) -> Option<String> {
+    for block in crate::content::decode(doc) {
+        if let Some(id) = agent_author_in_node(&block.node) {
+            return Some(id);
+        }
+    }
+    None
+}
+
+fn agent_author_in_node(node: &serde_json::Value) -> Option<String> {
+    if node["type"] == "text" {
+        if let Some(marks) = node["marks"].as_array() {
+            for mark in marks {
+                let author = mark["attrs"]["author"].as_str().unwrap_or("");
+                if let Some(id) = author.strip_prefix("agent:") {
+                    if !id.is_empty() {
+                        return Some(id.to_string());
+                    }
+                }
+            }
+        }
+    }
+    for child in node["content"].as_array().into_iter().flatten() {
+        if let Some(id) = agent_author_in_node(child) {
+            return Some(id);
+        }
+    }
+    None
+}
+
+fn doc_already_has_update(store: &Store, doc_id: &str, update: &[u8]) -> bool {
+    if update.len() <= 2 {
+        return true;
+    }
+    use yrs::updates::decoder::Decode;
+    use yrs::{ReadTxn, StateVector, Transact, Update};
+    let Ok(decoded) = Update::decode_v1(update) else {
+        return true;
+    };
+    let Ok(doc) = store.load_doc(doc_id) else {
+        return true;
+    };
+    let before = doc
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    if doc.transact_mut().apply_update(decoded).is_err() {
+        return true;
+    }
+    let after = doc
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    before == after
+}
+
+fn doc_snapshots_for_reapply(
+    store: &Store,
+    pending: &[PendingBotWrite],
+) -> Result<Vec<(String, Vec<u8>)>, String> {
+    use yrs::{ReadTxn, StateVector, Transact};
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for write in pending {
+        let Some(doc_id) = &write.doc_id else {
+            continue;
+        };
+        if !seen.insert(doc_id.clone()) {
+            continue;
+        }
+        let missing = pending.iter().any(|other| {
+            other.doc_id.as_deref() == Some(doc_id.as_str())
+                && other
+                    .doc_update
+                    .as_ref()
+                    .is_some_and(|update| !doc_already_has_update(store, doc_id, update))
+        });
+        if !missing {
+            continue;
+        }
+        let doc = store.load_doc(doc_id).map_err(|e| e.to_string())?;
+        let bytes = doc
+            .transact()
+            .encode_state_as_update_v1(&StateVector::default());
+        out.push((doc_id.clone(), bytes));
+    }
+    Ok(out)
+}
+
+fn unmerged_bot_omit(repo: &DraftRepo) -> Result<sync::SyncOmit, String> {
+    let mut omit = sync::SyncOmit::default();
+    let Some(main) = repo.head_oid().map_err(|e| e.to_string())? else {
+        return Ok(omit);
+    };
+    for tip in repo.search_ref_tips().map_err(|e| e.to_string())? {
+        if !tip.name.starts_with("bot/") {
+            continue;
+        }
+        let Some(base) = repo
+            .merge_base(&tip.oid, &main)
+            .map_err(|e| e.to_string())?
+        else {
+            continue;
+        };
+        if base == tip.oid {
+            continue;
+        }
+        let base_ids = changes::change_ids_in_commit(repo, &base).map_err(|e| e.to_string())?;
+        let base_comments: std::collections::HashSet<String> =
+            sync::comment_rows_in_commit(repo, &base)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|row| row.comment.id)
+                .collect();
+        for entry in changes::changes_in_commit(repo, &tip.oid).map_err(|e| e.to_string())? {
+            if entry.author_kind != "agent" || base_ids.contains(&entry.id) {
+                continue;
+            }
+            omit.change_status
+                .insert(entry.id.clone(), entry.status.clone());
+            omit.change_ids.insert(entry.id);
+        }
+        for row in sync::comment_rows_in_commit(repo, &tip.oid).map_err(|e| e.to_string())? {
+            if row.comment.author.kind != "agent" || base_comments.contains(&row.comment.id) {
+                continue;
+            }
+            omit.comment_ids.insert(row.comment.id);
+        }
+    }
+    Ok(omit)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn upsert_change_decision(
+    existing: Option<&[u8]>,
+    id: &str,
+    kind: &str,
+    section_id: &str,
+    status: &str,
+    decided_by: &str,
+    decided_at: &str,
+    bot_name: &str,
+    bot_agent_id: &str,
+) -> Result<Vec<u8>, String> {
+    let mut entries = existing
+        .and_then(|bytes| changes::parse_change_index(bytes).ok())
+        .unwrap_or_default();
+    let decided_by = if decided_by.is_empty() {
+        "author"
+    } else {
+        decided_by
+    };
+    if let Some(entry) = entries.iter_mut().find(|entry| entry.id == id) {
+        entry.status = status.to_string();
+        entry.decided_by = Some(decided_by.to_string());
+        entry.decided_at = Some(decided_at.to_string());
+        if entry.section_id.is_empty() {
+            entry.section_id = section_id.to_string();
+        }
+        if !kind.is_empty() {
+            entry.kind = changes::map_kind(kind).to_string();
+        }
+    } else {
+        entries.push(changes::ChangeEntry {
+            id: id.to_string(),
+            kind: changes::map_kind(kind).to_string(),
+            section_id: section_id.to_string(),
+            author_kind: "agent".into(),
+            author_id: bot_agent_id.to_string(),
+            author_name: bot_name.to_string(),
+            status: status.to_string(),
+            quote: String::new(),
+            decided_by: Some(decided_by.to_string()),
+            decided_at: Some(decided_at.to_string()),
+        });
+    }
+    changes::index_bytes(&entries).map_err(|e| e.to_string())
+}
+
+fn refreshed_bot_comment_files(
+    repo: &DraftRepo,
+    tip: &str,
+    store: &Store,
+    manuscript_id: &str,
+    bot_agent_id: &str,
+) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let live = store
+        .comments_for_manuscript(manuscript_id)
+        .map_err(|e| e.to_string())?;
+    let live_by_id: HashMap<String, crate::manuscripts::Comment> = live
+        .iter()
+        .cloned()
+        .map(|comment| (comment.id.clone(), comment))
+        .collect();
+    let mut seen = std::collections::HashSet::new();
+    let mut files = Vec::new();
+    let all_rows = sync::comment_rows_in_commit(repo, tip).map_err(|e| e.to_string())?;
+    let paths = repo
+        .list_tree_files(tip, "comments/")
+        .map_err(|e| e.to_string())?;
+    for path in paths {
+        if !path.ends_with(".json") {
+            continue;
+        }
+        let mut rows: Vec<_> = all_rows
+            .iter()
+            .filter(|row| row_belongs_to_path(row, &path))
+            .cloned()
+            .collect();
+        if rows.is_empty() {
+            continue;
+        }
+        let mut changed = false;
+        for row in &mut rows {
+            seen.insert(row.comment.id.clone());
+            let Some(current) = live_by_id.get(&row.comment.id) else {
+                continue;
+            };
+            if !comment_authored_by_bot(current, Some(bot_agent_id)) {
+                continue;
+            }
+            if current.resolved_at != row.comment.resolved_at {
+                row.comment = current.clone();
+                changed = true;
+            }
+        }
+        if changed {
+            let thread_id = rows
+                .first()
+                .and_then(|row| row.comment.thread_id.clone())
+                .unwrap_or_else(|| {
+                    path.trim_start_matches("comments/")
+                        .trim_end_matches(".json")
+                        .to_string()
+                });
+            let bytes =
+                sync::encode_comment_thread(&thread_id, &rows).map_err(|e| e.to_string())?;
+            files.push((path, bytes));
+        }
+    }
+    for comment in live {
+        if seen.contains(&comment.id) || comment.resolved_at.is_none() {
+            continue;
+        }
+        if !comment_authored_by_bot(&comment, Some(bot_agent_id)) {
+            continue;
+        }
+        let thread = comment
+            .thread_id
+            .clone()
+            .filter(|id| sessions::safe_file_id(id))
+            .unwrap_or_else(|| comment.id.clone());
+        if !sessions::safe_file_id(&thread) {
+            continue;
+        }
+        let path = format!("comments/{thread}.json");
+        let bytes = sync::encode_comment_thread(
+            &thread,
+            &[sync::GitComment {
+                comment,
+                deleted_at: None,
+            }],
+        )
+        .map_err(|e| e.to_string())?;
+        files.push((path, bytes));
+    }
+    Ok(files)
+}
+
+fn row_belongs_to_path(row: &sync::GitComment, path: &str) -> bool {
+    let file_id = path
+        .trim_start_matches("comments/")
+        .trim_end_matches(".json");
+    let thread = row
+        .comment
+        .thread_id
+        .as_deref()
+        .filter(|id| sessions::safe_file_id(id))
+        .unwrap_or(row.comment.id.as_str());
+    thread == file_id || row.comment.id == file_id
+}
+
+fn merge_overlay(repo: &DraftRepo, branch: &str) -> Result<Vec<(String, Vec<u8>)>, DraftRepoError> {
+    let main_oid = repo
+        .head_oid()?
+        .ok_or_else(|| DraftRepoError::Invalid("main has no commits".into()))?;
+    let bot_oid = repo
+        .branch_target(branch)?
+        .ok_or_else(|| DraftRepoError::Invalid(format!("bot branch {branch} is missing")))?;
+    let base = repo.merge_base(&bot_oid, &main_oid)?.ok_or_else(|| {
+        DraftRepoError::Invalid("bot branch has no common ancestor with main".into())
+    })?;
+    let base_ids = changes::change_ids_in_commit(repo, &base)?;
+    let main_changes = repo.file_bytes(&main_oid, "review/changes.json")?;
+    let bot_changes = repo.file_bytes(&bot_oid, "review/changes.json")?;
+    let mut files = Vec::new();
+    files.push((
+        "review/changes.json".into(),
+        merge_change_bytes(main_changes.as_deref(), bot_changes.as_deref(), &base_ids)?,
+    ));
+    let base_comments: std::collections::HashSet<String> =
+        sync::comment_rows_in_commit(repo, &base)?
+            .into_iter()
+            .map(|row| row.comment.id)
+            .collect();
+    for path in repo.list_tree_files(&bot_oid, "comments/")? {
+        if !path.ends_with(".json") {
+            continue;
+        }
+        let Some(bytes) = repo.file_bytes(&bot_oid, &path)? else {
+            continue;
+        };
+        let rows = sync::comment_rows_in_commit(repo, &bot_oid)?;
+        let in_file: Vec<_> = rows
+            .iter()
+            .filter(|row| row_belongs_to_path(row, &path))
+            .collect();
+        let introduces_bot = in_file.iter().any(|row| {
+            row.comment.author.kind == "agent" && !base_comments.contains(&row.comment.id)
+        });
+        let has_human = in_file
+            .iter()
+            .any(|row| row.comment.author.kind != "agent" && row.deleted_at.is_none());
+        if introduces_bot && !has_human {
+            files.push((path, bytes));
+        }
+    }
+    Ok(files)
+}
+
+fn merge_change_bytes(
+    main: Option<&[u8]>,
+    bot: Option<&[u8]>,
+    base_ids: &std::collections::HashSet<String>,
+) -> Result<Vec<u8>, DraftRepoError> {
+    let mut entries = main
+        .and_then(|bytes| changes::parse_change_index(bytes).ok())
+        .unwrap_or_default();
+    let bot_entries = bot
+        .and_then(|bytes| changes::parse_change_index(bytes).ok())
+        .unwrap_or_default();
+    for entry in bot_entries {
+        if entry.status != "accepted" && entry.status != "rejected" {
+            continue;
+        }
+        if base_ids.contains(&entry.id) {
+            continue;
+        }
+        if let Some(existing) = entries.iter_mut().find(|row| row.id == entry.id) {
+            *existing = entry;
+        } else {
+            entries.push(entry);
+        }
+    }
+    changes::index_bytes(&entries)
+}
+
 fn author_name(store: &Store) -> String {
     store
         .user_display_name()
@@ -1201,60 +1800,81 @@ impl DraftService {
         }
     }
 
-    /// A reject before `bot/*` exists still resolves the comment saved with that change.
-    /// The suggestion id was stored when the bot write was saved, so this does not wait
-    /// for a checkpoint to discover it, and it still matches after the editor has removed
-    /// the mark. The comment may sit on the same pending write or on its own write.
-    /// Resolving every pending comment waits until every pending change is rejected,
-    /// matching a branch reject. The pending copy is updated too, so the later bot commit
-    /// does not write the unresolved snapshot back over this one.
-    fn resolve_rejected_pending_comments(
+    /// Comment ids this reject should resolve. A comment saved with the suggestion
+    /// is linked by that change id. A comment saved on its own write is included
+    /// once every suggestion id known for this bot is rejected, including this one.
+    fn comment_ids_for_reject(
         &self,
         store: &Store,
         manuscript_id: &str,
+        bot_agent_id: &str,
         change_id: &str,
-    ) -> Result<(), String> {
-        let now = store.now().map_err(|e| e.to_string())?;
-        let decisions = store
-            .review_decisions_for_manuscript(manuscript_id)
-            .map_err(|e| e.to_string())?;
-        let rejected = |id: &str| {
-            decisions
-                .values()
-                .flatten()
-                .any(|row| row.id == id && row.status == "rejected")
-        };
-        let mut guard = self.bot_writes.lock().expect("bot writes");
-        let indexes: Vec<usize> = guard
-            .pending
-            .iter()
-            .enumerate()
-            .filter(|(_, write)| write.manuscript_id == manuscript_id)
-            .map(|(index, _)| index)
-            .collect();
-        let mut all_ids = Vec::new();
-        for index in &indexes {
-            all_ids.extend(guard.pending[*index].change_ids.iter().cloned());
+    ) -> Vec<String> {
+        let pending = self.pending_bot_writes(manuscript_id, None);
+        let mut links = self
+            .bot_sessions
+            .lock()
+            .expect("bot sessions")
+            .get(&(manuscript_id.to_string(), bot_agent_id.to_string()))
+            .map(|session| session.links.clone())
+            .unwrap_or_default();
+        for write in &pending {
+            absorb_write_links(&mut links, write);
         }
-        all_ids.sort();
-        all_ids.dedup();
-        let all_rejected = !all_ids.is_empty() && all_ids.iter().all(|id| rejected(id));
+        let mut ids = links.change_ids.clone();
+        if !change_id.is_empty() && !ids.iter().any(|id| id == change_id) {
+            ids.push(change_id.to_string());
+        }
+        let decisions = decided_ids(store, manuscript_id);
+        let all_rejected = !ids.is_empty()
+            && ids
+                .iter()
+                .all(|id| id == change_id || decisions.contains(id));
         let mut comments = Vec::new();
-        for index in indexes {
-            let write = &mut guard.pending[index];
-            let linked = write.change_ids.iter().any(|id| id == change_id);
-            if !linked && !all_rejected {
-                continue;
+        if !change_id.is_empty() {
+            if let Some(linked) = links.by_change.get(change_id) {
+                comments.extend(linked.iter().cloned());
             }
+        }
+        if all_rejected {
+            comments.extend(links.unlinked.iter().cloned());
+        }
+        comments.sort();
+        comments.dedup();
+        comments
+    }
+
+    fn resolve_comments(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        comment_ids: &[String],
+    ) -> Result<(), String> {
+        if comment_ids.is_empty() {
+            return Ok(());
+        }
+        let now = store.now().map_err(|e| e.to_string())?;
+        let mut guard = self.bot_writes.lock().expect("bot writes");
+        for write in guard
+            .pending
+            .iter_mut()
+            .filter(|write| write.manuscript_id == manuscript_id)
+        {
             if let Some(comment) = write.comment.as_mut() {
-                if comment.resolved_at.is_none() {
+                if comment_ids.iter().any(|id| id == &comment.id) && comment.resolved_at.is_none() {
                     comment.resolved_at = Some(now.clone());
                 }
-                comments.push(comment.clone());
             }
         }
         drop(guard);
-        for comment in comments {
+        for id in comment_ids {
+            let Some(mut comment) = store.get_comment(id).map_err(|e| e.to_string())? else {
+                continue;
+            };
+            if comment.resolved_at.is_some() {
+                continue;
+            }
+            comment.resolved_at = Some(now.clone());
             store
                 .upsert_comment(manuscript_id, &comment)
                 .map_err(|e| e.to_string())?;
@@ -1262,34 +1882,147 @@ impl DraftService {
         Ok(())
     }
 
-    /// True when `branch` introduced at least one of this bot's changes and every one of
-    /// those ids is rejected. Compared with the merge base, so a later checkpoint on `main`
-    /// does not hide them. A writer suggestion that was only in the cache does not count.
-    fn bot_branch_fully_rejected(
+    fn absorb_bot_links(
+        &self,
+        manuscript_id: &str,
+        bot_agent_id: &str,
+        pending: &[PendingBotWrite],
+    ) {
+        if pending.is_empty() {
+            return;
+        }
+        let mut sessions = self.bot_sessions.lock().expect("bot sessions");
+        let Some(session) =
+            sessions.get_mut(&(manuscript_id.to_string(), bot_agent_id.to_string()))
+        else {
+            return;
+        };
+        for write in pending {
+            absorb_write_links(&mut session.links, write);
+        }
+    }
+
+    /// True when every bot suggestion on `branch` is accepted or rejected.
+    /// A branch with no bot suggestions is settled, so a decision still merges.
+    /// A writer suggestion copied into the snapshot does not keep it open.
+    fn bot_branch_is_settled(
         &self,
         store: &Store,
         manuscript_id: &str,
         branch: &str,
-        bot_agent_id: Option<&str>,
+        bot_agent_id: &str,
     ) -> Result<bool, String> {
-        let introduced =
-            self.changes_introduced_on_branch(store, manuscript_id, branch, bot_agent_id)?;
-        if introduced.is_empty() {
+        let dir = self.ensure_open_inner(store, manuscript_id)?;
+        let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+        let Some(bot_oid) = repo.branch_target(branch).map_err(|e| e.to_string())? else {
             return Ok(false);
+        };
+        let Some(main_oid) = repo.head_oid().map_err(|e| e.to_string())? else {
+            return Ok(false);
+        };
+        let Some(base) = repo
+            .merge_base(&bot_oid, &main_oid)
+            .map_err(|e| e.to_string())?
+        else {
+            return Ok(false);
+        };
+        let base_ids = changes::change_ids_in_commit(&repo, &base).map_err(|e| e.to_string())?;
+        let introduced: Vec<changes::ChangeEntry> = changes::changes_in_commit(&repo, &bot_oid)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .filter(|entry| !base_ids.contains(&entry.id))
+            .filter(|entry| change_authored_by_bot(entry, Some(bot_agent_id)))
+            .collect();
+        Ok(introduced
+            .iter()
+            .all(|entry| entry.status == "accepted" || entry.status == "rejected"))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn commit_decision_on_bot_branch(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        branch: &str,
+        bot_agent_id: &str,
+        message: &str,
+        bot_name: &str,
+        bot_email: &str,
+        decision: &str,
+        decided_by: &str,
+        change_id: Option<&str>,
+        change_kind: Option<&str>,
+        change_section_id: Option<&str>,
+    ) -> Result<Option<String>, String> {
+        let dir = self.ensure_open_inner(store, manuscript_id)?;
+        let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+        let Some(tip) = repo.branch_target(branch).map_err(|e| e.to_string())? else {
+            return Err("bot branch is missing".into());
+        };
+        let mut owned: Vec<(String, Vec<u8>)> = Vec::new();
+        if let (Some(id), Some(section)) = (
+            change_id.filter(|id| !id.is_empty()),
+            change_section_id.filter(|id| !id.is_empty()),
+        ) {
+            let existing = repo
+                .file_bytes(&tip, "review/changes.json")
+                .map_err(|e| e.to_string())?;
+            let decided_at = decision_timestamp(store, manuscript_id, id)?;
+            let bytes = upsert_change_decision(
+                existing.as_deref(),
+                id,
+                change_kind.unwrap_or(""),
+                section,
+                decision,
+                decided_by,
+                &decided_at,
+                bot_name,
+                bot_agent_id,
+            )?;
+            owned.push(("review/changes.json".into(), bytes));
         }
-        let decisions = store
-            .review_decisions_for_manuscript(manuscript_id)
-            .map_err(|e| e.to_string())?;
-        for id in &introduced {
-            let rejected = decisions
-                .values()
-                .flatten()
-                .any(|row| row.id == *id && row.status == "rejected");
-            if !rejected {
-                return Ok(false);
-            }
+        for (path, bytes) in
+            refreshed_bot_comment_files(&repo, &tip, store, manuscript_id, bot_agent_id)?
+        {
+            owned.push((path, bytes));
         }
-        Ok(true)
+        let files: Vec<(&str, Option<&[u8]>)> = owned
+            .iter()
+            .map(|(path, bytes)| (path.as_str(), Some(bytes.as_slice())))
+            .collect();
+        repo.commit_files_on_branch(branch, message, bot_name, bot_email, &files, true)
+            .map_err(|e| format!("decision commit: {e}"))
+    }
+
+    /// One merge after every bot suggestion is decided. Main's chapter bytes stay.
+    /// The overlay is the decision index and the bot's comments.
+    fn merge_settled_bot_branch(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        branch: &str,
+        bot_agent_id: &str,
+    ) -> Result<(), String> {
+        let dir = self.ensure_open_inner(store, manuscript_id)?;
+        let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+        let overlay = merge_overlay(&repo, branch).map_err(|e| e.to_string())?;
+        let overlay_refs: Vec<(&str, &[u8])> = overlay
+            .iter()
+            .map(|(path, bytes)| (path.as_str(), bytes.as_slice()))
+            .collect();
+        let advance = self
+            .active_record(manuscript_id)
+            .map(|record| format!("session/{}", record.id));
+        repo.merge_bot_branch(
+            branch,
+            &author_name(store),
+            advance.as_deref(),
+            &overlay_refs,
+        )
+        .map_err(|e| format!("Couldn't merge bot changes: {e}"))?;
+        self.end_bot_session(manuscript_id, Some(bot_agent_id), "");
+        self.pack_if_linked_inner(store, manuscript_id)?;
+        Ok(())
     }
 
     /// Change ids this bot added on `branch`. The bot commit also snapshots the cache, so a
@@ -1545,6 +2278,7 @@ impl DraftService {
             key,
             BotSession {
                 branch: branch.clone(),
+                links: BotCommentLinks::default(),
             },
         );
         Ok(branch)

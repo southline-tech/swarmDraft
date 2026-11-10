@@ -122,6 +122,25 @@ struct FoundChange {
     present_in_head: bool,
 }
 
+fn decision_message_on_bot(repo: &DraftRepo, needle: &str) -> String {
+    let oid = bot_commit_with(repo, needle);
+    repo.commit_message(&oid).unwrap()
+}
+
+fn bot_commit_with(repo: &DraftRepo, needle: &str) -> String {
+    for tip in repo.search_ref_tips().unwrap() {
+        if !tip.name.starts_with("bot/") {
+            continue;
+        }
+        for commit in repo.walk_first_parent(&tip.oid).unwrap() {
+            if commit.message.contains(needle) {
+                return commit.oid;
+            }
+        }
+    }
+    panic!("no bot commit contains {needle}");
+}
+
 fn found(result: DraftChangeResolve) -> FoundChange {
     match result {
         DraftChangeResolve::Found {
@@ -263,23 +282,20 @@ fn review_commit_trailers_carry_the_change_id() {
     .unwrap()
     .expect("one commit per decision");
     let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
-    let oid = repo.head_oid().unwrap().unwrap();
-    let full = repo.commit_message(&oid).unwrap();
+    let full = decision_message_on_bot(&repo, "chg-1");
     assert!(full.starts_with("Accepted Line Editor's change in "));
     assert!(full.contains("Change-Id: chg-1"));
     assert!(full.contains("Decision: accepted"));
     assert!(full.contains("Kind: suggestion_insert"));
     assert!(full.contains(&format!("Section: {}", chapter.id)));
     assert!(full.contains(&format!("Session: {session_id}")));
-    let visible = svc
-        .history(&store, &m.id, 5, 0)
-        .unwrap()
-        .into_iter()
-        .find(|c| c.message.contains("Accepted Line Editor"))
-        .unwrap();
-    assert!(!visible.message.contains("Change-Id"));
-    assert!(!visible.message.contains("Session:"));
-    assert_eq!(visible.committer_name, "Line Editor");
+    let bot_oid = bot_commit_with(&repo, "Change-Id: chg-1");
+    assert_eq!(repo.committer_name(&bot_oid).unwrap(), "Line Editor");
+    let visible = svc.history(&store, &m.id, 8, 0).unwrap();
+    assert!(visible.iter().any(|c| c.message.starts_with("Merged bot/")));
+    assert!(visible
+        .iter()
+        .all(|c| !c.message.contains("Change-Id") && !c.message.contains("Session:")));
 }
 
 #[test]
@@ -728,13 +744,14 @@ fn accept_all_writes_a_deciding_commit_per_change() {
     assert_eq!(first.decision.as_deref(), Some("accepted"));
     assert_eq!(second.decided_commit.as_deref(), Some(decided[1].as_str()));
     assert_eq!(second.decision.as_deref(), Some("rejected"));
-    let accepted = svc
-        .history(&store, &m.id, 10, 0)
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    assert!(decision_message_on_bot(&repo, "Change-Id: chg-a").contains("Decision: accepted"));
+    assert!(decision_message_on_bot(&repo, "Change-Id: chg-b").contains("Decision: rejected"));
+    assert!(svc
+        .history(&store, &m.id, 12, 0)
         .unwrap()
-        .into_iter()
-        .filter(|c| c.message.starts_with("Accepted") || c.message.starts_with("Rejected"))
-        .count();
-    assert_eq!(accepted, 2);
+        .iter()
+        .any(|c| c.message.starts_with("Merged bot/")));
 }
 
 #[test]
@@ -1265,11 +1282,18 @@ fn deleting_the_local_database_rebuilds_comments_and_decisions() {
     .unwrap()
     .expect("reject commit");
     let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
-    let head = repo.head_oid().unwrap().unwrap();
-    let message = repo.commit_message(&head).unwrap();
+    let message = decision_message_on_bot(&repo, "Change-Id: chg-no");
     assert!(message.contains("Decision: rejected"));
     assert!(message.contains("Kind: suggestion_delete"));
     assert!(message.contains("Decided-By: author"));
+    let head = repo.head_oid().unwrap().unwrap();
+    let changes = String::from_utf8(
+        repo.file_bytes(&head, "review/changes.json")
+            .unwrap()
+            .expect("decisions are on main"),
+    )
+    .unwrap();
+    assert!(changes.contains("chg-yes") && changes.contains("chg-no"));
 
     let before = comment_snapshot(&store.comments_for_manuscript(&m.id).unwrap());
     let decisions_before =
@@ -1609,20 +1633,18 @@ fn accepting_after_the_writer_deletes_a_chapter_the_bot_snapshot_copied() {
         repo.commit_message(&main)
             .unwrap()
             .starts_with("Merged bot/"),
-        "accept did not record the bot parent"
+        "the branch did not merge once the suggestion was decided"
     );
-    let accept = repo.parent_oid(&main).unwrap().unwrap();
-    assert!(repo
-        .commit_message(&accept)
-        .unwrap()
-        .starts_with("Accepted Line Editor"));
+    let parents = repo.parent_oids(&main).unwrap();
+    assert_eq!(parents.len(), 2, "merge records main and the bot branch");
     assert_deleted_chapter_absent(&repo, &main, &added.id);
-    assert_deleted_chapter_absent(&repo, &accept, &added.id);
-    let accept_book = repo.file_bytes(&accept, "book.json").unwrap().unwrap();
+    assert_deleted_chapter_absent(&repo, &parents[0], &added.id);
+    let content_book = repo.file_bytes(&parents[0], "book.json").unwrap().unwrap();
     let head_book = repo.file_bytes(&main, "book.json").unwrap().unwrap();
-    assert_eq!(
-        head_book, accept_book,
-        "merge tree diverged from the accept commit"
+    assert_eq!(head_book, content_book, "merge replaced main's text");
+    assert!(
+        decision_message_on_bot(&repo, "Change-Id: chg-pending").contains("Decision: accepted"),
+        "the decision is not on the bot branch"
     );
     let bot = repo
         .search_ref_tips()
@@ -1752,11 +1774,13 @@ fn rejecting_the_bot_branch_keeps_its_comment_resolved_on_main() {
     assert!(svc
         .bot_branch_exists(&store, &m.id, "agent-test-1", "Line Editor")
         .is_err());
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    assert!(decision_message_on_bot(&repo, "Change-Id: chg-bot").contains("Decision: rejected"));
     assert!(svc
         .history(&store, &m.id, 10, 0)
         .unwrap()
         .iter()
-        .any(|c| c.message.starts_with("Rejected Line Editor")));
+        .any(|c| c.message.starts_with("Merged bot/")));
 }
 
 #[test]
@@ -1791,20 +1815,14 @@ fn checkpoint_then_reject_still_resolves_the_bot_comment() {
         "Author",
         "author@swarmdraft.local",
     )
-    .unwrap()
-    .expect("checkpoint copies the comment onto main");
+    .unwrap();
     let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
     let mid = repo.head_oid().unwrap().unwrap();
-    let copied = String::from_utf8(
+    assert!(
         repo.file_bytes(&mid, "comments/cthread-bot.json")
             .unwrap()
-            .expect("checkpoint wrote the comment"),
-    )
-    .unwrap();
-    assert!(copied.contains("Copied before reject."));
-    assert!(
-        !copied.contains("\"resolvedAt\": \""),
-        "checkpoint leaves the bot comment unresolved: {copied}"
+            .is_none(),
+        "checkpoint wrote the bot comment onto main before the branch merged"
     );
     svc.commit_review_decision(
         &store,
@@ -2095,9 +2113,11 @@ fn decision_around_a_pending_bot_commit(accepted: bool, decide_before_bot: bool)
             .unwrap();
         };
         let bot = || {
+            // The checkpoint already committed the suggestion onto the bot branch.
+            // A later bot commit must not move main or undo the decision. None means
+            // that tree was already on the branch.
             svc.commit_bot_suggestion(&store, &m.id, "agent-test-1", "Line Editor", "Bot comment")
-                .unwrap()
-                .expect("bot comment");
+                .unwrap();
         };
         if decide_before_bot {
             decide();
@@ -2118,10 +2138,18 @@ fn decision_around_a_pending_bot_commit(accepted: bool, decide_before_bot: bool)
                     .expect("chapter"),
             )
             .unwrap();
-            assert!(
-                chapter_md.contains("version-one") && !chapter_md.contains("guttered"),
-                "the bot commit put the suggestion back on main: {chapter_md}"
-            );
+            if accepted {
+                assert!(
+                    chapter_md.contains("guttered")
+                        && !chapter_md.contains("suggestion:chg-pending"),
+                    "accept did not keep the accepted text: {chapter_md}"
+                );
+            } else {
+                assert!(
+                    chapter_md.contains("version-one") && !chapter_md.contains("guttered"),
+                    "the bot commit put the rejected text back on main: {chapter_md}"
+                );
+            }
             let tip = repo
                 .search_ref_tips()
                 .unwrap()
@@ -2208,10 +2236,17 @@ fn decision_around_a_pending_bot_commit(accepted: bool, decide_before_bot: bool)
             .find(|section| section.kind == "chapter")
             .expect("chapter");
         let text = chapter_text(&store, &chapter.doc_id);
-        assert!(
-            text.contains("version-one") && !text.contains("guttered"),
-            "reopen brought the suggestion back: {text}"
-        );
+        if accepted {
+            assert!(
+                text.contains("guttered") && !text.contains("suggestion:chg-pending"),
+                "reopen lost the accepted text: {text}"
+            );
+        } else {
+            assert!(
+                text.contains("version-one") && !text.contains("guttered"),
+                "reopen brought the rejected text back: {text}"
+            );
+        }
     }
 }
 
@@ -2906,6 +2941,264 @@ fn rejecting_one_suggestion_still_lets_the_other_be_accepted() {
         .find(|c| c.id == "c-b")
         .unwrap();
     assert!(still_open.resolved_at.is_none());
+}
+
+/// Accept one suggestion and reject another on the same bot branch.
+/// The branch stays open until both are decided, then merges once.
+/// Main keeps the editor's text. The rejected wording stays only in the bot branch.
+#[test]
+fn mixed_decisions_merge_once_and_keep_main_text() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "bot-mixed-decisions.draft");
+    set_chapter_plain(&store, &chapter.doc_id, "chapter start");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap()
+    .expect("baseline");
+
+    let doc = store.load_doc(&chapter.doc_id).unwrap();
+    let since = state_vector(&doc);
+    content::encode(
+        &doc,
+        &json!({"type":"doc","content":[{"type":"paragraph","content":[{
+            "type":"text",
+            "text":"rejected wording",
+            "marks":[{"type":"suggestion_insert","attrs":{"id":"chg-drop","author":"agent:agent-test-1","ts":"t"}}]
+        }]}]}),
+    )
+    .unwrap();
+    let first_update = doc_update_since(&doc, &since);
+    let mut drop_comment = sample_comment("c-drop", &chapter.id, "Drop this.");
+    drop_comment.author.kind = "agent".into();
+    drop_comment.author.id = "agent-test-1".into();
+    drop_comment.author.name = "Line Editor".into();
+    svc.record_bot_write(
+        &store,
+        &m.id,
+        BotRetention {
+            comment: Some(drop_comment.clone()),
+            doc_id: Some(chapter.doc_id.clone()),
+            doc_update: Some(first_update.clone()),
+        },
+        || {
+            store
+                .insert_comment(&m.id, &drop_comment)
+                .map_err(|e| e.to_string())?;
+            store
+                .append_doc_update(&chapter.doc_id, &first_update)
+                .map_err(|e| e.to_string())?;
+            Ok::<(), String>(())
+        },
+    )
+    .unwrap();
+
+    let doc = store.load_doc(&chapter.doc_id).unwrap();
+    let since = state_vector(&doc);
+    content::encode(
+        &doc,
+        &json!({"type":"doc","content":[{"type":"paragraph","content":[
+            {
+                "type":"text",
+                "text":"rejected wording",
+                "marks":[{"type":"suggestion_insert","attrs":{"id":"chg-drop","author":"agent:agent-test-1","ts":"t"}}]
+            },
+            {
+                "type":"text",
+                "text":" kept wording",
+                "marks":[{"type":"suggestion_insert","attrs":{"id":"chg-keep","author":"agent:agent-test-1","ts":"t"}}]
+            }
+        ]}]}),
+    )
+    .unwrap();
+    let second_update = doc_update_since(&doc, &since);
+    let mut keep_comment = sample_comment("c-keep", &chapter.id, "Keep this.");
+    keep_comment.author.kind = "agent".into();
+    keep_comment.author.id = "agent-test-1".into();
+    keep_comment.author.name = "Line Editor".into();
+    svc.record_bot_write(
+        &store,
+        &m.id,
+        BotRetention {
+            comment: Some(keep_comment.clone()),
+            doc_id: Some(chapter.doc_id.clone()),
+            doc_update: Some(second_update.clone()),
+        },
+        || {
+            store
+                .insert_comment(&m.id, &keep_comment)
+                .map_err(|e| e.to_string())?;
+            store
+                .append_doc_update(&chapter.doc_id, &second_update)
+                .map_err(|e| e.to_string())?;
+            Ok::<(), String>(())
+        },
+    )
+    .unwrap();
+    svc.commit_bot_suggestion(
+        &store,
+        &m.id,
+        "agent-test-1",
+        "Line Editor",
+        "Bot suggestions",
+    )
+    .unwrap()
+    .expect("bot suggestions");
+
+    svc.commit_review_decision(
+        &store,
+        &m.id,
+        false,
+        "Line Editor",
+        &chapter.title,
+        "author",
+        Some("agent-test-1"),
+        Some("chg-drop"),
+        Some("suggestion_insert"),
+        Some(&chapter.id),
+    )
+    .unwrap();
+    assert!(
+        svc.bot_branch_exists(&store, &m.id, "agent-test-1", "Line Editor")
+            .unwrap(),
+        "the branch merged while a suggestion was still open"
+    );
+    assert!(
+        !svc.history(&store, &m.id, 12, 0)
+            .unwrap()
+            .iter()
+            .any(|c| c.message.starts_with("Merged bot/")),
+        "main merged the bot branch before every suggestion was decided"
+    );
+    let comments = store.comments_for_manuscript(&m.id).unwrap();
+    assert!(comments
+        .iter()
+        .find(|c| c.id == "c-drop")
+        .unwrap()
+        .resolved_at
+        .is_some());
+    assert!(comments
+        .iter()
+        .find(|c| c.id == "c-keep")
+        .unwrap()
+        .resolved_at
+        .is_none());
+
+    set_chapter_plain(&store, &chapter.doc_id, "kept wording");
+    svc.commit_review_decision(
+        &store,
+        &m.id,
+        true,
+        "Line Editor",
+        &chapter.title,
+        "author",
+        Some("agent-test-1"),
+        Some("chg-keep"),
+        Some("suggestion_insert"),
+        Some(&chapter.id),
+    )
+    .unwrap();
+    assert!(svc
+        .bot_branch_exists(&store, &m.id, "agent-test-1", "Line Editor")
+        .is_err());
+    assert!(svc
+        .history(&store, &m.id, 12, 0)
+        .unwrap()
+        .iter()
+        .any(|c| c.message.starts_with("Merged bot/")));
+
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let main = repo.head_oid().unwrap().unwrap();
+    let chapter_path = format!("chapters/{}.md", chapter.id);
+    let head_md = String::from_utf8(
+        repo.file_bytes(&main, &chapter_path)
+            .unwrap()
+            .expect("chapter"),
+    )
+    .unwrap();
+    let editor = chapter_text(&store, &chapter.doc_id);
+    assert!(
+        head_md.contains("kept wording") && editor.contains("kept wording"),
+        "main does not match the editor: main={head_md} editor={editor}"
+    );
+    assert!(
+        !head_md.contains("rejected wording"),
+        "rejected text landed on main: {head_md}"
+    );
+    let work_md = fs::read_to_string(svc.worktree_path(&m.id).join(&chapter_path)).unwrap();
+    assert_eq!(work_md, head_md, "worktree chapter disagrees with HEAD");
+    assert!(
+        bot_history_contains(&repo, &chapter_path, "rejected wording"),
+        "rejected text is missing from the bot branch history"
+    );
+    let changes = String::from_utf8(
+        repo.file_bytes(&main, "review/changes.json")
+            .unwrap()
+            .expect("decisions"),
+    )
+    .unwrap();
+    assert_eq!(
+        change_status(&changes, "chg-drop").as_deref(),
+        Some("rejected")
+    );
+    assert_eq!(
+        change_status(&changes, "chg-keep").as_deref(),
+        Some("accepted")
+    );
+    let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
+    let opened = svc
+        .open_draft_path(&store, &draft_path, true)
+        .unwrap()
+        .unwrap();
+    assert!(
+        opened.recovery.is_none(),
+        "reopen asked to save a newer copy"
+    );
+    let decisions = store.review_decisions_for_manuscript(&m.id).unwrap();
+    let rows: Vec<_> = decisions.values().flatten().collect();
+    assert!(rows
+        .iter()
+        .any(|row| row.id == "chg-drop" && row.status == "rejected"));
+    assert!(rows
+        .iter()
+        .any(|row| row.id == "chg-keep" && row.status == "accepted"));
+    let comments = store.comments_for_manuscript(&m.id).unwrap();
+    assert!(comments
+        .iter()
+        .find(|c| c.id == "c-drop")
+        .unwrap()
+        .resolved_at
+        .is_some());
+    assert!(comments
+        .iter()
+        .find(|c| c.id == "c-keep")
+        .unwrap()
+        .resolved_at
+        .is_none());
+}
+
+fn bot_history_contains(repo: &DraftRepo, path: &str, needle: &str) -> bool {
+    for tip in repo.search_ref_tips().unwrap() {
+        if !tip.name.starts_with("bot/") {
+            continue;
+        }
+        for commit in repo.walk_first_parent(&tip.oid).unwrap() {
+            if let Some(bytes) = repo.file_bytes(&commit.oid, path).unwrap() {
+                if String::from_utf8_lossy(&bytes).contains(needle) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 fn set_chapter_authored_marks(store: &Store, doc_id: &str, marks: &[(&str, &str, &str)]) {
