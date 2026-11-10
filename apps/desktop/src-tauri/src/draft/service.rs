@@ -67,6 +67,9 @@ pub struct DraftService {
     /// so a rebuild cannot drop a reply that has not landed in git yet.
     main_commit_pending: Mutex<usize>,
     main_commit_cv: Condvar,
+    /// Test hook invoked once after restore or open has the op lock and before it rebuilds the cache.
+    #[cfg(test)]
+    op_entered: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 impl DraftService {
@@ -83,6 +86,8 @@ impl DraftService {
             op: Mutex::new(()),
             main_commit_pending: Mutex::new(0),
             main_commit_cv: Condvar::new(),
+            #[cfg(test)]
+            op_entered: Mutex::new(None),
         }
     }
 
@@ -120,7 +125,17 @@ impl DraftService {
             if self.main_commits_pending() {
                 continue;
             }
+            #[cfg(test)]
+            self.fire_op_entered();
             return f();
+        }
+    }
+
+    #[cfg(test)]
+    fn fire_op_entered(&self) {
+        let hook = self.op_entered.lock().expect("op entered").take();
+        if let Some(hook) = hook {
+            hook();
         }
     }
 
@@ -310,12 +325,22 @@ impl DraftService {
                 change_section_id,
             )?;
             // One suggestion reject records that id only. The bot branch ends when every
-            // change it introduced has been rejected, so a later accept can still merge.
+            // change that bot introduced has been rejected, so a later accept can still merge.
             if !accepted {
                 if let Some(branch) = self.active_bot_branch(manuscript_id, bot_agent_id, bot_name)
                 {
-                    if self.bot_branch_fully_rejected(store, manuscript_id, &branch)? {
-                        self.resolve_bot_originated_comments(store, manuscript_id, &branch)?;
+                    if self.bot_branch_fully_rejected(
+                        store,
+                        manuscript_id,
+                        &branch,
+                        bot_agent_id,
+                    )? {
+                        self.resolve_bot_originated_comments(
+                            store,
+                            manuscript_id,
+                            &branch,
+                            bot_agent_id,
+                        )?;
                         self.end_bot_session(manuscript_id, bot_agent_id, bot_name);
                     }
                 }
@@ -886,6 +911,29 @@ fn bot_committer_email(bot_id: &str) -> String {
     format!("bot-{}@swarmdraft.local", bot_slug(bot_id))
 }
 
+fn change_authored_by_bot(entry: &changes::ChangeEntry, bot_agent_id: Option<&str>) -> bool {
+    if entry.author_kind != "agent" {
+        return false;
+    }
+    match bot_agent_id {
+        Some(id) if !id.is_empty() => entry.author_id == id,
+        _ => true,
+    }
+}
+
+fn comment_authored_by_bot(
+    comment: &crate::manuscripts::Comment,
+    bot_agent_id: Option<&str>,
+) -> bool {
+    if comment.author.kind != "agent" {
+        return false;
+    }
+    match bot_agent_id {
+        Some(id) if !id.is_empty() => comment.author.id == id,
+        _ => true,
+    }
+}
+
 fn new_bot_session_id() -> String {
     format!("s{}", crate::manuscripts::new_id())
 }
@@ -946,15 +994,18 @@ impl DraftService {
         }
     }
 
-    /// True when `branch` introduced at least one change and every one of those ids is rejected.
-    /// Compared with the merge base, so a later checkpoint on `main` does not hide them.
+    /// True when `branch` introduced at least one of this bot's changes and every one of
+    /// those ids is rejected. Compared with the merge base, so a later checkpoint on `main`
+    /// does not hide them. A writer suggestion that was only in the cache does not count.
     fn bot_branch_fully_rejected(
         &self,
         store: &Store,
         manuscript_id: &str,
         branch: &str,
+        bot_agent_id: Option<&str>,
     ) -> Result<bool, String> {
-        let introduced = self.changes_introduced_on_branch(store, manuscript_id, branch)?;
+        let introduced =
+            self.changes_introduced_on_branch(store, manuscript_id, branch, bot_agent_id)?;
         if introduced.is_empty() {
             return Ok(false);
         }
@@ -973,12 +1024,14 @@ impl DraftService {
         Ok(true)
     }
 
-    /// Change ids on the bot tip that the branch point does not already list.
+    /// Change ids this bot added on `branch`. The bot commit also snapshots the cache, so a
+    /// writer suggestion that had not reached `main` is on that tip and is not counted.
     fn changes_introduced_on_branch(
         &self,
         store: &Store,
         manuscript_id: &str,
         branch: &str,
+        bot_agent_id: Option<&str>,
     ) -> Result<Vec<String>, String> {
         let dir = self.ensure_open_inner(store, manuscript_id)?;
         let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
@@ -994,21 +1047,30 @@ impl DraftService {
         else {
             return Ok(Vec::new());
         };
-        let bot_ids = changes::change_ids_in_commit(&repo, &bot_oid).map_err(|e| e.to_string())?;
         let base_ids = changes::change_ids_in_commit(&repo, &base).map_err(|e| e.to_string())?;
-        let mut ids: Vec<String> = bot_ids.difference(&base_ids).cloned().collect();
+        let mut ids: Vec<String> = changes::changes_in_commit(&repo, &bot_oid)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .filter(|entry| !base_ids.contains(&entry.id))
+            .filter(|entry| change_authored_by_bot(entry, bot_agent_id))
+            .map(|entry| entry.id)
+            .collect();
         ids.sort();
+        ids.dedup();
         Ok(ids)
     }
 
-    /// Comments added on `branch` are marked resolved so the next main commit keeps them.
+    /// Comments this bot added on `branch` are marked resolved so the next main commit keeps them.
     /// A checkpoint that already copied the row onto `main` does not exempt it: the
-    /// comparison is the branch point, not the current tip.
+    /// comparison is the branch point, not the current tip. A writer comment that rode along
+    /// in the cache snapshot is left alone. The current cache row wins over that snapshot, so
+    /// a newer body or a delete is not replaced.
     fn resolve_bot_originated_comments(
         &self,
         store: &Store,
         manuscript_id: &str,
         branch: &str,
+        bot_agent_id: Option<&str>,
     ) -> Result<(), String> {
         let dir = self.ensure_open_inner(store, manuscript_id)?;
         let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
@@ -1029,18 +1091,47 @@ impl DraftService {
             .into_iter()
             .map(|row| row.comment.id)
             .collect::<std::collections::HashSet<_>>();
+        let live = store
+            .comments_for_manuscript(manuscript_id)
+            .map_err(|e| e.to_string())?;
+        let tombs = store
+            .comment_tombstones(manuscript_id)
+            .map_err(|e| e.to_string())?;
+        let tomb_ids = tombs
+            .iter()
+            .map(|tomb| tomb.comment.id.clone())
+            .collect::<std::collections::HashSet<_>>();
+        let mut live_by_id: HashMap<String, crate::manuscripts::Comment> = live
+            .into_iter()
+            .map(|comment| (comment.id.clone(), comment))
+            .collect();
         let now = store.now().map_err(|e| e.to_string())?;
         for row in sync::comment_rows_in_commit(&repo, &bot_oid).map_err(|e| e.to_string())? {
             if row.deleted_at.is_some() || base_ids.contains(&row.comment.id) {
                 continue;
             }
-            let mut comment = row.comment;
-            if comment.resolved_at.is_none() {
-                comment.resolved_at = Some(now.clone());
+            if !comment_authored_by_bot(&row.comment, bot_agent_id) {
+                continue;
             }
-            store
-                .upsert_comment(manuscript_id, &comment)
-                .map_err(|e| e.to_string())?;
+            if tomb_ids.contains(&row.comment.id) {
+                continue;
+            }
+            if let Some(current) = live_by_id.get_mut(&row.comment.id) {
+                if current.resolved_at.is_none() {
+                    current.resolved_at = Some(now.clone());
+                    store
+                        .upsert_comment(manuscript_id, current)
+                        .map_err(|e| e.to_string())?;
+                }
+            } else {
+                let mut comment = row.comment;
+                if comment.resolved_at.is_none() {
+                    comment.resolved_at = Some(now.clone());
+                }
+                store
+                    .upsert_comment(manuscript_id, &comment)
+                    .map_err(|e| e.to_string())?;
+            }
         }
         Ok(())
     }
@@ -1357,8 +1448,37 @@ pub fn queue_main_commit(
     manuscript_id: &str,
     message: &str,
 ) {
-    let drafts = Arc::clone(drafts);
     drafts.begin_main_commit();
+    spawn_main_commit(drafts, store, manuscript_id, message);
+}
+
+/// Write a comment change and mark its commit as queued under the same op lock.
+/// Restore or open cannot rebuild the cache in the gap between the two, and a reply
+/// that arrives while one of them holds the lock waits until that rebuild has finished.
+pub fn commit_comment_mutation<T>(
+    drafts: &Arc<DraftService>,
+    store: &Store,
+    manuscript_id: &str,
+    message: &str,
+    write: impl FnOnce(&Store) -> Result<T, String>,
+) -> Result<T, String> {
+    let result = {
+        let _guard = drafts.op.lock().expect("draft op");
+        let result = write(store)?;
+        drafts.begin_main_commit();
+        result
+    };
+    spawn_main_commit(drafts, store, manuscript_id, message);
+    Ok(result)
+}
+
+fn spawn_main_commit(
+    drafts: &Arc<DraftService>,
+    store: &Store,
+    manuscript_id: &str,
+    message: &str,
+) {
+    let drafts = Arc::clone(drafts);
     let store = store.clone();
     let manuscript_id = manuscript_id.to_string();
     let message = message.to_string();
@@ -1677,5 +1797,115 @@ mod save_as_lock_tests {
             .unwrap()
             .iter()
             .any(|c| c.body == "Queued reply."));
+    }
+
+    /// Reply while restore already holds the op lock. The reply is written after the rebuild
+    /// and the queued commit keeps it.
+    #[test]
+    fn reply_while_restore_holds_the_lock_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+        let id = stored.manuscript.id.clone();
+        let section_id = stored
+            .sections
+            .iter()
+            .find(|s| s.section.kind == "chapter")
+            .unwrap()
+            .section
+            .id
+            .clone();
+        let svc = Arc::new(DraftService::new(
+            store.data_dir().to_path_buf(),
+            "0.2.2".into(),
+        ));
+        let draft_path = dir.path().join("drafts").join("race-inside-restore.draft");
+        store
+            .set_draft_file_path(&id, &draft_path.to_string_lossy())
+            .unwrap();
+        store
+            .insert_comment(&id, &root_comment(&section_id))
+            .unwrap();
+        let baseline = svc
+            .commit_now(&store, &id, "Baseline", "Author", "author@swarmdraft.local")
+            .unwrap()
+            .expect("baseline");
+        let (entered_tx, entered_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        *svc.op_entered.lock().expect("op entered") = Some(Box::new(move || {
+            entered_tx.send(()).ok();
+            release_rx.recv().ok();
+        }));
+        let svc_restore = Arc::clone(&svc);
+        let store_restore = store.clone();
+        let id_restore = id.clone();
+        let restore_thread = thread::spawn(move || {
+            svc_restore.restore(&store_restore, &id_restore, &baseline, "Author")
+        });
+        entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("restore did not take the lock");
+        let svc_reply = Arc::clone(&svc);
+        let store_reply = store.clone();
+        let id_reply = id.clone();
+        let section_reply = section_id.clone();
+        let reply_thread = thread::spawn(move || {
+            commit_comment_mutation(&svc_reply, &store_reply, &id_reply, "Comment reply", |s| {
+                s.human_comment_reply(
+                    &id_reply,
+                    &section_reply,
+                    "cq1",
+                    "During restore.",
+                    "Author",
+                    "local",
+                )
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+            })
+        });
+        let quiet_until = Instant::now() + Duration::from_millis(200);
+        while Instant::now() < quiet_until {
+            assert!(
+                store
+                    .comments_for_manuscript(&id)
+                    .unwrap()
+                    .iter()
+                    .all(|c| c.body != "During restore."),
+                "reply was written while restore held the lock"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+        release_tx.send(()).unwrap();
+        restore_thread
+            .join()
+            .expect("restore thread")
+            .expect("restore");
+        reply_thread.join().expect("reply thread").expect("reply");
+        assert!(store
+            .comments_for_manuscript(&id)
+            .unwrap()
+            .iter()
+            .any(|c| c.body == "During restore."));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let repo = DraftRepo::open_working(&svc.worktree_path(&id)).unwrap();
+            let head = repo.head_oid().unwrap().unwrap();
+            let message = repo.commit_message(&head).unwrap();
+            if message.starts_with("Comment reply") {
+                let bytes = repo
+                    .file_bytes(&head, "comments/cq1.json")
+                    .unwrap()
+                    .expect("queued reply file");
+                assert!(String::from_utf8(bytes)
+                    .unwrap()
+                    .contains("During restore."));
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "queued reply commit did not land"
+            );
+            thread::sleep(Duration::from_millis(30));
+        }
     }
 }

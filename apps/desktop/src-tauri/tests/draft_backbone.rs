@@ -51,7 +51,7 @@ fn set_chapter_mark(store: &Store, doc_id: &str, change_id: &str, text: &str) {
         &json!({"type":"doc","content":[{"type":"paragraph","content":[{
             "type":"text",
             "text": text,
-            "marks":[{"type":"suggestion_insert","attrs":{"id": change_id, "author":"agent:bot-1","ts":"t"}}]
+            "marks":[{"type":"suggestion_insert","attrs":{"id": change_id, "author":"agent:agent-test-1","ts":"t"}}]
         }]}]}),
     )
     .unwrap();
@@ -1539,6 +1539,108 @@ fn checkpoint_then_reject_still_resolves_the_bot_comment() {
 }
 
 #[test]
+fn rejecting_the_bot_branch_leaves_the_writer_comment_and_suggestion() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "bot-writer-reject.draft");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap();
+    set_chapter_authored_marks(
+        &store,
+        &chapter.doc_id,
+        &[
+            ("chg-writer", "writer wording", "Author"),
+            ("chg-bot", "bot wording", "agent:agent-test-1"),
+        ],
+    );
+    store
+        .insert_comment(
+            &m.id,
+            &sample_comment("c-writer", &chapter.id, "Writer note."),
+        )
+        .unwrap();
+    let mut bot = sample_comment("c-bot", &chapter.id, "Bot note.");
+    bot.author.kind = "agent".into();
+    bot.author.id = "agent-test-1".into();
+    bot.author.name = "Line Editor".into();
+    store.insert_comment(&m.id, &bot).unwrap();
+    svc.commit_bot_suggestion(&store, &m.id, "agent-test-1", "Line Editor", "Bot comment")
+        .unwrap()
+        .expect("bot comment");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Checkpoint",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap()
+    .expect("checkpoint copies the writer comment onto main");
+    let mut writer = store
+        .comments_for_manuscript(&m.id)
+        .unwrap()
+        .into_iter()
+        .find(|c| c.id == "c-writer")
+        .unwrap();
+    writer.body = "Edited before reject.".into();
+    store.upsert_comment(&m.id, &writer).unwrap();
+    svc.commit_review_decision(
+        &store,
+        &m.id,
+        false,
+        "Line Editor",
+        &chapter.title,
+        "author",
+        Some("agent-test-1"),
+        Some("chg-bot"),
+        Some("suggestion_insert"),
+        Some(&chapter.id),
+    )
+    .unwrap();
+    let rows = store.comments_for_manuscript(&m.id).unwrap();
+    let writer = rows.iter().find(|c| c.id == "c-writer").unwrap();
+    assert_eq!(writer.body, "Edited before reject.");
+    assert!(
+        writer.resolved_at.is_none(),
+        "a writer comment is not resolved with the bot branch"
+    );
+    let bot = rows.iter().find(|c| c.id == "c-bot").unwrap();
+    assert!(bot.resolved_at.is_some());
+    assert!(svc
+        .bot_branch_exists(&store, &m.id, "agent-test-1", "Line Editor")
+        .is_err());
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let main = repo.head_oid().unwrap().unwrap();
+    let writer_file = String::from_utf8(
+        repo.file_bytes(&main, "comments/c-writer.json")
+            .unwrap()
+            .expect("writer comment stays on main"),
+    )
+    .unwrap();
+    assert!(writer_file.contains("Edited before reject."));
+    assert!(
+        !writer_file.contains("\"resolvedAt\": \""),
+        "the decision commit keeps the writer comment unresolved: {writer_file}"
+    );
+    let bot_file = String::from_utf8(
+        repo.file_bytes(&main, "comments/c-bot.json")
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(bot_file.contains("\"resolvedAt\": \""));
+}
+
+#[test]
 fn rejecting_one_suggestion_still_lets_the_other_be_accepted() {
     let (_dir, store) = temp_store();
     let stored = store.create_blank_manuscript_with_progress(None).unwrap();
@@ -1632,6 +1734,32 @@ fn rejecting_one_suggestion_still_lets_the_other_be_accepted() {
         .find(|c| c.id == "c-b")
         .unwrap();
     assert!(still_open.resolved_at.is_none());
+}
+
+fn set_chapter_authored_marks(store: &Store, doc_id: &str, marks: &[(&str, &str, &str)]) {
+    let content: Vec<_> = marks
+        .iter()
+        .map(|(id, text, author)| {
+            json!({
+                "type": "text",
+                "text": text,
+                "marks": [{
+                    "type": "suggestion_insert",
+                    "attrs": {"id": id, "author": author, "ts": "t"}
+                }]
+            })
+        })
+        .collect();
+    let doc = content::new_doc();
+    content::encode(
+        &doc,
+        &json!({"type":"doc","content":[{"type":"paragraph","content": content}]}),
+    )
+    .unwrap();
+    let state = doc
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    store.replace_doc_state(doc_id, &state).unwrap();
 }
 
 fn set_chapter_marks(store: &Store, doc_id: &str, marks: &[(&str, &str)]) {

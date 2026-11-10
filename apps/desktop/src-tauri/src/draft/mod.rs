@@ -21,5 +21,6 @@ pub use migrate::{migrate_legacy_books_to_draft, DraftMigrationNotice};
 pub use repair::repair_draft_file_paths;
 pub use repo::{CommitEntry, CommitOptions, DraftRepo, DraftRepoError};
 pub use service::{
-    queue_main_commit, DraftRecoveryOffer, DraftSaveOutcome, DraftService, OpenDraftResult,
+    commit_comment_mutation, queue_main_commit, DraftRecoveryOffer, DraftSaveOutcome, DraftService,
+    OpenDraftResult,
 };

@@ -895,25 +895,28 @@ async fn section_comment_reply(
 ) -> Result<ReviewCommentRow, String> {
     let drafts = std::sync::Arc::clone(drafts.inner());
     let store_for_git = store.inner().clone();
-    let manuscript_for_git = manuscript_id.clone();
-    let row = blocking(&store, move |s| {
-        Ok(review_comment_row(s.human_comment_reply(
+    let row = tauri::async_runtime::spawn_blocking(move || {
+        draft::commit_comment_mutation(
+            &drafts,
+            &store_for_git,
             &manuscript_id,
-            &section_id,
-            &thread_id,
-            &body,
-            &author_name,
-            &author_id,
-        )?))
+            "Comment reply",
+            |s| {
+                s.human_comment_reply(
+                    &manuscript_id,
+                    &section_id,
+                    &thread_id,
+                    &body,
+                    &author_name,
+                    &author_id,
+                )
+                .map_err(err)
+            },
+        )
     })
-    .await?;
-    draft::queue_main_commit(
-        &drafts,
-        &store_for_git,
-        &manuscript_for_git,
-        "Comment reply",
-    );
-    Ok(row)
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(review_comment_row(row))
 }
 
 /// Resolve or reopen a comment thread (#255).
@@ -928,17 +931,19 @@ async fn section_comment_resolve(
 ) -> Result<(), String> {
     let drafts = std::sync::Arc::clone(drafts.inner());
     let store_for_git = store.inner().clone();
-    let manuscript_for_git = manuscript_id.clone();
-    blocking(&store, move |s| {
-        s.set_comment_thread_resolved(&manuscript_id, &section_id, &thread_id, resolved)
-    })
-    .await?;
     let message = if resolved {
         "Resolved comment"
     } else {
         "Reopened comment"
     };
-    draft::queue_main_commit(&drafts, &store_for_git, &manuscript_for_git, message);
+    tauri::async_runtime::spawn_blocking(move || {
+        draft::commit_comment_mutation(&drafts, &store_for_git, &manuscript_id, message, |s| {
+            s.set_comment_thread_resolved(&manuscript_id, &section_id, &thread_id, resolved)
+                .map_err(err)
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     Ok(())
 }
 
@@ -952,17 +957,20 @@ async fn section_comment_delete(
 ) -> Result<(), String> {
     let drafts = std::sync::Arc::clone(drafts.inner());
     let store_for_git = store.inner().clone();
-    let manuscript_for_git = manuscript_id.clone();
-    blocking(&store, move |s| {
-        s.tombstone_comment(&manuscript_id, &comment_id)
+    tauri::async_runtime::spawn_blocking(move || {
+        draft::commit_comment_mutation(
+            &drafts,
+            &store_for_git,
+            &manuscript_id,
+            "Deleted comment",
+            |s| {
+                s.tombstone_comment(&manuscript_id, &comment_id)
+                    .map_err(err)
+            },
+        )
     })
-    .await?;
-    draft::queue_main_commit(
-        &drafts,
-        &store_for_git,
-        &manuscript_for_git,
-        "Deleted comment",
-    );
+    .await
+    .map_err(|e| e.to_string())??;
     Ok(())
 }
 

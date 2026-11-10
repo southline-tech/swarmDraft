@@ -86,6 +86,8 @@ Run this consolidated pass in order; do not hand off until every line that appli
 
 Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
 
+- 2026-11-09 · #344 · PR #345 · a full branch reject resolved a writer comment the bot commit had copied from the cache, and a writer suggestion kept the branch open · only that bot's comments and changes count; resolving sets `resolvedAt` on the current row and does not copy the bot snapshot over a newer body or a delete
+- 2026-11-09 · #344 · PR #345 · a reply saved while restore held the op lock was reconciled away, then the queued commit stored the wipe · the sqlite write and `begin_main_commit` share the op lock, so the reply is written after the rebuild
 - 2026-11-09 · #344 · PR #345 · restore failed when a kept decision named a section the old text did not have, and the next commit dropped it · decisions store `manuscript_id` and comments no longer require the section row, so both import after the chapter is gone and the next commit writes them again
 - 2026-11-09 · #344 · PR #345 · one suggestion reject resolved every bot-only comment and ended the bot session, and a checkpoint hid those comments from the reject · the branch ends when every change it introduced is rejected; resolution compares the branch point, not the current `main` tip
 - 2026-11-09 · #344 · PR #345 · a queued comment commit could lose to restore or reopen and then write the wiped cache · restore and open wait until queued main commits finish
