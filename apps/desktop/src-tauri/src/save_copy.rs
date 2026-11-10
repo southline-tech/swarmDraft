@@ -45,6 +45,11 @@ fn is_within(path: &Path, root: &Path, case_insensitive: bool) -> bool {
 /// `\\\\?\\UNC\\...`, and the same with forward slashes). Their canonical form never
 /// prefix-matches the drive-letter data folder, so they are refused outright.
 pub(crate) fn is_unc_like(s: &str) -> bool {
+    // Win32 extended-path prefixes are not applied to ordinary POSIX paths (#193).
+    // `//server/share` is still refused. A pasted `\\?\` string keeps the Windows rules.
+    if !cfg!(windows) && !s.contains('\\') && !s.starts_with("//") {
+        return false;
+    }
     let s = s.replace('/', "\\");
     if s.get(..8)
         .is_some_and(|h| h.eq_ignore_ascii_case("\\\\?\\UNC\\"))
@@ -139,7 +144,19 @@ pub fn display_path(path: &Path) -> String {
     display_path_str(&path.display().to_string())
 }
 
+fn is_win32_path_text(raw: &str) -> bool {
+    if raw.contains('\\') {
+        return true;
+    }
+    let b = raw.as_bytes();
+    b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'/' || b[2] == b'\\')
+}
+
 pub fn display_path_str(raw: &str) -> String {
+    // `\\?\` stripping is a Win32 display fix (#183). Leave macOS and Linux paths alone.
+    if !cfg!(windows) && !is_win32_path_text(raw) {
+        return raw.to_string();
+    }
     let s = raw.replace('/', "\\");
     if s.len() >= 8 && s[..8].eq_ignore_ascii_case(r"\\?\UNC\") {
         return format!("\\\\{}", &s[8..]);
@@ -525,5 +542,12 @@ mod tests {
             display_path_str(r"C:/Users/a/book (copy).docx"),
             r"C:\Users\a\book (copy).docx"
         );
+        assert_eq!(
+            display_path_str("/Users/a/Library/Application Support/book.docx"),
+            "/Users/a/Library/Application Support/book.docx"
+        );
+        assert!(!is_unc_like(
+            "/Users/a/Library/Application Support/book.docx"
+        ));
     }
 }

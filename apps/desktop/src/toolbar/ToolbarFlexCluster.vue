@@ -4,6 +4,7 @@
  */
 import type { Align } from './toolbar';
 import { SHORTCUTS, SUPPORTED_ALIGN } from './toolbar';
+import { ariaKeyshortcuts } from '../shells/app-shortcuts';
 import type { ToolbarCommand } from './toolbar';
 import type { ToolbarOverflowItemId } from './toolbar-overflow';
 
@@ -79,7 +80,7 @@ const menuTextBtn =
       :class="[btn, 'underline']"
       :aria-pressed="state.underline"
       aria-label="Underline"
-      :aria-keyshortcuts="editable ? 'Control+U' : undefined"
+      :aria-keyshortcuts="editable ? ariaKeyshortcuts(SHORTCUTS.underline) : undefined"
       :title="ftip('Underline', SHORTCUTS.underline)"
       :data-tb-measure="surface === 'measure' ? 'underline' : undefined"
       v-bind="ro"

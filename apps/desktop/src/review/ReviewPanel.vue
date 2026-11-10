@@ -30,6 +30,7 @@ import type { BookChapterGroup } from './review-book';
 import { scrollListRowToTop } from './review-scroll';
 import { groupReviewListByChapter, suggestionItems, type ReviewListItem } from './review-inline';
 import { authorName, type AgentName } from '../agent-names';
+import { displayChord } from '../shells/app-shortcuts';
 import { collabColor } from '../author-colors';
 import {
   REVIEW_CHANGES_REGION_ID,
@@ -209,7 +210,7 @@ function confirm() {
   if (c) emit('decide-visible', c.decision, c.keys);
   confirming.value = null;
 }
-const tip = (text: string, keys: string) => `${text} (${keys})`;
+const tip = (text: string, keys: string) => `${text} (${displayChord(keys)})`;
 
 const groupedVisible = computed(() => {
   if (!props.chapterGroups?.length) return null;

@@ -13,6 +13,7 @@ import {
   type SuggestionItem,
   type SuggestionTarget,
 } from '@swarmdraft/editor';
+import { usesPrimaryModifier } from '../shells/modifier-key';
 
 /** Raw author ids in first-appearance (document) order. */
 export function authorsOf(items: readonly { author: string }[]): string[] {
@@ -309,7 +310,7 @@ export function inForeignInput(target: EventTarget | null, editorRoot: Element |
 }
 
 export function reviewActionFor(e: KeyboardEvent): ReviewAction | null {
-  const ctrl = e.ctrlKey || e.metaKey;
+  const ctrl = usesPrimaryModifier(e);
   if (e.altKey && e.shiftKey && !ctrl) {
     if (e.key === 'ArrowRight') return 'next';
     if (e.key === 'ArrowLeft') return 'prev';

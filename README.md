@@ -47,8 +47,9 @@ pnpm.cmd dev
 ```
 
 The first Rust build takes a few minutes. When the window opens, import your chosen manuscript
-(Word `.docx` works). Unsigned Windows installers from CI are also documented in
-[docs/install-windows.md](docs/install-windows.md).
+(Word `.docx` works). Unsigned Windows installers from CI are documented in
+[docs/install-windows.md](docs/install-windows.md). Unsigned macOS disk images (Gatekeeper will
+warn) are documented in [docs/install-macos.md](docs/install-macos.md).
 
 ### Working with suggestions
 

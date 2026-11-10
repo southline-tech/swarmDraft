@@ -1,7 +1,8 @@
 name: CI
 
-# PR CI runs on ubuntu-latest only. Windows installer bundles build in release.yml
-# on version tags (v*) only — not on pull requests.
+# PR CI runs on ubuntu-latest only. Windows installer bundles and the unsigned macOS
+# DMG build in release.yml on version tags (v*) — macOS also on workflow_dispatch —
+# not on pull requests.
 on:
   pull_request:
     branches: [main]

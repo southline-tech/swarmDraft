@@ -408,6 +408,7 @@ export const shortcutSheet = {
   escCloseSuffix: ' to close',
   closeAriaLabel: 'Close keyboard shortcuts',
   windowsConventionsLead: 'Windows conventions. Press ',
+  macConventionsLead: 'Mac conventions. Press ',
   windowsConventionsTrail: ' any time to open this sheet.',
   sheetTitle: 'Keyboard shortcuts',
 } as const;
