@@ -265,12 +265,12 @@ fn import_comments_from_worktree(
 ) -> Result<(), DraftRepoError> {
     let dir = worktree.join("comments");
     // A legacy archive has no comments directory. Leave the local rows alone.
+    // An id already stored is left as it is. This never deletes a local row:
+    // a comment not yet packed, one added after a restored commit, or a bot
+    // comment that exists only on a bot branch stays in SQLite.
     if !dir.is_dir() {
         return Ok(());
     }
-    let mut rows = Vec::new();
-    let mut seen_ids = HashSet::new();
-    let mut preserve_threads = HashSet::new();
     for entry in fs::read_dir(&dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -283,39 +283,17 @@ fn import_comments_from_worktree(
                 "draft comment file skipped (unreadable): {}",
                 path.display()
             );
-            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                if !stem.is_empty() {
-                    preserve_threads.insert(stem.to_string());
-                }
-            }
             continue;
         };
         for row in file.rows {
             let Some(comment) = row.into_comment(&file.thread_id) else {
                 continue;
             };
-            if seen_ids.insert(comment.id.clone()) {
-                rows.push(comment);
+            if let Err(e) = store.insert_comment_if_missing(manuscript_id, &comment) {
+                eprintln!("draft comment import skipped {}: {e}", comment.id);
             }
         }
     }
-    if !preserve_threads.is_empty() {
-        for existing in store
-            .comments_for_manuscript(manuscript_id)
-            .map_err(storage_err)?
-        {
-            let thread = existing
-                .thread_id
-                .clone()
-                .unwrap_or_else(|| existing.id.clone());
-            if preserve_threads.contains(&thread) && seen_ids.insert(existing.id.clone()) {
-                rows.push(existing);
-            }
-        }
-    }
-    store
-        .replace_comments_for_manuscript(manuscript_id, &rows)
-        .map_err(storage_err)?;
     Ok(())
 }
 

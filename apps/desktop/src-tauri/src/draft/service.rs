@@ -255,18 +255,15 @@ impl DraftService {
         self.with_op(|| {
             let verb = if accepted { "Accepted" } else { "Rejected" };
             let base = format!("{verb} {bot_name}'s change in {chapter_title}");
+            let decision = if accepted { "accepted" } else { "rejected" };
             let msg = match (change_id, change_kind, change_section_id) {
-                (Some(id), Some(kind), Some(section)) if !id.is_empty() && !section.is_empty() => {
-                    let _ = kind;
-                    let decision = if accepted { "accepted" } else { "rejected" };
-                    append_trailers(
-                        &base,
-                        &[
-                            ("Change-Id", id),
-                            ("Decision", decision),
-                            ("Section", section),
-                        ],
-                    )
+                (Some(id), kind, Some(section)) if !id.is_empty() && !section.is_empty() => {
+                    let mut trailers = vec![("Change-Id", id), ("Decision", decision)];
+                    if let Some(kind) = kind.filter(|k| !k.is_empty()) {
+                        trailers.push(("Kind", kind));
+                    }
+                    trailers.push(("Section", section));
+                    append_trailers(&base, &trailers)
                 }
                 _ => base,
             };
@@ -712,8 +709,60 @@ impl DraftService {
         manuscript_id: &str,
         change_id: &str,
     ) -> Result<DraftChangeResolve, String> {
-        self.with_op(|| self.resolve_change_inner(store, manuscript_id, change_id))
+        let change_id = change_id.trim();
+        if change_id.is_empty() {
+            return Ok(DraftChangeResolve::NotFound {
+                change_id: change_id.to_string(),
+            });
+        }
+        let change_id = change_id.to_string();
+        // Cache check stays under the op lock. The history walk does not: a miss
+        // can scan every commit, and Save must not wait on that.
+        let prep = self.with_op(|| {
+            let dir = self.ensure_open_inner(store, manuscript_id)?;
+            let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+            let key = changes::tip_cache_key(&repo).map_err(|e| e.to_string())?;
+            if key.is_empty() {
+                return Ok(ResolvePrep::Cached(DraftChangeResolve::NotFound {
+                    change_id: change_id.clone(),
+                }));
+            }
+            let cache = self.resolve_cache.lock().expect("resolve cache");
+            if let Some((cached_key, found)) = cache.get(manuscript_id) {
+                if cached_key == &key {
+                    let hit = found.get(&change_id).cloned().unwrap_or_else(|| {
+                        DraftChangeResolve::NotFound {
+                            change_id: change_id.clone(),
+                        }
+                    });
+                    return Ok(ResolvePrep::Cached(hit));
+                }
+            }
+            Ok(ResolvePrep::Walk { dir, key })
+        })?;
+        match prep {
+            ResolvePrep::Cached(hit) => Ok(hit),
+            ResolvePrep::Walk { dir, key } => {
+                let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+                let found = changes::resolve_all(&repo).map_err(|e| e.to_string())?;
+                let result = found.get(&change_id).cloned().unwrap_or_else(|| {
+                    DraftChangeResolve::NotFound {
+                        change_id: change_id.clone(),
+                    }
+                });
+                self.resolve_cache
+                    .lock()
+                    .expect("resolve cache")
+                    .insert(manuscript_id.to_string(), (key, found));
+                Ok(result)
+            }
+        }
     }
+}
+
+enum ResolvePrep {
+    Cached(DraftChangeResolve),
+    Walk { dir: PathBuf, key: String },
 }
 
 fn copy_bare_to_working(bare: &Path, work: &Path) -> Result<(), std::io::Error> {
@@ -900,53 +949,6 @@ impl DraftService {
                 Err(err)
             }
         }
-    }
-
-    fn resolve_change_inner(
-        &self,
-        store: &Store,
-        manuscript_id: &str,
-        change_id: &str,
-    ) -> Result<DraftChangeResolve, String> {
-        let change_id = change_id.trim();
-        if change_id.is_empty() {
-            return Ok(DraftChangeResolve::NotFound {
-                change_id: change_id.to_string(),
-            });
-        }
-        let dir = self.ensure_open_inner(store, manuscript_id)?;
-        let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
-        let key = changes::tip_cache_key(&repo).map_err(|e| e.to_string())?;
-        if key.is_empty() {
-            return Ok(DraftChangeResolve::NotFound {
-                change_id: change_id.to_string(),
-            });
-        }
-        {
-            let cache = self.resolve_cache.lock().expect("resolve cache");
-            if let Some((cached_key, found)) = cache.get(manuscript_id) {
-                if cached_key == &key {
-                    return Ok(found.get(change_id).cloned().unwrap_or_else(|| {
-                        DraftChangeResolve::NotFound {
-                            change_id: change_id.to_string(),
-                        }
-                    }));
-                }
-            }
-        }
-        let found = changes::resolve_all(&repo).map_err(|e| e.to_string())?;
-        let result =
-            found
-                .get(change_id)
-                .cloned()
-                .unwrap_or_else(|| DraftChangeResolve::NotFound {
-                    change_id: change_id.to_string(),
-                });
-        self.resolve_cache
-            .lock()
-            .expect("resolve cache")
-            .insert(manuscript_id.to_string(), (key, found));
-        Ok(result)
     }
 
     fn ensure_bot_session_inner(

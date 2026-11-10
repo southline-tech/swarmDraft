@@ -230,6 +230,7 @@ fn review_commit_trailers_carry_the_change_id() {
     assert!(full.starts_with("Accepted Line Editor's change in "));
     assert!(full.contains("Change-Id: chg-1"));
     assert!(full.contains("Decision: accepted"));
+    assert!(full.contains("Kind: suggestion_insert"));
     assert!(full.contains(&format!("Section: {}", chapter.id)));
     assert!(full.contains(&format!("Session: {session_id}")));
     let visible = svc
@@ -362,9 +363,13 @@ fn comment_threads_round_trip_without_duplicates() {
     let rows = store2
         .comments_for_manuscript(&opened.manuscript_id)
         .unwrap();
-    assert_eq!(rows.len(), 2);
-    assert_eq!(rows.iter().filter(|c| c.id == "clocalextra").count(), 0);
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows.iter().filter(|c| c.id == "clocalextra").count(), 1);
     assert_eq!(rows.iter().filter(|c| c.id == thread).count(), 1);
+    let mut ids: Vec<_> = rows.iter().map(|c| c.id.as_str()).collect();
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), rows.len());
 }
 
 #[test]
@@ -745,7 +750,7 @@ fn resolve_change_uses_the_bot_commit_that_added_the_id() {
 }
 
 #[test]
-fn reopen_applies_a_newer_resolved_at() {
+fn reopen_inserts_a_missing_comment_and_leaves_the_local_row() {
     let (_dir, store) = temp_store();
     let stored = store.create_blank_manuscript_with_progress(None).unwrap();
     let m = stored.manuscript.clone();
@@ -779,21 +784,40 @@ fn reopen_applies_a_newer_resolved_at() {
     store
         .set_comment_thread_resolved(&m.id, &chapter.id, thread, true)
         .unwrap();
+    store
+        .insert_comment(
+            &m.id,
+            &sample_comment("cthread2", &chapter.id, "Added in the archive."),
+        )
+        .unwrap();
     svc.commit_now(&store, &m.id, "Saved", "Author", "author@swarmdraft.local")
         .unwrap()
-        .expect("resolved comment is committed");
+        .expect("new comment is committed");
     svc2.open_draft_path(&store2, &draft_path, true)
         .unwrap()
         .unwrap();
     let rows = store2
         .comments_for_manuscript(&opened.manuscript_id)
         .unwrap();
-    assert_eq!(rows.len(), 1);
-    assert!(rows[0].resolved_at.is_some());
+    assert_eq!(rows.len(), 2);
+    let kept = rows.iter().find(|c| c.id == thread).unwrap();
+    assert!(kept.resolved_at.is_none());
+    assert_eq!(kept.body, "Please check this.");
+    assert!(rows.iter().any(|c| c.id == "cthread2"));
+    svc2.open_draft_path(&store2, &draft_path, true)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        store2
+            .comments_for_manuscript(&opened.manuscript_id)
+            .unwrap()
+            .len(),
+        2
+    );
 }
 
 #[test]
-fn restore_drops_a_comment_added_after_that_commit() {
+fn restore_keeps_a_comment_added_after_that_commit() {
     let (_dir, store) = temp_store();
     let stored = store.create_blank_manuscript_with_progress(None).unwrap();
     let m = stored.manuscript.clone();
@@ -821,8 +845,12 @@ fn restore_drops_a_comment_added_after_that_commit() {
         .expect("later comment");
     svc.restore(&store, &m.id, &older, "Author").unwrap();
     let rows = store.comments_for_manuscript(&m.id).unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].id, "cthread1");
+    assert_eq!(rows.len(), 2);
+    let mut ids: Vec<_> = rows.iter().map(|c| c.id.as_str()).collect();
+    ids.sort();
+    assert_eq!(ids, vec!["cthread1", "cthread2"]);
+    ids.dedup();
+    assert_eq!(ids.len(), 2);
 }
 
 #[test]
@@ -962,6 +990,62 @@ fn bot_comment_lands_on_the_bot_branch() {
         .is_none());
     let head = repo.head_name().unwrap().unwrap();
     assert!(head == "main" || head == "master");
+}
+
+#[test]
+fn bot_comment_only_on_bot_branch_survives_open_and_restore() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "bot-only-comment.draft");
+    let baseline = svc
+        .commit_now(
+            &store,
+            &m.id,
+            "Baseline",
+            "Author",
+            "author@swarmdraft.local",
+        )
+        .unwrap()
+        .expect("baseline");
+    let mut comment = sample_comment("cthread-bot", &chapter.id, "Only on the bot branch.");
+    comment.author.kind = "agent".into();
+    comment.author.id = "agent-test-1".into();
+    comment.author.name = "Line Editor".into();
+    store.insert_comment(&m.id, &comment).unwrap();
+    let bot_oid = svc
+        .commit_bot_suggestion(&store, &m.id, "agent-test-1", "Line Editor", "Bot comment")
+        .unwrap()
+        .expect("bot comment commit");
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    assert!(repo
+        .file_bytes(&bot_oid, "comments/cthread-bot.json")
+        .unwrap()
+        .is_some());
+    let main = repo.head_oid().unwrap().unwrap();
+    assert!(repo
+        .file_bytes(&main, "comments/cthread-bot.json")
+        .unwrap()
+        .is_none());
+    let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
+    svc.open_draft_path(&store, &draft_path, true)
+        .unwrap()
+        .unwrap();
+    let after_open = store.comments_for_manuscript(&m.id).unwrap();
+    assert_eq!(after_open.len(), 1);
+    assert_eq!(after_open[0].id, "cthread-bot");
+    assert_eq!(after_open[0].body, "Only on the bot branch.");
+    svc.restore(&store, &m.id, &baseline, "Author").unwrap();
+    let after_restore = store.comments_for_manuscript(&m.id).unwrap();
+    assert_eq!(after_restore.len(), 1);
+    assert_eq!(after_restore[0].id, "cthread-bot");
+    assert_eq!(after_restore[0].body, "Only on the bot branch.");
+    svc.open_draft_path(&store, &draft_path, true)
+        .unwrap()
+        .unwrap();
+    assert_eq!(store.comments_for_manuscript(&m.id).unwrap().len(), 1);
 }
 
 #[test]
