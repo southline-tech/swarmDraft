@@ -616,15 +616,20 @@ impl Store {
     }
 
     /// Replay the stored document, leaving out `skip` updates (matched by exact bytes).
-    /// A later update that does not apply without one of those is kept by replaying the
-    /// whole document instead, so writer text that depends on the skipped update is not dropped.
+    /// A later update that does not integrate without one of those — including one yrs
+    /// stashes as pending instead of returning an error — keeps the whole document, so
+    /// writer text that depends on the skipped update is not dropped.
     pub(crate) fn load_doc_except(
         &self,
         doc_id: &str,
         skip: &[Vec<u8>],
-    ) -> Result<Doc, StorageError> {
+    ) -> Result<ExceptDoc, StorageError> {
         if skip.is_empty() {
-            return self.load_doc(doc_id);
+            let doc = self.load_doc(doc_id)?;
+            return Ok(ExceptDoc {
+                without_skipped: doc.clone(),
+                doc,
+            });
         }
         let updates: Vec<Vec<u8>> = self.with_conn(|c| {
             let mut st =
@@ -649,17 +654,38 @@ impl Store {
             kept.push(update);
         }
         if !skipped_any {
-            return self.load_doc(doc_id);
+            let doc = self.load_doc(doc_id)?;
+            return Ok(ExceptDoc {
+                without_skipped: doc.clone(),
+                doc,
+            });
         }
-        match apply_doc_updates(&kept) {
-            Ok(doc) => Ok(doc),
+        let applied = match apply_doc_updates(&kept) {
+            Ok(applied) => applied,
             Err(err) => {
                 eprintln!(
                     "draft checkpoint keeps a pending bot edit in the chapter; a later edit does not apply without it: {err}"
                 );
-                self.load_doc(doc_id)
+                let doc = self.load_doc(doc_id)?;
+                return Ok(ExceptDoc {
+                    without_skipped: doc.clone(),
+                    doc,
+                });
             }
+        };
+        if !applied.missing {
+            return Ok(ExceptDoc {
+                without_skipped: applied.doc.clone(),
+                doc: applied.doc,
+            });
         }
+        eprintln!(
+            "draft checkpoint keeps a pending bot edit in the chapter; a later edit does not apply without it"
+        );
+        Ok(ExceptDoc {
+            without_skipped: applied.doc,
+            doc: self.load_doc(doc_id)?,
+        })
     }
 
     /// Persist everything in `doc` that is newer than `since` as one update.
@@ -2144,11 +2170,31 @@ fn validate_outline(
     Ok(())
 }
 
+/// A chapter replayed for a main checkpoint, with and without updates that are still
+/// waiting for a `bot/*` commit.
+pub(crate) struct ExceptDoc {
+    /// Document to write. This is the full chapter when a later update does not
+    /// integrate without one of the skipped updates, so that keystroke is not dropped.
+    pub doc: Doc,
+    /// The same updates with `skip` left out. Later updates that cite a skipped block
+    /// stay pending here and are not part of the integrated text. Suggestion ids are
+    /// compared against this so a checkpoint can keep the keystroke without listing
+    /// that suggestion in `review/changes.json`.
+    pub without_skipped: Doc,
+}
+
 pub fn state_vector(doc: &Doc) -> StateVector {
     doc.transact().state_vector()
 }
 
-fn apply_doc_updates(updates: &[Vec<u8>]) -> Result<Doc, StorageError> {
+struct AppliedDoc {
+    doc: Doc,
+    /// True when a replayed update cited a block that was not in this replay.
+    /// yrs keeps that update pending and still returns Ok.
+    missing: bool,
+}
+
+fn apply_doc_updates(updates: &[Vec<u8>]) -> Result<AppliedDoc, StorageError> {
     let doc = crate::content::new_doc();
     {
         let mut txn = doc.transact_mut();
@@ -2159,7 +2205,8 @@ fn apply_doc_updates(updates: &[Vec<u8>]) -> Result<Doc, StorageError> {
                 .map_err(|e| StorageError::Invalid(format!("bad update: {e}")))?;
         }
     }
-    Ok(doc)
+    let missing = doc.transact().has_missing_updates();
+    Ok(AppliedDoc { doc, missing })
 }
 
 /// Incremental Yjs update from `since`, the same bytes `agent_write` stores.

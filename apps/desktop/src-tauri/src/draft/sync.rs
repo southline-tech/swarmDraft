@@ -116,6 +116,10 @@ pub(crate) struct SyncOmit {
     pub comment_ids: HashSet<String>,
     /// Exact `doc_updates` bytes still waiting for a `bot/*` commit, keyed by doc id.
     pub doc_updates: HashMap<String, Vec<Vec<u8>>>,
+    /// Suggestion ids already known to belong to a pending bot write. A checkpoint
+    /// omits these even after open squashes the update log and the bytes above no
+    /// longer match a row.
+    pub change_ids: HashSet<String>,
 }
 
 pub fn sync_store_to_worktree(
@@ -123,7 +127,7 @@ pub fn sync_store_to_worktree(
     manuscript_id: &str,
     worktree: &Path,
     omit: &SyncOmit,
-) -> Result<(), DraftRepoError> {
+) -> Result<HashMap<String, HashSet<String>>, DraftRepoError> {
     let manuscript = store.get_manuscript(manuscript_id).map_err(storage_err)?;
     let sections = store.list_sections(manuscript_id).map_err(storage_err)?;
     fs::create_dir_all(worktree.join("chapters"))?;
@@ -157,12 +161,17 @@ pub fn sync_store_to_worktree(
         serde_json::to_vec_pretty(&book).map_err(|e| DraftRepoError::Invalid(e.to_string()))?,
     )?;
 
-    let mut pending_change_ids = HashSet::new();
+    let mut pending_change_ids = omit.change_ids.clone();
+    let mut discovered: HashMap<String, HashSet<String>> = HashMap::new();
     for section in &sections {
         if section.kind != "chapter" {
             continue;
         }
-        let doc = chapter_doc_for_sync(store, &section.doc_id, omit, &mut pending_change_ids)?;
+        let (doc, ids) =
+            chapter_doc_for_sync(store, &section.doc_id, omit, &mut pending_change_ids)?;
+        if !ids.is_empty() {
+            discovered.insert(section.doc_id.clone(), ids);
+        }
         let state = doc
             .transact()
             .encode_state_as_update_v1(&StateVector::default());
@@ -176,32 +185,37 @@ pub fn sync_store_to_worktree(
     sync_notes(store, manuscript_id, worktree)?;
     sync_comments(store, manuscript_id, worktree, &omit.comment_ids)?;
     changes::write_change_index(store, manuscript_id, worktree, &pending_change_ids)?;
-    Ok(())
+    Ok(discovered)
 }
 
-/// Chapter document to write. Pending bot updates are left out, and the suggestion ids
-/// that disappear with them are recorded so `review/changes.json` omits those rows too.
+/// Chapter document to write. Pending bot updates are left out when the rest of the
+/// chapter still integrates. A later keystroke that does not integrate without one is
+/// kept by writing the whole chapter, and the suggestion ids that disappear from the
+/// replay without those updates are still omitted from `review/changes.json`.
 fn chapter_doc_for_sync(
     store: &Store,
     doc_id: &str,
     omit: &SyncOmit,
     pending_change_ids: &mut HashSet<String>,
-) -> Result<Doc, DraftRepoError> {
+) -> Result<(Doc, HashSet<String>), DraftRepoError> {
     let skips = omit
         .doc_updates
         .get(doc_id)
         .map(Vec::as_slice)
         .unwrap_or(&[]);
     if skips.is_empty() {
-        return store.load_doc(doc_id).map_err(storage_err);
+        return Ok((store.load_doc(doc_id).map_err(storage_err)?, HashSet::new()));
     }
     let full = store.load_doc(doc_id).map_err(storage_err)?;
-    let stripped = store.load_doc_except(doc_id, skips).map_err(storage_err)?;
-    let full_ids = changes::suggestion_ids(&full);
-    for id in full_ids.difference(&changes::suggestion_ids(&stripped)) {
+    let loaded = store.load_doc_except(doc_id, skips).map_err(storage_err)?;
+    let mut found = HashSet::new();
+    for id in
+        changes::suggestion_ids(&full).difference(&changes::suggestion_ids(&loaded.without_skipped))
+    {
+        found.insert(id.clone());
         pending_change_ids.insert(id.clone());
     }
-    Ok(stripped)
+    Ok((loaded.doc, found))
 }
 
 pub(super) fn to_pretty(value: &impl Serialize) -> Result<Vec<u8>, DraftRepoError> {

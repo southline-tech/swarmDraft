@@ -68,6 +68,34 @@ fn chapter_text(store: &Store, doc_id: &str) -> String {
     content::markdown(&decode(&doc))
 }
 
+/// Insert `extra` at the end of the text run that contains `needle`.
+fn insert_into_text(doc: &yrs::Doc, needle: &str, extra: &str) {
+    use yrs::{GetString, Text, Transact, XmlFragment, XmlOut};
+    let frag = doc.get_or_insert_xml_fragment(content::FRAGMENT);
+    let (text, index) = {
+        let txn = doc.transact();
+        let mut found = None;
+        for child in frag.children(&txn) {
+            let XmlOut::Element(el) = child else {
+                continue;
+            };
+            for inner in el.children(&txn) {
+                let XmlOut::Text(text) = inner else {
+                    continue;
+                };
+                let value = text.get_string(&txn);
+                if let Some(pos) = value.find(needle) {
+                    let index = value[..pos + needle.len()].encode_utf16().count() as u32;
+                    found = Some((text, index));
+                }
+            }
+        }
+        found.unwrap_or_else(|| panic!("missing text {needle}"))
+    };
+    let mut txn = doc.transact_mut();
+    text.insert(&mut txn, index, extra);
+}
+
 fn link_draft(store: &Store, manuscript_id: &str, name: &str) {
     let path = store.data_dir().join("drafts").join(name);
     store
@@ -1697,6 +1725,183 @@ fn checkpoint_before_bot_commit_still_resolves_the_bot_comment() {
     assert!(svc
         .bot_branch_exists(&store, &m.id, "agent-test-1", "Line Editor")
         .is_err());
+}
+
+/// Type into a suggestion whose `bot/*` commit has not run, then checkpoint.
+/// The keystroke is in that commit and still there after reopen. The suggestion
+/// id and the bot comment stay off `main`, so rejecting the branch still resolves it.
+#[test]
+fn checkpoint_keeps_a_keystroke_typed_into_a_pending_suggestion() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "bot-keystroke-before-commit.draft");
+    set_chapter_plain(&store, &chapter.doc_id, "version-one");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap()
+    .expect("baseline");
+    let doc = store.load_doc(&chapter.doc_id).unwrap();
+    let since = state_vector(&doc);
+    content::encode(
+        &doc,
+        &json!({"type":"doc","content":[{"type":"paragraph","content":[{
+            "type":"text",
+            "text":"guttered",
+            "marks":[{"type":"suggestion_insert","attrs":{"id":"chg-pending","author":"agent:agent-test-1","ts":"t"}}]
+        }]}]}),
+    )
+    .unwrap();
+    let update = doc_update_since(&doc, &since);
+    let mut comment = sample_comment("cthread-kept", &chapter.id, "Pending before the branch.");
+    comment.author.kind = "agent".into();
+    comment.author.id = "agent-test-1".into();
+    comment.author.name = "Line Editor".into();
+    svc.record_bot_write(
+        &m.id,
+        BotRetention {
+            comment: Some(comment.clone()),
+            doc_id: Some(chapter.doc_id.clone()),
+            doc_update: Some(update.clone()),
+        },
+        || {
+            store
+                .insert_comment(&m.id, &comment)
+                .map_err(|e| e.to_string())?;
+            store
+                .append_doc_update(&chapter.doc_id, &update)
+                .map_err(|e| e.to_string())?;
+            Ok::<(), String>(())
+        },
+    )
+    .unwrap();
+    let doc = store.load_doc(&chapter.doc_id).unwrap();
+    let since = state_vector(&doc);
+    insert_into_text(&doc, "guttered", " KEPT");
+    let typed = doc_update_since(&doc, &since);
+    store.append_doc_update(&chapter.doc_id, &typed).unwrap();
+    assert!(
+        chapter_text(&store, &chapter.doc_id).contains("KEPT"),
+        "the keystroke was not saved"
+    );
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Checkpoint",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap();
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let mid = repo.head_oid().unwrap().unwrap();
+    assert!(
+        repo.file_bytes(&mid, "comments/cthread-kept.json")
+            .unwrap()
+            .is_none(),
+        "checkpoint wrote the bot comment before its branch existed"
+    );
+    let changes = repo
+        .file_bytes(&mid, "review/changes.json")
+        .unwrap()
+        .map(|bytes| String::from_utf8(bytes).unwrap())
+        .unwrap_or_default();
+    assert!(
+        !changes.contains("chg-pending"),
+        "checkpoint wrote the suggestion id before its branch existed: {changes}"
+    );
+    let chapter_md = String::from_utf8(
+        repo.file_bytes(&mid, &format!("chapters/{}.md", chapter.id))
+            .unwrap()
+            .expect("chapter"),
+    )
+    .unwrap();
+    assert!(
+        chapter_md.contains("KEPT"),
+        "checkpoint dropped the keystroke: {chapter_md}"
+    );
+    let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
+    let opened = svc
+        .open_draft_path(&store, &draft_path, true)
+        .unwrap()
+        .unwrap();
+    assert_eq!(opened.manuscript_id, m.id);
+    let reopened = chapter_text(&store, &chapter.doc_id);
+    assert!(
+        reopened.contains("KEPT"),
+        "reopen dropped the keystroke: {reopened}"
+    );
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Checkpoint after reopen",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap();
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let after = repo.head_oid().unwrap().unwrap();
+    let changes = repo
+        .file_bytes(&after, "review/changes.json")
+        .unwrap()
+        .map(|bytes| String::from_utf8(bytes).unwrap())
+        .unwrap_or_default();
+    assert!(
+        !changes.contains("chg-pending"),
+        "checkpoint after reopen wrote the suggestion id: {changes}"
+    );
+    let chapter_md = String::from_utf8(
+        repo.file_bytes(&after, &format!("chapters/{}.md", chapter.id))
+            .unwrap()
+            .expect("chapter"),
+    )
+    .unwrap();
+    assert!(
+        chapter_md.contains("KEPT"),
+        "checkpoint after reopen dropped the keystroke: {chapter_md}"
+    );
+    svc.commit_bot_suggestion(&store, &m.id, "agent-test-1", "Line Editor", "Bot comment")
+        .unwrap()
+        .expect("bot comment");
+    svc.commit_review_decision(
+        &store,
+        &m.id,
+        false,
+        "Line Editor",
+        &chapter.title,
+        "author",
+        Some("agent-test-1"),
+        Some("chg-pending"),
+        Some("suggestion_insert"),
+        Some(&chapter.id),
+    )
+    .unwrap();
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let main = repo.head_oid().unwrap().unwrap();
+    let text = String::from_utf8(
+        repo.file_bytes(&main, "comments/cthread-kept.json")
+            .unwrap()
+            .expect("rejected bot comment is on main"),
+    )
+    .unwrap();
+    assert!(text.contains("Pending before the branch."));
+    assert!(
+        text.contains("\"resolvedAt\": \""),
+        "reject did not resolve the comment: {text}"
+    );
+    let row = store
+        .comments_for_manuscript(&m.id)
+        .unwrap()
+        .into_iter()
+        .find(|c| c.id == "cthread-kept")
+        .unwrap();
+    assert!(row.resolved_at.is_some());
 }
 
 #[test]

@@ -95,6 +95,9 @@ struct PendingBotWrite {
     comment: Option<Comment>,
     doc_id: Option<String>,
     doc_update: Option<Vec<u8>>,
+    /// Suggestion ids this update added. Filled when a checkpoint can see them, and
+    /// still left out of `review/changes.json` after open squashes the update log.
+    change_ids: Vec<String>,
 }
 
 impl DraftService {
@@ -142,6 +145,7 @@ impl DraftService {
                 comment: retention.comment,
                 doc_id: retention.doc_id,
                 doc_update,
+                change_ids: Vec::new(),
             });
         }
         Ok(result)
@@ -467,8 +471,13 @@ impl DraftService {
             repo.checkout_branch(&branch)
                 .map_err(|e| format!("checkout bot branch: {e}"))?;
             // This commit is what publishes the pending rows. A main checkpoint omits them.
-            sync::sync_store_to_worktree(store, manuscript_id, &dir, &sync::SyncOmit::default())
-                .map_err(|e| format!("sync: {e}"))?;
+            let _published = sync::sync_store_to_worktree(
+                store,
+                manuscript_id,
+                &dir,
+                &sync::SyncOmit::default(),
+            )
+            .map_err(|e| format!("sync: {e}"))?;
             let email = bot_committer_email(bot_agent_id);
             let oid = repo
                 .commit_all(message, bot_display_name, &email, &CommitOptions::default())
@@ -515,14 +524,16 @@ impl DraftService {
 
     /// Write the cache for a `main` commit, skipping bot comments and suggestions whose
     /// `bot/*` commit has not landed. The lock covers the skip set and the sync, so a bot
-    /// write cannot enter SQLite in between and get published onto `main`.
+    /// write cannot enter SQLite in between and get published onto `main`. A keystroke
+    /// that does not apply without one of those suggestions stays in the chapter. The
+    /// suggestion id stays out of `review/changes.json`.
     fn sync_main_worktree(
         &self,
         store: &Store,
         manuscript_id: &str,
         dir: &Path,
     ) -> Result<(), String> {
-        let guard = self.bot_writes.lock().expect("bot writes");
+        let mut guard = self.bot_writes.lock().expect("bot writes");
         let mut omit = sync::SyncOmit::default();
         for write in guard
             .pending
@@ -540,9 +551,24 @@ impl DraftService {
                         .push(update.clone());
                 }
             }
+            omit.change_ids.extend(write.change_ids.iter().cloned());
         }
-        sync::sync_store_to_worktree(store, manuscript_id, dir, &omit)
-            .map_err(|e| format!("sync: {e}"))
+        let discovered = sync::sync_store_to_worktree(store, manuscript_id, dir, &omit)
+            .map_err(|e| format!("sync: {e}"))?;
+        for write in guard
+            .pending
+            .iter_mut()
+            .filter(|write| write.manuscript_id == manuscript_id)
+        {
+            if let Some(doc_id) = &write.doc_id {
+                if let Some(ids) = discovered.get(doc_id) {
+                    if !ids.is_empty() {
+                        write.change_ids = ids.iter().cloned().collect();
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn bot_branch_exists(

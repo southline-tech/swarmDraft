@@ -86,6 +86,7 @@ Run this consolidated pass in order; do not hand off until every line that appli
 
 Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
 
+- 2026-11-10 · #344 · PR #345 · a checkpoint that left out a pending bot suggestion dropped a keystroke typed into it, and opening that chapter kept the loss · when a later update does not integrate without the suggestion, the chapter keeps that text; the suggestion id and the bot comment stay off main
 - 2026-11-10 · #344 · PR #345 · a checkpoint before the bot branch existed copied the bot comment and suggestion onto main, so rejecting the branch saw an empty diff and left the comment open · a main checkpoint skips bot comments and suggestions whose `bot/*` commit is still pending
 - 2026-11-10 · #344 · PR #345 · a bot comment or suggestion that had not reached git was deleted when restore or open rebuilt the cache, and the bot commit then stored that empty cache · reconcile keeps that saved comment and document update until the bot commit lands, and the commit writes those saved bytes
 - 2026-11-09 · #344 · PR #345 · a full branch reject resolved a writer comment the bot commit had copied from the cache, and a writer suggestion kept the branch open · only that bot's comments and changes count; resolving sets `resolvedAt` on the current row and does not copy the bot snapshot over a newer body or a delete
