@@ -164,7 +164,7 @@ onBeforeUnmount(() => {
         </header>
         <!-- prettier-ignore -->
         <p id="old-change-summary" class="old-change__summary" data-test="old-change-summary">
-          <template v-if="settled"><bdi v-if="decider" dir="auto">{{ decider }}</bdi>{{ settledMiddle }}<bdi v-if="author" dir="auto" data-test="old-change-author">{{ author }}</bdi><template v-if="authorIsBot"> <span class="agent-tag" data-test="agent-tag">Bot</span></template>{{ authorSuffix }}<span v-if="whenText" data-test="old-change-when">{{ whenSuffix }}</span></template>
+          <template v-if="settled"><bdi v-if="decider" dir="auto">{{ decider }}</bdi>{{ settledMiddle }}<bdi v-if="author" dir="auto" data-test="old-change-author">{{ author }}</bdi>{{ authorSuffix }}<template v-if="authorIsBot"> <span class="agent-tag" data-test="agent-tag">Bot</span></template><span v-if="whenText" data-test="old-change-when">{{ whenSuffix }}</span></template>
           <template v-else><bdi v-if="author" dir="auto" data-test="old-change-author">{{ author }}</bdi><template v-if="authorIsBot"> <span class="agent-tag" data-test="agent-tag">Bot</span></template>{{ editedRest }}</template>
         </p>
         <p class="old-change__kind" data-test="old-change-kind">{{ kindLabel(view.kind) }}</p>

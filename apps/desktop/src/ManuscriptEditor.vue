@@ -37,6 +37,7 @@ import OverlapPopover, { type OverlapEntry } from './review/OverlapPopover.vue';
 import {
   DecisionLog,
   keyOf,
+  filterChangesById,
   groupChanges,
   changeTypeLabel,
   inForeignInput,
@@ -254,6 +255,8 @@ const props = defineProps<{
   reviewFollow?: boolean;
   /** Book-wide author filter owned by ContinuousManuscript (#241). */
   authorFilter?: AuthorFilter | null;
+  /** Review-link selection (#119). Null shows every change. */
+  changeIds?: readonly string[] | null;
   chapterOpsEnabled?: boolean;
   canMergePrevChapter?: boolean;
   chapterNumber?: number;
@@ -292,6 +295,7 @@ const emit = defineEmits<{
   'open-suggestions': [items: SuggestionItem[]];
   'update:reviewFollow': [on: boolean];
   'update:authorFilter': [filter: AuthorFilter];
+  'clear-change-ids': [];
   'comment-reply': [threadId: string, body: string];
   'comment-resolve': [threadId: string, resolved: boolean];
   'split-chapter': [payload: { blockIndex: number; title: string; removeLine: boolean }];
@@ -779,6 +783,16 @@ watch(currentKey, (key) => {
 });
 const collapsed = shallowRef(loadCollapsed());
 watch(collapsed, (v) => saveCollapsed(v));
+watch(
+  () => props.changeIds,
+  (ids) => {
+    if (!ids?.length) return;
+    reviewOpen.value = true;
+    collapsed.value = false;
+    if (focusMode.value) focusMode.value = false;
+  },
+  { immediate: true },
+);
 const changes = computed(() => {
   const local = groupChanges(suggestions.value);
   if (!props.reviewTarget || props.bookChanges == null) return local;
@@ -836,18 +850,27 @@ function fromOfThread(thread: CommentThread): number {
   return from >= 0 ? from : -1;
 }
 
+const reviewSelection = computed(() =>
+  props.changeIds && props.changeIds.length ? props.changeIds : null,
+);
 const reviewListItems = computed(() =>
   buildReviewList({
-    changes: changes.value,
-    threads: commentThreads.value,
-    filter: filter.value,
+    changes: reviewSelection.value
+      ? filterChangesById(changes.value, reviewSelection.value)
+      : changes.value,
+    threads: reviewSelection.value ? [] : commentThreads.value,
+    filter: reviewSelection.value ? null : filter.value,
     showResolved: showResolved.value,
     fromOfChange,
     fromOfThread,
   }).map((item) => ({ ...item, key: reviewListKey(item) })),
 );
 
-const filteredSuggestions = computed(() => visibleItems(changes.value, filter.value));
+const filteredSuggestions = computed(() =>
+  reviewSelection.value
+    ? filterChangesById(changes.value, reviewSelection.value)
+    : visibleItems(changes.value, filter.value),
+);
 
 function marginSelectedKey(): string | null {
   const key = currentKey.value;
@@ -2024,6 +2047,7 @@ onBeforeUnmount(() => {
             :follow="reviewTarget ? (reviewFollow ?? true) : true"
             :load-failed="!!loadError"
             :filter="filter"
+            :change-ids="changeIds ?? null"
             :current-key="currentKey"
             :collapsed="collapsed"
             :busy="!editor?.isEditable"
@@ -2035,6 +2059,7 @@ onBeforeUnmount(() => {
             @decide-visible="decideVisible"
             @toggle-collapsed="collapsed = !collapsed"
             @select-view="onSelectView"
+            @clear-change-ids="emit('clear-change-ids')"
             @dismiss-one="dismissOne"
             @update:follow="emit('update:reviewFollow', $event)"
             @update:show-resolved="showResolved = $event"

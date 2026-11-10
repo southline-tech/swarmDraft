@@ -56,7 +56,7 @@ versions (`final`, `final_v2`, edits…).
    powershell -ExecutionPolicy Bypass -File $env:USERPROFILE\swarmdraft-bot\mcp.ps1
    ```
 
-   It should list the tools. In **Settings → Agents**, the bot should show as MCP connected.
+   It should list the tools. In **Settings → Agents**, the bot should show as Bots connected.
    Revoke anytime from that list.
 
 `request_pairing` arguments: `{ name, color?, scopes? }`. `poll_pairing` arguments:
@@ -75,8 +75,22 @@ Body shape:
 `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"<tool>","arguments":{...}}}`
 
 Tools include: `list_documents`, `list_chapters`, `read_chapter`, `search_text`, `suggest_edit`,
-`suggest_insert`, `suggest_style`, `add_comment`, `list_suggestions`, `trigger_export`, `get_export`,
-`send_feedback`. Run `tools/list` first for the exact argument names.
+`suggest_insert`, `suggest_style`, `add_comment`, `list_suggestions`, `link_to_edit`, `link_to_review`,
+`trigger_export`, `get_export`, `send_feedback`. Run `tools/list` first for the exact argument names.
+
+## Links back to the book
+
+After a suggestion is stored, send the author a link instead of describing the edit in chat.
+
+- `link_to_edit` arguments: `{ manuscript_id, change_id }`. Returns `{ url }` shaped like
+  `swarmdraft://open?draft=<manuscriptId>&change=<changeId>`. Opening it focuses that change.
+  A change that was already accepted, rejected, or edited later opens the read-only history view.
+- `link_to_review` arguments: `{ manuscript_id, change_ids }` with at most **50** ids. Returns
+  `{ url }` shaped like `swarmdraft://review?draft=<manuscriptId>&changes=<id1>,<id2>`. Opening it
+  shows the review list filtered to those changes, with a chip the author can clear.
+
+Use ids this manuscript already has (`suggest_edit`, `suggest_insert`, `suggest_style`, or
+`list_suggestions`). An unknown manuscript or change id returns an error; do not invent a url.
 
 `send_feedback` queues product feedback for the author to preview and Allow or Deny in the app (same
 fields as **Send feedback** in Settings). **Batch** product notes into one digest (bulleted

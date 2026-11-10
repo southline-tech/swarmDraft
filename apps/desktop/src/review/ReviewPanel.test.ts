@@ -442,4 +442,20 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(w.emitted('dismiss-one')).toEqual([[key(outdatedItems[0]!)]]);
     w.unmount();
   });
+
+  it('filters to the selected changes and clears the chip (#119)', async () => {
+    const w = mount(ReviewPanel, { props: { items, labels, changeIds: ['s1', 's3'] } });
+    expect(w.findAll('[data-test=item]')).toHaveLength(2);
+    expect(w.find('[data-test=item]').text()).toContain('flickered');
+    expect(w.text()).not.toContain('glowed');
+    const chip = w.get('[data-test=selected-changes-chip]');
+    expect(chip.get('[data-test=selected-changes-label]').text()).toBe(
+      'Showing 2 selected changes',
+    );
+    await chip.get('[data-test=clear-selected-changes]').trigger('click');
+    expect(w.emitted('clear-change-ids')).toHaveLength(1);
+    await w.setProps({ changeIds: null });
+    expect(w.find('[data-test=selected-changes-chip]').exists()).toBe(false);
+    expect(w.findAll('[data-test=item]')).toHaveLength(3);
+  });
 });

@@ -289,7 +289,7 @@ export const pairing = {
 /** Settings › Agents connection row (#188). */
 export const agentConnection = {
   notConnected: 'Not connected',
-  connected: 'Connected',
+  connected: 'Bots connected',
   lastActiveMin: (min: number) => `Last active ${min} min ago`,
   lastActiveHours: (hours: number) => `Last active ${hours} h ago`,
   lastActiveDays: (days: number) => `Last active ${days} d ago`,

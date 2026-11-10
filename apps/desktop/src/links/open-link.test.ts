@@ -2,7 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { agentDirectory, setAgents } from '../agent-names';
 import OldChangeView from './OldChangeView.vue';
-import { UNKNOWN_CHANGE_TOAST, openChangeLink, type ChangeLinkRoute } from './open-link';
+import {
+  UNKNOWN_CHANGE_TOAST,
+  openChangeLink,
+  openReviewLink,
+  unknownChangesToast,
+  type ChangeLinkRoute,
+} from './open-link';
 import type { OldChangeViewModel } from './open-link';
 
 function localWhen(unix: number): string {
@@ -33,22 +39,27 @@ function route(): ChangeLinkRoute & {
   toast: ReturnType<typeof vi.fn>;
   failed: ReturnType<typeof vi.fn>;
   opened: ReturnType<typeof vi.fn>;
+  selected: ReturnType<typeof vi.fn>;
 } {
   const focus = vi.fn(async () => {});
   const history = vi.fn();
   const toast = vi.fn();
   const failed = vi.fn();
   const opened = vi.fn(async () => true);
+  const selected = vi.fn();
   return {
     focus,
     history,
     toast,
     failed,
     opened,
+    selected,
     ensureManuscript: opened,
     focusChange: focus,
     showHistory: history,
     showToast: toast,
+    resetLinkUi: vi.fn(),
+    showSelectedChanges: selected,
     clearOpenError: vi.fn(),
     onFailure: failed,
   };
@@ -171,6 +182,13 @@ describe('open change link (#117, #123)', () => {
     expect(author.getAttribute('dir')).toBe('auto');
     expect(author.textContent).toBe('Line Editor');
     expect(summary.querySelector('[data-test="agent-tag"]')?.textContent).toBe('Bot');
+    const summaryText = summary.textContent ?? '';
+    const possessive = summaryText.indexOf("Line Editor's change");
+    const badge = summaryText.indexOf('Bot');
+    const when = summaryText.indexOf(localWhen(1700000000));
+    expect(possessive).toBeGreaterThan(-1);
+    expect(badge).toBeGreaterThan(possessive);
+    expect(when).toBeGreaterThan(badge);
     w.unmount();
   });
 
@@ -273,5 +291,67 @@ describe('open change link (#117, #123)', () => {
     expect(r.failed).not.toHaveBeenCalled();
     expect(r.focus).not.toHaveBeenCalled();
     expect(r.history).not.toHaveBeenCalled();
+  });
+});
+
+describe('open review link (#119)', () => {
+  const reviewUrl = 'swarmdraft://review?draft=book-1&changes=chg-1,missing,chg-2';
+
+  it('filters to the open changes and toasts how many ids were unknown', async () => {
+    const r = route();
+    const result = await openReviewLink(reviewUrl, r, async (_manuscriptId, changeId) => {
+      if (changeId === 'missing') return { action: 'unknown', manuscriptId: 'book-1' };
+      return {
+        action: 'focus',
+        manuscriptId: 'book-1',
+        sectionId: changeId === 'chg-2' ? 'sec-new' : 'sec-1',
+        changeId,
+      };
+    });
+    expect(result).toBe('opened');
+    expect(r.opened).toHaveBeenCalledWith('book-1');
+    expect(r.selected).toHaveBeenCalledWith(['chg-1', 'chg-2']);
+    expect(r.toast).toHaveBeenCalledWith(unknownChangesToast(1));
+    expect(unknownChangesToast(1)).toBe("1 change couldn't be found.");
+    expect(unknownChangesToast(2)).toBe("2 changes couldn't be found.");
+    expect(r.history).not.toHaveBeenCalled();
+    expect(r.focus).not.toHaveBeenCalled();
+  });
+
+  it('shows the old-change view for a decided change and keeps the other ids in the filter', async () => {
+    const r = route();
+    await openReviewLink(reviewUrl, r, async (_manuscriptId, changeId) => {
+      if (changeId === 'chg-2') {
+        return {
+          action: 'history',
+          manuscriptId: 'book-1',
+          changeId,
+          sectionId: 'sec-1',
+          quote: 'guttered',
+          kind: 'suggestion_insert',
+          authorKind: 'agent',
+          authorName: 'Line Editor',
+          outcome: 'accepted',
+          decidedBy: 'Sam',
+          decidedAt: 1700000000,
+        };
+      }
+      if (changeId === 'missing') return { action: 'unknown', manuscriptId: 'book-1' };
+      return {
+        action: 'focus',
+        manuscriptId: 'book-1',
+        sectionId: 'sec-1',
+        changeId,
+      };
+    });
+    expect(r.selected).toHaveBeenCalledWith(['chg-1']);
+    expect(r.history).toHaveBeenCalledWith(
+      expect.objectContaining({
+        changeId: 'chg-2',
+        outcome: 'accepted',
+        authorName: 'Line Editor',
+      }),
+    );
+    expect(r.toast).toHaveBeenCalledWith("1 change couldn't be found.");
   });
 });

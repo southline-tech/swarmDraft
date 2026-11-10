@@ -30,6 +30,21 @@ export function visibleItems<T extends { author: string }>(
   return filter ? items.filter((i) => i.author === filter) : [...items];
 }
 
+/** Keep changes whose ids are in a review link. `null` leaves the list alone. */
+export function filterChangesById<T extends { id: string }>(
+  items: readonly T[],
+  changeIds: readonly string[] | null,
+): T[] {
+  if (!changeIds) return [...items];
+  const ids = new Set(changeIds);
+  return items.filter((item) => ids.has(item.id));
+}
+
+/** Chip copy for a review link. `count` is how many changes the link selected. */
+export function selectedChangesLabel(count: number): string {
+  return `Showing ${count} selected change${count === 1 ? '' : 's'}`;
+}
+
 /** True when inline suggestion marks for this author should show (matches panel view). */
 export function authorVisibleInFilter(filter: AuthorFilter, author: string): boolean {
   return filter ? author === filter : true;

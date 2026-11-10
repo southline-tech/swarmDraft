@@ -21,6 +21,7 @@ import {
   pendingCountForAuthor,
   REVIEW_SHORTCUTS,
   REVIEW_VIEW_CYCLE,
+  selectedChangesLabel,
   viewScopeAnnouncement,
   visibleItems,
   type AuthorFilter,
@@ -68,6 +69,8 @@ const props = withDefaults(
     /** Suggestion count for rail badge and view menu (filter applies). */
     suggestionCount?: number;
     showResolved?: boolean;
+    /** Review-link selection (#119). Null shows the usual list. */
+    changeIds?: readonly string[] | null;
   }>(),
   {
     filter: null,
@@ -83,6 +86,7 @@ const props = withDefaults(
     listItems: () => [],
     suggestionCount: undefined,
     showResolved: false,
+    changeIds: null,
   },
 );
 const emit = defineEmits<{
@@ -101,23 +105,34 @@ const emit = defineEmits<{
   'update:showResolved': [on: boolean];
   'comment-reply': [threadId: string, body: string];
   'comment-resolve': [threadId: string, resolved: boolean];
+  /** Drop a review-link selection and show every change again. */
+  'clear-change-ids': [];
 }>();
 
 const changes = computed(() =>
   props.bookChanges != null ? [...props.bookChanges] : groupChanges(props.items),
 );
 const authors = computed(() => authorsOf(changes.value));
-const listRows = computed(() =>
-  props.listItems.length
+const listRows = computed(() => {
+  const base = props.listItems.length
     ? [...props.listItems]
     : visibleItems(changes.value, props.filter).map((change) => ({
         kind: 'suggestion' as const,
         key: change.key,
         from: 0,
         change,
-      })),
+      }));
+  const selected = props.changeIds;
+  if (!selected) return base;
+  const ids = new Set(selected);
+  return base.filter((row) => row.kind === 'suggestion' && ids.has(row.change.id));
+});
+const visibleSuggestions = computed(() =>
+  props.changeIds
+    ? suggestionItems(listRows.value).map((row) => row.change)
+    : visibleItems(changes.value, props.filter),
 );
-const visibleSuggestions = computed(() => visibleItems(changes.value, props.filter));
+const selectedCount = computed(() => (props.changeIds ? new Set(props.changeIds).size : 0));
 const badgeCount = computed(() => props.suggestionCount ?? visibleSuggestions.value.length);
 const visible = computed(() => listRows.value);
 const index = computed(() => visible.value.findIndex((v) => v.key === props.currentKey));
@@ -390,8 +405,15 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
       </button>
     </header>
 
+    <div v-if="changeIds" class="selection-chip" role="status" data-test="selected-changes-chip">
+      <span data-test="selected-changes-label">{{ selectedChangesLabel(selectedCount) }}</span>
+      <button type="button" data-test="clear-selected-changes" @click="emit('clear-change-ids')">
+        Clear
+      </button>
+    </div>
+
     <div
-      v-if="authors.length > 1"
+      v-if="authors.length > 1 && !changeIds"
       ref="viewFilterRoot"
       class="view-filter"
       data-test="view-switcher"
@@ -507,15 +529,28 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
       :title="emptyStates.reviewTitle"
       :text="emptyStates.reviewText"
     />
+    <p v-if="changeIds && !listRows.length" class="muted" data-test="selected-changes-empty">
+      None of the selected changes are still open.
+    </p>
     <p
-      v-if="filter && !visibleSuggestions.length && !listRows.some((r) => r.kind === 'comment')"
+      v-if="
+        !changeIds &&
+        filter &&
+        !visibleSuggestions.length &&
+        !listRows.some((r) => r.kind === 'comment')
+      "
       class="muted"
       data-test="empty-filtered"
     >
       No suggestions from this author. Choose All to see the rest.
     </p>
     <p
-      v-if="filter && !visibleSuggestions.length && listRows.some((r) => r.kind === 'comment')"
+      v-if="
+        !changeIds &&
+        filter &&
+        !visibleSuggestions.length &&
+        listRows.some((r) => r.kind === 'comment')
+      "
       class="muted"
       data-test="empty-filtered"
     >
@@ -865,6 +900,28 @@ button.primary:disabled {
   color: var(--ct-text-muted);
   background: var(--ct-surface);
   border-bottom: 1px solid var(--ct-border);
+}
+.selection-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ct-space-2);
+  font-size: var(--ct-text-sm);
+  font-weight: var(--ct-weight-semibold);
+  padding: var(--ct-space-1) var(--ct-space-3);
+  border-radius: var(--ct-radius-full);
+  border: 1px solid var(--ct-border);
+  background: color-mix(in srgb, var(--ct-surface-raised) 88%, transparent);
+  color: var(--ct-text);
+}
+.selection-chip button {
+  font: inherit;
+  font-weight: var(--ct-weight-semibold);
+  color: var(--ct-text);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
 }
 .follow-chip {
   position: sticky;

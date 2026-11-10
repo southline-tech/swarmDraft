@@ -1,6 +1,7 @@
 /**
  * Open a change link: focus a live or moved change, or show the read-only history view.
- * Unknown ids stay on the manuscript with a toast (#117, #123).
+ * A review link opens the book and filters Review to those changes (#117, #119, #123).
+ * Unknown ids stay on the manuscript with a toast.
  */
 import { isTauri } from '@tauri-apps/api/core';
 import {
@@ -9,10 +10,16 @@ import {
   listenChangeLinks,
   type LinkResolution,
 } from '../backend';
-import { parseChangeLink } from './link-codec';
+import { parseChangeLink, parseReviewLink } from './link-codec';
 
 export const UNKNOWN_CHANGE_TOAST =
   "That change isn't in this book's history. Your book is open where you left off.";
+
+/** How many review-link ids were not in the book. */
+export function unknownChangesToast(count: number): string {
+  if (count === 1) return "1 change couldn't be found.";
+  return `${count} changes couldn't be found.`;
+}
 
 export type { LinkResolution };
 
@@ -36,8 +43,29 @@ export interface ChangeLinkRoute {
   focusChange: (sectionId: string, changeId: string) => Promise<void>;
   showHistory: (view: OldChangeViewModel) => void;
   showToast: (message: string) => void;
+  /** Clear a previous link's toast, history view, and review filter. */
+  resetLinkUi: () => void;
+  /** Filter the review list to these still-open change ids. */
+  showSelectedChanges: (changeIds: string[]) => void;
   clearOpenError: () => void;
   onFailure: (err: unknown) => void;
+}
+
+function historyModel(
+  resolution: Extract<LinkResolution, { action: 'history' }>,
+): OldChangeViewModel {
+  return {
+    manuscriptId: resolution.manuscriptId,
+    changeId: resolution.changeId,
+    sectionId: resolution.sectionId,
+    quote: resolution.quote,
+    kind: resolution.kind,
+    authorKind: resolution.authorKind,
+    authorName: resolution.authorName,
+    outcome: resolution.outcome,
+    decidedBy: resolution.decidedBy,
+    decidedAt: resolution.decidedAt,
+  };
 }
 
 type Resolver = (manuscriptId: string, changeId: string) => Promise<LinkResolution | null>;
@@ -67,27 +95,82 @@ export async function openChangeLink(
   }
   if (!opened) return 'failed';
   route.clearOpenError();
+  route.resetLinkUi();
   if (resolution.action === 'focus') {
     await route.focusChange(resolution.sectionId, resolution.changeId);
     return 'opened';
   }
   if (resolution.action === 'history') {
-    route.showHistory({
-      manuscriptId: resolution.manuscriptId,
-      changeId: resolution.changeId,
-      sectionId: resolution.sectionId,
-      quote: resolution.quote,
-      kind: resolution.kind,
-      authorKind: resolution.authorKind,
-      authorName: resolution.authorName,
-      outcome: resolution.outcome,
-      decidedBy: resolution.decidedBy,
-      decidedAt: resolution.decidedAt,
-    });
+    route.showHistory(historyModel(resolution));
     return 'opened';
   }
   route.showToast(UNKNOWN_CHANGE_TOAST);
   return 'opened';
+}
+
+/**
+ * Open a review link: filter Review to the still-open changes.
+ * Decided or no-longer-present changes use the same history view as one edit link.
+ * Unknown ids are left out, with a toast for how many.
+ */
+export async function openReviewLink(
+  raw: string,
+  route: ChangeLinkRoute,
+  resolve: Resolver = linksResolve,
+): Promise<'invalid' | 'opened' | 'failed'> {
+  const parsed = parseReviewLink(raw);
+  if (!parsed) return 'invalid';
+  let opened = false;
+  try {
+    opened = await route.ensureManuscript(parsed.manuscriptId);
+  } catch (err) {
+    console.error('Review link open failed', err);
+    route.onFailure(err);
+    return 'failed';
+  }
+  if (!opened) return 'failed';
+  route.clearOpenError();
+
+  const focusIds: string[] = [];
+  const history: OldChangeViewModel[] = [];
+  let unknown = 0;
+  const seen = new Set<string>();
+  for (const changeId of parsed.changeIds) {
+    if (seen.has(changeId)) continue;
+    seen.add(changeId);
+    let resolution: LinkResolution | null;
+    try {
+      resolution = await resolve(parsed.manuscriptId, changeId);
+    } catch (err) {
+      route.onFailure(err);
+      return 'failed';
+    }
+    if (!resolution || resolution.action === 'unknown') {
+      unknown += 1;
+      continue;
+    }
+    if (resolution.action === 'focus') {
+      focusIds.push(resolution.changeId);
+      continue;
+    }
+    history.push(historyModel(resolution));
+  }
+
+  route.resetLinkUi();
+  if (focusIds.length) route.showSelectedChanges(focusIds);
+  if (history[0]) route.showHistory(history[0]);
+  if (unknown) route.showToast(unknownChangesToast(unknown));
+  return 'opened';
+}
+
+/** Change link or review link. Anything else is invalid. */
+export async function openAppLink(
+  raw: string,
+  route: ChangeLinkRoute,
+  resolve: Resolver = linksResolve,
+): Promise<'invalid' | 'opened' | 'failed'> {
+  if (parseReviewLink(raw)) return openReviewLink(raw, route, resolve);
+  return openChangeLink(raw, route, resolve);
 }
 
 /** Cold start plus later opens (single-instance and the deep-link plugin). */
@@ -101,7 +184,7 @@ export function startChangeLinkRoute(route: ChangeLinkRoute): () => void {
     const prev = seen.get(url) ?? 0;
     if (now - prev < 2000) return;
     seen.set(url, now);
-    void openChangeLink(url, route);
+    void openAppLink(url, route);
   };
   void (async () => {
     try {

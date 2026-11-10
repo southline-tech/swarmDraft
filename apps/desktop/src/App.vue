@@ -1306,13 +1306,20 @@ onMounted(() => {
       await editorPane.value?.focusResolvedChange(sectionId, changeId);
     },
     showHistory: (view) => {
-      dismissLinkToast();
       dismissToast();
       oldChange.value = view;
     },
     showToast: (message) => {
-      oldChange.value = null;
       showLinkToast(message, 'alert');
+    },
+    resetLinkUi: () => {
+      oldChange.value = null;
+      dismissLinkToast();
+      selectedChangeIds.value = null;
+    },
+    showSelectedChanges: (changeIds) => {
+      focusMode.value = false;
+      selectedChangeIds.value = changeIds;
     },
     clearOpenError: () => {
       openError.value = '';
@@ -1580,6 +1587,9 @@ async function ensureManuscriptForLink(manuscriptId: string): Promise<boolean> {
 }
 
 /** Open an imported manuscript (exposed for tests and the Tauri open-file flow). */
+/** Change ids from a review link. Null shows the full review list (#119). */
+const selectedChangeIds = ref<string[] | null>(null);
+
 function open(next: ManuscriptSession) {
   const switching = session.value !== next;
   const prev = switching ? session.value : null;
@@ -1590,6 +1600,7 @@ function open(next: ManuscriptSession) {
   }
   // A toast from an earlier book must never describe this one; callers re-show it on success.
   dismissToast();
+  selectedChangeIds.value = null;
   saveFailure.value = saveSucceeded();
   saveStatusShown.value = false;
   saveDirty.value = false;
@@ -2676,6 +2687,8 @@ defineExpose({ open, closeSession });
               :computer-name="info?.computerName"
               :decision-records-by-section="decisionRecordsBySection"
               :manuscript-id="session.id"
+              :change-ids="selectedChangeIds"
+              @clear-change-ids="selectedChangeIds = null"
               :draft-label="draftPickerLabel"
               :draft-rows="draftRows"
               :current-draft-id="session.id"

@@ -87,6 +87,8 @@ const props = defineProps<{
     splitHint: boolean;
   } | null;
   splitAcrossThreadIds?: readonly string[];
+  /** Review-link selection (#119). Null shows every change. */
+  changeIds?: readonly string[] | null;
 }>();
 
 const commentRows = shallowRef<readonly CommentRow[]>([]);
@@ -159,6 +161,7 @@ const emit = defineEmits<{
   'merge-prev-chapter': [];
   'reading-position': [pos: ReadingPosition];
   'copy-link': [ok: boolean];
+  'clear-change-ids': [];
 }>();
 
 const suggestionsBySection = shallowRef(new Map<string, SuggestionItem[]>());
@@ -590,6 +593,7 @@ onBeforeUnmount(() => {
             :review-active-scroll-key="sec.id === selectedId ? activeScrollKey : undefined"
             :review-follow="sec.id === selectedId ? reviewFollow : undefined"
             :author-filter="authorFilter"
+            :change-ids="sec.id === selectedId ? (changeIds ?? null) : null"
             :chapter-title="sec.id === selectedId ? chapterTitle : undefined"
             :chapter-label="sectionLabels?.get(sec.id)"
             :book-docs="sec.id === selectedId ? bookDocs : undefined"
@@ -620,6 +624,7 @@ onBeforeUnmount(() => {
             :split-chapter-hint="sec.id === selectedId && !!leadChapterOps?.splitHint"
             :split-across-thread-ids="sec.id === selectedId ? splitAcrossThreadIds : undefined"
             @update:author-filter="authorFilter = $event"
+            @clear-change-ids="emit('clear-change-ids')"
             @split-chapter="emit('split-chapter', $event)"
             @merge-prev-chapter="emit('merge-prev-chapter')"
             @copy-link="emit('copy-link', $event)"
