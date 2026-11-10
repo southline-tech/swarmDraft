@@ -342,8 +342,9 @@ impl DraftService {
             .ensure_open_inner(store, manuscript_id)
             .map_err(|e| format!("ensure_open: {e}"))?;
         let session = self.session_for_commit(store, manuscript_id)?;
-        sync::sync_store_to_worktree(store, manuscript_id, &dir)
-            .map_err(|e| format!("sync: {e}"))?;
+        // Held across the read of pending bot writes and the file sync. A bot write
+        // waits, then lands in SQLite after this checkpoint's files are already written.
+        self.sync_main_worktree(store, manuscript_id, &dir)?;
         if let Some(record) = &session {
             sessions::write_session_file(&dir, record).map_err(|e| format!("session: {e}"))?;
         }
@@ -465,7 +466,8 @@ impl DraftService {
             let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
             repo.checkout_branch(&branch)
                 .map_err(|e| format!("checkout bot branch: {e}"))?;
-            sync::sync_store_to_worktree(store, manuscript_id, &dir)
+            // This commit is what publishes the pending rows. A main checkpoint omits them.
+            sync::sync_store_to_worktree(store, manuscript_id, &dir, &sync::SyncOmit::default())
                 .map_err(|e| format!("sync: {e}"))?;
             let email = bot_committer_email(bot_agent_id);
             let oid = repo
@@ -509,6 +511,38 @@ impl DraftService {
         }
         let mut guard = self.bot_writes.lock().expect("bot writes");
         guard.pending.retain(|write| !tokens.contains(&write.token));
+    }
+
+    /// Write the cache for a `main` commit, skipping bot comments and suggestions whose
+    /// `bot/*` commit has not landed. The lock covers the skip set and the sync, so a bot
+    /// write cannot enter SQLite in between and get published onto `main`.
+    fn sync_main_worktree(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        dir: &Path,
+    ) -> Result<(), String> {
+        let guard = self.bot_writes.lock().expect("bot writes");
+        let mut omit = sync::SyncOmit::default();
+        for write in guard
+            .pending
+            .iter()
+            .filter(|write| write.manuscript_id == manuscript_id)
+        {
+            if let Some(comment) = &write.comment {
+                omit.comment_ids.insert(comment.id.clone());
+            }
+            if let (Some(doc_id), Some(update)) = (&write.doc_id, &write.doc_update) {
+                if update.len() > 2 {
+                    omit.doc_updates
+                        .entry(doc_id.clone())
+                        .or_default()
+                        .push(update.clone());
+                }
+            }
+        }
+        sync::sync_store_to_worktree(store, manuscript_id, dir, &omit)
+            .map_err(|e| format!("sync: {e}"))
     }
 
     pub fn bot_branch_exists(

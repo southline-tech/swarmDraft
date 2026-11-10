@@ -109,10 +109,20 @@ pub fn sync_worktree_to_store(
     Ok(())
 }
 
+/// Bot comments and document updates saved in SQLite and not yet on a `bot/*` commit.
+/// A main checkpoint passes these so it does not publish them before that branch exists.
+#[derive(Default)]
+pub(crate) struct SyncOmit {
+    pub comment_ids: HashSet<String>,
+    /// Exact `doc_updates` bytes still waiting for a `bot/*` commit, keyed by doc id.
+    pub doc_updates: HashMap<String, Vec<Vec<u8>>>,
+}
+
 pub fn sync_store_to_worktree(
     store: &Store,
     manuscript_id: &str,
     worktree: &Path,
+    omit: &SyncOmit,
 ) -> Result<(), DraftRepoError> {
     let manuscript = store.get_manuscript(manuscript_id).map_err(storage_err)?;
     let sections = store.list_sections(manuscript_id).map_err(storage_err)?;
@@ -147,11 +157,12 @@ pub fn sync_store_to_worktree(
         serde_json::to_vec_pretty(&book).map_err(|e| DraftRepoError::Invalid(e.to_string()))?,
     )?;
 
+    let mut pending_change_ids = HashSet::new();
     for section in &sections {
         if section.kind != "chapter" {
             continue;
         }
-        let doc = store.load_doc(&section.doc_id).map_err(storage_err)?;
+        let doc = chapter_doc_for_sync(store, &section.doc_id, omit, &mut pending_change_ids)?;
         let state = doc
             .transact()
             .encode_state_as_update_v1(&StateVector::default());
@@ -163,9 +174,34 @@ pub fn sync_store_to_worktree(
     }
 
     sync_notes(store, manuscript_id, worktree)?;
-    sync_comments(store, manuscript_id, worktree)?;
-    changes::write_change_index(store, manuscript_id, worktree)?;
+    sync_comments(store, manuscript_id, worktree, &omit.comment_ids)?;
+    changes::write_change_index(store, manuscript_id, worktree, &pending_change_ids)?;
     Ok(())
+}
+
+/// Chapter document to write. Pending bot updates are left out, and the suggestion ids
+/// that disappear with them are recorded so `review/changes.json` omits those rows too.
+fn chapter_doc_for_sync(
+    store: &Store,
+    doc_id: &str,
+    omit: &SyncOmit,
+    pending_change_ids: &mut HashSet<String>,
+) -> Result<Doc, DraftRepoError> {
+    let skips = omit
+        .doc_updates
+        .get(doc_id)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    if skips.is_empty() {
+        return store.load_doc(doc_id).map_err(storage_err);
+    }
+    let full = store.load_doc(doc_id).map_err(storage_err)?;
+    let stripped = store.load_doc_except(doc_id, skips).map_err(storage_err)?;
+    let full_ids = changes::suggestion_ids(&full);
+    for id in full_ids.difference(&changes::suggestion_ids(&stripped)) {
+        pending_change_ids.insert(id.clone());
+    }
+    Ok(stripped)
 }
 
 pub(super) fn to_pretty(value: &impl Serialize) -> Result<Vec<u8>, DraftRepoError> {
@@ -223,6 +259,7 @@ fn sync_comments(
     store: &Store,
     manuscript_id: &str,
     worktree: &Path,
+    pending_comment_ids: &HashSet<String>,
 ) -> Result<(), DraftRepoError> {
     let comments = store
         .comments_for_manuscript(manuscript_id)
@@ -232,6 +269,9 @@ fn sync_comments(
         .map_err(storage_err)?;
     let mut groups: BTreeMap<String, Vec<GitComment>> = BTreeMap::new();
     for comment in comments {
+        if pending_comment_ids.contains(&comment.id) {
+            continue;
+        }
         push_thread_row(
             &mut groups,
             GitComment {

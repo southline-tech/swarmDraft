@@ -615,6 +615,53 @@ impl Store {
         Ok(doc)
     }
 
+    /// Replay the stored document, leaving out `skip` updates (matched by exact bytes).
+    /// A later update that does not apply without one of those is kept by replaying the
+    /// whole document instead, so writer text that depends on the skipped update is not dropped.
+    pub(crate) fn load_doc_except(
+        &self,
+        doc_id: &str,
+        skip: &[Vec<u8>],
+    ) -> Result<Doc, StorageError> {
+        if skip.is_empty() {
+            return self.load_doc(doc_id);
+        }
+        let updates: Vec<Vec<u8>> = self.with_conn(|c| {
+            let mut st =
+                c.prepare("SELECT data FROM doc_updates WHERE doc_id = ?1 ORDER BY seq")?;
+            let rows = st
+                .query_map([doc_id], |r| r.get(0))?
+                .collect::<Result<_, _>>()?;
+            Ok(rows)
+        })?;
+        let mut skip_left: Vec<&[u8]> = skip.iter().map(Vec::as_slice).collect();
+        let mut kept = Vec::with_capacity(updates.len());
+        let mut skipped_any = false;
+        for update in updates {
+            if let Some(pos) = skip_left
+                .iter()
+                .position(|candidate| *candidate == update.as_slice())
+            {
+                skip_left.swap_remove(pos);
+                skipped_any = true;
+                continue;
+            }
+            kept.push(update);
+        }
+        if !skipped_any {
+            return self.load_doc(doc_id);
+        }
+        match apply_doc_updates(&kept) {
+            Ok(doc) => Ok(doc),
+            Err(err) => {
+                eprintln!(
+                    "draft checkpoint keeps a pending bot edit in the chapter; a later edit does not apply without it: {err}"
+                );
+                self.load_doc(doc_id)
+            }
+        }
+    }
+
     /// Persist everything in `doc` that is newer than `since` as one update.
     pub fn save_doc_changes(
         &self,
@@ -2099,6 +2146,20 @@ fn validate_outline(
 
 pub fn state_vector(doc: &Doc) -> StateVector {
     doc.transact().state_vector()
+}
+
+fn apply_doc_updates(updates: &[Vec<u8>]) -> Result<Doc, StorageError> {
+    let doc = crate::content::new_doc();
+    {
+        let mut txn = doc.transact_mut();
+        for update in updates {
+            let decoded = Update::decode_v1(update)
+                .map_err(|e| StorageError::Invalid(format!("bad update: {e}")))?;
+            txn.apply_update(decoded)
+                .map_err(|e| StorageError::Invalid(format!("bad update: {e}")))?;
+        }
+    }
+    Ok(doc)
 }
 
 /// Incremental Yjs update from `since`, the same bytes `agent_write` stores.

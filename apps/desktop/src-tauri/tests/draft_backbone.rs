@@ -6,10 +6,12 @@ use std::path::Path;
 use serde_json::json;
 use swarmdraft_lib::content::{self, decode};
 use swarmdraft_lib::draft::{
-    pack_draft, CommitOptions, DraftChangeResolve, DraftManifest, DraftRepo, DraftService,
-    DRAFT_FORMAT, DRAFT_FORMAT_VERSION,
+    pack_draft, BotRetention, CommitOptions, DraftChangeResolve, DraftManifest, DraftRepo,
+    DraftService, DRAFT_FORMAT, DRAFT_FORMAT_VERSION,
 };
-use swarmdraft_lib::manuscripts::{Author, Comment, ReviewDecisionRecord};
+use swarmdraft_lib::manuscripts::{
+    doc_update_since, state_vector, Author, Comment, ReviewDecisionRecord,
+};
 use swarmdraft_lib::storage::Store;
 use yrs::updates::decoder::Decode;
 use yrs::{ReadTxn, StateVector, Transact, Update};
@@ -1536,6 +1538,165 @@ fn checkpoint_then_reject_still_resolves_the_bot_comment() {
         .find(|c| c.id == "cthread-bot")
         .unwrap();
     assert!(row.resolved_at.is_some());
+}
+
+/// Save the bot comment and suggestion, checkpoint, then let the bot commit run.
+/// The checkpoint must not publish those rows onto `main`, or the later reject sees
+/// an empty diff and leaves the comment open.
+#[test]
+fn checkpoint_before_bot_commit_still_resolves_the_bot_comment() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "bot-checkpoint-before-commit.draft");
+    set_chapter_plain(&store, &chapter.doc_id, "version-one");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap()
+    .expect("baseline");
+    let doc = store.load_doc(&chapter.doc_id).unwrap();
+    let since = state_vector(&doc);
+    content::encode(
+        &doc,
+        &json!({"type":"doc","content":[{"type":"paragraph","content":[{
+            "type":"text",
+            "text":"guttered",
+            "marks":[{"type":"suggestion_insert","attrs":{"id":"chg-pending","author":"agent:agent-test-1","ts":"t"}}]
+        }]}]}),
+    )
+    .unwrap();
+    let update = doc_update_since(&doc, &since);
+    let mut comment = sample_comment("cthread-pending", &chapter.id, "Pending before the branch.");
+    comment.author.kind = "agent".into();
+    comment.author.id = "agent-test-1".into();
+    comment.author.name = "Line Editor".into();
+    svc.record_bot_write(
+        &m.id,
+        BotRetention {
+            comment: Some(comment.clone()),
+            doc_id: Some(chapter.doc_id.clone()),
+            doc_update: Some(update.clone()),
+        },
+        || {
+            store
+                .insert_comment(&m.id, &comment)
+                .map_err(|e| e.to_string())?;
+            store
+                .append_doc_update(&chapter.doc_id, &update)
+                .map_err(|e| e.to_string())?;
+            Ok::<(), String>(())
+        },
+    )
+    .unwrap();
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Checkpoint",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap();
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let mid = repo.head_oid().unwrap().unwrap();
+    assert!(
+        repo.file_bytes(&mid, "comments/cthread-pending.json")
+            .unwrap()
+            .is_none(),
+        "checkpoint wrote the bot comment before its branch existed"
+    );
+    let changes = repo
+        .file_bytes(&mid, "review/changes.json")
+        .unwrap()
+        .map(|bytes| String::from_utf8(bytes).unwrap())
+        .unwrap_or_default();
+    assert!(
+        !changes.contains("chg-pending"),
+        "checkpoint wrote the bot suggestion before its branch existed: {changes}"
+    );
+    let chapter_md = String::from_utf8(
+        repo.file_bytes(&mid, &format!("chapters/{}.md", chapter.id))
+            .unwrap()
+            .expect("chapter"),
+    )
+    .unwrap();
+    assert!(chapter_md.contains("version-one"), "{chapter_md}");
+    assert!(
+        !chapter_md.contains("guttered"),
+        "checkpoint wrote the suggestion text: {chapter_md}"
+    );
+    let pending = store
+        .comments_for_manuscript(&m.id)
+        .unwrap()
+        .into_iter()
+        .find(|c| c.id == "cthread-pending")
+        .unwrap();
+    assert!(pending.resolved_at.is_none());
+    svc.commit_bot_suggestion(&store, &m.id, "agent-test-1", "Line Editor", "Bot comment")
+        .unwrap()
+        .expect("bot comment");
+    assert!(svc
+        .bot_branch_exists(&store, &m.id, "agent-test-1", "Line Editor")
+        .unwrap());
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let tip = repo
+        .search_ref_tips()
+        .unwrap()
+        .into_iter()
+        .find(|tip| tip.name.starts_with("bot/"))
+        .expect("bot tip");
+    let bot_changes = String::from_utf8(
+        repo.file_bytes(&tip.oid, "review/changes.json")
+            .unwrap()
+            .expect("bot changes"),
+    )
+    .unwrap();
+    assert!(
+        bot_changes.contains("chg-pending"),
+        "bot commit dropped the suggestion: {bot_changes}"
+    );
+    svc.commit_review_decision(
+        &store,
+        &m.id,
+        false,
+        "Line Editor",
+        &chapter.title,
+        "author",
+        Some("agent-test-1"),
+        Some("chg-pending"),
+        Some("suggestion_insert"),
+        Some(&chapter.id),
+    )
+    .unwrap();
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let main = repo.head_oid().unwrap().unwrap();
+    let text = String::from_utf8(
+        repo.file_bytes(&main, "comments/cthread-pending.json")
+            .unwrap()
+            .expect("rejected bot comment is on main"),
+    )
+    .unwrap();
+    assert!(text.contains("Pending before the branch."));
+    assert!(
+        text.contains("\"resolvedAt\": \""),
+        "reject did not resolve the comment: {text}"
+    );
+    let row = store
+        .comments_for_manuscript(&m.id)
+        .unwrap()
+        .into_iter()
+        .find(|c| c.id == "cthread-pending")
+        .unwrap();
+    assert!(row.resolved_at.is_some());
+    assert!(svc
+        .bot_branch_exists(&store, &m.id, "agent-test-1", "Line Editor")
+        .is_err());
 }
 
 #[test]

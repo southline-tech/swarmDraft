@@ -75,10 +75,23 @@ pub fn write_change_index(
     store: &Store,
     manuscript_id: &str,
     worktree: &Path,
+    except: &HashSet<String>,
 ) -> Result<(), DraftRepoError> {
-    let changes = build_change_index(store, manuscript_id)?;
+    let mut changes = build_change_index(store, manuscript_id)?;
+    if !except.is_empty() {
+        changes.retain(|entry| !except.contains(&entry.id));
+    }
     let bytes = index_bytes(&changes)?;
     write_stable(&worktree.join("review").join("changes.json"), &bytes)
+}
+
+/// Suggestion, deletion, and format-change ids marked in `doc`.
+pub(crate) fn suggestion_ids(doc: &yrs::Doc) -> HashSet<String> {
+    let mut marks: HashMap<String, MarkAcc> = HashMap::new();
+    for block in crate::content::decode(doc) {
+        walk_marks(&block.node, &mut marks);
+    }
+    marks.into_keys().collect()
 }
 
 pub fn index_bytes(changes: &[ChangeEntry]) -> Result<Vec<u8>, DraftRepoError> {
