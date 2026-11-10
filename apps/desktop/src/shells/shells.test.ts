@@ -7,7 +7,13 @@ import ManuscriptEditor from '../ManuscriptEditor.vue';
 import ContextMenu from './ContextMenu.vue';
 import type { ContextMenuAction } from './context-menu';
 import { SAMPLE_DOC } from '../fixtures/sample';
-import { loadTracking, PROFILE_KEY, TRACK_PROMPT_SEEN_KEY, TRACKING_KEY } from '../settings/prefs';
+import {
+  loadProfile,
+  loadTracking,
+  PROFILE_KEY,
+  TRACK_PROMPT_SEEN_KEY,
+  TRACKING_KEY,
+} from '../settings/prefs';
 import { REVIEW_SHORTCUTS } from '../review/review-state';
 import { SHORTCUTS } from '../toolbar/toolbar';
 import { MANUSCRIPT_SHORTCUTS } from './app-shortcuts';
@@ -375,7 +381,7 @@ describe('UI shells (Part of #36)', () => {
     localStorage.removeItem(TRACK_PROMPT_SEEN_KEY);
     localStorage.removeItem(PROFILE_KEY);
     const lead = mount(ManuscriptEditor, {
-      props: { doc: docToYDoc(SAMPLE_DOC as never) },
+      props: { doc: docToYDoc(SAMPLE_DOC as never), computerName: 'Rowan Vale' },
       attachTo: document.body,
     });
     const slice = mount(ManuscriptEditor, {
@@ -417,7 +423,8 @@ describe('UI shells (Part of #36)', () => {
     await flushPromises();
     expect(
       listSuggestions(sliceEditor.getJSON() as never).some(
-        (item) => item.kind === 'suggestion_insert' && item.text === '!',
+        (item) =>
+          item.kind === 'suggestion_insert' && item.text === '!' && item.author === 'Rowan Vale',
       ),
     ).toBe(true);
 
@@ -450,6 +457,49 @@ describe('UI shells (Part of #36)', () => {
     expect(slice.get('[data-test="track-changes-toggle"]').attributes('aria-pressed')).toBe(
       String(loadTracking()),
     );
+
+    lead.unmount();
+    slice.unmount();
+    localStorage.removeItem(TRACKING_KEY);
+    localStorage.removeItem(TRACK_PROMPT_SEEN_KEY);
+    localStorage.removeItem(PROFILE_KEY);
+  });
+
+  it('uses the saved name for a new slice insert after the lead reloads the profile', async () => {
+    localStorage.removeItem(TRACKING_KEY);
+    localStorage.removeItem(TRACK_PROMPT_SEEN_KEY);
+    localStorage.removeItem(PROFILE_KEY);
+    const lead = mount(ManuscriptEditor, {
+      props: { doc: docToYDoc(SAMPLE_DOC as never), computerName: 'Rowan Vale' },
+      attachTo: document.body,
+    });
+    const slice = mount(ManuscriptEditor, {
+      props: { doc: docToYDoc(SAMPLE_DOC as never), sliceMode: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    await lead.get('[data-test="track-changes-toggle"]').trigger('click');
+    await lead.get('[data-test="name-prompt-change"]').trigger('click');
+    await lead.get('[data-test="settings-name"]').setValue('Sample Writer');
+    await lead.get('[data-test="settings-save"]').trigger('click');
+    await flushPromises();
+    expect(loadProfile().name).toBe('Sample Writer');
+    await lead.get('[data-test="settings-cancel"]').trigger('click');
+    await flushPromises();
+
+    const sliceEditor = (
+      slice.get('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+    ).editor;
+    sliceEditor.view.dispatch(
+      sliceEditor.state.tr.insertText('?', sliceEditor.state.doc.content.size - 1),
+    );
+    await flushPromises();
+    expect(
+      listSuggestions(sliceEditor.getJSON() as never).some(
+        (item) =>
+          item.kind === 'suggestion_insert' && item.text === '?' && item.author === 'Sample Writer',
+      ),
+    ).toBe(true);
 
     lead.unmount();
     slice.unmount();

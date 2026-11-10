@@ -81,8 +81,8 @@ import {
   saveTrackPromptSeen,
   saveTracking,
   seedProfileForTracking,
-  type Profile,
 } from './settings/prefs';
+import { useBookProfile } from './settings/profile-state';
 import { useBookTracking } from './settings/tracking-state';
 import {
   ariaKeyshortcuts,
@@ -331,7 +331,8 @@ if (trackingForcedOn && !tracking.value) {
   skipForcedTrackingPersist = true;
   tracking.value = true;
 }
-const writerProfile = shallowRef<Profile>(loadProfile(prefStore()));
+/** Shared with every mounted section. Assigning it updates their suggestion author and color. */
+const writerProfile = useBookProfile(loadProfile(prefStore()));
 const namePromptOpen = shallowRef(false);
 const nameColorPromptOpen = shallowRef(false);
 const profileColorName = computed(
