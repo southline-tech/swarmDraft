@@ -37,6 +37,7 @@ import {
   draftAfterWordImport,
   listenOpenDraftPath,
   listenMacosQuit,
+  macosQuitCancelled,
   draftTakeLaunchPath,
   draftSave,
   draftSaveAs,
@@ -1115,15 +1116,20 @@ async function openRecentBook(id: string) {
 async function quitApp() {
   if (!isTauri()) return;
   const win = getCurrentWindow();
-  if (
-    (await flushWithTimeout(
-      () => session.value?.flush() ?? Promise.resolve(),
-      CLOSE_FLUSH_TIMEOUT_MS,
-    )) !== 'saved' &&
-    !(await confirmQuit())
-  )
+  const flushed = await flushWithTimeout(
+    () => session.value?.flush() ?? Promise.resolve(),
+    CLOSE_FLUSH_TIMEOUT_MS,
+  );
+  if (flushed !== 'saved' && !(await confirmQuit())) {
+    await macosQuitCancelled();
     return;
-  await win.destroy();
+  }
+  try {
+    await win.destroy();
+  } catch (e) {
+    await macosQuitCancelled();
+    throw e;
+  }
 }
 watch(settingsOpen, async (isOpen) => {
   await nextTick();
@@ -1234,6 +1240,8 @@ onMounted(() => {
   }).then((unlisten) => {
     if (leaving) unlisten();
     else stopMacosQuit = unlisten;
+    // A quit that arrived before this listener is dropped. Clear the gate so the next one flushes.
+    void macosQuitCancelled();
   });
   stopAppMenuKeys = () => {
     window.removeEventListener('keydown', onAppMenuKey);

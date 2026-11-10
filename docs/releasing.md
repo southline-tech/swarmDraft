@@ -44,9 +44,11 @@ signing, notarization, or any `APPLE_*` secret. Signing and notarization stay de
 Developer approval. Gatekeeper will warn; authors follow [install-macos.md](./install-macos.md)
 (**Open anyway** / Control-click **Open**).
 
-The job uploads the `.dmg` and `SHA256SUMS-macos.txt` as a workflow artifact. On a version tag it
-also attaches those files to the GitHub release. The Windows job is unchanged: NSIS, MSI, updater
-artifacts, and `SHA256SUMS.txt`.
+The job uploads the `.dmg` and `SHA256SUMS-macos.txt` as a workflow artifact named
+`swarmdraft-macos-unsigned` (a fixed name, so a manual run from a branch still uploads). On a
+version tag the Windows job creates the GitHub release first; this job then attaches the disk
+image and does not create the release. A manual run skips the Windows job and still builds the
+disk image. The Windows job is unchanged: NSIS, MSI, updater artifacts, and `SHA256SUMS.txt`.
 
 ## Out of scope on this track
 

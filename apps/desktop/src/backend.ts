@@ -426,6 +426,16 @@ export async function listenMacosQuit(onQuit: () => void): Promise<UnlistenFn> {
   }
 }
 
+/** The window stayed open after a macOS quit. The next Dock Quit may flush again. */
+export async function macosQuitCancelled(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke('macos_quit_cancelled');
+  } catch (e) {
+    console.error('Could not reset macOS quit', e);
+  }
+}
+
 /** Cold-start `.draft` from argv; returned once then cleared on the backend. */
 export async function draftTakeLaunchPath(): Promise<string | null> {
   if (!isTauri()) return null;

@@ -57,6 +57,11 @@ fn os_user_display_name() -> String {
 }
 
 #[tauri::command]
+fn macos_quit_cancelled() {
+    menu::system_quit_cancelled();
+}
+
+#[tauri::command]
 fn app_info(
     app: tauri::AppHandle,
     store: tauri::State<'_, storage::Store>,
@@ -1340,6 +1345,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            macos_quit_cancelled,
             app_info,
             agents_list,
             agents_primary_id,

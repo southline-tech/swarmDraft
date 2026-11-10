@@ -3,9 +3,82 @@
 //! Edit is required so copy, paste, and the other clipboard commands reach the webview.
 //! Undo and redo stay off this menu so Command-Z stays on the editor history.
 //! Quit is a custom item: the predefined Quit item calls `terminate:` and skips the save flush.
-//! Windows and Linux keep the in-app book menu only; this module does not call `set_menu` there.
+//! Dock Quit, logout, and shutdown still send `terminate:`. `applicationShouldTerminate:`
+//! replies `NSTerminateCancel` and emits the same quit event once, so the window can flush
+//! and then exit through `ExitRequested`. Windows and Linux keep the in-app book menu only;
+//! this module does not call `set_menu` there.
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
 
 use tauri::Emitter;
+
+/// `NSTerminateCancel` (`0`). Refusing termination keeps the process up until the save flush
+/// finishes. `win.destroy()` then exits through `RunEvent::ExitRequested`.
+pub const NS_TERMINATE_CANCEL: usize = 0;
+
+/// What `applicationShouldTerminate:` returns, and whether to start a flush.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminateReply {
+    /// Always [`NS_TERMINATE_CANCEL`].
+    pub code: usize,
+    /// False when a flush is already running. A second terminate must not start another.
+    pub emit_quit: bool,
+}
+
+/// One system quit at a time. Cleared when the window stays open.
+pub struct QuitFlushGate {
+    exit_in_progress: AtomicBool,
+}
+
+impl QuitFlushGate {
+    pub const fn new() -> Self {
+        Self {
+            exit_in_progress: AtomicBool::new(false),
+        }
+    }
+
+    /// Dock Quit, logout, shutdown, or a second terminate during that flush.
+    pub fn on_system_terminate(&self) -> TerminateReply {
+        let already = self.exit_in_progress.swap(true, Ordering::SeqCst);
+        TerminateReply {
+            code: NS_TERMINATE_CANCEL,
+            emit_quit: !already,
+        }
+    }
+
+    /// The unsaved prompt was declined, or destroy failed.
+    pub fn clear(&self) {
+        self.exit_in_progress.store(false, Ordering::SeqCst);
+    }
+}
+
+impl Default for QuitFlushGate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+static QUIT_FLUSH: QuitFlushGate = QuitFlushGate::new();
+static QUIT_APP: OnceLock<tauri::AppHandle> = OnceLock::new();
+
+/// Cancel termination. Emit `macos-quit` only when a flush is not already running.
+fn begin_system_terminate(app: Option<&tauri::AppHandle>) -> usize {
+    let reply = QUIT_FLUSH.on_system_terminate();
+    if reply.emit_quit {
+        if let Some(app) = app {
+            let _ = app.emit(QUIT_EVENT, ());
+        } else {
+            QUIT_FLUSH.clear();
+        }
+    }
+    reply.code
+}
+
+/// The window stayed open. The next Dock Quit may flush again.
+pub fn system_quit_cancelled() {
+    QUIT_FLUSH.clear();
+}
 
 /// Application menu, then File, Edit, and Window. The first title is the fallback when
 /// `productName` is empty; the installed app menu uses the configured product name.
@@ -70,14 +143,71 @@ pub fn quit_menu_label(app_title: &str) -> String {
 /// The Quit listener is registered everywhere so a later menu event still flushes;
 /// only macOS installs the item that emits it.
 pub fn install(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let _ = QUIT_APP.set(app.clone());
     #[cfg(target_os = "macos")]
-    install_macos(app)?;
+    {
+        install_macos(app)?;
+        install_system_terminate_handler();
+    }
     app.on_menu_event(|handle, event| {
         if event.id() == QUIT_MENU_ID {
-            let _ = handle.emit(QUIT_EVENT, ());
+            let _ = begin_system_terminate(Some(handle));
         }
     });
     Ok(())
+}
+
+/// Install `applicationShouldTerminate:` on tao's delegate. Without it, AppKit ends the
+/// process and `applicationWillTerminate` tears the event loop down without `quitApp`.
+#[cfg(target_os = "macos")]
+fn install_system_terminate_handler() {
+    use std::ffi::CString;
+
+    use objc2::encode::Encode;
+    use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
+
+    let Some(class) = AnyClass::get(c"TaoAppDelegateParent") else {
+        eprintln!("swarmDraft: TaoAppDelegateParent is missing; Dock Quit cannot flush");
+        return;
+    };
+    let sel = objc2::sel!(applicationShouldTerminate:);
+    if class.instance_method(sel).is_some() {
+        return;
+    }
+    // Same encoding `NSApplicationTerminateReply` uses: NSUInteger, then self, _cmd, sender.
+    let types = CString::new(format!(
+        "{ret}{obj}{cmd}{obj}",
+        ret = usize::ENCODING,
+        obj = <*mut AnyObject>::ENCODING,
+        cmd = Sel::ENCODING,
+    ))
+    .expect("terminate encoding");
+    // The runtime calls this as `applicationShouldTerminate:`. Imp erases that signature.
+    let imp: Imp = unsafe {
+        std::mem::transmute::<extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject) -> usize, Imp>(
+            application_should_terminate,
+        )
+    };
+    let added = unsafe {
+        objc2::ffi::class_addMethod(
+            std::ptr::from_ref(class).cast_mut(),
+            sel,
+            imp,
+            types.as_ptr(),
+        )
+    };
+    if !added.as_bool() {
+        eprintln!("swarmDraft: could not install applicationShouldTerminate:");
+    }
+}
+
+#[cfg(target_os = "macos")]
+extern "C-unwind" fn application_should_terminate(
+    _this: *mut objc2::runtime::AnyObject,
+    _cmd: objc2::runtime::Sel,
+    _sender: *mut objc2::runtime::AnyObject,
+) -> usize {
+    begin_system_terminate(QUIT_APP.get())
 }
 
 #[cfg(target_os = "macos")]
@@ -237,6 +367,26 @@ mod tests {
                 "{action} would bypass the editor"
             );
         }
+    }
+
+    #[test]
+    fn system_terminate_cancels_and_emits_only_once_until_the_window_stays_open() {
+        // Menu-id assertions never call this. Dock Quit, logout, and shutdown do.
+        let gate = QuitFlushGate::new();
+        let first = gate.on_system_terminate();
+        assert_eq!(first.code, NS_TERMINATE_CANCEL);
+        assert_eq!(NS_TERMINATE_CANCEL, 0);
+        assert!(first.emit_quit);
+        let second = gate.on_system_terminate();
+        assert_eq!(
+            second,
+            TerminateReply {
+                code: NS_TERMINATE_CANCEL,
+                emit_quit: false,
+            }
+        );
+        gate.clear();
+        assert!(gate.on_system_terminate().emit_quit);
     }
 
     #[test]

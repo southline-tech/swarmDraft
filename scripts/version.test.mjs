@@ -109,4 +109,12 @@ test('release.yml policy', () => {
   assert.doesNotMatch(yml, /certificateThumbprint/);
   assert.doesNotMatch(yml, /signCommand/);
   assert.match(yml, /gh release upload "\$tag" "\$\{files\[@\]\}" --clobber/);
+  assert.doesNotMatch(yml, /gh release create/);
+  assert.match(yml, /needs: windows-installer/);
+  assert.match(
+    yml,
+    /if: "\$\{\{ always\(\) && \(needs\.windows-installer\.result == 'success' \|\| needs\.windows-installer\.result == 'skipped'\) \}\}"/,
+  );
+  assert.match(yml, /name: swarmdraft-macos-unsigned\n/);
+  assert.doesNotMatch(yml, /swarmdraft-macos-unsigned-\$\{\{/);
 });

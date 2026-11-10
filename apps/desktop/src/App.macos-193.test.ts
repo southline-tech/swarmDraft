@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import { invoke } from '@tauri-apps/api/core';
 import App from './App.vue';
 import { MACOS_QUIT_EVENT } from './backend';
 import { storedFixture } from './stored-fixture.test-helper';
@@ -172,6 +173,31 @@ describe('macOS quit and Finder open (#193 review)', () => {
     expect(bridge.destroy).not.toHaveBeenCalled();
     releaseSave();
     await vi.waitFor(() => expect(bridge.destroy).toHaveBeenCalledTimes(1));
+    w.unmount();
+  });
+
+  it('declining an unsaved quit clears the macOS quit gate', async () => {
+    const backend = await import('./backend');
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    await chooseFile(w);
+    await vi.waitFor(() => {
+      const pm = w.get('.ProseMirror').element as HTMLElement;
+      expect(pm.getAttribute('contenteditable')).toBe('true');
+    });
+    vi.mocked(backend.saveSectionUpdate).mockRejectedValue(new Error('locked'));
+    const before = vi
+      .mocked(invoke)
+      .mock.calls.filter((call) => call[0] === 'macos_quit_cancelled').length;
+    editorOf(w).commands.insertContentAt(1, 'UNSAVED ');
+    bridge.listeners.get(MACOS_QUIT_EVENT)!();
+    await vi.waitFor(() => {
+      const after = vi
+        .mocked(invoke)
+        .mock.calls.filter((call) => call[0] === 'macos_quit_cancelled').length;
+      expect(after).toBe(before + 1);
+    });
+    expect(bridge.destroy).not.toHaveBeenCalled();
     w.unmount();
   });
 });

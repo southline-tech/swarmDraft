@@ -98,9 +98,13 @@ jobs:
 
   # Unsigned on purpose (#193). No Apple Developer identity, notarization, hardened runtime,
   # or APPLE_* secrets. Tauri may ad-hoc sign so the binary can launch; Gatekeeper still warns.
+  # On a tag this waits until windows-installer has created the GitHub release, then only
+  # uploads the DMG. A manual run skips Windows; that skip must not skip this build.
   macos-unsigned-dmg:
     name: macOS unsigned DMG (no Apple signing)
     runs-on: macos-latest
+    needs: windows-installer
+    if: "${{ always() && (needs.windows-installer.result == 'success' || needs.windows-installer.result == 'skipped') }}"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -157,17 +161,14 @@ jobs:
           tag="${{ github.ref_name }}"
           shopt -s nullglob
           files=(SHA256SUMS-macos.txt apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg)
-          upload() {
-            if gh release view "$tag" >/dev/null 2>&1; then
-              gh release upload "$tag" "${files[@]}" --clobber
-              return $?
-            fi
-            gh release create "$tag" "${files[@]}" \
-              --title "swarmDraft ${tag}" \
-              --notes-file docs/release-notes-template.md
-          }
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No unsigned DMG to upload" >&2
+            exit 1
+          fi
+          # windows-installer creates the release. This step only uploads, so a parallel
+          # create cannot answer 422 and drop the Windows installers.
           for _ in 1 2 3 4 5 6; do
-            if upload; then
+            if gh release upload "$tag" "${files[@]}" --clobber; then
               exit 0
             fi
             sleep 15
@@ -178,7 +179,7 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: swarmdraft-macos-unsigned-${{ github.ref_name }}
+          name: swarmdraft-macos-unsigned
           path: |
             apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
             SHA256SUMS-macos.txt
