@@ -1875,6 +1875,7 @@ fn checkpoint_before_bot_commit_still_resolves_the_bot_comment() {
     comment.author.id = "agent-test-1".into();
     comment.author.name = "Line Editor".into();
     svc.record_bot_write(
+        &store,
         &m.id,
         BotRetention {
             comment: Some(comment.clone()),
@@ -2039,6 +2040,7 @@ fn decision_around_a_pending_bot_commit(accepted: bool, decide_before_bot: bool)
     comment.author.id = "agent-test-1".into();
     comment.author.name = "Line Editor".into();
     svc.record_bot_write(
+        &store,
         &m.id,
         BotRetention {
             comment: Some(comment.clone()),
@@ -2258,6 +2260,278 @@ fn checkpoint_then_bot_commit_then_reject_keeps_the_decision() {
     decision_around_a_pending_bot_commit(false, false);
 }
 
+/// Save the suggestion and its comment, flush the chapter back to the pre-suggestion
+/// text, and reject before any checkpoint and before the bot commit. The reject commit
+/// carries the comment with `resolvedAt` set. Deleting the database and reopening
+/// restores that resolved comment.
+#[test]
+fn reject_before_checkpoint_keeps_the_bot_comment_resolved() {
+    let (dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "reject-before-checkpoint.draft");
+    set_chapter_plain(&store, &chapter.doc_id, "version-one");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap()
+    .expect("baseline");
+    let doc = store.load_doc(&chapter.doc_id).unwrap();
+    let since = state_vector(&doc);
+    content::encode(
+        &doc,
+        &json!({"type":"doc","content":[{"type":"paragraph","content":[{
+            "type":"text",
+            "text":"guttered",
+            "marks":[{"type":"suggestion_insert","attrs":{"id":"chg-pending","author":"agent:agent-test-1","ts":"t"}}]
+        }]}]}),
+    )
+    .unwrap();
+    let update = doc_update_since(&doc, &since);
+    let mut comment = sample_comment("cthread-pending", &chapter.id, "Pending before the branch.");
+    comment.author.kind = "agent".into();
+    comment.author.id = "agent-test-1".into();
+    comment.author.name = "Line Editor".into();
+    svc.record_bot_write(
+        &store,
+        &m.id,
+        BotRetention {
+            comment: None,
+            doc_id: Some(chapter.doc_id.clone()),
+            doc_update: Some(update.clone()),
+        },
+        || {
+            store
+                .append_doc_update(&chapter.doc_id, &update)
+                .map_err(|e| e.to_string())
+        },
+    )
+    .unwrap();
+    svc.record_bot_write(
+        &store,
+        &m.id,
+        BotRetention {
+            comment: Some(comment.clone()),
+            doc_id: None,
+            doc_update: None,
+        },
+        || {
+            store
+                .insert_comment(&m.id, &comment)
+                .map_err(|e| e.to_string())
+        },
+    )
+    .unwrap();
+    // The editor applies the reject and flushes that text before the decision commit.
+    set_chapter_plain(&store, &chapter.doc_id, "version-one");
+    assert!(
+        !chapter_text(&store, &chapter.doc_id).contains("guttered"),
+        "the flush left the suggestion in the chapter"
+    );
+    svc.commit_review_decision(
+        &store,
+        &m.id,
+        false,
+        "Line Editor",
+        &chapter.title,
+        "author",
+        Some("agent-test-1"),
+        Some("chg-pending"),
+        Some("suggestion_insert"),
+        Some(&chapter.id),
+    )
+    .unwrap();
+    assert!(svc
+        .bot_branch_exists(&store, &m.id, "agent-test-1", "Line Editor")
+        .is_err());
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let main = repo.head_oid().unwrap().unwrap();
+    assert_recorded_decision(&repo, &main, false);
+    let text = String::from_utf8(
+        repo.file_bytes(&main, "comments/cthread-pending.json")
+            .unwrap()
+            .expect("reject commit dropped the bot comment"),
+    )
+    .unwrap();
+    assert!(text.contains("Pending before the branch."));
+    assert!(
+        text.contains("\"resolvedAt\": \""),
+        "reject left the comment unresolved: {text}"
+    );
+    let chapter_md = String::from_utf8(
+        repo.file_bytes(&main, &format!("chapters/{}.md", chapter.id))
+            .unwrap()
+            .expect("chapter"),
+    )
+    .unwrap();
+    assert!(
+        chapter_md.contains("version-one") && !chapter_md.contains("guttered"),
+        "reject put the suggestion back: {chapter_md}"
+    );
+    let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
+    let data = dir.path().to_path_buf();
+    drop(store);
+    drop(svc);
+    drop(repo);
+    for name in ["swarmdraft.db", "swarmdraft.db-wal", "swarmdraft.db-shm"] {
+        let path = data.join(name);
+        if path.exists() {
+            fs::remove_file(&path).unwrap();
+        }
+    }
+    let store = Store::open(&data).unwrap();
+    let svc = DraftService::new(data, "0.2.1".into());
+    let opened = svc
+        .open_draft_path(&store, &draft_path, true)
+        .unwrap()
+        .unwrap();
+    let id = opened.manuscript_id;
+    let decisions = store.review_decisions_for_manuscript(&id).unwrap();
+    let decision = decisions
+        .values()
+        .flatten()
+        .find(|row| row.id == "chg-pending")
+        .unwrap_or_else(|| panic!("reopen lost the decision: {decisions:?}"));
+    assert_eq!(decision.status, "rejected");
+    let comment = store
+        .comments_for_manuscript(&id)
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id == "cthread-pending")
+        .expect("reopen lost the comment");
+    assert_eq!(comment.body, "Pending before the branch.");
+    assert!(comment.resolved_at.is_some());
+    let chapter = store
+        .list_sections(&id)
+        .unwrap()
+        .into_iter()
+        .find(|section| section.kind == "chapter")
+        .expect("chapter");
+    let text = chapter_text(&store, &chapter.doc_id);
+    assert!(
+        text.contains("version-one") && !text.contains("guttered"),
+        "reopen brought the suggestion back: {text}"
+    );
+}
+
+/// The same reject, then the bot commit and a checkpoint. The comment stays resolved
+/// on `main` and the suggestion text stays off the chapter.
+#[test]
+fn reject_before_checkpoint_stays_resolved_after_the_bot_commit() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "reject-then-bot-commit.draft");
+    set_chapter_plain(&store, &chapter.doc_id, "version-one");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap()
+    .expect("baseline");
+    let doc = store.load_doc(&chapter.doc_id).unwrap();
+    let since = state_vector(&doc);
+    content::encode(
+        &doc,
+        &json!({"type":"doc","content":[{"type":"paragraph","content":[{
+            "type":"text",
+            "text":"guttered",
+            "marks":[{"type":"suggestion_insert","attrs":{"id":"chg-pending","author":"agent:agent-test-1","ts":"t"}}]
+        }]}]}),
+    )
+    .unwrap();
+    let update = doc_update_since(&doc, &since);
+    let mut comment = sample_comment("cthread-pending", &chapter.id, "Pending before the branch.");
+    comment.author.kind = "agent".into();
+    comment.author.id = "agent-test-1".into();
+    comment.author.name = "Line Editor".into();
+    svc.record_bot_write(
+        &store,
+        &m.id,
+        BotRetention {
+            comment: Some(comment.clone()),
+            doc_id: Some(chapter.doc_id.clone()),
+            doc_update: Some(update.clone()),
+        },
+        || {
+            store
+                .insert_comment(&m.id, &comment)
+                .map_err(|e| e.to_string())?;
+            store
+                .append_doc_update(&chapter.doc_id, &update)
+                .map_err(|e| e.to_string())?;
+            Ok::<(), String>(())
+        },
+    )
+    .unwrap();
+    // The editor applies the reject and flushes that text before the decision commit.
+    set_chapter_plain(&store, &chapter.doc_id, "version-one");
+    svc.commit_review_decision(
+        &store,
+        &m.id,
+        false,
+        "Line Editor",
+        &chapter.title,
+        "author",
+        Some("agent-test-1"),
+        Some("chg-pending"),
+        Some("suggestion_insert"),
+        Some(&chapter.id),
+    )
+    .unwrap();
+    svc.commit_bot_suggestion(&store, &m.id, "agent-test-1", "Line Editor", "Bot comment")
+        .unwrap()
+        .expect("bot comment");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Checkpoint",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap();
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let main = repo.head_oid().unwrap().unwrap();
+    let text = String::from_utf8(
+        repo.file_bytes(&main, "comments/cthread-pending.json")
+            .unwrap()
+            .expect("checkpoint dropped the bot comment"),
+    )
+    .unwrap();
+    assert!(
+        text.contains("\"resolvedAt\": \""),
+        "the bot commit reopened the comment: {text}"
+    );
+    let chapter_md = String::from_utf8(
+        repo.file_bytes(&main, &format!("chapters/{}.md", chapter.id))
+            .unwrap()
+            .expect("chapter"),
+    )
+    .unwrap();
+    assert!(
+        chapter_md.contains("version-one") && !chapter_md.contains("guttered"),
+        "the bot commit put the suggestion back on main: {chapter_md}"
+    );
+    let row = store
+        .comments_for_manuscript(&m.id)
+        .unwrap()
+        .into_iter()
+        .find(|c| c.id == "cthread-pending")
+        .unwrap();
+    assert!(row.resolved_at.is_some());
+}
+
 /// Type into a suggestion whose `bot/*` commit has not run, then checkpoint.
 /// The keystroke is in that commit and still there after reopen. The suggestion
 /// id and the bot comment stay off `main`, so rejecting the branch still resolves it.
@@ -2296,6 +2570,7 @@ fn checkpoint_keeps_a_keystroke_typed_into_a_pending_suggestion() {
     comment.author.id = "agent-test-1".into();
     comment.author.name = "Line Editor".into();
     svc.record_bot_write(
+        &store,
         &m.id,
         BotRetention {
             comment: Some(comment.clone()),

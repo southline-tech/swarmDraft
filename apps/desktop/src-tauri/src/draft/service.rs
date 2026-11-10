@@ -95,8 +95,10 @@ struct PendingBotWrite {
     comment: Option<Comment>,
     doc_id: Option<String>,
     doc_update: Option<Vec<u8>>,
-    /// Suggestion ids this update added. Filled when a checkpoint can see them, and
-    /// still left out of `review/changes.json` after open squashes the update log.
+    /// Suggestion ids this update added. Captured when the bot write is saved, while
+    /// the mark is still in the chapter, so a reject before the first checkpoint can
+    /// resolve the comment saved with that change. Still left out of
+    /// `review/changes.json` after open squashes the update log.
     change_ids: Vec<String>,
 }
 
@@ -124,11 +126,15 @@ impl DraftService {
     }
 
     /// Run `write` and remember its comment and document update until the bot commit lands.
-    /// Does not take the draft op lock: a bot HTTP call still returns while that lock is held.
-    /// The sqlite write and the retain share this lock with reconcile, so a rebuild cannot
-    /// drop the row in the gap between them.
+    /// Suggestion ids in that update are remembered here too, while the mark is still in
+    /// the chapter. A later reject can resolve the linked comment before any checkpoint,
+    /// including after the editor has already removed the mark. Does not take the draft
+    /// op lock: a bot HTTP call still returns while that lock is held. The sqlite write
+    /// and the retain share this lock with reconcile, so a rebuild cannot drop the row
+    /// in the gap between them.
     pub fn record_bot_write<T, E>(
         &self,
+        store: &Store,
         manuscript_id: &str,
         retention: BotRetention,
         write: impl FnOnce() -> Result<T, E>,
@@ -137,6 +143,12 @@ impl DraftService {
         let result = write()?;
         let doc_update = retention.doc_update.filter(|update| update.len() > 2);
         if retention.comment.is_some() || doc_update.is_some() {
+            let change_ids = match (&retention.doc_id, &doc_update) {
+                (Some(doc_id), Some(update)) => {
+                    suggestion_ids_added_by_update(store, doc_id, update)
+                }
+                _ => Vec::new(),
+            };
             let token = guard.next_token;
             guard.next_token += 1;
             guard.pending.push(PendingBotWrite {
@@ -145,7 +157,7 @@ impl DraftService {
                 comment: retention.comment,
                 doc_id: retention.doc_id,
                 doc_update,
-                change_ids: Vec::new(),
+                change_ids,
             });
         }
         Ok(result)
@@ -1103,6 +1115,32 @@ fn comment_authored_by_bot(
     }
 }
 
+/// Suggestion ids that `update` adds to `doc_id`. Read while the mark is still in the
+/// chapter. Empty when the update adds none, or when the chapter cannot be loaded.
+fn suggestion_ids_added_by_update(store: &Store, doc_id: &str, update: &[u8]) -> Vec<String> {
+    let full = match store.load_doc(doc_id) {
+        Ok(doc) => doc,
+        Err(e) => {
+            eprintln!("draft bot change id was not recorded; the chapter did not load: {e}");
+            return Vec::new();
+        }
+    };
+    let loaded = match store.load_doc_except(doc_id, &[update.to_vec()]) {
+        Ok(loaded) => loaded,
+        Err(e) => {
+            eprintln!("draft bot change id was not recorded; the chapter did not load: {e}");
+            return Vec::new();
+        }
+    };
+    let mut ids: Vec<String> = changes::suggestion_ids(&full)
+        .difference(&changes::suggestion_ids(&loaded.without_skipped))
+        .cloned()
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 fn new_bot_session_id() -> String {
     format!("s{}", crate::manuscripts::new_id())
 }
@@ -1164,10 +1202,12 @@ impl DraftService {
     }
 
     /// A reject before `bot/*` exists still resolves the comment saved with that change.
-    /// The comment may sit on the same pending write or on its own write. Resolving every
-    /// pending comment waits until every pending change is rejected, matching a branch
-    /// reject. The pending copy is updated too, so the later bot commit does not write
-    /// the unresolved snapshot back over this one.
+    /// The suggestion id was stored when the bot write was saved, so this does not wait
+    /// for a checkpoint to discover it, and it still matches after the editor has removed
+    /// the mark. The comment may sit on the same pending write or on its own write.
+    /// Resolving every pending comment waits until every pending change is rejected,
+    /// matching a branch reject. The pending copy is updated too, so the later bot commit
+    /// does not write the unresolved snapshot back over this one.
     fn resolve_rejected_pending_comments(
         &self,
         store: &Store,
@@ -2211,6 +2251,7 @@ mod save_as_lock_tests {
         comment: &crate::manuscripts::Comment,
     ) {
         svc.record_bot_write(
+            store,
             manuscript_id,
             BotRetention {
                 comment: Some(comment.clone()),
@@ -2486,6 +2527,7 @@ mod save_as_lock_tests {
         .unwrap();
         let update = crate::manuscripts::doc_update_since(&doc, &since);
         svc.record_bot_write(
+            &store,
             &id,
             BotRetention {
                 comment: None,

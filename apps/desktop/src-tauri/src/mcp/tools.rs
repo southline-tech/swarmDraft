@@ -877,6 +877,7 @@ impl SwarmdraftMcp {
                 };
                 let bot = author(p);
                 self.drafts.record_bot_write(
+                    &self.store,
                     &a.manuscript_id,
                     crate::draft::BotRetention {
                         comment: Some(c.clone()),
@@ -991,6 +992,7 @@ overlaps another bot's pending suggestion on the same passage."
                 let (doc_id, doc_update) = bot_doc_retention(&s.doc_id, &doc, &sv);
                 let bot = author(p);
                 self.drafts.record_bot_write(
+                    &self.store,
                     &a.manuscript_id,
                     crate::draft::BotRetention {
                         comment: None,
@@ -1141,6 +1143,7 @@ Use this instead of cramming new scenes into suggest_edit replacements."
                 let (doc_id, doc_update) = bot_doc_retention(&s.doc_id, &doc, &sv);
                 let bot = author(p);
                 self.drafts.record_bot_write(
+                    &self.store,
                     &a.manuscript_id,
                     crate::draft::BotRetention {
                         comment: None,
@@ -1281,6 +1284,7 @@ Use this instead of cramming new scenes into suggest_edit replacements."
                 let (doc_id, doc_update) = bot_doc_retention(&s.doc_id, &doc, &sv);
                 let bot = author(p);
                 self.drafts.record_bot_write(
+                    &self.store,
                     &a.manuscript_id,
                     crate::draft::BotRetention {
                         comment: None,
