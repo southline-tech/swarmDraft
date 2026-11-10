@@ -7,12 +7,12 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 const links = vi.hoisted(() => ({
-  resolve: vi.fn(async (_manuscriptId: string, _changeId: string) => ({
+  resolve: vi.fn(async () => ({
     action: 'unknown' as const,
     manuscriptId: 'book-1',
   })),
   take: vi.fn(async (): Promise<string | null> => null),
-  listen: vi.fn(async (_onUrl: (url: string) => void) => () => {}),
+  listen: vi.fn(async () => () => {}),
 }));
 
 vi.mock('../backend', () => ({

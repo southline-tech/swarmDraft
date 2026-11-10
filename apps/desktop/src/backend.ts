@@ -556,6 +556,7 @@ export type LinkResolution =
       sectionId: string;
       quote: string;
       kind: string;
+      authorKind?: string;
       authorName: string;
       outcome: string;
       decidedBy: string;

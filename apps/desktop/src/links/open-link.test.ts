@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
+import { agentDirectory, setAgents } from '../agent-names';
 import OldChangeView from './OldChangeView.vue';
 import { UNKNOWN_CHANGE_TOAST, openChangeLink, type ChangeLinkRoute } from './open-link';
 import type { OldChangeViewModel } from './open-link';
@@ -54,6 +55,10 @@ function route(): ChangeLinkRoute & {
 }
 
 const url = 'swarmdraft://open?draft=book-1&change=chg-1';
+
+afterEach(() => {
+  agentDirectory.value = null;
+});
 
 describe('open change link (#117, #123)', () => {
   it('focuses a live change', async () => {
@@ -119,6 +124,7 @@ describe('open change link (#117, #123)', () => {
     expect(view.textContent).toContain('This change was accepted');
     expect(view.textContent).toContain('Sam accepted');
     expect(view.textContent).toContain("Ada's change");
+    expect(view.querySelector('[data-test="agent-tag"]')).toBeNull();
     expect(view.textContent).toContain(localWhen(1700000000));
     expect(view.textContent).not.toContain('UTC');
     expect(view.textContent).toContain('Added text');
@@ -131,6 +137,40 @@ describe('open change link (#117, #123)', () => {
     expect(view.textContent).toContain('Back to my book');
     expect(view.querySelector('[data-test="old-change-chapter"]')).toBeNull();
     expect(view.querySelector('textarea, [contenteditable="true"]')).toBeNull();
+    w.unmount();
+  });
+
+  it('names the writer and the bot, and does not show a raw agent id', async () => {
+    setAgents([
+      {
+        id: 'bot-1',
+        name: 'Line Editor',
+        color: '#3366ff',
+        createdAt: '2026-10-26T00:00:00Z',
+        revokedAt: null,
+        primary: false,
+      },
+    ]);
+    const w = mount(OldChangeView, {
+      props: {
+        view: historyView({
+          authorName: 'agent:bot-1',
+          authorKind: 'agent',
+          decidedBy: 'Sam',
+        }),
+      },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    const summary = document.querySelector('[data-test="old-change-summary"]')!;
+    expect(summary.textContent).toContain('Sam accepted');
+    expect(summary.textContent).toContain('Line Editor');
+    expect(summary.textContent).not.toContain('agent:');
+    const author = summary.querySelector('[data-test="old-change-author"]')!;
+    expect(author.tagName).toBe('BDI');
+    expect(author.getAttribute('dir')).toBe('auto');
+    expect(author.textContent).toBe('Line Editor');
+    expect(summary.querySelector('[data-test="agent-tag"]')?.textContent).toBe('Bot');
     w.unmount();
   });
 

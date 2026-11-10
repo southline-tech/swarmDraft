@@ -4,6 +4,7 @@
  * Layout lives in shells.css next to `.st-dlg` (the node is teleported).
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { markAuthorLabel, UNNAMED_AGENT } from '../agent-names';
 import AppIcon from '../icons/AppIcon.vue';
 import { ensureOverlayLayer, APP_OVERLAY_LAYER } from '../overlay/layer';
 import { trapTab } from '../settings/focus-trap';
@@ -30,7 +31,17 @@ const settled = computed(
   () => props.view.outcome === 'accepted' || props.view.outcome === 'rejected',
 );
 const decider = computed(() => props.view.decidedBy.trim());
-const author = computed(() => props.view.authorName.trim());
+const rawAuthor = computed(() => props.view.authorName.trim());
+const authorIsBot = computed(
+  () => props.view.authorKind === 'agent' || rawAuthor.value.startsWith('agent:'),
+);
+/** Saved display name. A raw `agent:<id>` mark is never shown. */
+const author = computed(() => {
+  const raw = rawAuthor.value;
+  if (raw.startsWith('agent:')) return markAuthorLabel(raw).name;
+  if (authorIsBot.value && !raw) return UNNAMED_AGENT;
+  return raw;
+});
 const verb = computed(() => (props.view.outcome === 'rejected' ? 'rejected' : 'accepted'));
 
 function heading(outcome: string): string {
@@ -153,8 +164,8 @@ onBeforeUnmount(() => {
         </header>
         <!-- prettier-ignore -->
         <p id="old-change-summary" class="old-change__summary" data-test="old-change-summary">
-          <template v-if="settled"><bdi v-if="decider" dir="auto">{{ decider }}</bdi>{{ settledMiddle }}<bdi v-if="author" dir="auto">{{ author }}</bdi>{{ authorSuffix }}<span v-if="whenText" data-test="old-change-when">{{ whenSuffix }}</span></template>
-          <template v-else><bdi v-if="author" dir="auto">{{ author }}</bdi>{{ editedRest }}</template>
+          <template v-if="settled"><bdi v-if="decider" dir="auto">{{ decider }}</bdi>{{ settledMiddle }}<bdi v-if="author" dir="auto" data-test="old-change-author">{{ author }}</bdi><template v-if="authorIsBot"> <span class="agent-tag" data-test="agent-tag">Bot</span></template>{{ authorSuffix }}<span v-if="whenText" data-test="old-change-when">{{ whenSuffix }}</span></template>
+          <template v-else><bdi v-if="author" dir="auto" data-test="old-change-author">{{ author }}</bdi><template v-if="authorIsBot"> <span class="agent-tag" data-test="agent-tag">Bot</span></template>{{ editedRest }}</template>
         </p>
         <p class="old-change__kind" data-test="old-change-kind">{{ kindLabel(view.kind) }}</p>
         <p class="old-change__label" data-test="old-change-quote-label">Original wording</p>

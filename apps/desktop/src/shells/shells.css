@@ -500,6 +500,10 @@
 .old-change__summary {
   color: var(--ct-text);
 }
+.old-change__summary .agent-tag {
+  margin-inline-end: var(--ct-space-1);
+  vertical-align: middle;
+}
 .old-change__quote {
   margin: var(--ct-space-2) 0 0;
   padding: var(--ct-space-3);

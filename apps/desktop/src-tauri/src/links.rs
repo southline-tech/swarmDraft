@@ -169,6 +169,7 @@ pub struct ChangeSnapshot {
     pub id: String,
     pub kind: String,
     pub section_id: String,
+    pub author_kind: String,
     pub author_name: String,
     pub status: String,
     pub quote: String,
@@ -191,6 +192,7 @@ pub fn read_change_snapshot(
             id: id.to_string(),
             kind: json_str(item, "kind"),
             section_id: json_str(item, "sectionId"),
+            author_kind: json_str(item, "authorKind"),
             author_name: json_str(item, "authorName"),
             status: json_str(item, "status"),
             quote: json_str(item, "quote"),
@@ -203,6 +205,7 @@ pub fn read_change_snapshot(
 pub struct HistoryView {
     pub quote: String,
     pub kind: String,
+    pub author_kind: String,
     pub author_name: String,
     pub outcome: String,
     pub decided_by: String,
@@ -210,9 +213,11 @@ pub struct HistoryView {
 }
 
 /// Original wording from the introducing commit, and who decided it.
+///
+/// `decided_by` is the `Decided-By` trailer (the writer's display name). The review
+/// commit's git committer is the bot and is not shown.
 pub fn load_history_view(
     repo: &DraftRepo,
-    worktree: &Path,
     change_id: &str,
     introduced_commit: &str,
     decided_commit: Option<&str>,
@@ -226,6 +231,10 @@ pub fn load_history_view(
         .as_ref()
         .map(|s| s.author_name.clone())
         .unwrap_or_default();
+    let mut author_kind = snap
+        .as_ref()
+        .map(|s| s.author_kind.clone())
+        .unwrap_or_default();
     if kind.is_empty() {
         if let Some(oid) = decided_commit {
             if let Ok(message) = repo.commit_message(oid) {
@@ -235,13 +244,17 @@ pub fn load_history_view(
             }
         }
     }
+    if agent_id_from_mark(&author_name).is_some() {
+        author_kind = "agent".into();
+    }
     let decided_by = decided_commit
-        .and_then(|oid| committer_name(worktree, oid))
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| author_name.clone());
+        .and_then(|oid| repo.commit_message(oid).ok())
+        .and_then(|message| trailer(&message, "Decided-By"))
+        .unwrap_or_default();
     HistoryView {
         quote,
         kind,
+        author_kind,
         author_name,
         outcome: outcome.to_string(),
         decided_by,
@@ -249,22 +262,65 @@ pub fn load_history_view(
     }
 }
 
-pub fn committer_name(worktree: &Path, oid: &str) -> Option<String> {
-    let repo = git2::Repository::open(worktree).ok()?;
-    let oid = git2::Oid::from_str(oid).ok()?;
-    let commit = repo.find_commit(oid).ok()?;
-    let committer = commit.committer();
-    let author = commit.author();
-    let name = committer
-        .name()
-        .or_else(|| author.name())?
-        .trim()
-        .to_string();
-    if name.is_empty() {
+/// `agent:<id>` as stored on a review mark. Anything else is not a raw agent id.
+fn agent_id_from_mark(author_name: &str) -> Option<&str> {
+    let id = author_name.trim().strip_prefix("agent:")?.trim();
+    if id.is_empty() {
         None
     } else {
-        Some(name)
+        Some(id)
     }
+}
+
+fn usable_saved_name(name: &str, agent_id: &str) -> Option<String> {
+    let name = name.trim();
+    if name.is_empty() || name.starts_with("agent:") || name == agent_id {
+        return None;
+    }
+    Some(name.to_string())
+}
+
+/// Display name saved with the suggestion, then the agent's saved name.
+/// `author_parts` keeps `agent:<id>` on the snapshot unless a suggestion row replaced it.
+fn saved_bot_display_name(
+    store: &Store,
+    manuscript_id: &str,
+    change_id: &str,
+    agent_id: &str,
+) -> Option<String> {
+    if let Ok(rows) = store.suggestions_for_manuscript(manuscript_id) {
+        if let Some(row) = rows.iter().find(|s| s.id == change_id) {
+            if let Some(name) = usable_saved_name(&row.author.name, agent_id) {
+                return Some(name);
+            }
+        }
+        if let Some(row) = rows
+            .iter()
+            .find(|s| s.author.kind == "agent" && s.author.id == agent_id)
+        {
+            if let Some(name) = usable_saved_name(&row.author.name, agent_id) {
+                return Some(name);
+            }
+        }
+    }
+    let agents = store.list_agents().ok()?;
+    let agent = agents.iter().find(|a| a.id == agent_id)?;
+    usable_saved_name(&agent.name, agent_id)
+}
+
+fn resolve_saved_author(
+    store: &Store,
+    manuscript_id: &str,
+    change_id: &str,
+    author_name: &str,
+    author_kind: &str,
+) -> (String, String) {
+    let Some(agent_id) = agent_id_from_mark(author_name) else {
+        return (author_name.to_string(), author_kind.to_string());
+    };
+    let name =
+        saved_bot_display_name(store, manuscript_id, change_id, agent_id).unwrap_or_default();
+    (name, "agent".into())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -281,6 +337,7 @@ pub enum LinkResolution {
         section_id: String,
         quote: String,
         kind: String,
+        author_kind: String,
         author_name: String,
         outcome: String,
         decided_by: String,
@@ -335,11 +392,12 @@ pub fn resolve_open_link(
         Err(err) => return Err(err.to_string()),
     }
     let resolved = drafts.resolve_change(store, manuscript_id, change_id)?;
-    Ok(resolution_from(drafts, manuscript_id, &resolved))
+    Ok(resolution_from(drafts, store, manuscript_id, &resolved))
 }
 
 fn resolution_from(
     drafts: &DraftService,
+    store: &Store,
     manuscript_id: &str,
     resolved: &DraftChangeResolve,
 ) -> LinkResolution {
@@ -369,7 +427,6 @@ fn resolution_from(
                 .map(|repo| {
                     load_history_view(
                         &repo,
-                        &dir,
                         &change_id,
                         &introduced_commit,
                         decided_commit.as_deref(),
@@ -380,18 +437,27 @@ fn resolution_from(
                 .unwrap_or(HistoryView {
                     quote: String::new(),
                     kind: String::new(),
+                    author_kind: String::new(),
                     author_name: String::new(),
                     outcome: outcome.clone(),
                     decided_by: String::new(),
                     decided_at,
                 });
+            let (author_name, author_kind) = resolve_saved_author(
+                store,
+                manuscript_id,
+                &change_id,
+                &view.author_name,
+                &view.author_kind,
+            );
             LinkResolution::History {
                 manuscript_id: manuscript_id.to_string(),
                 change_id,
                 section_id,
                 quote: view.quote,
                 kind: view.kind,
-                author_name: view.author_name,
+                author_kind,
+                author_name,
                 outcome: view.outcome,
                 decided_by: view.decided_by,
                 decided_at: view.decided_at,
@@ -719,16 +785,15 @@ mod tests {
         .unwrap();
         let decided = repo
             .commit_all(
-                "Accepted Ada's change in Chapter\n\nChange-Id: chg-1\nDecision: accepted\nKind: suggestion_insert\n",
-                "Sam",
-                "sam@example.com",
+                "Accepted Ada's change in Chapter\n\nChange-Id: chg-1\nDecision: accepted\nKind: suggestion_insert\nDecided-By: Sam\n",
+                "agent:bot-1",
+                "bot@example.com",
                 &CommitOptions::default(),
             )
             .unwrap()
             .unwrap();
         let view = load_history_view(
             &repo,
-            dir.path(),
             "chg-1",
             &introduced_oid,
             Some(&decided),
@@ -737,9 +802,102 @@ mod tests {
         );
         assert_eq!(view.quote, "guttered");
         assert_eq!(view.kind, "suggestion_insert");
+        assert_eq!(view.author_kind, "human");
         assert_eq!(view.author_name, "Ada");
         assert_eq!(view.outcome, "accepted");
         assert_eq!(view.decided_by, "Sam");
         assert_eq!(view.decided_at, Some(20));
+    }
+
+    #[test]
+    fn accepted_link_names_the_writer_and_the_bots_saved_name() {
+        use crate::content;
+        use crate::storage::Store;
+        use yrs::{ReadTxn, StateVector, Transact};
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        store.set_user_display_name("Sam").unwrap();
+        let writer = store.user_display_name().unwrap().unwrap();
+        let agent = store.create_agent("Line Editor", "#3366ff").unwrap();
+        let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+        let manuscript_id = stored.manuscript.id.clone();
+        let chapter = stored
+            .sections
+            .iter()
+            .find(|s| s.section.kind == "chapter")
+            .unwrap();
+        let section_id = chapter.section.id.clone();
+        let mark_author = format!("agent:{}", agent.id);
+        let doc = content::new_doc();
+        content::encode(
+            &doc,
+            &serde_json::json!({"type":"doc","content":[{"type":"paragraph","content":[{
+                "type":"text",
+                "text": "guttered",
+                "marks":[{"type":"suggestion_insert","attrs":{"id": "chg-1", "author": mark_author, "ts":"t"}}]
+            }]}]}),
+        )
+        .unwrap();
+        let state = doc
+            .transact()
+            .encode_state_as_update_v1(&StateVector::default());
+        store
+            .replace_doc_state(&chapter.section.doc_id, &state)
+            .unwrap();
+        let path = store.data_dir().join("drafts").join("book.draft");
+        store
+            .set_draft_file_path(&manuscript_id, &path.to_string_lossy())
+            .unwrap();
+        let drafts = DraftService::new(dir.path().to_path_buf(), "0.2.2".into());
+        drafts
+            .commit_review_decision(
+                &store,
+                &manuscript_id,
+                true,
+                &mark_author,
+                chapter.section.title.as_str(),
+                &writer,
+                Some(agent.id.as_str()),
+                Some("chg-1"),
+                Some("suggestion_insert"),
+                Some(section_id.as_str()),
+            )
+            .unwrap()
+            .expect("decision commit");
+
+        let repo = DraftRepo::open_working(&drafts.worktree_path(&manuscript_id)).unwrap();
+        let head = repo.head_oid().unwrap().unwrap();
+        let message = repo.commit_message(&head).unwrap();
+        assert!(message.contains("Decided-By: Sam"));
+        let git = git2::Repository::open(drafts.worktree_path(&manuscript_id)).unwrap();
+        let committer = git
+            .find_commit(git2::Oid::from_str(&head).unwrap())
+            .unwrap()
+            .committer()
+            .name()
+            .unwrap()
+            .to_string();
+        assert_eq!(committer, mark_author);
+
+        let resolved = resolve_open_link(&drafts, &store, &manuscript_id, "chg-1").unwrap();
+        let LinkResolution::History {
+            decided_by,
+            author_name,
+            author_kind,
+            quote,
+            outcome,
+            ..
+        } = resolved
+        else {
+            panic!("expected history, got {resolved:?}");
+        };
+        let summary = format!("{decided_by} accepted {author_name}'s change");
+        assert_eq!(outcome, "accepted");
+        assert_eq!(quote, "guttered");
+        assert_eq!(author_kind, "agent");
+        assert_eq!(summary, "Sam accepted Line Editor's change");
+        assert!(!summary.contains("agent:"));
+        assert_ne!(decided_by, committer);
     }
 }

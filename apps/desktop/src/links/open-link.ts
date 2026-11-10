@@ -22,6 +22,8 @@ export interface OldChangeViewModel {
   sectionId: string;
   quote: string;
   kind: string;
+  /** `agent` when the suggestion came from a bot. */
+  authorKind?: string;
   authorName: string;
   outcome: string;
   decidedBy: string;
@@ -76,6 +78,7 @@ export async function openChangeLink(
       sectionId: resolution.sectionId,
       quote: resolution.quote,
       kind: resolution.kind,
+      authorKind: resolution.authorKind,
       authorName: resolution.authorName,
       outcome: resolution.outcome,
       decidedBy: resolution.decidedBy,
