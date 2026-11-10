@@ -7,6 +7,7 @@ import type { Section } from '@swarmdraft/schema';
 import * as Y from 'yjs';
 import { APP_OVERLAY_LAYER, ensureOverlayLayer } from '../overlay/layer';
 import { trapTab } from '../settings/focus-trap';
+import { usesPrimaryModifier } from '../shells/modifier-key';
 import '../settings/settings.css';
 import NoteBodyEditor from './NoteBodyEditor.vue';
 import {
@@ -185,7 +186,7 @@ function onDialogKeydown(e: KeyboardEvent) {
     requestClose();
     return;
   }
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && canSave.value) {
+  if (e.key === 'Enter' && usesPrimaryModifier(e) && canSave.value) {
     e.preventDefault();
     void save();
   }

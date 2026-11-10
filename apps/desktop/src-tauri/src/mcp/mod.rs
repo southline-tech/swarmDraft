@@ -550,3 +550,16 @@ pub fn drafts_for_store(store: &Store) -> std::sync::Arc<crate::draft::DraftServ
         "0.0.0-test".into(),
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::DEFAULT_HOST;
+
+    #[test]
+    fn loopback_bind_host_is_ipv4() {
+        assert_eq!(DEFAULT_HOST, "127.0.0.1");
+        let addr: std::net::SocketAddr = format!("{DEFAULT_HOST}:7337").parse().unwrap();
+        assert!(addr.ip().is_loopback());
+        assert_ne!(DEFAULT_HOST, "0.0.0.0");
+    }
+}

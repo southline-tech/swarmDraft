@@ -36,6 +36,8 @@ import {
   draftRecoverWorktreeToFile,
   draftAfterWordImport,
   listenOpenDraftPath,
+  listenMacosQuit,
+  macosQuitCancelled,
   draftTakeLaunchPath,
   draftSave,
   draftSaveAs,
@@ -111,6 +113,7 @@ import {
   undoChapterToast,
   type ChapterToastState,
 } from './chapter/chapter-app-handlers';
+import { appMenuKeyAction, menuShortcutLabel, saveChord } from './shells/app-shortcuts';
 import OpeningProgress from './shells/OpeningProgress.vue';
 import ErrorCard from './shells/ErrorCard.vue';
 import PairingPrompt from './PairingPrompt.vue';
@@ -1166,15 +1169,20 @@ async function openRecentBook(id: string) {
 async function quitApp() {
   if (!isTauri()) return;
   const win = getCurrentWindow();
-  if (
-    (await flushWithTimeout(
-      () => session.value?.flush() ?? Promise.resolve(),
-      CLOSE_FLUSH_TIMEOUT_MS,
-    )) !== 'saved' &&
-    !(await confirmQuit())
-  )
+  const flushed = await flushWithTimeout(
+    () => session.value?.flush() ?? Promise.resolve(),
+    CLOSE_FLUSH_TIMEOUT_MS,
+  );
+  if (flushed !== 'saved' && !(await confirmQuit())) {
+    await macosQuitCancelled();
     return;
-  await win.destroy();
+  }
+  try {
+    await win.destroy();
+  } catch (e) {
+    await macosQuitCancelled();
+    throw e;
+  }
 }
 watch(settingsOpen, async (isOpen) => {
   await nextTick();
@@ -1191,13 +1199,13 @@ const chooseFile = () => {
 
 /** Book-menu shortcuts wired in this build (#104 Designer). */
 const appMenuShortcuts = computed(() => ({
-  new: importing.value ? undefined : 'Ctrl+N',
-  open: 'Ctrl+O',
-  importWord: 'Ctrl+Shift+O',
-  save: session.value && isTauri() ? 'Ctrl+S' : undefined,
-  saveAs: session.value && isTauri() ? 'Ctrl+Shift+S' : undefined,
-  settings: 'Ctrl+,',
-  quit: isTauri() ? 'Ctrl+Q' : undefined,
+  new: importing.value ? undefined : menuShortcutLabel('Ctrl+N'),
+  open: menuShortcutLabel('Ctrl+O'),
+  importWord: menuShortcutLabel('Ctrl+Shift+O'),
+  save: session.value && isTauri() ? menuShortcutLabel('Ctrl+S') : undefined,
+  saveAs: session.value && isTauri() ? menuShortcutLabel('Ctrl+Shift+S') : undefined,
+  settings: menuShortcutLabel('Ctrl+,'),
+  quit: isTauri() ? menuShortcutLabel('Ctrl+Q') : undefined,
 }));
 
 const menuTextField = (t: EventTarget | null) =>
@@ -1206,10 +1214,9 @@ const menuTextField = (t: EventTarget | null) =>
 const menuField = (t: EventTarget | null) =>
   menuTextField(t) || (t instanceof HTMLElement && !!t.closest('[contenteditable=true]'));
 
-/** Ctrl+S / Ctrl+Shift+S save the book from the editor. They stay inert in text fields. */
+/** Ctrl+S / Ctrl+Shift+S (Command on macOS) save the book from the editor. They stay inert in text fields. */
 function isSaveChord(e: KeyboardEvent) {
-  const mod = e.ctrlKey || e.metaKey;
-  return mod && !e.altKey && e.key.toLowerCase() === 's' && !!session.value && isTauri();
+  return saveChord(e, !!session.value && isTauri());
 }
 
 function onUpdatePromptEscape(e: KeyboardEvent) {
@@ -1228,35 +1235,21 @@ function onAppMenuKey(e: KeyboardEvent) {
   if (preview.value) return;
   // The editor is contenteditable, but Save must still run while the failure banner is up (#336).
   if (menuField(e.target) && !(isSaveChord(e) && !menuTextField(e.target))) return;
-  const mod = e.ctrlKey || e.metaKey;
-  const k = e.key.toLowerCase();
-  if (mod && e.shiftKey && k === 'o' && !e.altKey) {
-    e.preventDefault();
+  const action = appMenuKeyAction(e, {
+    importing: importing.value,
+    canSave: !!session.value && isTauri(),
+    canQuit: isTauri(),
+  });
+  if (!action) return;
+  e.preventDefault();
+  if (action === 'import-word') {
     if (!importing.value) chooseFile();
-    return;
-  }
-  if (mod && e.shiftKey && k === 's' && !e.altKey && session.value && isTauri()) {
-    e.preventDefault();
-    void onMenuSaveAs();
-    return;
-  }
-  if (!mod || e.shiftKey || e.altKey) return;
-  if (k === 'n' && !importing.value) {
-    e.preventDefault();
-    void onToolbarDraftNew();
-  } else if (k === 'o') {
-    e.preventDefault();
-    void openDraftFromDialog();
-  } else if (k === 's' && session.value && isTauri()) {
-    e.preventDefault();
-    void onMenuSave();
-  } else if (e.key === ',') {
-    e.preventDefault();
-    settingsOpen.value = !settingsOpen.value;
-  } else if (k === 'q' && isTauri()) {
-    e.preventDefault();
-    void quitApp();
-  }
+  } else if (action === 'save-as') void onMenuSaveAs();
+  else if (action === 'new') void onToolbarDraftNew();
+  else if (action === 'open') void openDraftFromDialog();
+  else if (action === 'save') void onMenuSave();
+  else if (action === 'settings') settingsOpen.value = !settingsOpen.value;
+  else if (action === 'quit') void quitApp();
 }
 
 let stopCloseFlush = () => {};
@@ -1273,6 +1266,8 @@ function blockFileNavigation(e: DragEvent) {
 const reloadAgents = () => void reloadOnFocus();
 let stopOpenDraftPath = () => {};
 let stopChangeLinks = () => {};
+let stopMacosQuit = () => {};
+let leaving = false;
 onMounted(() => {
   window.addEventListener('dragover', blockFileNavigation);
   window.addEventListener('drop', blockFileNavigation);
@@ -1280,13 +1275,27 @@ onMounted(() => {
   window.addEventListener('keydown', onAppMenuKey);
   window.addEventListener('keydown', onUpdatePromptEscape);
   void refreshAgents();
-  void listenOpenDraftPath((path) => {
-    void openDraftFromPath(path);
-  }).then((unlisten) => {
+  // Register the listener before taking the queue. take_all marks the slot taken;
+  // a Finder open that arrives in the gap would be emitted with nobody listening.
+  void (async () => {
+    const unlisten = await listenOpenDraftPath((path) => {
+      void openDraftFromPath(path);
+    });
+    if (leaving) {
+      unlisten();
+      return;
+    }
     stopOpenDraftPath = unlisten;
-  });
-  void draftTakeLaunchPath().then((path) => {
-    if (path) void openDraftFromPath(path);
+    const path = await draftTakeLaunchPath();
+    if (!leaving && path) void openDraftFromPath(path);
+  })();
+  void listenMacosQuit(() => {
+    void quitApp();
+  }).then((unlisten) => {
+    if (leaving) unlisten();
+    else stopMacosQuit = unlisten;
+    // A quit that arrived before this listener is dropped. Clear the gate so the next one flushes.
+    void macosQuitCancelled();
   });
   stopChangeLinks = startChangeLinkRoute({
     ensureManuscript: ensureManuscriptForLink,
@@ -1317,6 +1326,7 @@ onMounted(() => {
   };
 });
 onBeforeUnmount(() => {
+  leaving = true;
   window.removeEventListener('dragover', blockFileNavigation);
   window.removeEventListener('drop', blockFileNavigation);
   window.removeEventListener('focus', reloadAgents);
@@ -1324,6 +1334,7 @@ onBeforeUnmount(() => {
   stopOpenDraftPath();
   stopChangeLinks();
   clearTimeout(linkToastTimer);
+  stopMacosQuit();
   appUpdater?.dispose();
 });
 onMounted(async () => {

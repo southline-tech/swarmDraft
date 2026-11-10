@@ -17,6 +17,7 @@
    uninstaller.
 
 For more detail (SmartScreen, coAuthor migration, uninstall pages), see
-[install-windows.md](./install-windows.md).
+[install-windows.md](./install-windows.md). On a Mac, the unsigned disk image and Gatekeeper
+**Open anyway** steps are in [install-macos.md](./install-macos.md).
 
 Use **Send feedback** in the book menu or Settings if something goes wrong — we read every report.

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { DecisionRecord, SuggestionItem } from '@swarmdraft/editor';
 import {
   DecisionLog,
@@ -164,6 +164,19 @@ describe('review state (RAD-258)', () => {
     expect(k('j', { ctrlKey: true })).toBeNull();
     expect(k('ArrowRight', { shiftKey: true })).toBeNull();
     expect(Object.values(REVIEW_SHORTCUTS).join(' ')).not.toMatch(/Ctrl\+[RJ]\b/);
+  });
+
+  it('accepts Command and ignores Control on macOS (#193)', () => {
+    vi.stubGlobal('navigator', { platform: 'MacIntel' });
+    try {
+      const k = (key: string, m: Partial<KeyboardEventInit> = {}) =>
+        reviewActionFor(new KeyboardEvent('keydown', { key, ...m }));
+      expect(k('Enter', { metaKey: true, shiftKey: true })).toBe('accept');
+      expect(k('\\', { metaKey: true })).toBe('toggle');
+      expect(k('Enter', { ctrlKey: true, shiftKey: true })).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('groupChanges carries bot reason onto one card (#60)', () => {

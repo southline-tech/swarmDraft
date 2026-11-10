@@ -19,10 +19,12 @@ pub mod feedback;
 pub mod links;
 pub mod manuscripts;
 pub mod mcp;
+pub mod menu;
 pub mod migrate;
 pub mod notes;
 pub mod opening_progress;
 pub mod pairing;
+pub mod platform;
 pub mod save_copy;
 pub mod storage;
 
@@ -31,8 +33,6 @@ use std::sync::Arc;
 use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_deep_link::DeepLinkExt;
-
-use std::sync::Mutex;
 
 use dictionary::{
     spell_dictionary_add, spell_dictionary_ignore, spell_dictionary_list, spell_dictionary_remove,
@@ -56,6 +56,11 @@ fn os_user_display_name() -> String {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "Author".to_string())
+}
+
+#[tauri::command]
+fn macos_quit_cancelled() {
+    menu::system_quit_cancelled();
 }
 
 #[tauri::command]
@@ -1246,14 +1251,6 @@ fn focus_main_window(app: &tauri::AppHandle) {
     }
 }
 
-/// Cold-start `.draft` path from argv (consumed once via [`draft_take_launch_path`]).
-#[derive(Default)]
-struct LaunchDraftPath(Mutex<Option<String>>);
-
-fn take_stored_launch_path(slot: &Mutex<Option<String>>) -> Option<String> {
-    slot.lock().ok()?.take()
-}
-
 fn draft_path_from_argv(argv: &[String]) -> Option<String> {
     use std::path::Path;
     argv.iter()
@@ -1267,8 +1264,19 @@ fn draft_path_from_argv(argv: &[String]) -> Option<String> {
 }
 
 #[tauri::command]
-fn draft_take_launch_path(state: tauri::State<'_, LaunchDraftPath>) -> Option<String> {
-    take_stored_launch_path(&state.0)
+fn draft_take_launch_path(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, platform::LaunchDraftPath>,
+) -> Option<String> {
+    let mut paths = state.take_all();
+    if paths.is_empty() {
+        return None;
+    }
+    let first = paths.remove(0);
+    for path in paths {
+        let _ = app.emit("open-draft-path", path);
+    }
+    Some(first)
 }
 
 /// Cold-start change link, returned once. Later opens arrive on `open-change-link`
@@ -1328,7 +1336,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             focus_main_window(app);
             if let Some(path) = draft_path_from_argv(&argv) {
-                let _ = app.emit("open-draft-path", path);
+                platform::deliver_opened_draft(app, path);
             }
             if let Some(url) = links::first_change_link(&argv) {
                 let _ = app.emit("open-change-link", url);
@@ -1390,11 +1398,9 @@ pub fn run() {
             let draft_service = std::sync::Arc::new(draft_service);
             app.manage(draft_service.clone());
             app.manage(store.clone());
-            let launch_draft = LaunchDraftPath::default();
+            let launch_draft = platform::LaunchDraftPath::default();
             if let Some(path) = draft_path_from_argv(&std::env::args().collect::<Vec<_>>()) {
-                if let Ok(mut slot) = launch_draft.0.lock() {
-                    *slot = Some(path);
-                }
+                let _ = launch_draft.offer(path);
             }
             app.manage(launch_draft);
             app.manage(links::LaunchGate::default());
@@ -1402,6 +1408,8 @@ pub fn run() {
             if let Err(e) = app.deep_link().register_all() {
                 eprintln!("swarmDraft: deep link scheme not registered: {e}");
             }
+            // macOS: App / File / Edit / Window. Edit supplies copy and paste. No-op elsewhere.
+            menu::install(app.handle())?;
             app.manage(export::PandocDownloadState::default());
             app.manage(backup::OpLock::default());
             app.manage(std::sync::Mutex::new(McpStatus {
@@ -1451,6 +1459,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            macos_quit_cancelled,
             app_info,
             agents_list,
             agents_primary_id,
@@ -1532,14 +1541,14 @@ pub fn run() {
             links_take_launch_url,
             links_resolve
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running swarmDraft");
+        .build(tauri::generate_context!())
+        .expect("error while building swarmDraft")
+        .run(platform::on_run_event);
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{draft_path_from_argv, os_user_display_name, take_stored_launch_path};
-    use std::sync::Mutex;
+    use super::{draft_path_from_argv, os_user_display_name};
 
     #[test]
     fn draft_path_from_argv_matches_extension_case_insensitive() {
@@ -1548,16 +1557,6 @@ mod tests {
             draft_path_from_argv(&argv).as_deref(),
             Some(r"C:\Books\My Book.DRAFT")
         );
-    }
-
-    #[test]
-    fn draft_take_launch_path_returns_once() {
-        let slot = Mutex::new(Some("/tmp/a.draft".into()));
-        assert_eq!(
-            take_stored_launch_path(&slot).as_deref(),
-            Some("/tmp/a.draft")
-        );
-        assert_eq!(take_stored_launch_path(&slot), None);
     }
 
     #[test]

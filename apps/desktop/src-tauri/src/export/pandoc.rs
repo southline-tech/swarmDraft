@@ -4,7 +4,7 @@
 //! GitHub release). Downloaded into app data on first export when no override, managed copy, or
 //! PATH binary is found. Always run as a separate process (GPL).
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 use std::io::Read;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -12,21 +12,81 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "macos", test))]
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
-/// Pinned Pandoc version for managed Windows download (#186).
+/// Pinned Pandoc version for the managed first-export download (#186, #193).
 pub const PANDOC_PIN_VERSION: &str = "3.13";
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "macos", test))]
 const PANDOC_WIN_ZIP_SHA256: &str =
     "23e1f2e978a3df80db8bf65c9c59534f41a23140480cfb4f783a882ab7dc6a4e";
+#[cfg(any(windows, target_os = "macos", test))]
+const PANDOC_MAC_ARM64_ZIP_SHA256: &str =
+    "f436d18bebbfb3ddd326597686dacab9fac5dc23bd060495020f35a28a43a7c3";
+#[cfg(any(windows, target_os = "macos", test))]
+const PANDOC_MAC_X64_ZIP_SHA256: &str =
+    "1823278715aa405aaf21b59cde5dc789346aa8d4fc307467f9a9ee84162bedc5";
 
-#[cfg(windows)]
-const PANDOC_WIN_ZIP_URL: &str =
-    "https://github.com/jgm/pandoc/releases/download/3.13/pandoc-3.13-windows-x86_64.zip";
+/// Which official Pandoc 3.13 zip to download.
+#[cfg(any(windows, target_os = "macos", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PandocHost {
+    WindowsX64,
+    MacosAarch64,
+    MacosX86_64,
+}
+
+/// One pinned release asset.
+#[cfg(any(windows, target_os = "macos", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PandocAsset {
+    pub version: &'static str,
+    pub url: &'static str,
+    pub sha256: &'static str,
+    /// File name inside the zip (`pandoc.exe` on Windows, `pandoc` on macOS).
+    pub exe_name: &'static str,
+}
+
+#[cfg(any(windows, target_os = "macos", test))]
+pub fn pandoc_asset(host: PandocHost) -> PandocAsset {
+    match host {
+        PandocHost::WindowsX64 => PandocAsset {
+            version: PANDOC_PIN_VERSION,
+            url: "https://github.com/jgm/pandoc/releases/download/3.13/pandoc-3.13-windows-x86_64.zip",
+            sha256: PANDOC_WIN_ZIP_SHA256,
+            exe_name: "pandoc.exe",
+        },
+        PandocHost::MacosAarch64 => PandocAsset {
+            version: PANDOC_PIN_VERSION,
+            url: "https://github.com/jgm/pandoc/releases/download/3.13/pandoc-3.13-arm64-macOS.zip",
+            sha256: PANDOC_MAC_ARM64_ZIP_SHA256,
+            exe_name: "pandoc",
+        },
+        PandocHost::MacosX86_64 => PandocAsset {
+            version: PANDOC_PIN_VERSION,
+            url: "https://github.com/jgm/pandoc/releases/download/3.13/pandoc-3.13-x86_64-macOS.zip",
+            sha256: PANDOC_MAC_X64_ZIP_SHA256,
+            exe_name: "pandoc",
+        },
+    }
+}
+
+/// Asset for this process, if first-export download is supported here.
+#[cfg(any(windows, target_os = "macos", test))]
+pub fn current_pandoc_host() -> Option<PandocHost> {
+    if cfg!(windows) {
+        Some(PandocHost::WindowsX64)
+    } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        Some(PandocHost::MacosAarch64)
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        Some(PandocHost::MacosX86_64)
+    } else {
+        None
+    }
+}
 
 pub const PANDOC_MISSING: &str =
     "Pandoc is not available for export. Connect to the internet and try again, or choose an existing Pandoc in Export settings.";
@@ -131,34 +191,38 @@ pub fn resolve_pandoc(
         return Ok(p);
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     {
         return download_managed_pandoc(data_dir, progress);
     }
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = progress;
         Err(PANDOC_MISSING.into())
     }
 }
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "macos", test))]
 fn hex_sha256(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(bytes);
     format!("{:x}", h.finalize())
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn download_managed_pandoc(
     data_dir: &Path,
     progress: Option<&PandocDownloadState>,
 ) -> Result<PathBuf, String> {
+    let Some(host) = current_pandoc_host() else {
+        return Err(PANDOC_MISSING.into());
+    };
+    let asset = pandoc_asset(host);
     if let Some(p) = progress {
         p.report("downloading", Some(0), "Downloading Pandoc…");
     }
 
-    let bytes = match fetch_url(PANDOC_WIN_ZIP_URL, progress) {
+    let bytes = match fetch_url(asset.url, progress) {
         Ok(b) => b,
         Err(e) => {
             if let Some(p) = progress {
@@ -172,7 +236,7 @@ fn download_managed_pandoc(
         p.report("verifying", Some(95), "Verifying download…");
     }
     let digest = hex_sha256(&bytes);
-    if !digest.eq_ignore_ascii_case(PANDOC_WIN_ZIP_SHA256) {
+    if !digest.eq_ignore_ascii_case(asset.sha256) {
         if let Some(p) = progress {
             p.clear();
         }
@@ -186,7 +250,7 @@ fn download_managed_pandoc(
     }
     let install_dir = data_dir.join("pandoc").join(PANDOC_PIN_VERSION);
     std::fs::create_dir_all(&install_dir).map_err(|e| format!("pandoc: extract: {e}"))?;
-    let exe = extract_pandoc_exe_from_zip(&bytes, &install_dir).map_err(|e| {
+    let exe = extract_pandoc_bin_from_zip(&bytes, &install_dir, asset.exe_name).map_err(|e| {
         let _ = std::fs::remove_dir_all(install_dir.parent().unwrap_or(&install_dir));
         format!("pandoc: extract: {e}")
     })?;
@@ -197,7 +261,7 @@ fn download_managed_pandoc(
     Ok(exe)
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn fetch_url(url: &str, progress: Option<&PandocDownloadState>) -> Result<Vec<u8>, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(600))
@@ -233,23 +297,48 @@ fn fetch_url(url: &str, progress: Option<&PandocDownloadState>) -> Result<Vec<u8
     Ok(out)
 }
 
-#[cfg(any(windows, test))]
-fn extract_pandoc_exe_from_zip(zip_bytes: &[u8], dest_dir: &Path) -> Result<PathBuf, String> {
+#[cfg(any(windows, target_os = "macos", test))]
+fn zip_entry_is_bin(name: &str, exe_name: &str) -> bool {
+    let name = name.trim_end_matches('/');
+    let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    base == exe_name
+}
+
+#[cfg(any(windows, target_os = "macos", test))]
+fn extract_pandoc_bin_from_zip(
+    zip_bytes: &[u8],
+    dest_dir: &Path,
+    exe_name: &str,
+) -> Result<PathBuf, String> {
     let cursor = std::io::Cursor::new(zip_bytes);
     let mut archive = zip::ZipArchive::new(cursor).map_err(|e| format!("invalid zip: {e}"))?;
-    let mut exe_path: Option<PathBuf> = None;
+    let mut best: Option<(u64, PathBuf)> = None;
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
         let name = file.name().replace('\\', "/");
-        if name.ends_with("pandoc.exe") && !file.is_dir() {
-            let out = dest_dir.join("pandoc.exe");
-            let mut tmp = std::fs::File::create(&out).map_err(|e| e.to_string())?;
-            std::io::copy(&mut file, &mut tmp).map_err(|e| e.to_string())?;
-            exe_path = Some(out);
-            break;
+        if file.is_dir() || !zip_entry_is_bin(&name, exe_name) {
+            continue;
         }
+        let len = file.size();
+        if best.as_ref().is_some_and(|(n, _)| *n >= len) {
+            continue;
+        }
+        let out = dest_dir.join(exe_name);
+        let mut tmp = std::fs::File::create(&out).map_err(|e| e.to_string())?;
+        std::io::copy(&mut file, &mut tmp).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&out)
+                .map_err(|e| e.to_string())?
+                .permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&out, perms).map_err(|e| e.to_string())?;
+        }
+        best = Some((len, out));
     }
-    exe_path.ok_or_else(|| "pandoc.exe not found in the release zip".into())
+    best.map(|(_, path)| path)
+        .ok_or_else(|| format!("{exe_name} not found in the release zip"))
 }
 
 pub fn write_theme_css(dir: &Path) -> Result<PathBuf, String> {
@@ -434,9 +523,64 @@ mod tests {
         let bytes = std::fs::read(dir.path().join("rel.zip")).unwrap();
         let dest = dir.path().join("install");
         std::fs::create_dir_all(&dest).unwrap();
-        let exe = extract_pandoc_exe_from_zip(&bytes, &dest).unwrap();
+        let exe = extract_pandoc_bin_from_zip(&bytes, &dest, "pandoc.exe").unwrap();
         assert!(exe.ends_with("pandoc.exe"));
         assert!(exe.is_file());
+    }
+
+    #[test]
+    fn pinned_assets_cover_windows_and_both_macos_arches() {
+        let win = pandoc_asset(PandocHost::WindowsX64);
+        let arm = pandoc_asset(PandocHost::MacosAarch64);
+        let intel = pandoc_asset(PandocHost::MacosX86_64);
+        assert_eq!(win.version, PANDOC_PIN_VERSION);
+        assert_eq!(arm.version, PANDOC_PIN_VERSION);
+        assert!(win.url.ends_with("pandoc-3.13-windows-x86_64.zip"));
+        assert!(arm.url.ends_with("pandoc-3.13-arm64-macOS.zip"));
+        assert!(intel.url.ends_with("pandoc-3.13-x86_64-macOS.zip"));
+        assert_eq!(win.exe_name, "pandoc.exe");
+        assert_eq!(arm.exe_name, "pandoc");
+        assert_eq!(intel.exe_name, "pandoc");
+        assert_eq!(win.sha256, PANDOC_WIN_ZIP_SHA256);
+        assert_ne!(arm.sha256, intel.sha256);
+        assert_ne!(arm.sha256, win.sha256);
+        assert_eq!(arm.sha256.len(), 64);
+        assert_eq!(intel.sha256.len(), 64);
+    }
+
+    #[test]
+    fn current_host_matches_this_process() {
+        let host = current_pandoc_host();
+        #[cfg(windows)]
+        assert_eq!(host, Some(PandocHost::WindowsX64));
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        assert_eq!(host, Some(PandocHost::MacosAarch64));
+        #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+        assert_eq!(host, Some(PandocHost::MacosX86_64));
+        #[cfg(not(any(windows, target_os = "macos")))]
+        assert_eq!(host, None);
+    }
+
+    #[test]
+    fn extract_finds_macos_pandoc_not_the_lua_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut zip =
+            zip::ZipWriter::new(std::fs::File::create(dir.path().join("mac.zip")).unwrap());
+        let opts = SimpleFileOptions::default();
+        zip.start_file("pandoc-3.13-arm64/bin/pandoc-lua", opts)
+            .unwrap();
+        zip.write_all(b"pandoc").unwrap();
+        zip.start_file("pandoc-3.13-arm64/bin/pandoc", opts)
+            .unwrap();
+        zip.write_all(b"real-pandoc-binary").unwrap();
+        zip.finish().unwrap();
+        let bytes = std::fs::read(dir.path().join("mac.zip")).unwrap();
+        let dest = dir.path().join("install");
+        std::fs::create_dir_all(&dest).unwrap();
+        let bin = extract_pandoc_bin_from_zip(&bytes, &dest, "pandoc").unwrap();
+        assert!(bin.ends_with("pandoc"));
+        assert!(!bin.ends_with("pandoc-lua"));
+        assert_eq!(std::fs::read(&bin).unwrap(), b"real-pandoc-binary");
     }
 
     #[test]

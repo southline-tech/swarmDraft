@@ -171,7 +171,7 @@ onMounted(() => nextTick(() => mainMenuItems()[0]?.focus()));
       :aria-disabled="isDisabled(it.id) ? 'true' : undefined"
       @click="pick(it.id)"
     >
-      {{ it.label }}<span class="sh-k">{{ it.keys }}</span>
+      {{ it.label }}<span class="sh-k">{{ menuShortcutLabel(it.keys) }}</span>
     </button>
     <button
       v-if="showCopyLink"
@@ -224,7 +224,7 @@ onMounted(() => nextTick(() => mainMenuItems()[0]?.focus()));
           <span class="sh-mi-lead" aria-hidden="true">
             <AppIcon v-if="activeStyle === st.id" name="check" class="sh-mi-check" />
           </span>
-          {{ st.label }}<span class="sh-k">{{ st.keys }}</span>
+          {{ st.label }}<span class="sh-k">{{ menuShortcutLabel(st.keys) }}</span>
         </button>
       </div>
     </div>
@@ -274,7 +274,7 @@ onMounted(() => nextTick(() => mainMenuItems()[0]?.focus()));
       <span class="sh-mi-lead" aria-hidden="true">
         <AppIcon v-if="it.icon" :name="it.icon" class="sh-mi-muted" />
       </span>
-      {{ it.label }}<span class="sh-k">{{ it.keys }}</span>
+      {{ it.label }}<span class="sh-k">{{ menuShortcutLabel(it.keys) }}</span>
     </button>
   </div>
 </template>

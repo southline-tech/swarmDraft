@@ -19,8 +19,15 @@ import type { ManuscriptSession } from '../manuscript-session';
 import { mapError, type MappedError } from './map-error';
 import { BUSY_CODE } from './busy';
 
-/** Strip Win32 verbatim prefixes before showing a path in the UI (#183). */
+function isWin32PathText(path: string): boolean {
+  if (path.includes('\\')) return true;
+  return /^[A-Za-z]:[\\/]/.test(path);
+}
+
+/** Strip Win32 verbatim prefixes before showing a path in the UI (#183).
+ * POSIX paths are left unchanged so macOS locations keep their slashes (#193). */
 export function displayUserPath(path: string): string {
+  if (!isWin32PathText(path)) return path;
   const s = path.replace(/\//g, '\\');
   const uncPrefix = '\\\\?\\UNC\\';
   if (
