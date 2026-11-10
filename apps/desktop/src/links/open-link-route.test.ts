@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type Mock } from 'vitest';
 import { flushPromises } from '@vue/test-utils';
 import type { ChangeLinkRoute } from './open-link';
 
@@ -10,9 +10,13 @@ const links = vi.hoisted(() => ({
   resolve: vi.fn(async () => ({
     action: 'unknown' as const,
     manuscriptId: 'book-1',
-  })),
+  })) as Mock<
+    (manuscriptId: string, changeId: string) => Promise<{ action: 'unknown'; manuscriptId: string }>
+  >,
   take: vi.fn(async (): Promise<string | null> => null),
-  listen: vi.fn(async () => () => {}),
+  listen: vi.fn(async () => () => {}) as Mock<
+    (onUrl: (url: string) => void) => Promise<() => void>
+  >,
 }));
 
 vi.mock('../backend', () => ({
