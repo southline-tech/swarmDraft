@@ -36,6 +36,7 @@ import {
   draftRecoverWorktreeToFile,
   draftAfterWordImport,
   listenOpenDraftPath,
+  listenMacosQuit,
   draftTakeLaunchPath,
   draftSave,
   draftSaveAs,
@@ -1205,6 +1206,8 @@ function blockFileNavigation(e: DragEvent) {
 // Agent display names (RAD-263): load once, and again when the window regains focus.
 const reloadAgents = () => void reloadOnFocus();
 let stopOpenDraftPath = () => {};
+let stopMacosQuit = () => {};
+let leaving = false;
 onMounted(() => {
   window.addEventListener('dragover', blockFileNavigation);
   window.addEventListener('drop', blockFileNavigation);
@@ -1212,13 +1215,25 @@ onMounted(() => {
   window.addEventListener('keydown', onAppMenuKey);
   window.addEventListener('keydown', onUpdatePromptEscape);
   void refreshAgents();
-  void listenOpenDraftPath((path) => {
-    void openDraftFromPath(path);
-  }).then((unlisten) => {
+  // Register the listener before taking the queue. take_all marks the slot taken;
+  // a Finder open that arrives in the gap would be emitted with nobody listening.
+  void (async () => {
+    const unlisten = await listenOpenDraftPath((path) => {
+      void openDraftFromPath(path);
+    });
+    if (leaving) {
+      unlisten();
+      return;
+    }
     stopOpenDraftPath = unlisten;
-  });
-  void draftTakeLaunchPath().then((path) => {
-    if (path) void openDraftFromPath(path);
+    const path = await draftTakeLaunchPath();
+    if (!leaving && path) void openDraftFromPath(path);
+  })();
+  void listenMacosQuit(() => {
+    void quitApp();
+  }).then((unlisten) => {
+    if (leaving) unlisten();
+    else stopMacosQuit = unlisten;
   });
   stopAppMenuKeys = () => {
     window.removeEventListener('keydown', onAppMenuKey);
@@ -1226,11 +1241,13 @@ onMounted(() => {
   };
 });
 onBeforeUnmount(() => {
+  leaving = true;
   window.removeEventListener('dragover', blockFileNavigation);
   window.removeEventListener('drop', blockFileNavigation);
   window.removeEventListener('focus', reloadAgents);
   stopAppMenuKeys();
   stopOpenDraftPath();
+  stopMacosQuit();
   appUpdater?.dispose();
 });
 onMounted(async () => {

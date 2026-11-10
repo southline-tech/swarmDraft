@@ -26,6 +26,27 @@ pub fn legacy_coauthor_holds_port(host: &str, port: u16) -> bool {
         .any(|name| executable_name_suggests_legacy_coauthor(&name))
 }
 
+/// `lsof` address filter. The host and port belong in the `-i` option
+/// (`-iTCP@127.0.0.1:7337`). A following `host:port` argument is a filename, so the
+/// lookup misses the listener and the legacy-app warning never appears (#193).
+///
+/// Grammar: `[46][protocol][@hostname|hostaddr][:service|port]`. A colon before the
+/// host (`-iTCP:127.0.0.1:7337`) is parsed as a port name and rejected.
+#[cfg(any(target_os = "macos", test))]
+pub fn lsof_listen_args(host: &str, port: u16) -> Vec<String> {
+    let host = if host == "localhost" {
+        "127.0.0.1"
+    } else {
+        host
+    };
+    vec![
+        "-nP".to_string(),
+        format!("-iTCP@{host}:{port}"),
+        "-sTCP:LISTEN".to_string(),
+        "-t".to_string(),
+    ]
+}
+
 /// Linux reads `/proc/net/tcp`. macOS has no `/proc`, so it uses `lsof` (#193).
 #[cfg(target_os = "linux")]
 fn port_listener_pids(host: &str, port: u16) -> Vec<u32> {
@@ -157,16 +178,8 @@ fn process_image_name(pid: u32) -> Option<String> {
 
 #[cfg(target_os = "macos")]
 fn port_listener_pids(host: &str, port: u16) -> Vec<u32> {
-    let host = if host == "localhost" {
-        "127.0.0.1"
-    } else {
-        host
-    };
-    let spec = format!("{host}:{port}");
-    let output = match Command::new("lsof")
-        .args(["-nP", "-iTCP", &spec, "-sTCP:LISTEN", "-t"])
-        .output()
-    {
+    let args = lsof_listen_args(host, port);
+    let output = match Command::new("lsof").args(&args).output() {
         Ok(o) if o.status.success() => o,
         _ => return Vec::new(),
     };
@@ -206,6 +219,7 @@ fn process_image_name(_pid: u32) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
 
     #[test]
     fn legacy_name_detection() {
@@ -215,5 +229,53 @@ mod tests {
         ));
         assert!(!executable_name_suggests_legacy_coauthor("swarmDraft.exe"));
         assert!(!executable_name_suggests_legacy_coauthor("python3"));
+    }
+
+    #[test]
+    fn macos_lsof_filter_is_one_address_argument() {
+        let args = lsof_listen_args("localhost", 7337);
+        assert_eq!(
+            args,
+            vec![
+                "-nP".to_string(),
+                "-iTCP@127.0.0.1:7337".to_string(),
+                "-sTCP:LISTEN".to_string(),
+                "-t".to_string(),
+            ]
+        );
+        assert!(!args.iter().any(|arg| arg == "127.0.0.1:7337"));
+        assert!(!args.iter().any(|arg| arg.contains("-iTCP:127.0.0.1")));
+    }
+
+    /// The filter has to name a real listener. A colon-before-host form is rejected, and a
+    /// split `host:port` argument is a missing filename, so neither reports the pid.
+    #[test]
+    fn macos_lsof_filter_reports_the_listener_pid() {
+        let Ok(_) = Command::new("lsof").arg("-h").output() else {
+            return;
+        };
+        let listener = match std::net::TcpListener::bind("127.0.0.1:0") {
+            Ok(listener) => listener,
+            Err(_) => return,
+        };
+        let port = listener.local_addr().expect("bound port").port();
+        let args = lsof_listen_args("127.0.0.1", port);
+        let output = Command::new("lsof").args(&args).output().expect("lsof");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !stderr.contains("No such file"),
+            "lsof treated the filter as a filename: {stderr}"
+        );
+        assert!(
+            !stderr.contains("unacceptable"),
+            "lsof rejected the address filter: {stderr}"
+        );
+        let pid = std::process::id().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.split_whitespace().any(|line| line == pid),
+            "stdout={stdout:?} stderr={stderr:?} status={:?}",
+            output.status
+        );
     }
 }

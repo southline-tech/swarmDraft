@@ -108,4 +108,5 @@ test('release.yml policy', () => {
   assert.match(yml, /updaterJsonPreferNsis:\s*true/);
   assert.doesNotMatch(yml, /certificateThumbprint/);
   assert.doesNotMatch(yml, /signCommand/);
+  assert.match(yml, /gh release upload "\$tag" "\$\{files\[@\]\}" --clobber/);
 });

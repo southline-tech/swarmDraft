@@ -414,6 +414,18 @@ export async function listenOpenDraftPath(onPath: (path: string) => void): Promi
   }
 }
 
+/** Rust `menu::QUIT_EVENT`. Native Quit emits this; the window flushes, then destroys. */
+export const MACOS_QUIT_EVENT = 'macos-quit';
+
+export async function listenMacosQuit(onQuit: () => void): Promise<UnlistenFn> {
+  if (!isTauri()) return () => {};
+  try {
+    return await listen(MACOS_QUIT_EVENT, () => onQuit());
+  } catch {
+    return () => {};
+  }
+}
+
 /** Cold-start `.draft` from argv; returned once then cleared on the backend. */
 export async function draftTakeLaunchPath(): Promise<string | null> {
   if (!isTauri()) return null;

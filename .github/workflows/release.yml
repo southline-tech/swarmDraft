@@ -159,7 +159,7 @@ jobs:
           files=(SHA256SUMS-macos.txt apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg)
           upload() {
             if gh release view "$tag" >/dev/null 2>&1; then
-              gh release upload "$tag" "${files[@]}"
+              gh release upload "$tag" "${files[@]}" --clobber
               return $?
             fi
             gh release create "$tag" "${files[@]}" \

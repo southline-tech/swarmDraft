@@ -334,3 +334,9 @@ Implementor: add one line here for every review, design or QA finding, in the sa
 - 2026-11-05 · #34/#41 · PR #327 Designer review @ bbba72d · MCP/Pandoc/DOCX on screen · `Connected`, Word export copy in `copy-deck.ts`; map export errors; allow `.docx` in banned list; `copy:check` MCP test
 - 2026-11-05 · #34/#41 · PR #327 Designer review @ bbba72d · error-card bare line · ob9 card in opening-shell scrim; empty-states shows review + comments
 - 2026-11-05 · #34/#41 · PR #327 Designer review @ bbba72d · toast space after “Your book is open.” · trailing space inside `AppToast` bold lead
+- 2026-11-09 · #193 · PR #343 review · native Quit is `terminate:` and skips the save flush · custom `quit_flush` item (`macos-quit`, Cmd+Q) emits `macos-quit`; `listenMacosQuit` calls `quitApp`
+- 2026-11-09 · #193 · PR #343 review · native Undo/Redo steal Cmd+Z from editor history · Edit menu keeps cut/copy/paste/select all only; `blocked_native_selector` rejects `undo:` / `redo:`
+- 2026-11-09 · #193 · PR #343 review · `lsof -iTCP` plus a separate `host:port` is a filename, so the legacy port warning never fires · one `-iTCP@host:port` argument (`lsof_listen_args`); colon-before-host is an invalid port
+- 2026-11-09 · #193 · PR #343 review · Window submenu omitted `WINDOW_SUBMENU_ID` · `submenu_id` + `Submenu::with_id_and_items` for the menu that contains Minimize
+- 2026-11-09 · #193 · PR #343 review · Finder open listener and `take_all` raced, dropping an open that arrived in the gap · await `listenOpenDraftPath`, then `draftTakeLaunchPath`
+- 2026-11-09 · #193 · PR #343 review · macOS `gh release upload` failed on re-run without `--clobber` · `--clobber` on the unsigned DMG upload; `release.yml policy` asserts it
