@@ -1954,9 +1954,15 @@ fn checkpoint_before_bot_commit_still_resolves_the_bot_comment() {
         .find(|c| c.id == "cthread-pending")
         .unwrap();
     assert!(pending.resolved_at.is_none());
+    assert!(
+        svc.bot_branch_exists(&store, &m.id, "agent-test-1", "Line Editor")
+            .unwrap(),
+        "the checkpoint did not flush the bot commit onto its branch"
+    );
+    // The checkpoint already committed this suggestion. A later call must not
+    // be required to create another commit, and must not move the branch.
     svc.commit_bot_suggestion(&store, &m.id, "agent-test-1", "Line Editor", "Bot comment")
-        .unwrap()
-        .expect("bot comment");
+        .unwrap();
     assert!(svc
         .bot_branch_exists(&store, &m.id, "agent-test-1", "Line Editor")
         .unwrap());
@@ -3183,6 +3189,133 @@ fn mixed_decisions_merge_once_and_keep_main_text() {
         .unwrap()
         .resolved_at
         .is_none());
+}
+
+/// A reply shares the bot comment's thread file. The checkpoint leaves the bot
+/// note off main, so the merge has to keep that reply and any tombstone already
+/// in the file. Deleting the database and reopening still finds the reply.
+#[test]
+fn reply_on_the_bot_thread_survives_accept() {
+    let (dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "bot-thread-reply.draft");
+    set_chapter_plain(&store, &chapter.doc_id, "chapter start");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap()
+    .expect("baseline");
+    set_chapter_mark(&store, &chapter.doc_id, "chg-bot", "suggested wording");
+    let mut bot = sample_comment("c-bot", &chapter.id, "Bot note.");
+    bot.author.kind = "agent".into();
+    bot.author.id = "agent-test-1".into();
+    bot.author.name = "Line Editor".into();
+    store.insert_comment(&m.id, &bot).unwrap();
+    svc.commit_bot_suggestion(&store, &m.id, "agent-test-1", "Line Editor", "Bot comment")
+        .unwrap()
+        .expect("bot comment");
+    store
+        .human_comment_reply(
+            &m.id,
+            &chapter.id,
+            "c-bot",
+            "Writer reply.",
+            "Author",
+            "local",
+        )
+        .unwrap();
+    let mut removed = sample_comment("c-removed", &chapter.id, "Removed reply.");
+    removed.thread_id = Some("c-bot".into());
+    removed.created_at = "2026-01-01T00:00:02.000Z".into();
+    store.insert_comment(&m.id, &removed).unwrap();
+    store.tombstone_comment(&m.id, "c-removed").unwrap();
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Checkpoint",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap()
+    .expect("checkpoint");
+    svc.commit_review_decision(
+        &store,
+        &m.id,
+        true,
+        "Line Editor",
+        &chapter.title,
+        "author",
+        Some("agent-test-1"),
+        Some("chg-bot"),
+        Some("suggestion_insert"),
+        Some(&chapter.id),
+    )
+    .unwrap();
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let main = repo.head_oid().unwrap().unwrap();
+    let merged = String::from_utf8(
+        repo.file_bytes(&main, "comments/c-bot.json")
+            .unwrap()
+            .expect("thread file"),
+    )
+    .unwrap();
+    assert!(
+        merged.contains("Writer reply."),
+        "the merge dropped the reply: {merged}"
+    );
+    assert!(
+        merged.contains("Bot note."),
+        "the merge dropped the bot note: {merged}"
+    );
+    assert!(
+        merged.contains("Removed reply.") && merged.contains("\"deletedAt\""),
+        "the merge dropped the reply tombstone: {merged}"
+    );
+    let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
+    let data = dir.path().to_path_buf();
+    drop(store);
+    drop(svc);
+    drop(repo);
+    for name in ["swarmdraft.db", "swarmdraft.db-wal", "swarmdraft.db-shm"] {
+        let path = data.join(name);
+        if path.exists() {
+            fs::remove_file(&path).unwrap();
+        }
+    }
+    let store = Store::open(&data).unwrap();
+    let svc = DraftService::new(data, "0.2.1".into());
+    let opened = svc
+        .open_draft_path(&store, &draft_path, true)
+        .unwrap()
+        .unwrap();
+    let comments = store
+        .comments_for_manuscript(&opened.manuscript_id)
+        .unwrap();
+    assert!(
+        comments.iter().any(|c| c.body == "Writer reply."),
+        "reopen lost the reply: {comments:?}"
+    );
+    assert!(
+        comments
+            .iter()
+            .any(|c| c.id == "c-bot" && c.body == "Bot note."),
+        "reopen lost the bot note: {comments:?}"
+    );
+    assert!(comments.iter().all(|c| c.id != "c-removed"));
+    let tombs = store.comment_tombstones(&opened.manuscript_id).unwrap();
+    assert!(
+        tombs
+            .iter()
+            .any(|row| row.comment.id == "c-removed" && row.comment.body == "Removed reply."),
+        "reopen lost the reply tombstone: {tombs:?}"
+    );
 }
 
 fn bot_history_contains(repo: &DraftRepo, path: &str, needle: &str) -> bool {

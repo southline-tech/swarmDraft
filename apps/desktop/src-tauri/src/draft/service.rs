@@ -1610,29 +1610,68 @@ fn merge_overlay(repo: &DraftRepo, branch: &str) -> Result<Vec<(String, Vec<u8>)
             .into_iter()
             .map(|row| row.comment.id)
             .collect();
+    let main_rows = sync::comment_rows_in_commit(repo, &main_oid)?;
+    let bot_rows = sync::comment_rows_in_commit(repo, &bot_oid)?;
     for path in repo.list_tree_files(&bot_oid, "comments/")? {
         if !path.ends_with(".json") {
             continue;
         }
-        let Some(bytes) = repo.file_bytes(&bot_oid, &path)? else {
-            continue;
-        };
-        let rows = sync::comment_rows_in_commit(repo, &bot_oid)?;
-        let in_file: Vec<_> = rows
+        let in_bot: Vec<_> = bot_rows
             .iter()
             .filter(|row| row_belongs_to_path(row, &path))
+            .cloned()
             .collect();
-        let introduces_bot = in_file.iter().any(|row| {
+        let introduces_bot = in_bot.iter().any(|row| {
             row.comment.author.kind == "agent" && !base_comments.contains(&row.comment.id)
         });
-        let has_human = in_file
-            .iter()
-            .any(|row| row.comment.author.kind != "agent" && row.deleted_at.is_none());
-        if introduces_bot && !has_human {
-            files.push((path, bytes));
+        if !introduces_bot {
+            continue;
         }
+        let in_main: Vec<_> = main_rows
+            .iter()
+            .filter(|row| row_belongs_to_path(row, &path))
+            .cloned()
+            .collect();
+        // A reply uses this same path. Main's checkpoint leaves the bot note out,
+        // so copying the bot file would drop the reply and any tombstone.
+        let bytes = merge_comment_thread(&path, &in_main, &in_bot)?;
+        files.push((path, bytes));
     }
     Ok(files)
+}
+
+/// Human rows and tombstones already on main stay. Bot-authored rows are added.
+/// A live row on main wins over a bot tombstone. A bot note that is also on main
+/// keeps the bot copy, which carries the decision's `resolvedAt`.
+fn merge_comment_thread(
+    path: &str,
+    main_rows: &[sync::GitComment],
+    bot_rows: &[sync::GitComment],
+) -> Result<Vec<u8>, DraftRepoError> {
+    let mut by_id: std::collections::BTreeMap<String, sync::GitComment> =
+        std::collections::BTreeMap::new();
+    for row in main_rows {
+        by_id.insert(row.comment.id.clone(), row.clone());
+    }
+    for row in bot_rows {
+        if row.comment.author.kind != "agent" {
+            continue;
+        }
+        if let Some(existing) = by_id.get(&row.comment.id) {
+            if existing.deleted_at.is_some() || existing.comment.author.kind != "agent" {
+                continue;
+            }
+            if row.deleted_at.is_some() {
+                continue;
+            }
+        }
+        by_id.insert(row.comment.id.clone(), row.clone());
+    }
+    let thread_id = path
+        .trim_start_matches("comments/")
+        .trim_end_matches(".json");
+    let rows: Vec<_> = by_id.into_values().collect();
+    sync::encode_comment_thread(thread_id, &rows)
 }
 
 fn merge_change_bytes(
