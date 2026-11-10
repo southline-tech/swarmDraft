@@ -156,7 +156,12 @@ import {
   clampSelectedMarginTop,
   type MarginNoteLayout,
 } from './review/margin-note-layout';
-import { CONTINUOUS_REVIEW_NAV, CONTINUOUS_SCROLL_ROOT } from './continuous-review-nav';
+import {
+  CONTINUOUS_REVIEW_NAV,
+  CONTINUOUS_SCROLL_ROOT,
+  changeKeyMatches,
+} from './continuous-review-nav';
+import { COPY_LINK_DISABLED_REASON, writeChangeLink } from './links/link-codec';
 import { reviewComposerHasFocus } from './review/review-focus-policy';
 import type { ReviewChange } from './review/review-state';
 import { SECTION_LOAD_ERROR_COPY } from './errors/map-error';
@@ -291,6 +296,8 @@ const emit = defineEmits<{
   'comment-resolve': [threadId: string, resolved: boolean];
   'split-chapter': [payload: { blockIndex: number; title: string; removeLine: boolean }];
   'merge-prev-chapter': [];
+  /** Clipboard result for a change link (#117). The parent shows the toast. */
+  'copy-link': [ok: boolean];
 }>();
 
 const appFooterEditor = inject(APP_FOOTER_EDITOR_KEY, null);
@@ -301,7 +308,7 @@ const continuousScroll = inject(CONTINUOUS_SCROLL_ROOT, null);
    manuscript, the Y.Doc, the selection or the undo history. */
 const findOpen = shallowRef(Boolean(import.meta.env.DEV && props.initialFindOpen));
 const findFocusReplace = shallowRef(Boolean(import.meta.env.DEV && props.initialFindReplace));
-const menuAt = shallowRef<{ x: number; y: number } | null>(null);
+const menuAt = shallowRef<{ x: number; y: number; changeId?: string } | null>(null);
 const spellMenu = shallowRef<{ x: number; y: number; issue: SpellIssue } | null>(null);
 const spellPrefs = ref(loadSpellPrefs());
 const shortcutsOpen = shallowRef(Boolean(import.meta.env.DEV && props.initialShortcutsOpen));
@@ -469,6 +476,35 @@ function closeFind() {
   findFocusReplace.value = false;
   void nextTick(() => editor.value?.view.focus());
 }
+const TRACKED_MARKS = new Set(['suggestion_insert', 'suggestion_delete', 'format_change']);
+
+function trackedChangeId(ed: Editor, pos: number): string | null {
+  const spots = pos > 0 ? [pos, pos - 1] : [pos];
+  for (const spot of spots) {
+    const clamped = Math.max(0, Math.min(spot, ed.state.doc.content.size));
+    for (const mark of ed.state.doc.resolve(clamped).marks()) {
+      if (!TRACKED_MARKS.has(mark.type.name)) continue;
+      const id = String(mark.attrs.id ?? '').trim();
+      if (id) return id;
+    }
+  }
+  return null;
+}
+
+function changeIdFromContext(ed: Editor, e: MouseEvent): string | undefined {
+  const target = e.target;
+  if (target instanceof Element) {
+    const mark = target.closest(
+      'ins[data-suggestion][data-id], del[data-suggestion][data-id], span[data-format-change][data-id]',
+    );
+    const id = mark?.getAttribute('data-id')?.trim();
+    if (id) return id;
+  }
+  const hit = ed.view.posAtCoords({ left: e.clientX, top: e.clientY });
+  if (!hit) return undefined;
+  return trackedChangeId(ed, hit.pos) ?? undefined;
+}
+
 function openMenu(e: MouseEvent) {
   const ed = editor.value;
   if (ed && !ed.isDestroyed) {
@@ -490,6 +526,7 @@ function openMenu(e: MouseEvent) {
   menuAt.value = {
     x: Math.min(e.clientX, window.innerWidth - 280),
     y: Math.min(e.clientY, window.innerHeight - 300),
+    changeId: ed && !ed.isDestroyed ? changeIdFromContext(ed, e) : undefined,
   };
 }
 
@@ -532,12 +569,16 @@ const mergePrevDisabledReason = computed((): string | undefined => {
   if (!props.canMergePrevChapter) return 'No previous chapter';
   return undefined;
 });
-const menuDisabled = computed(() =>
-  contextMenuDisabled(editor.value, {
-    splitBlocked: !!splitDisabledReason.value,
-    canMergePrev: !!props.canMergePrevChapter,
-  }),
-);
+const menuDisabled = computed(() => {
+  const out = new Set(
+    contextMenuDisabled(editor.value, {
+      splitBlocked: !!splitDisabledReason.value,
+      canMergePrev: !!props.canMergePrevChapter,
+    }),
+  );
+  if (!menuAt.value?.changeId) out.add('copy_link');
+  return out;
+});
 const splitPopover = shallowRef<{
   x: number;
   y: number;
@@ -604,6 +645,13 @@ const menuActiveStyle = computed((): ContextMenuAction | undefined => {
 async function onContextMenuSelect(action: ContextMenuAction) {
   const at = menuAt.value;
   menuAt.value = null;
+  if (action === 'copy_link') {
+    const id = at?.changeId;
+    const ok = id && props.manuscriptId ? await writeChangeLink(props.manuscriptId, id) : false;
+    emit('copy-link', ok);
+    editor.value?.view.focus();
+    return;
+  }
   if (action === 'split_chapter') {
     openSplitPopover(at ?? undefined);
     return;
@@ -993,11 +1041,14 @@ function selectLocalChange(
     visible.value.find((v) => v.key === listKey && v.kind === 'suggestion') ??
     visible.value.find(
       (v) =>
-        v.kind === 'suggestion' && (parseBookChangeKey(v.key)?.changeKey ?? v.key) === changeKey,
+        v.kind === 'suggestion' &&
+        (changeKeyMatches(v.key, changeKey) || v.change.id === changeKey),
     ) ??
-    changes.value.find((c) => c.key === changeKey);
+    changes.value.find((c) => changeKeyMatches(c.key, changeKey) || c.id === changeKey);
   if (!item || !('change' in item)) {
-    const fromChanges = changes.value.find((c) => c.key === changeKey);
+    const fromChanges = changes.value.find(
+      (c) => changeKeyMatches(c.key, changeKey) || c.id === changeKey,
+    );
     if (!fromChanges) return;
     currentKey.value = listKey;
     currentIndex = visible.value.findIndex((v) => v.key === listKey);
@@ -2042,6 +2093,7 @@ onBeforeUnmount(() => {
       :show-chapter-group="!!chapterOpsEnabled && !sliceMode"
       :split-title="splitDisabledReason ?? undefined"
       :merge-prev-title="mergePrevDisabledReason"
+      :copy-link-title="COPY_LINK_DISABLED_REASON"
       @select="onContextMenuSelect"
       @close="menuAt = null"
     />

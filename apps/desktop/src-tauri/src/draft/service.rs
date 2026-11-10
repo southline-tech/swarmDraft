@@ -251,7 +251,7 @@ impl DraftService {
         change_kind: Option<&str>,
         change_section_id: Option<&str>,
     ) -> Result<Option<String>, String> {
-        let _ = decided_by;
+        let writer = decided_by.trim().to_string();
         self.with_op(|| {
             let verb = if accepted { "Accepted" } else { "Rejected" };
             let base = format!("{verb} {bot_name}'s change in {chapter_title}");
@@ -263,7 +263,13 @@ impl DraftService {
                         trailers.push(("Kind", kind));
                     }
                     trailers.push(("Section", section));
+                    if !writer.is_empty() {
+                        trailers.push(("Decided-By", writer.as_str()));
+                    }
                     append_trailers(&base, &trailers)
+                }
+                _ if !writer.is_empty() => {
+                    append_trailers(&base, &[("Decided-By", writer.as_str())])
                 }
                 _ => base,
             };

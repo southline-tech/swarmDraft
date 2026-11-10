@@ -542,6 +542,83 @@ export async function draftResolveChange(
   return invoke<DraftChangeResolve>('draft_resolve_change', { manuscriptId, changeId });
 }
 
+export type LinkResolution =
+  | {
+      action: 'focus';
+      manuscriptId: string;
+      sectionId: string;
+      changeId: string;
+    }
+  | {
+      action: 'history';
+      manuscriptId: string;
+      changeId: string;
+      sectionId: string;
+      quote: string;
+      kind: string;
+      authorKind?: string;
+      authorName: string;
+      outcome: string;
+      decidedBy: string;
+      decidedAt: number | null;
+    }
+  | { action: 'unknown'; manuscriptId: string };
+
+/** Git-history resolution for a change link (#117, #123). */
+export async function linksResolve(
+  manuscriptId: string,
+  changeId: string,
+): Promise<LinkResolution | null> {
+  if (!isTauri()) return null;
+  try {
+    return await invoke<LinkResolution>('links_resolve', { manuscriptId, changeId });
+  } catch (err) {
+    console.error('Change link resolve failed', err);
+    throw err;
+  }
+}
+
+/** Cold-start change link, once. */
+export async function linksTakeLaunchUrl(): Promise<string | null> {
+  if (!isTauri()) return null;
+  try {
+    const url = await invoke<unknown>('links_take_launch_url');
+    return typeof url === 'string' && url.trim() ? url : null;
+  } catch (err) {
+    console.error('Change link launch failed', err);
+    return null;
+  }
+}
+
+function urlsFrom(payload: unknown): string[] {
+  if (typeof payload === 'string') return [payload];
+  if (Array.isArray(payload))
+    return payload.filter((item): item is string => typeof item === 'string');
+  return [];
+}
+
+/** Later opens: deep-link plugin and the single-instance forward. */
+export async function listenChangeLinks(onUrl: (url: string) => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  try {
+    const { listen } = await import('@tauri-apps/api/event');
+    const stops = await Promise.all([
+      listen<unknown>('deep-link://new-url', (event) => {
+        for (const url of urlsFrom(event.payload)) onUrl(url);
+      }),
+      listen<string>('open-change-link', (event) => {
+        if (typeof event.payload === 'string') onUrl(event.payload);
+      }),
+    ]);
+    return () => {
+      for (const stop of stops) stop();
+    };
+  } catch (err) {
+    console.error('Change link listen failed', err);
+    return () => {};
+  }
+}
+
 /** Open comments and saved agent names for the active section's review sidebar (#47). */
 export interface SectionReviewMeta {
   comments: import('@swarmdraft/editor').CommentRow[];
