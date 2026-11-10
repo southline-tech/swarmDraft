@@ -295,6 +295,8 @@ fn search_char(c: char) -> char {
 
 /// Git commit for a bot suggestion or comment. Runs off the request so a held draft op lock
 /// cannot stall the HTTP response. Failures are logged; the row is already stored.
+/// The write itself is retained by `DraftService::record_bot_write` so a restore or open
+/// that runs before this task takes the lock does not drop it.
 fn queue_bot_suggestion_commit(
     drafts: &std::sync::Arc<crate::draft::DraftService>,
     store: &crate::storage::Store,
@@ -329,6 +331,19 @@ fn queue_bot_suggestion_commit(
         Err(_) => {
             std::thread::spawn(work);
         }
+    }
+}
+
+fn bot_doc_retention(
+    doc_id: &str,
+    doc: &yrs::Doc,
+    since: &yrs::StateVector,
+) -> (Option<String>, Option<Vec<u8>>) {
+    let update = crate::manuscripts::doc_update_since(doc, since);
+    if update.len() > 2 {
+        (Some(doc_id.to_string()), Some(update))
+    } else {
+        (None, None)
     }
 }
 
@@ -856,16 +871,31 @@ impl SwarmdraftMcp {
                     created_at: self.store.now()?,
                     resolved_at: None,
                 };
-                self.store.agent_write(
-                    &p.token_id,
-                    AgentWrite {
-                        manuscript_id: &a.manuscript_id,
-                        doc: edited.as_ref().map(|(d, sv)| (s.doc_id.as_str(), d, sv)),
-                        comment: Some(&c),
-                        suggestion: None,
+                let (doc_id, doc_update) = match &edited {
+                    Some((doc, sv)) => bot_doc_retention(&s.doc_id, doc, sv),
+                    None => (None, None),
+                };
+                let bot = author(p);
+                self.drafts.record_bot_write(
+                    &a.manuscript_id,
+                    crate::draft::BotRetention {
+                        comment: Some(c.clone()),
+                        doc_id,
+                        doc_update,
+                    },
+                    || {
+                        self.store.agent_write(
+                            &p.token_id,
+                            AgentWrite {
+                                manuscript_id: &a.manuscript_id,
+                                doc: edited.as_ref().map(|(d, sv)| (s.doc_id.as_str(), d, sv)),
+                                comment: Some(&c),
+                                suggestion: None,
+                            },
+                        )?;
+                        Ok::<(), ToolErr>(())
                     },
                 )?;
-                let bot = author(p);
                 queue_bot_suggestion_commit(
                     &self.drafts,
                     &self.store,
@@ -958,16 +988,28 @@ overlaps another bot's pending suggestion on the same passage."
                     status: "open".into(),
                     created_at: ts,
                 };
-                self.store.agent_write(
-                    &p.token_id,
-                    AgentWrite {
-                        manuscript_id: &a.manuscript_id,
-                        doc: Some((s.doc_id.as_str(), &doc, &sv)),
+                let (doc_id, doc_update) = bot_doc_retention(&s.doc_id, &doc, &sv);
+                let bot = author(p);
+                self.drafts.record_bot_write(
+                    &a.manuscript_id,
+                    crate::draft::BotRetention {
                         comment: None,
-                        suggestion: Some(&x),
+                        doc_id,
+                        doc_update,
+                    },
+                    || {
+                        self.store.agent_write(
+                            &p.token_id,
+                            AgentWrite {
+                                manuscript_id: &a.manuscript_id,
+                                doc: Some((s.doc_id.as_str(), &doc, &sv)),
+                                comment: None,
+                                suggestion: Some(&x),
+                            },
+                        )?;
+                        Ok::<(), ToolErr>(())
                     },
                 )?;
-                let bot = author(p);
                 queue_bot_suggestion_commit(
                     &self.drafts,
                     &self.store,
@@ -1096,16 +1138,28 @@ Use this instead of cramming new scenes into suggest_edit replacements."
                     status: "open".into(),
                     created_at: ts,
                 };
-                self.store.agent_write(
-                    &p.token_id,
-                    AgentWrite {
-                        manuscript_id: &a.manuscript_id,
-                        doc: Some((s.doc_id.as_str(), &doc, &sv)),
+                let (doc_id, doc_update) = bot_doc_retention(&s.doc_id, &doc, &sv);
+                let bot = author(p);
+                self.drafts.record_bot_write(
+                    &a.manuscript_id,
+                    crate::draft::BotRetention {
                         comment: None,
-                        suggestion: Some(&x),
+                        doc_id,
+                        doc_update,
+                    },
+                    || {
+                        self.store.agent_write(
+                            &p.token_id,
+                            AgentWrite {
+                                manuscript_id: &a.manuscript_id,
+                                doc: Some((s.doc_id.as_str(), &doc, &sv)),
+                                comment: None,
+                                suggestion: Some(&x),
+                            },
+                        )?;
+                        Ok::<(), ToolErr>(())
                     },
                 )?;
-                let bot = author(p);
                 queue_bot_suggestion_commit(
                     &self.drafts,
                     &self.store,
@@ -1224,16 +1278,28 @@ Use this instead of cramming new scenes into suggest_edit replacements."
                     status: "open".into(),
                     created_at: ts,
                 };
-                self.store.agent_write(
-                    &p.token_id,
-                    AgentWrite {
-                        manuscript_id: &a.manuscript_id,
-                        doc: Some((s.doc_id.as_str(), &doc, &sv)),
+                let (doc_id, doc_update) = bot_doc_retention(&s.doc_id, &doc, &sv);
+                let bot = author(p);
+                self.drafts.record_bot_write(
+                    &a.manuscript_id,
+                    crate::draft::BotRetention {
                         comment: None,
-                        suggestion: Some(&x),
+                        doc_id,
+                        doc_update,
+                    },
+                    || {
+                        self.store.agent_write(
+                            &p.token_id,
+                            AgentWrite {
+                                manuscript_id: &a.manuscript_id,
+                                doc: Some((s.doc_id.as_str(), &doc, &sv)),
+                                comment: None,
+                                suggestion: Some(&x),
+                            },
+                        )?;
+                        Ok::<(), ToolErr>(())
                     },
                 )?;
-                let bot = author(p);
                 queue_bot_suggestion_commit(
                     &self.drafts,
                     &self.store,

@@ -562,6 +562,36 @@ impl Store {
         })
     }
 
+    /// Append `update` when replaying the stored doc does not already include it.
+    /// A second call with the same bytes is a no-op, so a rebuild can reapply a bot
+    /// write without doubling the marks.
+    pub fn append_doc_update_unless_present(
+        &self,
+        doc_id: &str,
+        update: &[u8],
+    ) -> Result<(), StorageError> {
+        if update.len() <= 2 {
+            return Ok(());
+        }
+        let decoded = Update::decode_v1(update)
+            .map_err(|e| StorageError::Invalid(format!("bad update: {e}")))?;
+        let doc = self.load_doc(doc_id)?;
+        let before = doc
+            .transact()
+            .encode_state_as_update_v1(&StateVector::default());
+        doc.transact_mut()
+            .apply_update(decoded)
+            .map_err(|e| StorageError::Invalid(format!("bad update: {e}")))?;
+        validate_saved_doc(&doc)?;
+        let after = doc
+            .transact()
+            .encode_state_as_update_v1(&StateVector::default());
+        if before == after {
+            return Ok(());
+        }
+        self.append_doc_update(doc_id, update)
+    }
+
     /// Load a Yjs document by replaying its stored updates.
     pub fn load_doc(&self, doc_id: &str) -> Result<Doc, StorageError> {
         let updates: Vec<Vec<u8>> = self.with_conn(|c| {
@@ -2069,6 +2099,11 @@ fn validate_outline(
 
 pub fn state_vector(doc: &Doc) -> StateVector {
     doc.transact().state_vector()
+}
+
+/// Incremental Yjs update from `since`, the same bytes `agent_write` stores.
+pub fn doc_update_since(doc: &Doc, since: &StateVector) -> Vec<u8> {
+    doc.transact().encode_state_as_update_v1(since)
 }
 
 #[cfg(test)]

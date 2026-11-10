@@ -9,7 +9,7 @@ use serde::Serialize;
 use tauri::Window;
 use tauri_plugin_dialog::DialogExt;
 
-use crate::manuscripts::ReviewDecisionRecord;
+use crate::manuscripts::{Comment, ReviewDecisionRecord};
 use crate::storage::Store;
 
 use super::changes::{self, DraftChangeResolve};
@@ -67,9 +67,34 @@ pub struct DraftService {
     /// so a rebuild cannot drop a reply that has not landed in git yet.
     main_commit_pending: Mutex<usize>,
     main_commit_cv: Condvar,
+    /// Bot comments and document updates saved in SQLite and not yet on a `bot/*` commit.
+    /// Reconcile keeps them, and the bot commit writes these bytes rather than the rebuilt cache.
+    bot_writes: Mutex<BotWrites>,
     /// Test hook invoked once after restore or open has the op lock and before it rebuilds the cache.
     #[cfg(test)]
     op_entered: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+}
+
+/// A bot comment or suggestion saved by `agent_write`, retained until its git commit lands.
+#[derive(Clone)]
+pub struct BotRetention {
+    pub comment: Option<Comment>,
+    pub doc_id: Option<String>,
+    pub doc_update: Option<Vec<u8>>,
+}
+
+struct BotWrites {
+    next_token: u64,
+    pending: Vec<PendingBotWrite>,
+}
+
+#[derive(Clone)]
+struct PendingBotWrite {
+    token: u64,
+    manuscript_id: String,
+    comment: Option<Comment>,
+    doc_id: Option<String>,
+    doc_update: Option<Vec<u8>>,
 }
 
 impl DraftService {
@@ -86,9 +111,40 @@ impl DraftService {
             op: Mutex::new(()),
             main_commit_pending: Mutex::new(0),
             main_commit_cv: Condvar::new(),
+            bot_writes: Mutex::new(BotWrites {
+                next_token: 1,
+                pending: Vec::new(),
+            }),
             #[cfg(test)]
             op_entered: Mutex::new(None),
         }
+    }
+
+    /// Run `write` and remember its comment and document update until the bot commit lands.
+    /// Does not take the draft op lock: a bot HTTP call still returns while that lock is held.
+    /// The sqlite write and the retain share this lock with reconcile, so a rebuild cannot
+    /// drop the row in the gap between them.
+    pub fn record_bot_write<T, E>(
+        &self,
+        manuscript_id: &str,
+        retention: BotRetention,
+        write: impl FnOnce() -> Result<T, E>,
+    ) -> Result<T, E> {
+        let mut guard = self.bot_writes.lock().expect("bot writes");
+        let result = write()?;
+        let doc_update = retention.doc_update.filter(|update| update.len() > 2);
+        if retention.comment.is_some() || doc_update.is_some() {
+            let token = guard.next_token;
+            guard.next_token += 1;
+            guard.pending.push(PendingBotWrite {
+                token,
+                manuscript_id: manuscript_id.to_string(),
+                comment: retention.comment,
+                doc_id: retention.doc_id,
+                doc_update,
+            });
+        }
+        Ok(result)
     }
 
     fn begin_main_commit(&self) {
@@ -165,7 +221,17 @@ impl DraftService {
         manuscript_id: &str,
         worktree: &Path,
     ) -> Result<(), String> {
-        sync::sync_worktree_to_store(store, manuscript_id, worktree).map_err(|e| e.to_string())
+        // Held across the rebuild and the reapply. A bot write either lands before the
+        // deletes, and is put back, or waits and lands after them.
+        let guard = self.bot_writes.lock().expect("bot writes");
+        sync::sync_worktree_to_store(store, manuscript_id, worktree).map_err(|e| e.to_string())?;
+        let pending: Vec<PendingBotWrite> = guard
+            .pending
+            .iter()
+            .filter(|write| write.manuscript_id == manuscript_id)
+            .cloned()
+            .collect();
+        apply_pending_bot_writes(store, manuscript_id, &pending).map(|_| ())
     }
 
     pub fn ensure_open(&self, store: &Store, manuscript_id: &str) -> Result<PathBuf, String> {
@@ -382,6 +448,8 @@ impl DraftService {
     }
 
     /// Start or reuse `bot/{bot}/{session}` from main and commit bot-side suggestions on it.
+    /// Pending bot writes are put back into the cache first, so the commit records the row
+    /// from the write after a rebuild has replaced the cache.
     pub fn commit_bot_suggestion(
         &self,
         store: &Store,
@@ -393,6 +461,7 @@ impl DraftService {
         self.with_op(|| {
             let branch = self.ensure_bot_session_inner(store, manuscript_id, bot_agent_id)?;
             let dir = self.ensure_open_inner(store, manuscript_id)?;
+            let tokens = self.reapply_pending_bot_writes(store, manuscript_id)?;
             let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
             repo.checkout_branch(&branch)
                 .map_err(|e| format!("checkout bot branch: {e}"))?;
@@ -410,10 +479,36 @@ impl DraftService {
                 }
             }
             if oid.is_some() {
+                self.clear_pending_bot_writes(&tokens);
                 self.pack_if_linked_inner(store, manuscript_id)?;
             }
             Ok(oid)
         })
+    }
+
+    /// Put this book's saved bot writes back into SQLite. Returns their tokens so a
+    /// successful commit can drop them.
+    fn reapply_pending_bot_writes(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+    ) -> Result<Vec<u64>, String> {
+        let guard = self.bot_writes.lock().expect("bot writes");
+        let pending: Vec<PendingBotWrite> = guard
+            .pending
+            .iter()
+            .filter(|write| write.manuscript_id == manuscript_id)
+            .cloned()
+            .collect();
+        apply_pending_bot_writes(store, manuscript_id, &pending)
+    }
+
+    fn clear_pending_bot_writes(&self, tokens: &[u64]) {
+        if tokens.is_empty() {
+            return;
+        }
+        let mut guard = self.bot_writes.lock().expect("bot writes");
+        guard.pending.retain(|write| !tokens.contains(&write.token));
     }
 
     pub fn bot_branch_exists(
@@ -1431,6 +1526,55 @@ pub(crate) fn sanitize_filename(title: &str) -> String {
     }
 }
 
+/// Put saved bot writes back into SQLite. Tokens whose document update is in the cache
+/// (or that had no document update) are returned so a commit can drop them. A document
+/// update that does not apply stays pending and is not cleared.
+fn apply_pending_bot_writes(
+    store: &Store,
+    manuscript_id: &str,
+    pending: &[PendingBotWrite],
+) -> Result<Vec<u64>, String> {
+    if pending.is_empty() {
+        return Ok(Vec::new());
+    }
+    let tombstones = store
+        .comment_tombstones(manuscript_id)
+        .map_err(|e| e.to_string())?;
+    let mut applied = Vec::with_capacity(pending.len());
+    for write in pending {
+        if let Some(comment) = &write.comment {
+            let buried = tombstones.iter().any(|tomb| tomb.comment.id == comment.id);
+            if !buried
+                && store
+                    .get_comment(&comment.id)
+                    .map_err(|e| e.to_string())?
+                    .is_none()
+            {
+                store
+                    .insert_comment(manuscript_id, comment)
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        let doc_ok = if let (Some(doc_id), Some(update)) = (&write.doc_id, &write.doc_update) {
+            match store.append_doc_update_unless_present(doc_id, update) {
+                Ok(()) => true,
+                Err(e) => {
+                    eprintln!(
+                        "draft bot document update stays pending; it does not apply to the rebuilt chapter: {e}"
+                    );
+                    false
+                }
+            }
+        } else {
+            true
+        };
+        if doc_ok {
+            applied.push(write.token);
+        }
+    }
+    Ok(applied)
+}
+
 struct FinishMainCommit(Arc<DraftService>);
 
 impl Drop for FinishMainCommit {
@@ -1907,5 +2051,343 @@ mod save_as_lock_tests {
             );
             thread::sleep(Duration::from_millis(30));
         }
+    }
+
+    fn bot_comment(section_id: &str, body: &str) -> crate::manuscripts::Comment {
+        crate::manuscripts::Comment {
+            id: "cbot-race".into(),
+            section_id: section_id.into(),
+            block_id: None,
+            quote: None,
+            body: body.into(),
+            thread_id: Some("cbot-race".into()),
+            author: crate::manuscripts::Author {
+                kind: "agent".into(),
+                id: "agent-test-1".into(),
+                name: "Line Editor".into(),
+            },
+            created_at: "2026-03-01T00:00:00.000Z".into(),
+            resolved_at: None,
+        }
+    }
+
+    fn record_bot_comment(
+        svc: &DraftService,
+        store: &Store,
+        manuscript_id: &str,
+        comment: &crate::manuscripts::Comment,
+    ) {
+        svc.record_bot_write(
+            manuscript_id,
+            BotRetention {
+                comment: Some(comment.clone()),
+                doc_id: None,
+                doc_update: None,
+            },
+            || {
+                store
+                    .insert_comment(manuscript_id, comment)
+                    .map_err(|e| e.to_string())
+            },
+        )
+        .expect("record bot comment");
+    }
+
+    fn assert_comment_body(store: &Store, manuscript_id: &str, body: &str) {
+        assert!(
+            store
+                .comments_for_manuscript(manuscript_id)
+                .unwrap()
+                .iter()
+                .any(|comment| comment.body == body),
+            "missing bot comment {body}"
+        );
+    }
+
+    fn bot_tree_text(svc: &DraftService, manuscript_id: &str, path: &str) -> String {
+        let repo = DraftRepo::open_working(&svc.worktree_path(manuscript_id)).unwrap();
+        let tips = repo.search_ref_tips().unwrap();
+        let tip = tips
+            .iter()
+            .find(|tip| tip.name.starts_with("bot/"))
+            .expect("bot tip");
+        let bytes = repo
+            .file_bytes(&tip.oid, path)
+            .unwrap()
+            .unwrap_or_else(|| panic!("missing {path} on {}", tip.name));
+        String::from_utf8(bytes).unwrap()
+    }
+
+    /// Insert the bot comment, then restore, before `commit_bot_suggestion` runs.
+    #[test]
+    fn bot_comment_survives_restore_before_its_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+        let id = stored.manuscript.id.clone();
+        let section_id = stored
+            .sections
+            .iter()
+            .find(|s| s.section.kind == "chapter")
+            .unwrap()
+            .section
+            .id
+            .clone();
+        let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.2".into());
+        let draft_path = dir.path().join("drafts").join("bot-restore.draft");
+        store
+            .set_draft_file_path(&id, &draft_path.to_string_lossy())
+            .unwrap();
+        let baseline = svc
+            .commit_now(&store, &id, "Baseline", "Author", "author@swarmdraft.local")
+            .unwrap()
+            .expect("baseline");
+        let comment = bot_comment(&section_id, "Bot note before restore.");
+        record_bot_comment(&svc, &store, &id, &comment);
+        svc.restore(&store, &id, &baseline, "Author")
+            .expect("restore");
+        assert_comment_body(&store, &id, "Bot note before restore.");
+        svc.commit_bot_suggestion(&store, &id, "agent-test-1", "Line Editor", "Bot comment")
+            .unwrap()
+            .expect("bot comment commit");
+        assert_comment_body(&store, &id, "Bot note before restore.");
+        let text = bot_tree_text(&svc, &id, "comments/cbot-race.json");
+        assert!(
+            text.contains("Bot note before restore."),
+            "commit stored the rebuilt cache without the write: {text}"
+        );
+    }
+
+    /// Insert the bot comment, then reopen the packed book, before the bot commit runs.
+    #[test]
+    fn bot_comment_survives_reopen_before_its_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+        let id = stored.manuscript.id.clone();
+        let section_id = stored
+            .sections
+            .iter()
+            .find(|s| s.section.kind == "chapter")
+            .unwrap()
+            .section
+            .id
+            .clone();
+        let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.2".into());
+        let path = dir
+            .path()
+            .join("drafts")
+            .join("bot-reopen.draft")
+            .to_string_lossy()
+            .into_owned();
+        store.set_draft_file_path(&id, &path).unwrap();
+        svc.commit_now(&store, &id, "Baseline", "Author", "author@swarmdraft.local")
+            .unwrap()
+            .expect("baseline");
+        let comment = bot_comment(&section_id, "Bot note before reopen.");
+        record_bot_comment(&svc, &store, &id, &comment);
+        let opened = svc
+            .open_draft_path(&store, &path, true)
+            .expect("reopen")
+            .expect("draft opened");
+        assert_comment_body(&store, &opened.manuscript_id, "Bot note before reopen.");
+        svc.commit_bot_suggestion(
+            &store,
+            &opened.manuscript_id,
+            "agent-test-1",
+            "Line Editor",
+            "Bot comment",
+        )
+        .unwrap()
+        .expect("bot comment commit");
+        assert_comment_body(&store, &opened.manuscript_id, "Bot note before reopen.");
+        let text = bot_tree_text(&svc, &opened.manuscript_id, "comments/cbot-race.json");
+        assert!(text.contains("Bot note before reopen."), "{text}");
+    }
+
+    /// Insert while restore already holds the op lock, before the cache rebuild.
+    /// The write returns without waiting on that lock, and both the cache and the bot commit keep it.
+    #[test]
+    fn bot_comment_inserted_while_restore_holds_the_lock_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+        let id = stored.manuscript.id.clone();
+        let section_id = stored
+            .sections
+            .iter()
+            .find(|s| s.section.kind == "chapter")
+            .unwrap()
+            .section
+            .id
+            .clone();
+        let svc = Arc::new(DraftService::new(
+            store.data_dir().to_path_buf(),
+            "0.2.2".into(),
+        ));
+        let draft_path = dir.path().join("drafts").join("bot-inside-restore.draft");
+        store
+            .set_draft_file_path(&id, &draft_path.to_string_lossy())
+            .unwrap();
+        let baseline = svc
+            .commit_now(&store, &id, "Baseline", "Author", "author@swarmdraft.local")
+            .unwrap()
+            .expect("baseline");
+        let (entered_tx, entered_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        *svc.op_entered.lock().expect("op entered") = Some(Box::new(move || {
+            entered_tx.send(()).ok();
+            release_rx.recv().ok();
+        }));
+        let svc_restore = Arc::clone(&svc);
+        let store_restore = store.clone();
+        let id_restore = id.clone();
+        let restore_thread = thread::spawn(move || {
+            svc_restore.restore(&store_restore, &id_restore, &baseline, "Author")
+        });
+        entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("restore did not take the lock");
+        let svc_write = Arc::clone(&svc);
+        let store_write = store.clone();
+        let id_write = id.clone();
+        let section_write = section_id.clone();
+        let write_thread = thread::spawn(move || {
+            let comment = bot_comment(&section_write, "During restore.");
+            record_bot_comment(&svc_write, &store_write, &id_write, &comment);
+            svc_write
+                .commit_bot_suggestion(
+                    &store_write,
+                    &id_write,
+                    "agent-test-1",
+                    "Line Editor",
+                    "Bot comment",
+                )
+                .expect("bot comment commit")
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let present = store
+                .comments_for_manuscript(&id)
+                .unwrap()
+                .iter()
+                .any(|comment| comment.body == "During restore.");
+            if present {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "bot comment was not saved while restore held the lock"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            svc.op.try_lock().is_err(),
+            "restore released the lock before the bot comment was saved"
+        );
+        release_tx.send(()).unwrap();
+        restore_thread
+            .join()
+            .expect("restore thread")
+            .expect("restore");
+        assert_comment_body(&store, &id, "During restore.");
+        write_thread
+            .join()
+            .expect("write thread")
+            .expect("bot commit");
+        assert_comment_body(&store, &id, "During restore.");
+        let text = bot_tree_text(&svc, &id, "comments/cbot-race.json");
+        assert!(text.contains("During restore."), "{text}");
+    }
+
+    /// A suggestion mark saved by the bot, then restored before its commit, stays in the chapter
+    /// and is what the bot commit records.
+    #[test]
+    fn bot_suggestion_survives_restore_before_its_commit() {
+        use yrs::{ReadTxn, Transact};
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+        let id = stored.manuscript.id.clone();
+        let doc_id = stored
+            .sections
+            .iter()
+            .find(|s| s.section.kind == "chapter")
+            .unwrap()
+            .section
+            .doc_id
+            .clone();
+        let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.2".into());
+        let draft_path = dir
+            .path()
+            .join("drafts")
+            .join("bot-suggestion-restore.draft");
+        store
+            .set_draft_file_path(&id, &draft_path.to_string_lossy())
+            .unwrap();
+        let baseline_doc = crate::content::new_doc();
+        crate::content::encode(
+            &baseline_doc,
+            &serde_json::json!({"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"version-one"}]}]}),
+        )
+        .unwrap();
+        let baseline_state = baseline_doc
+            .transact()
+            .encode_state_as_update_v1(&yrs::StateVector::default());
+        store.replace_doc_state(&doc_id, &baseline_state).unwrap();
+        let baseline = svc
+            .commit_now(&store, &id, "Baseline", "Author", "author@swarmdraft.local")
+            .unwrap()
+            .expect("baseline");
+        let doc = store.load_doc(&doc_id).unwrap();
+        let since = crate::manuscripts::state_vector(&doc);
+        crate::content::encode(
+            &doc,
+            &serde_json::json!({"type":"doc","content":[{"type":"paragraph","content":[{
+                "type":"text",
+                "text":"guttered",
+                "marks":[{"type":"suggestion_insert","attrs":{"id":"chg-race","author":"agent:agent-test-1","ts":"t"}}]
+            }]}]}),
+        )
+        .unwrap();
+        let update = crate::manuscripts::doc_update_since(&doc, &since);
+        svc.record_bot_write(
+            &id,
+            BotRetention {
+                comment: None,
+                doc_id: Some(doc_id.clone()),
+                doc_update: Some(update.clone()),
+            },
+            || {
+                store
+                    .append_doc_update(&doc_id, &update)
+                    .map_err(|e| e.to_string())
+            },
+        )
+        .expect("record bot suggestion");
+        svc.restore(&store, &id, &baseline, "Author")
+            .expect("restore");
+        let markdown =
+            crate::content::markdown(&crate::content::decode(&store.load_doc(&doc_id).unwrap()));
+        assert!(
+            markdown.contains("guttered"),
+            "restore dropped the bot suggestion: {markdown}"
+        );
+        assert!(markdown.contains("version-one"), "{markdown}");
+        svc.commit_bot_suggestion(
+            &store,
+            &id,
+            "agent-test-1",
+            "Line Editor",
+            "Bot suggestions",
+        )
+        .unwrap()
+        .expect("bot suggestion commit");
+        let changes = bot_tree_text(&svc, &id, "review/changes.json");
+        assert!(
+            changes.contains("chg-race"),
+            "commit stored the rebuilt cache without the suggestion: {changes}"
+        );
     }
 }
