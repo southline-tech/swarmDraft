@@ -81,10 +81,12 @@ import {
   saveTrackPromptSeen,
   saveTracking,
   seedProfileForTracking,
-  type Profile,
 } from './settings/prefs';
+import { useBookProfile } from './settings/profile-state';
+import { useBookTracking } from './settings/tracking-state';
 import {
   ariaKeyshortcuts,
+  isTrackChangesChord,
   MANUSCRIPT_SHORTCUTS,
   usesPrimaryModifier,
 } from './shells/app-shortcuts';
@@ -305,12 +307,33 @@ const spellPrefs = ref(loadSpellPrefs());
 const shortcutsOpen = shallowRef(Boolean(import.meta.env.DEV && props.initialShortcutsOpen));
 const focusMode = shallowRef(Boolean(import.meta.env.DEV && props.initialFocusMode));
 const prefStore = () => props.storage ?? globalThis.localStorage;
-/** Track changes (#57): persisted on/off; first enable may show the tc3 name prompt. */
-const tracking = shallowRef(
-  loadTracking(prefStore()) || Boolean(import.meta.env.DEV && props.initialTracking),
-);
-watch(tracking, (on) => saveTracking(on, prefStore()));
-const writerProfile = shallowRef<Profile>(loadProfile(prefStore()));
+/** Track changes (#57): one book-wide on/off. The lead persists it and may show the tc3 name prompt. */
+const storedTracking = loadTracking(prefStore());
+/**
+ * Dev evidence (`initialTracking`) may show the toggle on for screenshots.
+ * Apply that after the persist watch so the synthetic on-state is skipped,
+ * while a later user toggle still writes the preference.
+ */
+const trackingForcedOn = Boolean(import.meta.env.DEV && props.initialTracking) && !storedTracking;
+const tracking = useBookTracking(storedTracking);
+let skipForcedTrackingPersist = false;
+watch(tracking, (on) => {
+  // Background sections share the flag. Only the lead writes the preference,
+  // so an evidence force-on is not saved by a slice mounted beside it.
+  if (props.sliceMode) return;
+  if (skipForcedTrackingPersist && on) {
+    skipForcedTrackingPersist = false;
+    return;
+  }
+  skipForcedTrackingPersist = false;
+  saveTracking(on, prefStore());
+});
+if (trackingForcedOn && !tracking.value) {
+  skipForcedTrackingPersist = true;
+  tracking.value = true;
+}
+/** Shared with every mounted section. Assigning it updates their suggestion author and color. */
+const writerProfile = useBookProfile(loadProfile(prefStore()));
 const namePromptOpen = shallowRef(false);
 const nameColorPromptOpen = shallowRef(false);
 const profileColorName = computed(
@@ -502,6 +525,12 @@ const splitDisabledReason = computed((): string | null => {
   const e = editor.value;
   if (!e || e.isDestroyed || !props.doc) return 'Read-only';
   return chapterSplitDisabledReason(e, e.state.doc.toJSON() as DocNode);
+});
+const mergePrevDisabledReason = computed((): string | undefined => {
+  const e = editor.value;
+  if (!e || e.isDestroyed || !props.doc || !e.isEditable) return 'Read-only';
+  if (!props.canMergePrevChapter) return 'No previous chapter';
+  return undefined;
 });
 const menuDisabled = computed(() =>
   contextMenuDisabled(editor.value, {
@@ -1157,8 +1186,26 @@ function onSelectView(author: string | null) {
   if (editor.value) refreshReview(editor.value);
 }
 
+/**
+ * Track changes is book-wide and owned by the lead editor. Another section's page is still the
+ * manuscript; find fields and other inputs are not.
+ */
+function trackChangesFieldBlocks(target: EventTarget | null, editorRoot: Element | null): boolean {
+  if (!inForeignInput(target, editorRoot)) return false;
+  return !(target instanceof Element && target.closest('.tiptap'));
+}
+
 function onKeydown(ev: KeyboardEvent) {
   if (shortcutsOpen.value) return;
+  if (isTrackChangesChord(ev)) {
+    // Every section mounts a listener. Only the lead (the toolbar owner) may toggle.
+    if (props.sliceMode) return;
+    if (trackChangesFieldBlocks(ev.target, editor.value?.view.dom ?? null)) return;
+    ev.preventDefault();
+    if (ev.repeat) return;
+    toggleTrackChanges();
+    return;
+  }
   if (
     chapterSplitShortcut(ev) &&
     props.chapterOpsEnabled &&
@@ -1994,7 +2041,7 @@ onBeforeUnmount(() => {
       :active-style="menuActiveStyle"
       :show-chapter-group="!!chapterOpsEnabled && !sliceMode"
       :split-title="splitDisabledReason ?? undefined"
-      :merge-prev-title="!editor?.isEditable ? 'Read-only' : undefined"
+      :merge-prev-title="mergePrevDisabledReason"
       @select="onContextMenuSelect"
       @close="menuAt = null"
     />

@@ -21,13 +21,13 @@ import {
   type CaretStyle,
   type ToolbarCommand,
 } from './toolbar';
+import { ariaKeyshortcuts, displayChord, MANUSCRIPT_SHORTCUTS } from '../shells/app-shortcuts';
 import {
   TOOLBAR_OVERFLOW_TEXT_ACTIONS,
   TOOLBAR_SPILL_ORDER,
   pickInlineOverflowItems,
   type ToolbarOverflowItemId,
 } from './toolbar-overflow';
-import { ariaKeyshortcuts, displayChord } from '../shells/app-shortcuts';
 
 const props = withDefaults(
   defineProps<{
@@ -423,7 +423,11 @@ const themeLabel = computed(() =>
           class="sh-track"
           data-test="track-changes-toggle"
           :aria-pressed="props.tracking"
-          :title="props.tracking ? 'Recording changes on' : 'Recording changes off'"
+          :aria-keyshortcuts="ariaKeyshortcuts(MANUSCRIPT_SHORTCUTS.trackChanges)"
+          :title="
+            (props.tracking ? 'Recording changes on' : 'Recording changes off') +
+            ` (${MANUSCRIPT_SHORTCUTS.trackChanges})`
+          "
           @click="emit('toggle-track')"
         >
           <svg class="tb-i" viewBox="0 0 16 16" aria-hidden="true">

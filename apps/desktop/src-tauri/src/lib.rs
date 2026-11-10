@@ -1107,11 +1107,13 @@ async fn draft_checkpoint(
     drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
     manuscript_id: String,
     message: String,
+    immediate: Option<bool>,
 ) -> Result<Option<String>, String> {
     let store = store.inner().clone();
     let drafts = std::sync::Arc::clone(drafts.inner());
+    let immediate = immediate.unwrap_or(false);
     tauri::async_runtime::spawn_blocking(move || {
-        drafts.checkpoint_if_due(&store, &manuscript_id, &message)
+        drafts.checkpoint_if_due(&store, &manuscript_id, &message, immediate)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1151,6 +1153,7 @@ async fn draft_restore(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn draft_review_commit(
     store: tauri::State<'_, storage::Store>,
     drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
@@ -1159,6 +1162,9 @@ async fn draft_review_commit(
     bot_name: String,
     chapter_title: String,
     bot_agent_id: Option<String>,
+    suggestion_id: String,
+    kind: String,
+    section_id: String,
 ) -> Result<Option<String>, String> {
     let store = store.inner().clone();
     let drafts = std::sync::Arc::clone(drafts.inner());
@@ -1171,7 +1177,65 @@ async fn draft_review_commit(
             &chapter_title,
             &draft_author_name(&store),
             bot_agent_id.as_deref(),
+            Some(suggestion_id.as_str()),
+            Some(kind.as_str()),
+            Some(section_id.as_str()),
         )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn draft_begin_session(
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+) -> Result<String, String> {
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        drafts.begin_editing_session(&store, &manuscript_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn draft_abandon_session(
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+) -> Result<(), String> {
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    tauri::async_runtime::spawn_blocking(move || drafts.abandon_editing_session(&manuscript_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn draft_end_session(
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+) -> Result<(), String> {
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    tauri::async_runtime::spawn_blocking(move || drafts.end_editing_session(&store, &manuscript_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn draft_resolve_change(
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+    change_id: String,
+) -> Result<draft::DraftChangeResolve, String> {
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        drafts.resolve_change(&store, &manuscript_id, &change_id)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1419,7 +1483,11 @@ pub fn run() {
             draft_checkpoint,
             draft_history,
             draft_restore,
-            draft_review_commit
+            draft_review_commit,
+            draft_begin_session,
+            draft_end_session,
+            draft_abandon_session,
+            draft_resolve_change
         ])
         .build(tauri::generate_context!())
         .expect("error while building swarmDraft")

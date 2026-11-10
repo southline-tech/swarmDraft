@@ -11,8 +11,10 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::storage::Store;
 
+use super::changes::{self, DraftChangeResolve};
 use super::format::{self, DraftManifest, DRAFT_FORMAT, DRAFT_FORMAT_VERSION, REPO_DIR};
-use super::repo::{CommitEntry, DraftRepo};
+use super::repo::{append_trailers, message_trailers, CommitEntry, CommitOptions, DraftRepo};
+use super::sessions::{self, SessionRecord};
 use super::sync;
 
 const CHECKPOINT_DEBOUNCE_MS: u128 = 5000;
@@ -42,6 +44,8 @@ struct BotSession {
     branch: String,
 }
 
+type ResolveCache = HashMap<String, (String, HashMap<String, DraftChangeResolve>)>;
+
 pub struct DraftService {
     store_data_dir: PathBuf,
     app_version: String,
@@ -50,6 +54,12 @@ pub struct DraftService {
     last_checkpoint: Mutex<HashMap<String, u128>>,
     /// (manuscript id, bot id) → active bot branch session
     bot_sessions: Mutex<HashMap<(String, String), BotSession>>,
+    /// Active human editing session for an open manuscript. The git ref is kept after it ends.
+    human_sessions: Mutex<HashMap<String, SessionRecord>>,
+    /// Missing entry means a human commit may start a session. `false` after the session ends.
+    autostart: Mutex<HashMap<String, bool>>,
+    /// Change lookups cached until a main, bot, or session tip moves.
+    resolve_cache: Mutex<ResolveCache>,
     /// Serialize pack, commit, open, restore (git2 + SQLite hydrate).
     op: Mutex<()>,
 }
@@ -62,8 +72,15 @@ impl DraftService {
             working: Mutex::new(HashMap::new()),
             last_checkpoint: Mutex::new(HashMap::new()),
             bot_sessions: Mutex::new(HashMap::new()),
+            human_sessions: Mutex::new(HashMap::new()),
+            autostart: Mutex::new(HashMap::new()),
+            resolve_cache: Mutex::new(HashMap::new()),
             op: Mutex::new(()),
         }
+    }
+
+    pub fn worktree_path(&self, manuscript_id: &str) -> PathBuf {
+        self.work_dir(manuscript_id)
     }
 
     fn with_op<T>(&self, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
@@ -139,13 +156,16 @@ impl DraftService {
         store: &Store,
         manuscript_id: &str,
         message: &str,
+        immediate: bool,
     ) -> Result<Option<String>, String> {
         self.with_op(|| {
             let now = now_ms();
             let mut last = self.last_checkpoint.lock().expect("draft checkpoint");
-            if let Some(prev) = last.get(manuscript_id) {
-                if now.saturating_sub(*prev) < CHECKPOINT_DEBOUNCE_MS {
-                    return Ok(None);
+            if !immediate {
+                if let Some(prev) = last.get(manuscript_id) {
+                    if now.saturating_sub(*prev) < CHECKPOINT_DEBOUNCE_MS {
+                        return Ok(None);
+                    }
                 }
             }
             let oid = self.commit_now_inner(
@@ -154,6 +174,7 @@ impl DraftService {
                 message,
                 &author_name(store),
                 "author@swarmdraft.local",
+                false,
             )?;
             if oid.is_some() {
                 last.insert(manuscript_id.to_string(), now);
@@ -177,6 +198,7 @@ impl DraftService {
                 message,
                 committer_name,
                 committer_email,
+                false,
             )
         })
     }
@@ -188,15 +210,25 @@ impl DraftService {
         message: &str,
         committer_name: &str,
         committer_email: &str,
+        allow_empty: bool,
     ) -> Result<Option<String>, String> {
         let dir = self
             .ensure_open_inner(store, manuscript_id)
             .map_err(|e| format!("ensure_open: {e}"))?;
+        let session = self.session_for_commit(store, manuscript_id)?;
         sync::sync_store_to_worktree(store, manuscript_id, &dir)
             .map_err(|e| format!("sync: {e}"))?;
+        if let Some(record) = &session {
+            sessions::write_session_file(&dir, record).map_err(|e| format!("session: {e}"))?;
+        }
+        let message = message_with_session(message, session.as_ref().map(|s| s.id.as_str()));
         let repo = DraftRepo::open_working(&dir).map_err(|e| format!("open_working: {e}"))?;
+        let options = CommitOptions {
+            allow_empty,
+            advance_branch: session.as_ref().map(|s| format!("session/{}", s.id)),
+        };
         let oid = repo
-            .commit_all(message, committer_name, committer_email)
+            .commit_all(&message, committer_name, committer_email, &options)
             .map_err(|e| format!("commit: {e}"))?;
         if oid.is_some() {
             self.pack_if_linked_inner(store, manuscript_id)
@@ -213,22 +245,42 @@ impl DraftService {
         accepted: bool,
         bot_name: &str,
         chapter_title: &str,
-        _decided_by: &str,
+        decided_by: &str,
         bot_agent_id: Option<&str>,
+        change_id: Option<&str>,
+        change_kind: Option<&str>,
+        change_section_id: Option<&str>,
     ) -> Result<Option<String>, String> {
+        let _ = decided_by;
         self.with_op(|| {
             let verb = if accepted { "Accepted" } else { "Rejected" };
-            let msg = format!("{verb} {bot_name}'s change in {chapter_title}");
+            let base = format!("{verb} {bot_name}'s change in {chapter_title}");
+            let decision = if accepted { "accepted" } else { "rejected" };
+            let msg = match (change_id, change_kind, change_section_id) {
+                (Some(id), kind, Some(section)) if !id.is_empty() && !section.is_empty() => {
+                    let mut trailers = vec![("Change-Id", id), ("Decision", decision)];
+                    if let Some(kind) = kind.filter(|k| !k.is_empty()) {
+                        trailers.push(("Kind", kind));
+                    }
+                    trailers.push(("Section", section));
+                    append_trailers(&base, &trailers)
+                }
+                _ => base,
+            };
             let bot_email = bot_agent_id
                 .map(bot_committer_email)
                 .unwrap_or_else(|| "bot@swarmdraft.local".into());
-            let oid = self.commit_now_inner(store, manuscript_id, &msg, bot_name, &bot_email)?;
+            let oid =
+                self.commit_now_inner(store, manuscript_id, &msg, bot_name, &bot_email, true)?;
             if accepted {
                 if let Some(branch) = self.active_bot_branch(manuscript_id, bot_agent_id, bot_name)
                 {
                     let dir = self.ensure_open_inner(store, manuscript_id)?;
                     let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
-                    repo.merge_bot_branch(&branch, &author_name(store))
+                    let advance = self
+                        .active_record(manuscript_id)
+                        .map(|s| format!("session/{}", s.id));
+                    repo.merge_bot_branch(&branch, &author_name(store), advance.as_deref())
                         .map_err(|e| format!("Couldn't merge bot changes: {e}"))?;
                     self.end_bot_session(manuscript_id, bot_agent_id, bot_name);
                 }
@@ -256,10 +308,15 @@ impl DraftService {
                 .map_err(|e| format!("sync: {e}"))?;
             let email = bot_committer_email(bot_agent_id);
             let oid = repo
-                .commit_all(message, bot_display_name, &email)
+                .commit_all(message, bot_display_name, &email, &CommitOptions::default())
                 .map_err(|e| format!("commit: {e}"))?;
             repo.checkout_main()
                 .map_err(|e| format!("checkout main: {e}"))?;
+            if let Some(record) = self.active_record(manuscript_id) {
+                if let Err(e) = sessions::write_session_file(&dir, &record) {
+                    eprintln!("draft session file not rewritten after bot commit: {e}");
+                }
+            }
             Ok(oid)
         })
     }
@@ -301,6 +358,7 @@ impl DraftService {
                 message,
                 &author_name(store),
                 "author@swarmdraft.local",
+                false,
             )?;
             Ok(DraftSaveOutcome::Committed { oid })
         })
@@ -333,6 +391,7 @@ impl DraftService {
                 &format!("Imported {label}"),
                 &author_name(store),
                 "author@swarmdraft.local",
+                false,
             )?;
             Ok(path.to_string_lossy().into_owned())
         })
@@ -360,9 +419,10 @@ impl DraftService {
         let manuscript = store
             .get_manuscript(manuscript_id)
             .map_err(|e| e.to_string())?;
-        let bare = dir.join(".bare-export");
+        // Outside the worktree so the export is not committed on the next save.
+        let bare = tempfile::tempdir().map_err(|e| e.to_string())?;
         let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
-        repo.export_bare(&bare).map_err(|e| e.to_string())?;
+        repo.export_bare(bare.path()).map_err(|e| e.to_string())?;
         let manifest = DraftManifest {
             format: DRAFT_FORMAT.into(),
             format_version: DRAFT_FORMAT_VERSION,
@@ -373,7 +433,8 @@ impl DraftService {
         if let Some(parent) = Path::new(&draft_path).parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        format::pack_draft(Path::new(&draft_path), &manifest, &bare).map_err(|e| e.to_string())?;
+        format::pack_draft(Path::new(&draft_path), &manifest, bare.path())
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -448,6 +509,7 @@ impl DraftService {
             "Saved",
             &author_name(store),
             "author@swarmdraft.local",
+            false,
         )?;
         self.pack_if_linked_inner(store, manuscript_id)?;
         Ok(path.to_string())
@@ -548,6 +610,9 @@ impl DraftService {
             .lock()
             .expect("draft working")
             .insert(id.clone(), work);
+        if let Err(e) = self.begin_editing_session_inner(store, &id) {
+            eprintln!("draft session start failed: {e}");
+        }
         Ok(Some(OpenDraftResult {
             manuscript_id: id,
             recovery: None,
@@ -581,15 +646,123 @@ impl DraftService {
             let dir = self.ensure_open_inner(store, manuscript_id)?;
             let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
             let time = repo.commit_time_unix(oid).unwrap_or(0);
-            let msg = format!("Restored version from {}", format_when_human(time));
+            let session = self.session_for_commit(store, manuscript_id)?;
+            let msg = message_with_session(
+                &format!("Restored version from {}", format_when_human(time)),
+                session.as_ref().map(|s| s.id.as_str()),
+            );
+            let advance = session.as_ref().map(|s| format!("session/{}", s.id));
             let new_oid = repo
-                .restore_as_new_commit(oid, committer_name, "author@swarmdraft.local", &msg)
+                .restore_as_new_commit(
+                    oid,
+                    committer_name,
+                    "author@swarmdraft.local",
+                    &msg,
+                    advance.as_deref(),
+                )
                 .map_err(|e| e.to_string())?;
             self.hydrate_from_worktree(store, manuscript_id, &dir)?;
+            if let Some(record) = self.active_record(manuscript_id) {
+                if let Err(e) = sessions::write_session_file(&dir, &record) {
+                    eprintln!("draft session file not rewritten after restore: {e}");
+                }
+            }
             self.pack_if_linked_inner(store, manuscript_id)?;
             Ok(new_oid)
         })
     }
+
+    /// Start `session/<id>` at the current main tip. A second call while one is active reuses it.
+    pub fn begin_editing_session(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+    ) -> Result<String, String> {
+        self.with_op(|| self.begin_editing_session_inner(store, manuscript_id))
+    }
+
+    /// Set `endedAt` and keep the session ref. Further commits do not start another session
+    /// until [`Self::begin_editing_session`].
+    pub fn end_editing_session(&self, store: &Store, manuscript_id: &str) -> Result<(), String> {
+        self.with_op(|| self.end_editing_session_inner(store, manuscript_id))
+    }
+
+    /// Drop the in-memory session without a commit. Used when storage was replaced and
+    /// writing the ended record would change the restored book.
+    pub fn abandon_editing_session(&self, manuscript_id: &str) -> Result<(), String> {
+        self.with_op(|| {
+            self.human_sessions
+                .lock()
+                .expect("sessions")
+                .remove(manuscript_id);
+            self.autostart
+                .lock()
+                .expect("autostart")
+                .insert(manuscript_id.to_string(), false);
+            Ok(())
+        })
+    }
+
+    pub fn resolve_change(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        change_id: &str,
+    ) -> Result<DraftChangeResolve, String> {
+        let change_id = change_id.trim();
+        if change_id.is_empty() {
+            return Ok(DraftChangeResolve::NotFound {
+                change_id: change_id.to_string(),
+            });
+        }
+        let change_id = change_id.to_string();
+        // Cache check stays under the op lock. The history walk does not: a miss
+        // can scan every commit, and Save must not wait on that.
+        let prep = self.with_op(|| {
+            let dir = self.ensure_open_inner(store, manuscript_id)?;
+            let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+            let key = changes::tip_cache_key(&repo).map_err(|e| e.to_string())?;
+            if key.is_empty() {
+                return Ok(ResolvePrep::Cached(DraftChangeResolve::NotFound {
+                    change_id: change_id.clone(),
+                }));
+            }
+            let cache = self.resolve_cache.lock().expect("resolve cache");
+            if let Some((cached_key, found)) = cache.get(manuscript_id) {
+                if cached_key == &key {
+                    let hit = found.get(&change_id).cloned().unwrap_or_else(|| {
+                        DraftChangeResolve::NotFound {
+                            change_id: change_id.clone(),
+                        }
+                    });
+                    return Ok(ResolvePrep::Cached(hit));
+                }
+            }
+            Ok(ResolvePrep::Walk { dir, key })
+        })?;
+        match prep {
+            ResolvePrep::Cached(hit) => Ok(hit),
+            ResolvePrep::Walk { dir, key } => {
+                let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+                let found = changes::resolve_all(&repo).map_err(|e| e.to_string())?;
+                let result = found.get(&change_id).cloned().unwrap_or_else(|| {
+                    DraftChangeResolve::NotFound {
+                        change_id: change_id.clone(),
+                    }
+                });
+                self.resolve_cache
+                    .lock()
+                    .expect("resolve cache")
+                    .insert(manuscript_id.to_string(), (key, found));
+                Ok(result)
+            }
+        }
+    }
+}
+
+enum ResolvePrep {
+    Cached(DraftChangeResolve),
+    Walk { dir: PathBuf, key: String },
 }
 
 fn copy_bare_to_working(bare: &Path, work: &Path) -> Result<(), std::io::Error> {
@@ -645,7 +818,139 @@ fn new_bot_session_id() -> String {
     format!("s{}", crate::manuscripts::new_id())
 }
 
+fn message_with_session(message: &str, session_id: Option<&str>) -> String {
+    let Some(id) = session_id else {
+        return message.to_string();
+    };
+    if message_trailers(message)
+        .iter()
+        .any(|(key, _)| key == "Session")
+    {
+        return message.to_string();
+    }
+    append_trailers(message, &[("Session", id)])
+}
+
 impl DraftService {
+    fn active_record(&self, manuscript_id: &str) -> Option<SessionRecord> {
+        self.human_sessions
+            .lock()
+            .expect("sessions")
+            .get(manuscript_id)
+            .cloned()
+    }
+
+    fn autostart_enabled(&self, manuscript_id: &str) -> bool {
+        self.autostart
+            .lock()
+            .expect("autostart")
+            .get(manuscript_id)
+            .copied()
+            .unwrap_or(true)
+    }
+
+    fn session_for_commit(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+    ) -> Result<Option<SessionRecord>, String> {
+        if let Some(record) = self.active_record(manuscript_id) {
+            return Ok(Some(record));
+        }
+        if !self.autostart_enabled(manuscript_id) {
+            return Ok(None);
+        }
+        self.begin_editing_session_inner(store, manuscript_id)?;
+        Ok(self.active_record(manuscript_id))
+    }
+
+    fn begin_editing_session_inner(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+    ) -> Result<String, String> {
+        self.autostart
+            .lock()
+            .expect("autostart")
+            .insert(manuscript_id.to_string(), true);
+        if let Some(existing) = self.active_record(manuscript_id) {
+            return Ok(existing.id);
+        }
+        let dir = self.ensure_open_inner(store, manuscript_id)?;
+        let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+        let base = repo.head_oid().map_err(|e| e.to_string())?;
+        let id = crate::manuscripts::new_id();
+        let record = SessionRecord {
+            id: id.clone(),
+            author_name: author_name(store),
+            started_at: store
+                .now()
+                .unwrap_or_else(|_| "1970-01-01T00:00:00.000Z".into()),
+            base_commit: base.clone(),
+            ended_at: None,
+        };
+        sessions::write_session_file(&dir, &record).map_err(|e| e.to_string())?;
+        if let Some(oid) = &base {
+            repo.point_branch(&format!("session/{id}"), oid)
+                .map_err(|e| e.to_string())?;
+        }
+        self.human_sessions
+            .lock()
+            .expect("sessions")
+            .insert(manuscript_id.to_string(), record);
+        Ok(id)
+    }
+
+    fn end_editing_session_inner(&self, store: &Store, manuscript_id: &str) -> Result<(), String> {
+        let Some(mut record) = self.active_record(manuscript_id) else {
+            self.autostart
+                .lock()
+                .expect("autostart")
+                .insert(manuscript_id.to_string(), false);
+            return Ok(());
+        };
+        let prior_ended = record.ended_at.clone();
+        record.ended_at = Some(
+            store
+                .now()
+                .unwrap_or_else(|_| "1970-01-01T00:00:00.000Z".into()),
+        );
+        self.human_sessions
+            .lock()
+            .expect("sessions")
+            .insert(manuscript_id.to_string(), record);
+        match self.commit_now_inner(
+            store,
+            manuscript_id,
+            "Saved",
+            &author_name(store),
+            "author@swarmdraft.local",
+            false,
+        ) {
+            Ok(_) => {
+                self.human_sessions
+                    .lock()
+                    .expect("sessions")
+                    .remove(manuscript_id);
+                self.autostart
+                    .lock()
+                    .expect("autostart")
+                    .insert(manuscript_id.to_string(), false);
+                Ok(())
+            }
+            Err(err) => {
+                if let Some(mut current) = self.active_record(manuscript_id) {
+                    current.ended_at = prior_ended;
+                    self.human_sessions
+                        .lock()
+                        .expect("sessions")
+                        .insert(manuscript_id.to_string(), current);
+                }
+                Err(err)
+            }
+        }
+    }
+
     fn ensure_bot_session_inner(
         &self,
         store: &Store,

@@ -7,7 +7,13 @@ import ManuscriptEditor from '../ManuscriptEditor.vue';
 import ContextMenu from './ContextMenu.vue';
 import type { ContextMenuAction } from './context-menu';
 import { SAMPLE_DOC } from '../fixtures/sample';
-import { loadTracking, PROFILE_KEY, TRACK_PROMPT_SEEN_KEY, TRACKING_KEY } from '../settings/prefs';
+import {
+  loadProfile,
+  loadTracking,
+  PROFILE_KEY,
+  TRACK_PROMPT_SEEN_KEY,
+  TRACKING_KEY,
+} from '../settings/prefs';
 import { REVIEW_SHORTCUTS } from '../review/review-state';
 import { SHORTCUTS } from '../toolbar/toolbar';
 import { MANUSCRIPT_SHORTCUTS } from './app-shortcuts';
@@ -118,6 +124,52 @@ describe('Find & replace (#53)', () => {
     expect(w.find('[data-test="find-count"]').text()).toMatch(/of \d+|No matches/);
     await w.find('[data-test="find-close"]').trigger('click');
     w.unmount();
+  });
+
+  it('throttles the match announcement while typing and announces navigation immediately', async () => {
+    const { w } = await mounted();
+    await w.find('[data-test="tb-find"]').trigger('click');
+    vi.useFakeTimers();
+    try {
+      const input = w.get('[data-test="find-input"]');
+      const live = () => w.get('[data-test="find-count-live"]').text().trim();
+      const visible = () => w.get('[data-test="find-count"]').text().trim();
+
+      await input.setValue('t');
+      await input.setValue('th');
+      await input.setValue('the');
+      expect(visible()).toMatch(/\d+ of \d+/);
+      expect(live()).toBe('');
+      await vi.advanceTimersByTimeAsync(349);
+      expect(live()).toBe('');
+      await vi.advanceTimersByTimeAsync(1);
+      expect(live()).toBe(visible());
+
+      await input.setValue('rain');
+      expect(visible()).toMatch(/1 of 1/);
+      expect(live()).not.toBe(visible());
+      await input.trigger('keydown', { key: 'Enter' });
+      expect(live()).toBe(visible());
+
+      await input.setValue('the');
+      expect(live()).not.toBe(visible());
+      await w.get('[data-test="find-next"]').trigger('click');
+      expect(live()).toBe(visible());
+
+      await w.get('[data-test="find-prev"]').trigger('click');
+      expect(live()).toBe(visible());
+
+      await input.setValue('rain');
+      await w.get('[data-test="replace-input"]').setValue('mist');
+      const beforeReplace = live();
+      await w.get('[data-test="replace-one"]').trigger('click');
+      await flushPromises();
+      expect(live()).toBe(visible());
+      expect(live()).not.toBe(beforeReplace);
+    } finally {
+      vi.useRealTimers();
+      w.unmount();
+    }
   });
 });
 
@@ -286,6 +338,194 @@ describe('UI shells (Part of #36)', () => {
     );
     w.unmount();
   });
+
+  it('toggles track changes with Ctrl+Shift+E and lists it on the sheet', async () => {
+    localStorage.removeItem(TRACKING_KEY);
+    localStorage.removeItem(TRACK_PROMPT_SEEN_KEY);
+    localStorage.removeItem(PROFILE_KEY);
+    const { w } = await mounted();
+    const toggle = w.get('[data-test="track-changes-toggle"]');
+    expect(toggle.attributes('aria-pressed')).toBe('false');
+    expect(toggle.attributes('aria-keyshortcuts')).toBe('Control+Shift+E');
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'e', ctrlKey: true, shiftKey: true, bubbles: true }),
+    );
+    await flushPromises();
+    expect(toggle.attributes('aria-pressed')).toBe('true');
+    expect(loadTracking()).toBe(true);
+
+    await w.find('[data-test="shortcuts-open"]').trigger('click');
+    const sheet = w.get('[data-test="shortcuts-sheet"]');
+    expect(sheet.text()).toContain('Track changes');
+    expect(sheet.text()).toContain('Ctrl');
+    expect(sheet.text()).toContain('E');
+    await sheet.trigger('keydown', { key: 'e', ctrlKey: true, shiftKey: true });
+    expect(toggle.attributes('aria-pressed')).toBe('true');
+    await sheet.trigger('keydown', { key: 'Escape' });
+
+    await w.find('[data-test="tb-find"]').trigger('click');
+    w.get('[data-test="find-input"]').element.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'e', ctrlKey: true, shiftKey: true, bubbles: true }),
+    );
+    await flushPromises();
+    expect(toggle.attributes('aria-pressed')).toBe('true');
+
+    w.unmount();
+    localStorage.removeItem(TRACKING_KEY);
+    localStorage.removeItem(TRACK_PROMPT_SEEN_KEY);
+    localStorage.removeItem(PROFILE_KEY);
+  });
+
+  it('toggles track changes once from the lead when another section is mounted', async () => {
+    localStorage.removeItem(TRACKING_KEY);
+    localStorage.removeItem(TRACK_PROMPT_SEEN_KEY);
+    localStorage.removeItem(PROFILE_KEY);
+    const lead = mount(ManuscriptEditor, {
+      props: { doc: docToYDoc(SAMPLE_DOC as never), computerName: 'Rowan Vale' },
+      attachTo: document.body,
+    });
+    const slice = mount(ManuscriptEditor, {
+      props: { doc: docToYDoc(SAMPLE_DOC as never), sliceMode: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    const toggle = lead.get('[data-test="track-changes-toggle"]');
+    expect(toggle.attributes('aria-pressed')).toBe('false');
+    expect(slice.find('[data-test="track-changes-toggle"]').exists()).toBe(false);
+
+    const chord = (target: EventTarget, repeat = false) => {
+      target.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'e',
+          ctrlKey: true,
+          shiftKey: true,
+          bubbles: true,
+          repeat,
+        }),
+      );
+    };
+
+    chord(slice.get('.tiptap').element);
+    await flushPromises();
+    // Caret in the other section still toggles the lead, once, so the toolbar and the
+    // saved preference stay together. A second editor must not flip them back.
+    expect(toggle.attributes('aria-pressed')).toBe(String(loadTracking()));
+    expect(loadTracking()).toBe(true);
+    expect(lead.find('[data-test="name-prompt"]').exists()).toBe(true);
+    expect(slice.find('[data-test="name-prompt"]').exists()).toBe(false);
+
+    const sliceEditor = (
+      slice.get('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+    ).editor;
+    sliceEditor.view.dispatch(
+      sliceEditor.state.tr.insertText('!', sliceEditor.state.doc.content.size - 1),
+    );
+    await flushPromises();
+    expect(
+      listSuggestions(sliceEditor.getJSON() as never).some(
+        (item) =>
+          item.kind === 'suggestion_insert' && item.text === '!' && item.author === 'Rowan Vale',
+      ),
+    ).toBe(true);
+
+    chord(slice.get('.tiptap').element, true);
+    await flushPromises();
+    expect(toggle.attributes('aria-pressed')).toBe('true');
+    expect(loadTracking()).toBe(true);
+    expect(
+      listSuggestions(sliceEditor.getJSON() as never).some(
+        (item) => item.kind === 'suggestion_insert' && item.text === '!',
+      ),
+    ).toBe(true);
+
+    chord(toggle.element);
+    await flushPromises();
+    expect(toggle.attributes('aria-pressed')).toBe('false');
+    expect(loadTracking()).toBe(false);
+
+    chord(toggle.element);
+    await flushPromises();
+    expect(toggle.attributes('aria-pressed')).toBe('true');
+    expect(loadTracking()).toBe(true);
+    await lead.get('[data-test="name-prompt-ok"]').trigger('click');
+
+    await slice.setProps({ sliceMode: false });
+    await lead.setProps({ sliceMode: true });
+    await flushPromises();
+    expect(slice.find('[data-test="name-prompt"]').exists()).toBe(false);
+    expect(document.querySelectorAll('[data-test="name-prompt"]').length).toBe(0);
+    expect(slice.get('[data-test="track-changes-toggle"]').attributes('aria-pressed')).toBe(
+      String(loadTracking()),
+    );
+
+    lead.unmount();
+    slice.unmount();
+    localStorage.removeItem(TRACKING_KEY);
+    localStorage.removeItem(TRACK_PROMPT_SEEN_KEY);
+    localStorage.removeItem(PROFILE_KEY);
+  });
+
+  it('uses the saved name for a new slice insert after the lead reloads the profile', async () => {
+    localStorage.removeItem(TRACKING_KEY);
+    localStorage.removeItem(TRACK_PROMPT_SEEN_KEY);
+    localStorage.removeItem(PROFILE_KEY);
+    const lead = mount(ManuscriptEditor, {
+      props: { doc: docToYDoc(SAMPLE_DOC as never), computerName: 'Rowan Vale' },
+      attachTo: document.body,
+    });
+    const slice = mount(ManuscriptEditor, {
+      props: { doc: docToYDoc(SAMPLE_DOC as never), sliceMode: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    await lead.get('[data-test="track-changes-toggle"]').trigger('click');
+    await lead.get('[data-test="name-prompt-change"]').trigger('click');
+    await lead.get('[data-test="settings-name"]').setValue('Sample Writer');
+    await lead.get('[data-test="settings-save"]').trigger('click');
+    await flushPromises();
+    expect(loadProfile().name).toBe('Sample Writer');
+    await lead.get('[data-test="settings-cancel"]').trigger('click');
+    await flushPromises();
+
+    const sliceEditor = (
+      slice.get('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+    ).editor;
+    sliceEditor.view.dispatch(
+      sliceEditor.state.tr.insertText('?', sliceEditor.state.doc.content.size - 1),
+    );
+    await flushPromises();
+    expect(
+      listSuggestions(sliceEditor.getJSON() as never).some(
+        (item) =>
+          item.kind === 'suggestion_insert' && item.text === '?' && item.author === 'Sample Writer',
+      ),
+    ).toBe(true);
+
+    lead.unmount();
+    slice.unmount();
+    localStorage.removeItem(TRACKING_KEY);
+    localStorage.removeItem(TRACK_PROMPT_SEEN_KEY);
+    localStorage.removeItem(PROFILE_KEY);
+  });
+
+  it('keeps merge with previous visible when it cannot run', async () => {
+    const ydoc = docToYDoc(SAMPLE_DOC as never);
+    const w = mount(ManuscriptEditor, {
+      props: { doc: ydoc, chapterOpsEnabled: true, canMergePrevChapter: false },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    await openContextMenu(w);
+    const item = w.get('[data-test="ctx-merge_prev_chapter"]');
+    expect(item.isVisible()).toBe(true);
+    expect(item.attributes('aria-disabled')).toBe('true');
+    expect(item.attributes('aria-describedby')).toBe('ctx-reason-merge_prev_chapter');
+    expect(item.text()).toContain('Merge with previous chapter');
+    expect(item.text()).toContain('No previous chapter');
+    await item.trigger('click');
+    expect(w.emitted('merge-prev-chapter')).toBeUndefined();
+    w.unmount();
+  });
 });
 
 describe('ContextMenu theme (#54)', () => {
@@ -343,6 +583,26 @@ describe('ContextMenu theme (#54)', () => {
     });
     expect(w.get('[data-test="ctx-cut"]').attributes('aria-disabled')).toBe('true');
     expect(w.get('[data-test="ctx-copy"]').attributes('aria-disabled')).toBeUndefined();
+    w.unmount();
+  });
+
+  it('keeps Merge with previous chapter in the menu when disabled and exposes the reason', () => {
+    const w = mount(ContextMenu, {
+      props: {
+        x: 8,
+        y: 8,
+        showChapterGroup: true,
+        mergePrevTitle: 'Read-only',
+        disabled: new Set<ContextMenuAction>(['merge_prev_chapter']),
+      },
+      attachTo: document.body,
+    });
+    const item = w.get('[data-test="ctx-merge_prev_chapter"]');
+    expect(item.isVisible()).toBe(true);
+    expect(item.attributes('aria-disabled')).toBe('true');
+    expect(item.attributes('aria-describedby')).toBe('ctx-reason-merge_prev_chapter');
+    expect(item.text()).toContain('Merge with previous chapter');
+    expect(w.get('#ctx-reason-merge_prev_chapter').text()).toBe('Read-only');
     w.unmount();
   });
 });

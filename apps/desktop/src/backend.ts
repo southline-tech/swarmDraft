@@ -467,9 +467,10 @@ export async function draftSave(manuscriptId: string, message?: string): Promise
 export async function draftCheckpoint(
   manuscriptId: string,
   message: string,
+  immediate = false,
 ): Promise<string | null> {
   if (!isTauri()) return null;
-  return invoke<string | null>('draft_checkpoint', { manuscriptId, message });
+  return invoke<string | null>('draft_checkpoint', { manuscriptId, message, immediate });
 }
 
 export async function draftHistory(
@@ -492,9 +493,53 @@ export async function draftReviewCommit(args: {
   botName: string;
   chapterTitle: string;
   botAgentId?: string;
+  suggestionId: string;
+  kind: string;
+  sectionId: string;
 }): Promise<string | null> {
   if (!isTauri()) return null;
   return invoke<string | null>('draft_review_commit', args);
+}
+
+export async function draftBeginSession(manuscriptId: string): Promise<string | null> {
+  if (!isTauri()) return null;
+  return invoke<string>('draft_begin_session', { manuscriptId });
+}
+
+export async function draftEndSession(manuscriptId: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('draft_end_session', { manuscriptId });
+}
+
+/** Drop the open editing session without writing, after storage was replaced. */
+export async function draftAbandonSession(manuscriptId: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('draft_abandon_session', { manuscriptId });
+}
+
+export type DraftChangeResolve =
+  | {
+      result: 'found';
+      changeId: string;
+      status: string;
+      sectionId: string;
+      introducedCommit: string;
+      introducedAt: number;
+      introducedRef: string;
+      decidedCommit: string | null;
+      decidedAt: number | null;
+      decision: string | null;
+      sessionId: string | null;
+      presentInHead: boolean;
+    }
+  | { result: 'notFound'; changeId: string };
+
+export async function draftResolveChange(
+  manuscriptId: string,
+  changeId: string,
+): Promise<DraftChangeResolve | null> {
+  if (!isTauri()) return null;
+  return invoke<DraftChangeResolve>('draft_resolve_change', { manuscriptId, changeId });
 }
 
 /** Open comments and saved agent names for the active section's review sidebar (#47). */

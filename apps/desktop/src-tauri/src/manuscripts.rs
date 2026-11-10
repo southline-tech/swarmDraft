@@ -1163,6 +1163,83 @@ impl Store {
         })
     }
 
+    /// Every comment row for a manuscript, including resolved threads, oldest first.
+    pub fn comments_for_manuscript(
+        &self,
+        manuscript_id: &str,
+    ) -> Result<Vec<Comment>, StorageError> {
+        self.with_conn(|c| {
+            let mut st = c.prepare(&format!(
+                "SELECT {COMMENT_COLS} FROM comments WHERE manuscript_id = ?1
+                 ORDER BY created_at, id"
+            ))?;
+            let rows = st
+                .query_map([manuscript_id], row_comment)?
+                .collect::<Result<_, _>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Every suggestion index row for a manuscript, ordered by id.
+    pub fn suggestions_for_manuscript(
+        &self,
+        manuscript_id: &str,
+    ) -> Result<Vec<Suggestion>, StorageError> {
+        self.with_conn(|c| {
+            let mut st = c.prepare(&format!(
+                "SELECT {SUGGESTION_COLS} FROM suggestions WHERE manuscript_id = ?1 ORDER BY id"
+            ))?;
+            let rows = st
+                .query_map([manuscript_id], row_suggestion)?
+                .collect::<Result<_, _>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Insert a comment when its id is not already stored. Existing rows are left as they are.
+    pub fn insert_comment_if_missing(
+        &self,
+        manuscript_id: &str,
+        c: &Comment,
+    ) -> Result<bool, StorageError> {
+        if c.author.kind != "human" && c.author.kind != "agent" {
+            return Err(StorageError::Invalid("bad author kind".into()));
+        }
+        if c.id.is_empty() || c.body.is_empty() {
+            return Err(StorageError::Invalid("empty comment field".into()));
+        }
+        self.with_conn(|conn| {
+            let exists: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM comments WHERE id = ?1",
+                [&c.id],
+                |r| r.get(0),
+            )?;
+            if exists > 0 {
+                return Ok(false);
+            }
+            conn.execute(
+                "INSERT INTO comments (id, manuscript_id, section_id, block_id, quote, body, thread_id,
+                   author_kind, author_id, author_name, created_at, resolved_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                params![
+                    c.id,
+                    manuscript_id,
+                    c.section_id,
+                    c.block_id,
+                    c.quote,
+                    c.body,
+                    c.thread_id,
+                    c.author.kind,
+                    c.author.id,
+                    c.author.name,
+                    c.created_at,
+                    c.resolved_at
+                ],
+            )?;
+            Ok(true)
+        })
+    }
+
     /// Every unresolved comment in a manuscript, for building a .docx copy (#74).
     pub fn open_comments_for_manuscript(
         &self,

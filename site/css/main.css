@@ -553,29 +553,6 @@ a:hover {
   background: var(--ct-surface);
 }
 
-.footer-link-btn {
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--ct-text-muted);
-  font: inherit;
-  font-size: inherit;
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.footer-link-btn:hover,
-.footer-link-btn:focus-visible {
-  color: var(--ct-accent);
-  text-decoration: underline;
-}
-
-.footer-link-btn:focus-visible {
-  outline: var(--ct-focus-outline);
-  outline-offset: var(--ct-focus-offset);
-  border-radius: var(--ct-radius-sm);
-}
-
 .feedback-dialog {
   z-index: var(--ct-z-modal);
   margin: auto;
@@ -640,6 +617,10 @@ a:hover {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
+  /* The inset is the covered band. Margin lifts the whole card; max-height caps it
+     to the visual viewport. The dialog's transform stays the open scale animation. */
+  margin-bottom: var(--feedback-keyboard-inset, 0px);
+  max-height: calc(100vh - var(--feedback-keyboard-inset, 0px));
   padding: var(--ct-space-6);
   padding-bottom: calc(var(--ct-space-6) + env(safe-area-inset-bottom, 0px));
   background: var(--ct-surface);
@@ -817,7 +798,8 @@ a:hover {
 
   .feedback-dialog__card {
     border-radius: var(--ct-radius-lg) var(--ct-radius-lg) 0 0;
-    max-height: 92vh;
+    margin-bottom: var(--feedback-keyboard-inset, 0px);
+    max-height: min(92vh, calc(100vh - var(--feedback-keyboard-inset, 0px)));
     overflow: auto;
   }
 

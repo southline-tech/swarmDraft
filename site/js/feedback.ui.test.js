@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -355,5 +357,168 @@ describe('landing feedback modal', () => {
       /\.feedback-dialog__card\s*\{[\s\S]*?border-radius:\s*var\(--ct-radius-lg\)/,
     );
     expect(css).toMatch(/\.feedback-dialog::backdrop\s*\{[\s\S]*?--ct-scrim/);
+    expect(css).toMatch(/\.feedback-actions\s*\{[^}]*bottom:\s*0;/);
+    expect(css).not.toMatch(/\.feedback-actions\s*\{[^}]*bottom:\s*var\(--feedback-keyboard-inset/);
+    expect(css).toMatch(
+      /\.feedback-dialog__card\s*\{[^}]*margin-bottom:\s*var\(--feedback-keyboard-inset,\s*0px\)/,
+    );
+    expect(css).toMatch(
+      /max-height:\s*min\(92vh,\s*calc\(100vh - var\(--feedback-keyboard-inset,\s*0px\)\)\)/,
+    );
+    expect(css).not.toMatch(/padding-bottom:[\s\S]{0,240}--feedback-keyboard-inset/);
+    expect(css).not.toMatch(/\.footer-link-btn/);
+  });
+
+  it('lifts the send row by the keyboard inset when the visual viewport shrinks', () => {
+    const listeners = {};
+    const viewport = {
+      height: 320,
+      offsetTop: 0,
+      addEventListener(type, fn) {
+        listeners[type] = fn;
+      },
+      removeEventListener(type, fn) {
+        if (listeners[type] === fn) delete listeners[type];
+      },
+    };
+    vi.stubGlobal('visualViewport', viewport);
+    window.innerHeight = 800;
+    const root = buildFeedbackDom({ withCss: true });
+    initFeedback(root);
+    root.querySelector('#feedback').click();
+    const card = root.querySelector('.feedback-dialog__card');
+    const actions = card.querySelector('.feedback-actions');
+    expect(card.style.getPropertyValue('--feedback-keyboard-inset')).toBe('480px');
+    expect(getComputedStyle(actions).bottom).toBe('0px');
+    expect(getComputedStyle(card).marginBottom).toBe('480px');
+    expect(getComputedStyle(card).paddingBottom.includes('480')).toBe(false);
+    viewport.height = 800;
+    listeners.resize();
+    expect(card.style.getPropertyValue('--feedback-keyboard-inset')).toBe('0px');
+    expect(getComputedStyle(actions).bottom).toBe('0px');
+    expect(getComputedStyle(card).marginBottom).toBe('0px');
+    root.querySelector('[data-feedback-close]').click();
+    expect(card.style.getPropertyValue('--feedback-keyboard-inset')).toBe('');
+    expect(listeners.resize).toBeUndefined();
+
+    const laidOut = measureFeedbackSheetInChrome();
+    const open = laidOut.withKeyboard;
+    expect(open.innerWidth).toBeLessThanOrEqual(640);
+    expect(Math.abs(open.card.bottom - open.vvBottom)).toBeLessThanOrEqual(1);
+    expect(open.actions.top).toBeGreaterThanOrEqual(open.vvTop - 1);
+    expect(open.actions.bottom).toBeLessThanOrEqual(open.vvBottom + 1);
+    expect(open.actions.bottom).toBeLessThanOrEqual(open.card.bottom + 1);
+    const messageFits =
+      open.message.top >= open.card.top - 1 && open.message.bottom <= open.actions.top + 1;
+    const messageScrollsIntoGap =
+      open.scrollHeight > open.clientHeight + 1 &&
+      open.message.top < open.actions.top &&
+      open.message.bottom > open.card.top;
+    expect(messageFits || messageScrollsIntoGap).toBe(true);
   });
 });
+
+function chromeBinary() {
+  const candidates = [
+    process.env.CHROME_PATH,
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+  ].filter(Boolean);
+  return candidates.find((path) => existsSync(path)) ?? null;
+}
+
+/** Phone-sheet boxes from real Chrome. happy-dom's getBoundingClientRect is a zero stub. */
+function measureFeedbackSheetInChrome() {
+  const chrome = chromeBinary();
+  if (!chrome) throw new Error('Chrome is required to measure the feedback sheet');
+  const dir = dirname(fileURLToPath(import.meta.url));
+  const cssDir = join(dir, '../css');
+  const work = mkdtempSync(join(tmpdir(), 'feedback-sheet-'));
+  const htmlPath = join(work, 'index.html');
+  writeFileSync(
+    htmlPath,
+    `<!doctype html>
+<html><head>
+<link rel="stylesheet" href="file://${cssDir}/tokens.css">
+<link rel="stylesheet" href="file://${cssDir}/main.css">
+</head><body>
+<dialog class="feedback-dialog">
+  <div class="feedback-dialog__card">
+    <h2 class="feedback-dialog__title">Send feedback</h2>
+    <form class="feedback-form">
+      <div class="feedback-field">
+        <label class="feedback-label" for="feedback-description">Your message</label>
+        <textarea class="feedback-input feedback-input--area" id="feedback-description"></textarea>
+      </div>
+      <div class="feedback-field">
+        <label class="feedback-label" for="feedback-email">Email (optional)</label>
+        <input class="feedback-input" id="feedback-email" />
+      </div>
+      <div class="feedback-actions">
+        <button class="btn btn--ghost" type="button">Cancel</button>
+        <button class="btn btn--primary" type="submit">Send feedback</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+<pre id="layout"></pre>
+<script>
+  const dialog = document.querySelector('dialog');
+  dialog.style.transition = 'none';
+  const card = document.querySelector('.feedback-dialog__card');
+  const actions = document.querySelector('.feedback-actions');
+  const message = document.querySelector('#feedback-description');
+  dialog.showModal();
+  const snap = (inset) => {
+    card.style.setProperty('--feedback-keyboard-inset', inset + 'px');
+    const vvTop = 0;
+    const vvBottom = window.innerHeight - inset;
+    const box = (el) => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, height: r.height };
+    };
+    return {
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      vvTop,
+      vvBottom,
+      card: box(card),
+      actions: box(actions),
+      message: box(message),
+      scrollHeight: card.scrollHeight,
+      clientHeight: card.clientHeight,
+    };
+  };
+  const inset = Math.round(window.innerHeight * 0.6);
+  document.getElementById('layout').textContent = JSON.stringify({ withKeyboard: snap(inset) });
+</script>
+</body></html>`,
+  );
+  try {
+    const res = spawnSync(
+      chrome,
+      [
+        '--headless=new',
+        '--disable-gpu',
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        '--force-prefers-reduced-motion',
+        `--user-data-dir=${work}/profile`,
+        '--window-size=390,800',
+        '--dump-dom',
+        `file://${htmlPath}`,
+      ],
+      { encoding: 'utf8' },
+    );
+    if (res.status !== 0) {
+      throw new Error(res.stderr || `chrome exited ${res.status}`);
+    }
+    const match = res.stdout.match(/<pre id="layout">([\s\S]*?)<\/pre>/);
+    if (!match) throw new Error('chrome did not report feedback sheet layout');
+    return JSON.parse(match[1]);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
