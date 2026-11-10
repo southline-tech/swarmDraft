@@ -9,7 +9,9 @@ use serde_json::Value;
 use crate::manuscripts::{ReviewDecisionRecord, Suggestion};
 use crate::storage::{StorageError, Store};
 
-use super::repo::{message_trailers, trailer_value, trailer_values, DraftRepo, DraftRepoError};
+use super::repo::{
+    message_trailers, trailer_value, trailer_values, DraftRepo, DraftRepoError, HistoryCommit,
+};
 use super::sync::{to_pretty, write_stable};
 
 const QUOTE_CHARS: usize = 200;
@@ -432,6 +434,65 @@ struct DecisionHit {
     session_id: Option<String>,
 }
 
+/// Latest `Change-Id` / `Decision` trailers on `commit` replace an older hit.
+fn note_decision_trailers(commit: &HistoryCommit, decided: &mut HashMap<String, DecisionHit>) {
+    let trailers = message_trailers(&commit.message);
+    let session = trailer_value(&trailers, "Session");
+    let decisions = trailer_values(&trailers, "Decision");
+    for (index, id) in trailer_values(&trailers, "Change-Id")
+        .into_iter()
+        .enumerate()
+    {
+        if id.is_empty() {
+            continue;
+        }
+        let decision = decisions
+            .get(index)
+            .or_else(|| decisions.last())
+            .cloned()
+            .unwrap_or_default();
+        let replace = decided
+            .get(&id)
+            .map(|hit| commit.time_unix > hit.at)
+            .unwrap_or(true);
+        if replace {
+            decided.insert(
+                id,
+                DecisionHit {
+                    commit: commit.oid.clone(),
+                    at: commit.time_unix,
+                    decision,
+                    session_id: session.clone(),
+                },
+            );
+        }
+    }
+}
+
+/// Decision commits reachable from a merge parent, stopping at commits this
+/// ref walk has already read. Does not record introductions.
+fn note_decision_chain(
+    repo: &DraftRepo,
+    start: &str,
+    already: &HashSet<String>,
+    decided: &mut HashMap<String, DecisionHit>,
+) -> Result<(), DraftRepoError> {
+    let mut oid = start.to_string();
+    let mut local = HashSet::new();
+    loop {
+        if already.contains(&oid) || !local.insert(oid.clone()) {
+            break;
+        }
+        let commit = repo.history_commit(&oid)?;
+        note_decision_trailers(&commit, decided);
+        let Some(parent) = repo.parent_oid(&oid)? else {
+            break;
+        };
+        oid = parent;
+    }
+    Ok(())
+}
+
 /// Cache key for change lookup. Includes every searched tip so a bot or session
 /// commit invalidates a result that was cached while `main` stayed put.
 pub fn tip_cache_key(repo: &DraftRepo) -> Result<String, DraftRepoError> {
@@ -477,38 +538,18 @@ pub fn resolve_all(
         let mut oid = tip.oid;
         loop {
             let commit = repo.history_commit(&oid)?;
+            note_decision_trailers(&commit, &mut decided);
             let trailers = message_trailers(&commit.message);
             let session = trailer_value(&trailers, "Session");
-            let decisions = trailer_values(&trailers, "Decision");
-            for (index, id) in trailer_values(&trailers, "Change-Id")
-                .into_iter()
-                .enumerate()
-            {
-                if id.is_empty() {
-                    continue;
-                }
-                let decision = decisions
-                    .get(index)
-                    .or_else(|| decisions.last())
-                    .cloned()
-                    .unwrap_or_default();
-                let replace = decided
-                    .get(&id)
-                    .map(|hit| commit.time_unix > hit.at)
-                    .unwrap_or(true);
-                if replace {
-                    decided.insert(
-                        id,
-                        DecisionHit {
-                            commit: commit.oid.clone(),
-                            at: commit.time_unix,
-                            decision,
-                            session_id: session.clone(),
-                        },
-                    );
-                }
+            // First parent is this ref's own history. A merge's other parents are
+            // the bot decision, which is not on main's first-parent chain. Read
+            // those trailers too, and do not mark them seen: the bot ref still
+            // names the introducing commit.
+            let parents = repo.parent_oids(&oid)?;
+            for extra in parents.iter().skip(1) {
+                note_decision_chain(repo, extra, &seen, &mut decided)?;
             }
-            let parent = repo.parent_oid(&oid)?;
+            let parent = parents.into_iter().next();
             let parent_ids = match &parent {
                 Some(parent_oid) => change_id_set(repo, parent_oid, &mut index_cache)?,
                 None => HashSet::new(),

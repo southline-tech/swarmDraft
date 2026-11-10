@@ -3318,6 +3318,281 @@ fn reply_on_the_bot_thread_survives_accept() {
     );
 }
 
+fn agent_comment(id: &str, section_id: &str, body: &str) -> Comment {
+    let mut comment = sample_comment(id, section_id, body);
+    comment.author.kind = "agent".into();
+    comment.author.id = "agent-test-1".into();
+    comment.author.name = "Line Editor".into();
+    comment
+}
+
+fn marks_doc(marks: &[(&str, &str)]) -> serde_json::Value {
+    let content: Vec<_> = marks
+        .iter()
+        .map(|(id, text)| {
+            json!({
+                "type": "text",
+                "text": text,
+                "marks": [{
+                    "type": "suggestion_insert",
+                    "attrs": {"id": id, "author": "agent:agent-test-1", "ts": "t"}
+                }]
+            })
+        })
+        .collect();
+    json!({"type":"doc","content":[{"type":"paragraph","content": content}]})
+}
+
+fn bot_comment_resolved_at(repo: &DraftRepo, comment_id: &str) -> Option<String> {
+    for tip in repo.search_ref_tips().unwrap() {
+        if !tip.name.starts_with("bot/") {
+            continue;
+        }
+        let Some(bytes) = repo
+            .file_bytes(&tip.oid, &format!("comments/{comment_id}.json"))
+            .unwrap()
+        else {
+            continue;
+        };
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let Some(rows) = value.get("rows").and_then(|rows| rows.as_array()) else {
+            continue;
+        };
+        for row in rows {
+            if row.get("id").and_then(|id| id.as_str()) == Some(comment_id) {
+                return row
+                    .get("resolvedAt")
+                    .and_then(|value| value.as_str())
+                    .map(|value| value.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn drop_database(dir: &Path) {
+    for name in ["swarmdraft.db", "swarmdraft.db-wal", "swarmdraft.db-shm"] {
+        let path = dir.join(name);
+        if path.exists() {
+            fs::remove_file(path).unwrap();
+        }
+    }
+}
+
+/// Resolving a bot comment has to land on the bot branch. Main omits that file,
+/// so a rebuild otherwise restores the comment still open.
+#[test]
+fn resolving_a_bot_comment_stays_resolved_after_reopen() {
+    let (dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "bot-resolve.draft");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap()
+    .expect("baseline");
+    let comment = agent_comment("c-bot", &chapter.id, "Bot note.");
+    store.insert_comment(&m.id, &comment).unwrap();
+    svc.commit_bot_suggestion(&store, &m.id, "agent-test-1", "Line Editor", "Bot comment")
+        .unwrap()
+        .expect("bot comment");
+    store
+        .set_comment_thread_resolved(&m.id, &chapter.id, "c-bot", true)
+        .unwrap();
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Resolved comment",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap();
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    assert!(
+        bot_comment_resolved_at(&repo, "c-bot").is_some(),
+        "the resolve never reached the bot branch"
+    );
+    let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
+    let data = dir.path().to_path_buf();
+    drop(repo);
+    drop(svc);
+    drop(store);
+    drop_database(&data);
+    let store = Store::open(&data).unwrap();
+    let svc = DraftService::new(data, "0.2.1".into());
+    let opened = svc
+        .open_draft_path(&store, &draft_path, true)
+        .unwrap()
+        .unwrap();
+    let comment = store
+        .comments_for_manuscript(&opened.manuscript_id)
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id == "c-bot")
+        .expect("bot comment");
+    assert!(
+        comment.resolved_at.is_some(),
+        "reopen showed the resolved bot comment as open"
+    );
+}
+
+/// A reject writes `resolvedAt` on the bot branch. A reply that reopens the thread
+/// has to clear it there before the other suggestion is decided, or a rebuild
+/// shows the comment resolved again.
+#[test]
+fn reply_after_one_reject_reopens_the_bot_comment() {
+    let (dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "bot-reopen-reply.draft");
+    set_chapter_plain(&store, &chapter.doc_id, "chapter start");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap()
+    .expect("baseline");
+
+    let doc = store.load_doc(&chapter.doc_id).unwrap();
+    let since = state_vector(&doc);
+    content::encode(&doc, &marks_doc(&[("chg-a", "first")])).unwrap();
+    let update_a = doc_update_since(&doc, &since);
+    let comment_a = agent_comment("c-a", &chapter.id, "Comment on the first.");
+    let doc_id = chapter.doc_id.clone();
+    svc.record_bot_write(
+        &store,
+        &m.id,
+        BotRetention {
+            comment: Some(comment_a.clone()),
+            doc_id: Some(doc_id.clone()),
+            doc_update: Some(update_a.clone()),
+        },
+        || {
+            store
+                .insert_comment(&m.id, &comment_a)
+                .map_err(|e| e.to_string())?;
+            store
+                .append_doc_update(&doc_id, &update_a)
+                .map_err(|e| e.to_string())?;
+            Ok::<(), String>(())
+        },
+    )
+    .unwrap();
+
+    let doc = store.load_doc(&chapter.doc_id).unwrap();
+    let since = state_vector(&doc);
+    content::encode(&doc, &marks_doc(&[("chg-a", "first"), ("chg-b", "second")])).unwrap();
+    let update_b = doc_update_since(&doc, &since);
+    let comment_b = agent_comment("c-b", &chapter.id, "Comment on the second.");
+    svc.record_bot_write(
+        &store,
+        &m.id,
+        BotRetention {
+            comment: Some(comment_b.clone()),
+            doc_id: Some(doc_id.clone()),
+            doc_update: Some(update_b.clone()),
+        },
+        || {
+            store
+                .insert_comment(&m.id, &comment_b)
+                .map_err(|e| e.to_string())?;
+            store
+                .append_doc_update(&doc_id, &update_b)
+                .map_err(|e| e.to_string())?;
+            Ok::<(), String>(())
+        },
+    )
+    .unwrap();
+    svc.commit_bot_suggestion(&store, &m.id, "agent-test-1", "Line Editor", "Bot comments")
+        .unwrap()
+        .expect("bot comments");
+    svc.commit_review_decision(
+        &store,
+        &m.id,
+        false,
+        "Line Editor",
+        &chapter.title,
+        "author",
+        Some("agent-test-1"),
+        Some("chg-a"),
+        Some("suggestion_insert"),
+        Some(&chapter.id),
+    )
+    .unwrap();
+    assert!(svc
+        .bot_branch_exists(&store, &m.id, "agent-test-1", "Line Editor")
+        .unwrap());
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    assert!(
+        bot_comment_resolved_at(&repo, "c-a").is_some(),
+        "reject did not record resolvedAt on the bot branch"
+    );
+    drop(repo);
+    store
+        .human_comment_reply(
+            &m.id,
+            &chapter.id,
+            "c-a",
+            "Writer reply.",
+            "Author",
+            "local",
+        )
+        .unwrap();
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Reopened comment",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap()
+    .expect("reply commit");
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    assert!(
+        bot_comment_resolved_at(&repo, "c-a").is_none(),
+        "the reply left the bot comment resolved"
+    );
+    let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
+    let data = dir.path().to_path_buf();
+    drop(repo);
+    drop(svc);
+    drop(store);
+    drop_database(&data);
+    let store = Store::open(&data).unwrap();
+    let svc = DraftService::new(data, "0.2.1".into());
+    let opened = svc
+        .open_draft_path(&store, &draft_path, true)
+        .unwrap()
+        .unwrap();
+    let comments = store
+        .comments_for_manuscript(&opened.manuscript_id)
+        .unwrap();
+    let reopened = comments
+        .iter()
+        .find(|row| row.id == "c-a")
+        .expect("bot comment");
+    assert!(
+        reopened.resolved_at.is_none(),
+        "reopen showed the replied thread resolved"
+    );
+    assert!(comments.iter().any(|row| row.body == "Writer reply."));
+    assert!(comments
+        .iter()
+        .any(|row| row.id == "c-b" && row.resolved_at.is_none()));
+}
+
 fn bot_history_contains(repo: &DraftRepo, path: &str, needle: &str) -> bool {
     for tip in repo.search_ref_tips().unwrap() {
         if !tip.name.starts_with("bot/") {

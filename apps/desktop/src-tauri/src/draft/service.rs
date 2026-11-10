@@ -376,15 +376,101 @@ impl DraftService {
         // A checkpoint must not be the first thing that touches a suggestion.
         // The bot branch commit happens first, then main records the live text.
         self.flush_pending_bot_suggestions(store, manuscript_id)?;
+        let oid = self.commit_synced_main(
+            store,
+            manuscript_id,
+            &dir,
+            message,
+            committer_name,
+            committer_email,
+            allow_empty,
+        )?;
+        // A resolve or a reply updates SQLite, then this commit. The bot comment
+        // stays off main, so the same save has to write `resolvedAt` on the bot branch
+        // or a rebuild puts the old value back.
+        self.record_comment_state_on_open_bot_branches(store, manuscript_id, &dir)?;
+        self.pack_if_linked_inner(store, manuscript_id)?;
+        Ok(oid)
+    }
+
+    /// Copy live `resolvedAt` for this bot's comments onto each open `bot/*` tip.
+    /// An unchanged thread does not add a commit.
+    fn record_comment_state_on_open_bot_branches(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        dir: &Path,
+    ) -> Result<(), String> {
+        let repo = DraftRepo::open_working(dir).map_err(|e| e.to_string())?;
+        let Some(main) = repo.head_oid().map_err(|e| e.to_string())? else {
+            return Ok(());
+        };
+        let tips = repo.search_ref_tips().map_err(|e| e.to_string())?;
+        for tip in tips {
+            if !tip.name.starts_with("bot/") {
+                continue;
+            }
+            let Some(base) = repo
+                .merge_base(&tip.oid, &main)
+                .map_err(|e| e.to_string())?
+            else {
+                continue;
+            };
+            if base == tip.oid {
+                continue;
+            }
+            let authors = agent_authors_on_tip(&repo, &tip.oid)?;
+            for (bot_id, bot_name) in authors {
+                let owned =
+                    refreshed_bot_comment_files(&repo, &tip.oid, store, manuscript_id, &bot_id)?;
+                if owned.is_empty() {
+                    continue;
+                }
+                let files: Vec<(&str, Option<&[u8]>)> = owned
+                    .iter()
+                    .map(|(path, bytes)| (path.as_str(), Some(bytes.as_slice())))
+                    .collect();
+                let name = if bot_name.trim().is_empty() {
+                    "Bot"
+                } else {
+                    bot_name.as_str()
+                };
+                repo.commit_files_on_branch(
+                    &tip.name,
+                    "Updated comment",
+                    name,
+                    &bot_committer_email(&bot_id),
+                    &files,
+                    false,
+                )
+                .map_err(|e| format!("comment on bot branch: {e}"))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Commit the worktree already synced for `main`. Does not flush bot suggestions:
+    /// that calls back into branch creation, and an unborn `main` has to be born first.
+    #[allow(clippy::too_many_arguments)]
+    fn commit_synced_main(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        dir: &Path,
+        message: &str,
+        committer_name: &str,
+        committer_email: &str,
+        allow_empty: bool,
+    ) -> Result<Option<String>, String> {
         let session = self.session_for_commit(store, manuscript_id)?;
         // Held across the read of pending bot writes and the file sync. A bot write
         // waits, then lands in SQLite after this checkpoint's files are already written.
-        self.sync_main_worktree(store, manuscript_id, &dir)?;
+        self.sync_main_worktree(store, manuscript_id, dir)?;
         if let Some(record) = &session {
-            sessions::write_session_file(&dir, record).map_err(|e| format!("session: {e}"))?;
+            sessions::write_session_file(dir, record).map_err(|e| format!("session: {e}"))?;
         }
         let message = message_with_session(message, session.as_ref().map(|s| s.id.as_str()));
-        let repo = DraftRepo::open_working(&dir).map_err(|e| format!("open_working: {e}"))?;
+        let repo = DraftRepo::open_working(dir).map_err(|e| format!("open_working: {e}"))?;
         let options = CommitOptions {
             allow_empty,
             advance_branch: session.as_ref().map(|s| format!("session/{}", s.id)),
@@ -1740,6 +1826,21 @@ fn change_authored_by_bot(entry: &changes::ChangeEntry, bot_agent_id: Option<&st
     }
 }
 
+fn agent_authors_on_tip(repo: &DraftRepo, oid: &str) -> Result<Vec<(String, String)>, String> {
+    let mut out = Vec::new();
+    for row in sync::comment_rows_in_commit(repo, oid).map_err(|e| e.to_string())? {
+        if row.deleted_at.is_some() || row.comment.author.kind != "agent" {
+            continue;
+        }
+        let id = row.comment.author.id.clone();
+        if id.is_empty() || out.iter().any(|(existing, _)| existing == &id) {
+            continue;
+        }
+        out.push((id, row.comment.author.name.clone()));
+    }
+    Ok(out)
+}
+
 fn comment_authored_by_bot(
     comment: &crate::manuscripts::Comment,
     bot_agent_id: Option<&str>,
@@ -2310,7 +2411,25 @@ impl DraftService {
         let session_id = new_bot_session_id();
         let branch = bot_branch_name(bot_agent_id, &session_id);
         let dir = self.ensure_open_inner(store, manuscript_id)?;
+        // A suggestion can be accepted before the idle checkpoint. The bot branch
+        // forks from main, so that first checkpoint has to exist. Pending bot
+        // writes stay out of it: this path does not flush them.
         let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+        if repo.head_oid().map_err(|e| e.to_string())?.is_none() {
+            self.commit_synced_main(
+                store,
+                manuscript_id,
+                &dir,
+                "Saved",
+                &author_name(store),
+                "author@swarmdraft.local",
+                false,
+            )?;
+        }
+        let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+        if repo.head_oid().map_err(|e| e.to_string())?.is_none() {
+            return Err("create bot branch: main has no commit to branch from".into());
+        }
         repo.ensure_bot_branch(&branch)
             .map_err(|e| format!("create bot branch: {e}"))?;
         self.bot_sessions.lock().expect("bot sessions").insert(
