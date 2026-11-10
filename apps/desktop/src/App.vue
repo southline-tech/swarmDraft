@@ -88,6 +88,8 @@ import Rad310UpdateEvidence from './evidence/Rad310UpdateEvidence.vue';
 import Rad3441PilotEvidence from './evidence/Rad3441PilotEvidence.vue';
 import { readEvidenceQuery } from './evidence/evidence-routes';
 import AppToast from './shells/AppToast.vue';
+import OldChangeView from './links/OldChangeView.vue';
+import { startChangeLinkRoute, type OldChangeViewModel } from './links/open-link';
 import UpdatePromptToast from './updater/UpdatePromptToast.vue';
 import {
   createAppUpdater,
@@ -1270,6 +1272,7 @@ function blockFileNavigation(e: DragEvent) {
 // Agent display names (RAD-263): load once, and again when the window regains focus.
 const reloadAgents = () => void reloadOnFocus();
 let stopOpenDraftPath = () => {};
+let stopChangeLinks = () => {};
 onMounted(() => {
   window.addEventListener('dragover', blockFileNavigation);
   window.addEventListener('drop', blockFileNavigation);
@@ -1285,6 +1288,29 @@ onMounted(() => {
   void draftTakeLaunchPath().then((path) => {
     if (path) void openDraftFromPath(path);
   });
+  stopChangeLinks = startChangeLinkRoute({
+    ensureManuscript: ensureManuscriptForLink,
+    focusChange: async (sectionId, changeId) => {
+      oldChange.value = null;
+      await nextTick();
+      await editorPane.value?.focusResolvedChange(sectionId, changeId);
+    },
+    showHistory: (view) => {
+      dismissLinkToast();
+      oldChange.value = view;
+    },
+    showToast: (message) => {
+      oldChange.value = null;
+      showLinkToast(message);
+    },
+    clearOpenError: () => {
+      openError.value = '';
+    },
+    onFailure: (err) => {
+      console.error('Change link failed', err);
+      openError.value = errorLine(err, 'open');
+    },
+  });
   stopAppMenuKeys = () => {
     window.removeEventListener('keydown', onAppMenuKey);
     window.removeEventListener('keydown', onUpdatePromptEscape);
@@ -1296,6 +1322,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('focus', reloadAgents);
   stopAppMenuKeys();
   stopOpenDraftPath();
+  stopChangeLinks();
+  clearTimeout(linkToastTimer);
   appUpdater?.dispose();
 });
 onMounted(async () => {
@@ -1512,6 +1540,28 @@ async function reloadOpenManuscript() {
   }
 }
 
+async function ensureManuscriptForLink(manuscriptId: string): Promise<boolean> {
+  if (session.value?.id === manuscriptId) return true;
+  try {
+    await session.value?.flush();
+  } catch (e) {
+    console.error('Flush before change link failed', e);
+  }
+  try {
+    const stored = await loadManuscript(manuscriptId);
+    if (!stored) {
+      openError.value = "Couldn't open that draft.";
+      return false;
+    }
+    open(openStored(stored, null, persistHooks));
+    return true;
+  } catch (e) {
+    console.error('Open change link draft failed', e);
+    openError.value = errorLine(e, 'open');
+    return false;
+  }
+}
+
 /** Open an imported manuscript (exposed for tests and the Tauri open-file flow). */
 function open(next: ManuscriptSession) {
   const switching = session.value !== next;
@@ -1584,6 +1634,21 @@ async function reopenAfterFailure(delays = REOPEN_BACKOFF_MS): Promise<Manuscrip
 
 /** ob7: "Your book is open" toast after a successful open/import; hides itself after a while. */
 const openToast = ref('');
+const linkToast = ref('');
+const oldChange = ref<OldChangeViewModel | null>(null);
+let linkToastTimer: ReturnType<typeof setTimeout> | undefined;
+function dismissLinkToast() {
+  clearTimeout(linkToastTimer);
+  linkToast.value = '';
+}
+function showLinkToast(message: string) {
+  clearTimeout(linkToastTimer);
+  linkToast.value = '';
+  void nextTick(() => {
+    linkToast.value = message;
+    linkToastTimer = setTimeout(dismissLinkToast, TOAST_MS);
+  });
+}
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 let toastToken = 0;
 function dismissToast() {
@@ -2352,6 +2417,7 @@ defineExpose({ open, closeSession });
         :offer-relink="saveCopyRelinkOffer"
         @relink="() => void onSaveCopyRelink()"
       />
+      <OldChangeView v-if="oldChange" :view="oldChange" @close="oldChange = null" />
       <HistoryPanel
         v-if="isTauri()"
         :open="historyOpen"
@@ -2395,6 +2461,13 @@ defineExpose({ open, closeSession });
             :action="noRoomToast ? 'Hide notes' : undefined"
             :icon="noRoomToast ? 'alert' : 'check'"
             @dismiss="noRoomToast ? hideNotesForOutline() : dismissToast()"
+          />
+          <AppToast
+            data-test="change-link-toast"
+            :open="!!linkToast"
+            :message="linkToast"
+            icon="alert"
+            @dismiss="dismissLinkToast"
           />
           <AppToast
             data-test="chapter-action-toast"

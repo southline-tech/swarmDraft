@@ -17,6 +17,7 @@ export type ContextMenuAction =
   | 'split_chapter'
   | 'merge_prev_chapter'
   | 'comment'
+  | 'copy_link'
   | 'ask-bot';
 
 export type ContextMenuClipboard = {

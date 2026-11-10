@@ -126,13 +126,23 @@ export function findMarkElement(root: HTMLElement, scopedKey: string): Element |
     const id = parsed.changeKey.slice(COMMENT_REVIEW_PREFIX.length);
     return section.querySelector(`span.comment-anchor[data-id="${CSS.escape(id)}"]`);
   }
-  const [author, id] = parsed.changeKey.split('\u0000');
-  if (!author || !id) return null;
+  const sep = parsed.changeKey.indexOf('\u0000');
+  const author = sep > 0 ? parsed.changeKey.slice(0, sep) : '';
+  const id = sep > 0 ? parsed.changeKey.slice(sep + 1) : parsed.changeKey;
+  if (!id) return null;
   for (const mark of section.querySelectorAll(MARK_SELECTOR)) {
     if (mark.classList.contains('comment-anchor')) continue;
-    if (mark.getAttribute('data-author') === author && mark.getAttribute('data-id') === id) {
+    if (
+      author &&
+      mark.getAttribute('data-author') === author &&
+      mark.getAttribute('data-id') === id
+    ) {
       return mark;
     }
+  }
+  for (const mark of section.querySelectorAll(MARK_SELECTOR)) {
+    if (mark.classList.contains('comment-anchor')) continue;
+    if (mark.getAttribute('data-id') === id) return mark;
   }
   return null;
 }

@@ -1,0 +1,665 @@
+//! Deep links to a tracked change (`swarmdraft://open?draft=&change=`).
+//!
+//! Resolution goes through [`draft::DraftService::resolve_change`] (git history). This module
+//! only reads that result and the change index; it does not write the draft.
+
+use std::path::Path;
+use std::sync::Mutex;
+
+use serde::Serialize;
+
+use crate::draft::{DraftChangeResolve, DraftRepo, DraftService};
+use crate::storage::Store;
+
+const SCHEME: &str = "swarmdraft://";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangeLink {
+    pub manuscript_id: String,
+    pub change_id: String,
+}
+
+/// `swarmdraft://open?draft=<manuscriptId>&change=<changeId>`.
+pub fn encode_change_link(manuscript_id: &str, change_id: &str) -> String {
+    format!(
+        "swarmdraft://open?draft={}&change={}",
+        percent_encode(manuscript_id),
+        percent_encode(change_id)
+    )
+}
+
+/// Parse a change link. Anything else (wrong scheme, missing id, blank id) is `None`.
+pub fn parse_change_link(raw: &str) -> Option<ChangeLink> {
+    let raw = raw.trim();
+    let rest = strip_prefix_ignore_ascii_case(raw, SCHEME)?;
+    let (host, query) = rest.split_once('?')?;
+    let host = host.trim_end_matches('/');
+    if !host.eq_ignore_ascii_case("open") {
+        return None;
+    }
+    let query = query.split('#').next().unwrap_or(query);
+    let mut manuscript_id = None;
+    let mut change_id = None;
+    for pair in query.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        let value = percent_decode(value).trim().to_string();
+        if value.is_empty() {
+            continue;
+        }
+        match key {
+            "draft" => manuscript_id = Some(value),
+            "change" => change_id = Some(value),
+            _ => {}
+        }
+    }
+    Some(ChangeLink {
+        manuscript_id: manuscript_id?,
+        change_id: change_id?,
+    })
+}
+
+/// First argv entry that is a change link, in any position.
+pub fn first_change_link(argv: &[String]) -> Option<String> {
+    argv.iter().find_map(|arg| {
+        let text = arg.trim();
+        parse_change_link(text).map(|_| text.to_string())
+    })
+}
+
+/// Remembers the cold-start URL so the webview can take it once.
+#[derive(Default)]
+pub struct LaunchGate(Mutex<Option<String>>);
+
+impl LaunchGate {
+    /// Return `url` the first time it is seen. The same URL after that is `None`.
+    pub fn take(&self, url: String) -> Option<String> {
+        let mut slot = self.0.lock().ok()?;
+        if slot.as_deref() == Some(url.as_str()) {
+            return None;
+        }
+        *slot = Some(url.clone());
+        Some(url)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChangeLinkClass {
+    /// Still on the page. `section_id` is the current section, including after a move.
+    Focus {
+        section_id: String,
+        change_id: String,
+    },
+    History {
+        change_id: String,
+        section_id: String,
+        outcome: String,
+        decided_at: Option<i64>,
+        decided_commit: Option<String>,
+        introduced_commit: String,
+    },
+    Unknown,
+}
+
+/// Map a git-history lookup to a focus target or a read-only history view.
+pub fn classify_change(resolve: &DraftChangeResolve) -> ChangeLinkClass {
+    match resolve {
+        DraftChangeResolve::NotFound { .. } => ChangeLinkClass::Unknown,
+        DraftChangeResolve::Found {
+            change_id,
+            status,
+            section_id,
+            introduced_commit,
+            decided_commit,
+            decided_at,
+            decision,
+            present_in_head,
+            ..
+        } => {
+            let outcome = decision
+                .clone()
+                .filter(|d| !d.is_empty())
+                .unwrap_or_else(|| status.clone());
+            let settled = outcome == "accepted"
+                || outcome == "rejected"
+                || status == "accepted"
+                || status == "rejected";
+            if settled {
+                let outcome = if outcome == "accepted" || outcome == "rejected" {
+                    outcome
+                } else {
+                    status.clone()
+                };
+                return ChangeLinkClass::History {
+                    change_id: change_id.clone(),
+                    section_id: section_id.clone(),
+                    outcome,
+                    decided_at: *decided_at,
+                    decided_commit: decided_commit.clone(),
+                    introduced_commit: introduced_commit.clone(),
+                };
+            }
+            if *present_in_head {
+                return ChangeLinkClass::Focus {
+                    section_id: section_id.clone(),
+                    change_id: change_id.clone(),
+                };
+            }
+            ChangeLinkClass::History {
+                change_id: change_id.clone(),
+                section_id: section_id.clone(),
+                outcome: if outcome.is_empty() {
+                    "recorded".into()
+                } else {
+                    outcome
+                },
+                decided_at: *decided_at,
+                decided_commit: decided_commit.clone(),
+                introduced_commit: introduced_commit.clone(),
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangeSnapshot {
+    pub id: String,
+    pub kind: String,
+    pub section_id: String,
+    pub author_name: String,
+    pub status: String,
+    pub quote: String,
+}
+
+pub fn read_change_snapshot(
+    repo: &DraftRepo,
+    oid: &str,
+    change_id: &str,
+) -> Option<ChangeSnapshot> {
+    let bytes = repo.file_bytes(oid, "review/changes.json").ok()??;
+    let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let arr = value.as_array()?;
+    for item in arr {
+        let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        if id != change_id {
+            continue;
+        }
+        return Some(ChangeSnapshot {
+            id: id.to_string(),
+            kind: json_str(item, "kind"),
+            section_id: json_str(item, "sectionId"),
+            author_name: json_str(item, "authorName"),
+            status: json_str(item, "status"),
+            quote: json_str(item, "quote"),
+        });
+    }
+    None
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryView {
+    pub quote: String,
+    pub kind: String,
+    pub author_name: String,
+    pub outcome: String,
+    pub decided_by: String,
+    pub decided_at: Option<i64>,
+}
+
+/// Original wording from the introducing commit, and who decided it.
+pub fn load_history_view(
+    repo: &DraftRepo,
+    worktree: &Path,
+    change_id: &str,
+    introduced_commit: &str,
+    decided_commit: Option<&str>,
+    outcome: &str,
+    decided_at: Option<i64>,
+) -> HistoryView {
+    let snap = read_change_snapshot(repo, introduced_commit, change_id);
+    let mut kind = snap.as_ref().map(|s| s.kind.clone()).unwrap_or_default();
+    let quote = snap.as_ref().map(|s| s.quote.clone()).unwrap_or_default();
+    let author_name = snap
+        .as_ref()
+        .map(|s| s.author_name.clone())
+        .unwrap_or_default();
+    if kind.is_empty() {
+        if let Some(oid) = decided_commit {
+            if let Ok(message) = repo.commit_message(oid) {
+                if let Some(from_trailer) = trailer(&message, "Kind") {
+                    kind = from_trailer;
+                }
+            }
+        }
+    }
+    let decided_by = decided_commit
+        .and_then(|oid| committer_name(worktree, oid))
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| author_name.clone());
+    HistoryView {
+        quote,
+        kind,
+        author_name,
+        outcome: outcome.to_string(),
+        decided_by,
+        decided_at,
+    }
+}
+
+pub fn committer_name(worktree: &Path, oid: &str) -> Option<String> {
+    let repo = git2::Repository::open(worktree).ok()?;
+    let oid = git2::Oid::from_str(oid).ok()?;
+    let commit = repo.find_commit(oid).ok()?;
+    let committer = commit.committer();
+    let author = commit.author();
+    let name = committer
+        .name()
+        .or_else(|| author.name())?
+        .trim()
+        .to_string();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name)
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase", tag = "action")]
+pub enum LinkResolution {
+    Focus {
+        manuscript_id: String,
+        section_id: String,
+        change_id: String,
+    },
+    History {
+        manuscript_id: String,
+        change_id: String,
+        section_id: String,
+        quote: String,
+        kind: String,
+        author_name: String,
+        outcome: String,
+        decided_by: String,
+        decided_at: Option<i64>,
+    },
+    Unknown {
+        manuscript_id: String,
+    },
+}
+
+/// Resolve one change link through git history.
+pub fn resolve_open_link(
+    drafts: &DraftService,
+    store: &Store,
+    manuscript_id: &str,
+    change_id: &str,
+) -> Result<LinkResolution, String> {
+    let resolved = drafts.resolve_change(store, manuscript_id, change_id)?;
+    Ok(resolution_from(drafts, manuscript_id, &resolved))
+}
+
+fn resolution_from(
+    drafts: &DraftService,
+    manuscript_id: &str,
+    resolved: &DraftChangeResolve,
+) -> LinkResolution {
+    match classify_change(resolved) {
+        ChangeLinkClass::Unknown => LinkResolution::Unknown {
+            manuscript_id: manuscript_id.to_string(),
+        },
+        ChangeLinkClass::Focus {
+            section_id,
+            change_id,
+        } => LinkResolution::Focus {
+            manuscript_id: manuscript_id.to_string(),
+            section_id,
+            change_id,
+        },
+        ChangeLinkClass::History {
+            change_id,
+            section_id,
+            outcome,
+            decided_at,
+            decided_commit,
+            introduced_commit,
+        } => {
+            let dir = drafts.worktree_path(manuscript_id);
+            let view = DraftRepo::open_working(&dir)
+                .ok()
+                .map(|repo| {
+                    load_history_view(
+                        &repo,
+                        &dir,
+                        &change_id,
+                        &introduced_commit,
+                        decided_commit.as_deref(),
+                        &outcome,
+                        decided_at,
+                    )
+                })
+                .unwrap_or(HistoryView {
+                    quote: String::new(),
+                    kind: String::new(),
+                    author_name: String::new(),
+                    outcome: outcome.clone(),
+                    decided_by: String::new(),
+                    decided_at,
+                });
+            LinkResolution::History {
+                manuscript_id: manuscript_id.to_string(),
+                change_id,
+                section_id,
+                quote: view.quote,
+                kind: view.kind,
+                author_name: view.author_name,
+                outcome: view.outcome,
+                decided_by: view.decided_by,
+                decided_at: view.decided_at,
+            }
+        }
+    }
+}
+
+fn json_str(item: &serde_json::Value, key: &str) -> String {
+    item.get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+fn trailer(message: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key}:");
+    for line in message.lines().rev() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Some(rest) = line.strip_prefix(&prefix) else {
+            continue;
+        };
+        let value = rest.trim();
+        if !value.is_empty() {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
+fn strip_prefix_ignore_ascii_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    if text.len() < prefix.len() {
+        return None;
+    }
+    let (head, tail) = text.split_at(prefix.len());
+    if head.eq_ignore_ascii_case(prefix) {
+        Some(tail)
+    } else {
+        None
+    }
+}
+
+fn percent_encode(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for b in text.as_bytes() {
+        match b {
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'_'
+            | b'.'
+            | b'!'
+            | b'~'
+            | b'*'
+            | b'\''
+            | b'('
+            | b')' => out.push(*b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(hex) = std::str::from_utf8(&bytes[i + 1..i + 3]) {
+                if let Ok(value) = u8::from_str_radix(hex, 16) {
+                    out.push(value);
+                    i += 3;
+                    continue;
+                }
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::draft::CommitOptions;
+
+    fn found(
+        status: &str,
+        section_id: &str,
+        decision: Option<&str>,
+        present_in_head: bool,
+    ) -> DraftChangeResolve {
+        DraftChangeResolve::Found {
+            change_id: "chg-1".into(),
+            status: status.into(),
+            section_id: section_id.into(),
+            introduced_commit: "intro".into(),
+            introduced_at: 10,
+            introduced_ref: "main".into(),
+            decided_commit: decision.map(|_| "decided".into()),
+            decided_at: decision.map(|_| 20),
+            decision: decision.map(str::to_string),
+            session_id: None,
+            present_in_head,
+        }
+    }
+
+    #[test]
+    fn link_round_trip_and_malformed_links() {
+        let url = encode_change_link("ms 1", "chg/1");
+        assert_eq!(url, "swarmdraft://open?draft=ms%201&change=chg%2F1");
+        assert_eq!(
+            parse_change_link(&url),
+            Some(ChangeLink {
+                manuscript_id: "ms 1".into(),
+                change_id: "chg/1".into(),
+            })
+        );
+        assert_eq!(
+            parse_change_link("swarmdraft://open/?draft=ms&change=chg"),
+            Some(ChangeLink {
+                manuscript_id: "ms".into(),
+                change_id: "chg".into(),
+            })
+        );
+        assert!(parse_change_link("https://example.com/?draft=ms&change=chg").is_none());
+        assert!(parse_change_link("swarmdraft://open?draft=ms").is_none());
+        assert!(parse_change_link("swarmdraft://open?draft=&change=chg").is_none());
+        assert!(parse_change_link("swarmdraft://other?draft=ms&change=chg").is_none());
+        assert!(parse_change_link("not a link").is_none());
+    }
+
+    #[test]
+    fn argv_finds_a_change_link_beside_other_args() {
+        let argv = vec![
+            "swarmdraft".into(),
+            "--flag".into(),
+            "swarmdraft://open?draft=book&change=chg-9".into(),
+        ];
+        assert_eq!(
+            first_change_link(&argv).as_deref(),
+            Some("swarmdraft://open?draft=book&change=chg-9")
+        );
+    }
+
+    #[test]
+    fn live_change_focuses_its_section() {
+        match classify_change(&found("open", "sec-1", None, true)) {
+            ChangeLinkClass::Focus {
+                section_id,
+                change_id,
+            } => {
+                assert_eq!(section_id, "sec-1");
+                assert_eq!(change_id, "chg-1");
+            }
+            other => panic!("expected focus, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn moved_change_focuses_the_resolved_section() {
+        // The introducing snapshot lived in another section. The resolve result's
+        // section id is the current one, and that is where the link opens.
+        match classify_change(&found("open", "sec-new", None, true)) {
+            ChangeLinkClass::Focus { section_id, .. } => assert_eq!(section_id, "sec-new"),
+            other => panic!("expected focus at the new section, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn accepted_and_rejected_changes_are_history() {
+        match classify_change(&found("accepted", "sec-1", Some("accepted"), false)) {
+            ChangeLinkClass::History { outcome, .. } => assert_eq!(outcome, "accepted"),
+            other => panic!("expected history, got {other:?}"),
+        }
+        match classify_change(&found("rejected", "sec-1", Some("rejected"), false)) {
+            ChangeLinkClass::History {
+                outcome,
+                decided_at,
+                ..
+            } => {
+                assert_eq!(outcome, "rejected");
+                assert_eq!(decided_at, Some(20));
+            }
+            other => panic!("expected history, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_id_is_not_a_page() {
+        let missing = DraftChangeResolve::NotFound {
+            change_id: "nope".into(),
+        };
+        assert_eq!(classify_change(&missing), ChangeLinkClass::Unknown);
+    }
+
+    #[test]
+    fn launch_gate_returns_a_url_once() {
+        let gate = LaunchGate::default();
+        let url = "swarmdraft://open?draft=m&change=c".to_string();
+        assert_eq!(gate.take(url.clone()).as_deref(), Some(url.as_str()));
+        assert_eq!(gate.take(url), None);
+    }
+
+    #[test]
+    fn history_keeps_the_original_quote_and_the_decision() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = DraftRepo::init_working(dir.path()).unwrap();
+        std::fs::create_dir(dir.path().join("review")).unwrap();
+        let introduced = serde_json::json!([{
+            "id": "chg-1",
+            "kind": "suggestion_insert",
+            "sectionId": "sec-old",
+            "authorKind": "human",
+            "authorId": "local",
+            "authorName": "Ada",
+            "status": "open",
+            "quote": "guttered"
+        }]);
+        std::fs::write(
+            dir.path().join("review/changes.json"),
+            serde_json::to_vec_pretty(&introduced).unwrap(),
+        )
+        .unwrap();
+        let introduced_oid = repo
+            .commit_all(
+                "Introduce change",
+                "Ada",
+                "ada@example.com",
+                &CommitOptions::default(),
+            )
+            .unwrap()
+            .unwrap();
+
+        let moved = serde_json::json!([{
+            "id": "chg-1",
+            "kind": "suggestion_insert",
+            "sectionId": "sec-new",
+            "authorKind": "human",
+            "authorId": "local",
+            "authorName": "Ada",
+            "status": "open",
+            "quote": "guttered"
+        }]);
+        std::fs::write(
+            dir.path().join("review/changes.json"),
+            serde_json::to_vec_pretty(&moved).unwrap(),
+        )
+        .unwrap();
+        repo.commit_all(
+            "Move change",
+            "Ada",
+            "ada@example.com",
+            &CommitOptions::default(),
+        )
+        .unwrap()
+        .unwrap();
+        let head = repo.head_oid().unwrap().unwrap();
+        let live = read_change_snapshot(&repo, &head, "chg-1").unwrap();
+        assert_eq!(live.section_id, "sec-new");
+
+        let accepted = serde_json::json!([{
+            "id": "chg-1",
+            "kind": "suggestion_insert",
+            "sectionId": "sec-new",
+            "authorKind": "human",
+            "authorId": "local",
+            "authorName": "Ada",
+            "status": "accepted",
+            "quote": ""
+        }]);
+        std::fs::write(
+            dir.path().join("review/changes.json"),
+            serde_json::to_vec_pretty(&accepted).unwrap(),
+        )
+        .unwrap();
+        let decided = repo
+            .commit_all(
+                "Accepted Ada's change in Chapter\n\nChange-Id: chg-1\nDecision: accepted\nKind: suggestion_insert\n",
+                "Sam",
+                "sam@example.com",
+                &CommitOptions::default(),
+            )
+            .unwrap()
+            .unwrap();
+        let view = load_history_view(
+            &repo,
+            dir.path(),
+            "chg-1",
+            &introduced_oid,
+            Some(&decided),
+            "accepted",
+            Some(20),
+        );
+        assert_eq!(view.quote, "guttered");
+        assert_eq!(view.kind, "suggestion_insert");
+        assert_eq!(view.author_name, "Ada");
+        assert_eq!(view.outcome, "accepted");
+        assert_eq!(view.decided_by, "Sam");
+        assert_eq!(view.decided_at, Some(20));
+    }
+}

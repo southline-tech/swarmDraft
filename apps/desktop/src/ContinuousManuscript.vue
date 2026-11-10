@@ -37,7 +37,11 @@ import {
   scrollElementCenterInRoot,
   scrollSectionAnchorToTop,
 } from './review/review-scroll';
-import { CONTINUOUS_REVIEW_NAV, CONTINUOUS_SCROLL_ROOT } from './continuous-review-nav';
+import {
+  CONTINUOUS_REVIEW_NAV,
+  CONTINUOUS_SCROLL_ROOT,
+  scopedKeyForChange,
+} from './continuous-review-nav';
 import type { AuthorFilter, ReviewChange } from './review/review-state';
 import { restoreWindowScroll } from './shell-chrome';
 import { clampScrollTop, type ReadingPosition } from './reading-position';
@@ -362,6 +366,24 @@ async function navigateToChange(
   activeScrollKey.value = scopedKey;
 }
 
+/** Focus a change by id at its current section, including after it moved (#117, #123). */
+async function focusChangeId(sectionId: string, changeId: string) {
+  await nextTick();
+  const root = scrollRoot.value;
+  let author: string | null = null;
+  if (root) {
+    const section = root.querySelector(`[data-section-anchor="${CSS.escape(sectionId)}"]`);
+    const mark = section?.querySelector(
+      `[data-suggestion][data-id="${CSS.escape(changeId)}"], [data-format-change][data-id="${CSS.escape(changeId)}"]`,
+    );
+    author = mark?.getAttribute('data-author') || null;
+  }
+  await navigateToChange(scopedKeyForChange(sectionId, changeId, author), {
+    focusEditor: true,
+    follow: true,
+  });
+}
+
 function decideInSection(sectionId: string, changeKey: string, decision: Decision) {
   editors.value.get(sectionId)?.decideLocalChange(changeKey, decision);
 }
@@ -369,6 +391,7 @@ function decideInSection(sectionId: string, changeKey: string, decision: Decisio
 provide(CONTINUOUS_SCROLL_ROOT, { root: scrollRoot });
 provide(CONTINUOUS_REVIEW_NAV, {
   navigateToChange,
+  focusChangeId,
   beginSuppressSync,
   decideInSection,
 });
@@ -492,6 +515,7 @@ defineExpose({
     if (props.selectedId) focusSection(props.selectedId);
   },
   focusSection,
+  focusResolvedChange: focusChangeId,
   setZoom,
   setScrollPaddingBottom,
   feedbackExcerpt,

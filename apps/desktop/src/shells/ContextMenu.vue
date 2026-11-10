@@ -16,6 +16,8 @@ const props = defineProps<{
   showChapterGroup?: boolean;
   splitTitle?: string;
   mergePrevTitle?: string;
+  /** Right-click landed on a tracked change (#117). */
+  showCopyLink?: boolean;
 }>();
 const emit = defineEmits<{ close: []; select: [action: ContextMenuAction] }>();
 const root = ref<HTMLElement>();
@@ -170,6 +172,18 @@ onMounted(() => nextTick(() => mainMenuItems()[0]?.focus()));
       @click="pick(it.id)"
     >
       {{ it.label }}<span class="sh-k">{{ it.keys }}</span>
+    </button>
+    <button
+      v-if="showCopyLink"
+      type="button"
+      role="menuitem"
+      tabindex="-1"
+      class="sh-mi"
+      data-test="ctx-copy_link"
+      data-action="copy_link"
+      @click="pick('copy_link')"
+    >
+      Copy link
     </button>
     <div class="sh-sep" role="separator" />
     <div style="position: relative" @mouseenter="subOpen = true" @mouseleave="subOpen = false">
