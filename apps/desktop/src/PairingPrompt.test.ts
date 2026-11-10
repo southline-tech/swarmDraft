@@ -197,7 +197,7 @@ describe('mcpAgentStatus', () => {
   it('formats connected, relative, and missing states', async () => {
     const { mcpAgentStatus } = await import('./mcp-agent-status');
     const now = Date.parse('2026-06-01T12:00:00.000Z');
-    expect(mcpAgentStatus('2026-06-01T11:59:00.000Z', now).text).toBe('Bots connected');
+    expect(mcpAgentStatus('2026-06-01T11:59:00.000Z', now).text).toBe('Connected');
     expect(mcpAgentStatus('2026-06-01T11:15:00.000Z', now).text).toBe('Last active 45 min ago');
     expect(mcpAgentStatus(null, now).text).toBe('Not connected');
   });

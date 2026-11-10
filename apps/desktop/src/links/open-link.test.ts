@@ -354,4 +354,36 @@ describe('open review link (#119)', () => {
     );
     expect(r.toast).toHaveBeenCalledWith("1 change couldn't be found.");
   });
+
+  it('gives every decided id a history view, not only the first', async () => {
+    const r = route();
+    const url = 'swarmdraft://review?draft=book-1&changes=open-1,acc-1,acc-2';
+    await openReviewLink(url, r, async (_manuscriptId, changeId) => {
+      if (changeId === 'open-1') {
+        return {
+          action: 'focus',
+          manuscriptId: 'book-1',
+          sectionId: 'sec-1',
+          changeId,
+        };
+      }
+      return {
+        action: 'history',
+        manuscriptId: 'book-1',
+        changeId,
+        sectionId: 'sec-1',
+        quote: changeId,
+        kind: 'suggestion_insert',
+        authorKind: 'agent',
+        authorName: 'Line Editor',
+        outcome: 'accepted',
+        decidedBy: 'Sam',
+        decidedAt: 1700000000,
+      };
+    });
+    expect(r.selected).toHaveBeenCalledWith(['open-1']);
+    expect(r.history.mock.calls.map((call) => call[0].changeId)).toEqual(['acc-1', 'acc-2']);
+    expect(r.toast).not.toHaveBeenCalled();
+    expect(r.focus).not.toHaveBeenCalled();
+  });
 });

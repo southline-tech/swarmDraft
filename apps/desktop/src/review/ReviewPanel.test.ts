@@ -458,4 +458,24 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(w.find('[data-test=selected-changes-chip]').exists()).toBe(false);
     expect(w.findAll('[data-test=item]')).toHaveLength(3);
   });
+
+  it('uses one message when a review link matches nothing (#119)', () => {
+    const empty = mount(ReviewPanel, { props: { items: [], changeIds: ['missing'] } });
+    expect(empty.find('[data-test=selected-changes-empty]').text()).toBe(
+      'None of the selected changes are still open.',
+    );
+    expect(empty.find('[data-test=empty]').exists()).toBe(false);
+    expect(empty.text()).not.toContain('Nothing to review');
+    empty.unmount();
+
+    const failed = mount(ReviewPanel, {
+      props: { items: [], changeIds: ['missing'], loadFailed: true },
+    });
+    expect(failed.find('[data-test=empty-load-failed]').text()).toBe(
+      "Suggestions couldn't be loaded for this section.",
+    );
+    expect(failed.find('[data-test=selected-changes-empty]').exists()).toBe(false);
+    expect(failed.find('[data-test=empty]').exists()).toBe(false);
+    failed.unmount();
+  });
 });

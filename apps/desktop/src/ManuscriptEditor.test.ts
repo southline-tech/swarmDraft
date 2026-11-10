@@ -883,4 +883,54 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     expect(w.find('[data-test="view-scope-live"]').text()).toMatch(/1 change from/);
     w.unmount();
   });
+
+  it('hides non-selected marks and margin notes for a review link (#119)', async () => {
+    const doc = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              marks: [
+                { type: 'suggestion_insert', attrs: { id: 's1', author: 'agent:a', ts: 't' } },
+              ],
+              text: 'alpha',
+            },
+            { type: 'text', text: ' ' },
+            {
+              type: 'text',
+              marks: [
+                { type: 'suggestion_insert', attrs: { id: 's2', author: 'agent:b', ts: 't' } },
+              ],
+              text: 'beta',
+            },
+          ],
+        },
+      ],
+    };
+    const w = mount(ManuscriptEditor, { props: { content: doc }, attachTo: document.body });
+    await flushPromises();
+    expect(w.findAll('[data-test="margin-note"]')).toHaveLength(2);
+    expect(w.findAll('.tiptap .suggestion-filter-hidden')).toHaveLength(0);
+
+    await w.setProps({ changeIds: ['s1'] });
+    await flushPromises();
+    const notes = w.findAll('[data-test="margin-note"]');
+    expect(notes).toHaveLength(1);
+    expect(notes[0]!.attributes('data-change-key')).toBe('agent:a\u0000s1');
+    const hidden = w.findAll('.tiptap .suggestion-filter-hidden');
+    expect(hidden).toHaveLength(1);
+    expect(hidden[0]!.text()).toBe('beta');
+    expect(w.findAll('.tiptap [data-suggester]')).toHaveLength(1);
+
+    const scope = w.find('[data-test="view-scope-live"]').text();
+    await w.find('.manuscript-editor').trigger('keydown', { key: ']', altKey: true });
+    await flushPromises();
+    expect(w.find('[data-test="view-scope-live"]').text()).toBe(scope);
+    expect(w.findAll('.tiptap .suggestion-filter-hidden')).toHaveLength(1);
+    expect(w.find('[data-test="view-switcher"]').exists()).toBe(false);
+    w.unmount();
+  });
 });

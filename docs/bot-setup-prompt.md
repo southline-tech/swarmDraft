@@ -56,7 +56,7 @@ versions (`final`, `final_v2`, edits…).
    powershell -ExecutionPolicy Bypass -File $env:USERPROFILE\swarmdraft-bot\mcp.ps1
    ```
 
-   It should list the tools. In **Settings → Agents**, the bot should show as Bots connected.
+   It should list the tools. In **Settings → Agents**, the bot should show as Connected.
    Revoke anytime from that list.
 
 `request_pairing` arguments: `{ name, color?, scopes? }`. `poll_pairing` arguments:

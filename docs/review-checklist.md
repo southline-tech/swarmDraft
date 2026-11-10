@@ -86,6 +86,10 @@ Run this consolidated pass in order; do not hand off until every line that appli
 
 Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
 
+- 2026-11-10 · #119 · PR #347 · a review link filtered the list and left margin notes, inline marks, other mounted sections, and Alt+[ / Alt+] on the full set · selection hides non-selected marks and margin notes in every mounted section the same way an author filter does, and the author-cycle shortcut stays idle until Clear
+- 2026-11-10 · #119 · PR #347 · decided ids after the first never appeared · `openReviewLink` hands every decided id to the history view, and closing one shows the next
+- 2026-11-10 · #119 · PR #347 · an empty review-link selection showed “Nothing to review” and the load-failure line together with “None of the selected changes are still open.” · one message for an empty selection; the load-failure line is the only message while suggestions fail to load
+- 2026-11-10 · #119 · PR #347 · the per-agent status line said “Bots connected” · that row and the sentences that describe it say “Connected”
 - 2026-11-09 · #116 · PR #341 · opening or restoring a `.draft` replaced comment rows and dropped any id the tree did not have · import uses `insert_comment_if_missing` on open and restore; local rows, including a bot comment only on `bot/*`, stay and are not duplicated
 - 2026-11-09 · #116 · PR #341 · review decision `kind` was accepted and discarded · the commit message stores it as a `Kind` trailer when it is non-empty
 - 2026-11-09 · #116 · PR #341 · a cache miss walked change history while holding the draft op lock · the walk runs after the lock is released; the cache check stays inside it

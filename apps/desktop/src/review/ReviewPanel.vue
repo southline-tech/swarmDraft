@@ -515,21 +515,21 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
     </label>
 
     <p
-      v-if="!changes.length && !listRows.length && loadFailed"
+      v-if="loadFailed && !listRows.length && (!changes.length || changeIds)"
       class="muted"
       data-test="empty-load-failed"
     >
       Suggestions couldn't be loaded for this section.
     </p>
     <EmptyState
-      v-else-if="!changes.length && !listRows.length"
+      v-else-if="!changeIds && !changes.length && !listRows.length"
       data-test="empty"
       icon="sparkle"
       tone="success"
       :title="emptyStates.reviewTitle"
       :text="emptyStates.reviewText"
     />
-    <p v-if="changeIds && !listRows.length" class="muted" data-test="selected-changes-empty">
+    <p v-else-if="changeIds && !listRows.length" class="muted" data-test="selected-changes-empty">
       None of the selected changes are still open.
     </p>
     <p

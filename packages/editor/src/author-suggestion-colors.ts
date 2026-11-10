@@ -13,6 +13,8 @@ export const suggestionColorsKey = new PluginKey<DecorationSet>('swarmdraftSugge
 export type SuggestionColor = (author: string) => string;
 /** When false, suggestion marks render as plain text (display only; doc unchanged). */
 export type SuggestionAuthorVisible = (author: string) => boolean;
+/** When false, that suggestion id renders as plain text (review-link selection). */
+export type SuggestionIdVisible = (id: string) => boolean;
 
 const SUGGESTION = new Set(['suggestion_insert', 'suggestion_delete', 'format_change']);
 
@@ -31,15 +33,19 @@ function decorate(
   doc: PMNode,
   colorFor: SuggestionColor,
   authorVisible: SuggestionAuthorVisible,
+  suggestionVisible: SuggestionIdVisible,
 ): DecorationSet {
   const decos: Decoration[] = [];
   doc.descendants((node, pos) => {
     if (!node.isText) return true;
     const marks = node.marks.filter((m) => SUGGESTION.has(m.type.name));
     if (!marks.length) return false;
-    const authors = [...new Set(marks.map((m) => String(m.attrs.author ?? '').trim()))];
-    const author = authors.length === 1 ? authors[0]! : '';
-    if (!authors.some((a) => authorVisible(a))) {
+    const shown = marks.filter(
+      (m) =>
+        suggestionVisible(String(m.attrs.id ?? '')) &&
+        authorVisible(String(m.attrs.author ?? '').trim()),
+    );
+    if (!shown.length) {
       decos.push(
         Decoration.inline(pos, pos + node.nodeSize, {
           class: hiddenClasses(marks),
@@ -47,6 +53,9 @@ function decorate(
       );
       return false;
     }
+    // Mixed authors on one range stay neutral, including when only one of them is visible.
+    const authors = [...new Set(marks.map((m) => String(m.attrs.author ?? '').trim()))];
+    const author = authors.length === 1 ? authors[0]! : '';
     const token = colorFor(author);
     decos.push(
       Decoration.inline(pos, pos + node.nodeSize, {
@@ -62,23 +71,27 @@ function decorate(
 export const AuthorSuggestionColors = Extension.create<{
   colorFor: SuggestionColor;
   authorVisible: SuggestionAuthorVisible;
+  suggestionVisible: SuggestionIdVisible;
 }>({
   name: 'authorSuggestionColors',
   addOptions: () => ({
     colorFor: (author: string) => (author ? `var(--ct-collab-1)` : `var(--ct-text-muted)`),
     authorVisible: () => true,
+    suggestionVisible: () => true,
   }),
   addProseMirrorPlugins() {
     const colorFor: SuggestionColor = (a) => this.options.colorFor(a);
     const authorVisible: SuggestionAuthorVisible = (a) => this.options.authorVisible(a);
+    const suggestionVisible: SuggestionIdVisible = (id) => this.options.suggestionVisible(id);
     return [
       new Plugin<DecorationSet>({
         key: suggestionColorsKey,
         state: {
-          init: (_, state: EditorState) => decorate(state.doc, colorFor, authorVisible),
+          init: (_, state: EditorState) =>
+            decorate(state.doc, colorFor, authorVisible, suggestionVisible),
           apply: (tr, old) =>
             tr.docChanged || tr.getMeta(suggestionColorsKey)
-              ? decorate(tr.doc, colorFor, authorVisible)
+              ? decorate(tr.doc, colorFor, authorVisible, suggestionVisible)
               : old,
         },
         props: { decorations: (state) => suggestionColorsKey.getState(state) },

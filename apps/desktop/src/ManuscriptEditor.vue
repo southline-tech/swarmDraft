@@ -786,7 +786,7 @@ watch(collapsed, (v) => saveCollapsed(v));
 watch(
   () => props.changeIds,
   (ids) => {
-    if (!ids?.length) return;
+    if (!ids?.length || props.sliceMode) return;
     reviewOpen.value = true;
     collapsed.value = false;
     if (focusMode.value) focusMode.value = false;
@@ -799,8 +799,17 @@ const changes = computed(() => {
   if (!props.sectionId) return [...props.bookChanges];
   return mergeSectionBookChanges(props.sectionId, props.bookChanges, suggestions.value);
 });
+/** Review-link ids. Null shows every change; a selection hides the rest like an author filter. */
+const reviewSelection = computed(() =>
+  props.changeIds && props.changeIds.length ? props.changeIds : null,
+);
 /** Margin callouts align to marks in this section's doc only (#212); the rail may stay book-wide. */
-const marginChanges = computed(() => visibleItems(groupChanges(suggestions.value), filter.value));
+const marginChanges = computed(() => {
+  const grouped = groupChanges(suggestions.value);
+  return reviewSelection.value
+    ? filterChangesById(grouped, reviewSelection.value)
+    : visibleItems(grouped, filter.value);
+});
 
 const commentThreads = computed((): CommentThread[] => {
   const e = editor.value;
@@ -850,9 +859,6 @@ function fromOfThread(thread: CommentThread): number {
   return from >= 0 ? from : -1;
 }
 
-const reviewSelection = computed(() =>
-  props.changeIds && props.changeIds.length ? props.changeIds : null,
-);
 const reviewListItems = computed(() =>
   buildReviewList({
     changes: reviewSelection.value
@@ -939,6 +945,13 @@ watch(
     refreshAuthorFilterDecorations();
     if (editor.value) refreshReview(editor.value);
     else announceViewScope();
+  },
+);
+watch(
+  () => props.changeIds,
+  () => {
+    refreshAuthorFilterDecorations();
+    if (editor.value && !editor.value.isDestroyed) refreshReview(editor.value);
   },
 );
 watch(
@@ -1304,6 +1317,9 @@ function onKeydown(ev: KeyboardEvent) {
     !inForeignInput(ev.target, editor.value?.view.dom ?? null)
   ) {
     ev.preventDefault();
+    // A review link owns the page until Clear. Cycling authors would announce a
+    // new scope and repaint marks the list is no longer using.
+    if (reviewSelection.value) return;
     filter.value = cycleAuthorView(authorsOf(changes.value), filter.value, cycle);
     return;
   }
@@ -1642,6 +1658,17 @@ defineExpose({
   feedbackExcerpt,
 });
 
+/** Author filter, unless a review link is choosing ids. Selection then hides the other marks. */
+function suggestionAuthorVisible(author: string): boolean {
+  if (reviewSelection.value) return true;
+  return authorVisibleInFilter(filter.value, author);
+}
+function suggestionIdVisible(id: string): boolean {
+  const selected = reviewSelection.value;
+  if (!selected) return true;
+  return selected.includes(id);
+}
+
 /** Set when the content does not fit the schema; the editor is then read-only and never emits. */
 const loadError = shallowRef<string>('');
 // Shown in an always-mounted assertive region one frame after it is set (#79).
@@ -1662,15 +1689,18 @@ const options: Partial<EditorOptions> = {
     }),
     AuthorLabels.configure({
       label: authorLabel,
-      authorVisible: (author) => authorVisibleInFilter(filter.value, author),
+      authorVisible: suggestionAuthorVisible,
+      suggestionVisible: suggestionIdVisible,
     }),
     AuthorSuggestionColors.configure({
       colorFor: collabColor,
-      authorVisible: (author) => authorVisibleInFilter(filter.value, author),
+      authorVisible: suggestionAuthorVisible,
+      suggestionVisible: suggestionIdVisible,
     }),
     SuggestionOverlap.configure({
-      filterAuthor: () => filter.value,
-      authorVisible: (author) => authorVisibleInFilter(filter.value, author),
+      filterAuthor: () => (reviewSelection.value ? null : filter.value),
+      authorVisible: suggestionAuthorVisible,
+      suggestionVisible: suggestionIdVisible,
       handlers: () => ({
         labelAuthor: (author) => labelAuthor(author).name,
         onGutterClick: (author) => {

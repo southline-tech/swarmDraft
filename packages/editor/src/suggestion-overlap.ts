@@ -7,6 +7,7 @@ import { Plugin, PluginKey, type EditorState } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { targetKey, type SuggestionTarget } from './decisions';
+import type { SuggestionIdVisible } from './author-suggestion-colors';
 
 export const suggestionOverlapKey = new PluginKey<DecorationSet>('swarmdraftSuggestionOverlap');
 
@@ -137,10 +138,12 @@ export interface OverlapUiHandlers {
 function decorate(
   doc: PMNode,
   filterAuthor: string | null,
-  authorVisible: OverlapAuthorVisible,
+  suggestionVisible: SuggestionIdVisible,
   handlers: OverlapUiHandlers,
 ): DecorationSet {
-  const allSpans = gatherSuggestionSpans(doc);
+  // A review link drops every id it did not select. Author filtering stays on
+  // `filterAuthor`, which still clusters the hidden authors for the gutter.
+  const allSpans = gatherSuggestionSpans(doc).filter((span) => suggestionVisible(span.id));
   const clusters = findOverlapClusters(allSpans);
   const decos: Decoration[] = [];
 
@@ -218,12 +221,14 @@ function decorate(
 export const SuggestionOverlap = Extension.create<{
   filterAuthor: () => string | null;
   authorVisible: OverlapAuthorVisible;
+  suggestionVisible: SuggestionIdVisible;
   handlers: () => OverlapUiHandlers;
 }>({
   name: 'suggestionOverlap',
   addOptions: () => ({
     filterAuthor: () => null,
     authorVisible: () => true,
+    suggestionVisible: () => true,
     handlers: () => ({
       onOverlapClick: () => {},
       onGutterClick: () => {},
@@ -232,17 +237,17 @@ export const SuggestionOverlap = Extension.create<{
   }),
   addProseMirrorPlugins() {
     const filterAuthor = () => this.options.filterAuthor();
-    const authorVisible = (a: string) => this.options.authorVisible(a);
+    const suggestionVisible: SuggestionIdVisible = (id) => this.options.suggestionVisible(id);
     const handlers = () => this.options.handlers();
     return [
       new Plugin<DecorationSet>({
         key: suggestionOverlapKey,
         state: {
           init: (_, state: EditorState) =>
-            decorate(state.doc, filterAuthor(), authorVisible, handlers()),
+            decorate(state.doc, filterAuthor(), suggestionVisible, handlers()),
           apply: (tr, old) =>
             tr.docChanged || tr.getMeta(suggestionOverlapKey)
-              ? decorate(tr.doc, filterAuthor(), authorVisible, handlers())
+              ? decorate(tr.doc, filterAuthor(), suggestionVisible, handlers())
               : old,
         },
         props: {
@@ -264,7 +269,9 @@ export const SuggestionOverlap = Extension.create<{
                 const from = Number(el.dataset.overlapFrom);
                 const to = Number(el.dataset.overlapTo);
                 if (!Number.isFinite(from) || !Number.isFinite(to)) return false;
-                const spans = gatherSuggestionSpans(view.state.doc);
+                const spans = gatherSuggestionSpans(view.state.doc).filter((span) =>
+                  suggestionVisible(span.id),
+                );
                 const cluster = findOverlapClusters(spans).find(
                   (c) => c.from === from && c.to === to,
                 );

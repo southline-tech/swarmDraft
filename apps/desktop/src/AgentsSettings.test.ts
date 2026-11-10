@@ -443,10 +443,10 @@ describe('AgentsSettings', () => {
       return w;
     }
 
-    it('shows Bots connected within two minutes', async () => {
+    it('shows Connected within two minutes', async () => {
       const w = await mountWithAgent('2026-06-01T11:59:00.000Z');
       const row = w.get('[data-test="agent-connection-status"]');
-      expect(row.text()).toBe('Bots connected');
+      expect(row.text()).toBe('Connected');
       expect(row.classes()).toContain('ag__mcp--connected');
       expect(row.classes()).not.toContain('ag__mcp--muted');
     });

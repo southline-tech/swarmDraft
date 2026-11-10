@@ -163,6 +163,43 @@ describe('ContinuousManuscript review (#240, #241)', () => {
     w.unmount();
   });
 
+  it('#119: a review link hides non-selected marks in every mounted section', async () => {
+    const { w } = await mountContinuous('ch-1', {
+      'ch-1': twoAuthorPara(),
+      'ch-2': {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'text',
+                text: 'later',
+                marks: [{ type: 'suggestion_insert', attrs: { id: 's3', ...byOther } }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    await w.setProps({ changeIds: ['s1'] });
+    await flushPromises();
+    const lead = document.querySelector('[data-test="lead-editor"]');
+    const other = document.querySelector('[data-section-anchor="ch-2"]');
+    expect(lead?.querySelectorAll('.suggestion-filter-hidden')).toHaveLength(1);
+    expect(lead?.querySelector('.suggestion-filter-hidden')?.textContent).toBe('other ');
+    expect(lead?.querySelectorAll('[data-suggester]')).toHaveLength(1);
+    expect(other?.querySelectorAll('.suggestion-filter-hidden')).toHaveLength(1);
+    expect(other?.querySelector('[data-suggester]')).toBeNull();
+    const scope = document.querySelector('[data-test="view-scope-live"]')?.textContent;
+    document
+      .querySelector('.manuscript-editor')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: ']', altKey: true, bubbles: true }));
+    await flushPromises();
+    expect(document.querySelector('[data-test="view-scope-live"]')?.textContent).toBe(scope);
+    w.unmount();
+  });
+
   it('#241: new manuscript session resets author filter to All', async () => {
     const { w } = await mountContinuous('ch-1', {
       title: {

@@ -41,6 +41,7 @@ export interface ChangeLinkRoute {
   ensureManuscript: (manuscriptId: string) => Promise<boolean>;
   /** Scroll and focus via the continuous review nav. */
   focusChange: (sectionId: string, changeId: string) => Promise<void>;
+  /** One decided change. A review link calls this once per decided id, in link order. */
   showHistory: (view: OldChangeViewModel) => void;
   showToast: (message: string) => void;
   /** Clear a previous link's toast, history view, and review filter. */
@@ -110,7 +111,7 @@ export async function openChangeLink(
 
 /**
  * Open a review link: filter Review to the still-open changes.
- * Decided or no-longer-present changes use the same history view as one edit link.
+ * Each decided or no-longer-present change uses the same history view as one edit link.
  * Unknown ids are left out, with a toast for how many.
  */
 export async function openReviewLink(
@@ -158,7 +159,7 @@ export async function openReviewLink(
 
   route.resetLinkUi();
   if (focusIds.length) route.showSelectedChanges(focusIds);
-  if (history[0]) route.showHistory(history[0]);
+  for (const view of history) route.showHistory(view);
   if (unknown) route.showToast(unknownChangesToast(unknown));
   return 'opened';
 }

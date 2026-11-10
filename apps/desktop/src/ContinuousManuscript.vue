@@ -593,7 +593,7 @@ onBeforeUnmount(() => {
             :review-active-scroll-key="sec.id === selectedId ? activeScrollKey : undefined"
             :review-follow="sec.id === selectedId ? reviewFollow : undefined"
             :author-filter="authorFilter"
-            :change-ids="sec.id === selectedId ? (changeIds ?? null) : null"
+            :change-ids="changeIds ?? null"
             :chapter-title="sec.id === selectedId ? chapterTitle : undefined"
             :chapter-label="sectionLabels?.get(sec.id)"
             :book-docs="sec.id === selectedId ? bookDocs : undefined"
