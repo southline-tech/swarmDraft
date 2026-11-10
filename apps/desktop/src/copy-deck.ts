@@ -394,6 +394,7 @@ export const shortcutSheet = {
   find: 'Find',
   replace: 'Replace',
   addComment: 'Add comment',
+  trackChanges: 'Track changes',
   nextChange: 'Next change',
   previousChange: 'Previous change',
   acceptChange: 'Accept change',

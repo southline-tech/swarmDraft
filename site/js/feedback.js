@@ -217,6 +217,36 @@ function showSuccessPanel(dialog) {
   }
 }
 
+/** Pixels the software keyboard covers, so the dialog card can sit in the visible gap. */
+export function feedbackKeyboardInsetPx(innerHeight, viewport) {
+  if (!viewport || typeof viewport.height !== 'number') return 0;
+  const offsetTop = typeof viewport.offsetTop === 'number' ? viewport.offsetTop : 0;
+  const inset = innerHeight - viewport.height - offsetTop;
+  return inset > 0 ? Math.round(inset) : 0;
+}
+
+/** Sets `--feedback-keyboard-inset` on the dialog card from `visualViewport` resize/scroll. */
+export function bindFeedbackKeyboardInset(card, viewport = globalThis.visualViewport) {
+  if (!card) return () => {};
+  const apply = () => {
+    const px = feedbackKeyboardInsetPx(globalThis.innerHeight, viewport);
+    card.style.setProperty('--feedback-keyboard-inset', `${px}px`);
+  };
+  apply();
+  const hasEvents = viewport && typeof viewport.addEventListener === 'function';
+  if (hasEvents) {
+    viewport.addEventListener('resize', apply);
+    viewport.addEventListener('scroll', apply);
+  }
+  return () => {
+    if (hasEvents) {
+      viewport.removeEventListener('resize', apply);
+      viewport.removeEventListener('scroll', apply);
+    }
+    card.style.removeProperty('--feedback-keyboard-inset');
+  };
+}
+
 function wireFocusTrap(dialog, onEscape) {
   const card = dialog.querySelector('.feedback-dialog__card');
   if (!card) return () => {};
@@ -325,11 +355,14 @@ export function initFeedback(documentRoot) {
   const counterState = { lastLiveAt: 0, liveResetId: undefined };
   let focusReturn = null;
   let removeTrap = () => {};
+  let unbindKeyboardInset = () => {};
 
   const closeModal = () => {
     if (!dialog.open) return;
     clearTimeout(counterState.liveResetId);
     removeTrap();
+    unbindKeyboardInset();
+    unbindKeyboardInset = () => {};
     dialog.close();
     showFormPanel(dialog);
     resetFeedbackForm(form, counterState);
@@ -344,6 +377,8 @@ export function initFeedback(documentRoot) {
     resetFeedbackForm(form, counterState);
     dialog.showModal();
     removeTrap = wireFocusTrap(dialog, closeModal);
+    unbindKeyboardInset();
+    unbindKeyboardInset = bindFeedbackKeyboardInset(dialog.querySelector('.feedback-dialog__card'));
     form.description?.focus();
   };
 

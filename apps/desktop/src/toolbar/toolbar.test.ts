@@ -433,7 +433,7 @@ describe('EditorToolbar', () => {
     const bar = w.get('[data-test="editor-toolbar"]');
     const titles = bar.findAll('[title]').map((el) => el.attributes('title')!);
     const keys = bar.findAll('[aria-keyshortcuts]').map((el) => el.attributes('aria-keyshortcuts'));
-    expect(keys).toEqual(['Control+B', 'Control+I', 'Control+U']);
+    expect(keys).toEqual(['Control+B', 'Control+I', 'Control+Shift+E', 'Control+U']);
     for (const t of titles) expect(t).not.toMatch(/Ctrl\+(?:[LERJ\\FYZ]\b|Alt)/);
     expect(w.find('[data-test="tb-align-left"]').attributes('title')).toBe('Align left');
     w.unmount();

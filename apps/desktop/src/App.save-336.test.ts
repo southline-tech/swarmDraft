@@ -268,3 +268,35 @@ describe('Save As can be repeated (#336)', () => {
     vi.mocked(backend.draftSaveAs).mockReset().mockResolvedValue(null);
   });
 });
+
+describe('File menu history without a book (#326)', () => {
+  it('shows History disabled with a reason until a book is open', async () => {
+    const w = mount(App, { attachTo: document.body });
+    await settle();
+    await w.get('[data-test="app-menu-trigger"]').trigger('click');
+    await settle();
+    const item = document.body.querySelector('[data-test="app-menu-history"]') as HTMLElement;
+    expect(item).toBeTruthy();
+    expect(item.getAttribute('aria-disabled')).toBe('true');
+    expect(item.textContent).toContain('History');
+    expect(item.textContent).toContain('Open a book first');
+    expect(item.getAttribute('aria-describedby')).toBe('app-menu-history-reason');
+    item.click();
+    await settle();
+    expect(document.body.querySelector('[data-test="history-panel"]')).toBeNull();
+    w.unmount();
+  });
+
+  it('opens History once a book is open', async () => {
+    const w = await openBook();
+    await w.get('[data-test="app-menu-trigger"]').trigger('click');
+    await settle();
+    const item = document.body.querySelector('[data-test="app-menu-history"]') as HTMLElement;
+    expect(item.getAttribute('aria-disabled')).toBeNull();
+    expect(item.textContent).not.toContain('Open a book first');
+    item.click();
+    await settle();
+    expect(document.body.querySelector('[data-test="history-panel"]')).toBeTruthy();
+    w.unmount();
+  });
+});

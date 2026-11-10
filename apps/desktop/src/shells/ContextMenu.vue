@@ -219,7 +219,6 @@ onMounted(() => nextTick(() => mainMenuItems()[0]?.focus()));
       <p class="ctx-group-label" role="presentation">Chapter</p>
       <button
         v-for="it in CHAPTER"
-        v-show="it.id !== 'merge_prev_chapter' || !isDisabled(it.id)"
         :key="it.id"
         type="button"
         role="menuitem"
@@ -240,7 +239,7 @@ onMounted(() => nextTick(() => mainMenuItems()[0]?.focus()));
         <span
           v-if="chapterDisabledReason(it.id)"
           :id="chapterReasonId(it.id)"
-          class="ctx-mi-reason"
+          class="sh-mi-reason"
           >{{ chapterDisabledReason(it.id) }}</span
         >
       </button>
@@ -272,27 +271,6 @@ onMounted(() => nextTick(() => mainMenuItems()[0]?.focus()));
   padding: var(--ct-space-1) var(--ct-space-3);
   font-size: var(--ct-text-xs);
   color: var(--ct-text-muted);
-}
-.sh-mi--stack {
-  flex-direction: column;
-  align-items: stretch;
-  gap: var(--ct-space-1);
-  height: auto;
-  min-height: var(--ct-space-8);
-  padding-top: var(--ct-space-2);
-  padding-bottom: var(--ct-space-2);
-}
-.sh-mi-row {
-  display: flex;
-  width: 100%;
-  justify-content: space-between;
-  gap: var(--ct-space-2);
-}
-.ctx-mi-reason {
-  font-size: var(--ct-text-xs);
-  color: var(--ct-text-muted);
-  text-align: left;
-  line-height: 1.3;
 }
 .sh-mi-lead {
   display: inline-flex;
