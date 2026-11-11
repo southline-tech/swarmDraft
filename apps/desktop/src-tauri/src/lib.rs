@@ -1349,12 +1349,12 @@ fn launch_change_url(app: &tauri::AppHandle) -> Option<String> {
     if let Ok(Some(urls)) = app.deep_link().get_current() {
         for url in urls {
             let text = url.to_string();
-            if links::parse_change_link(&text).is_some() {
+            if links::is_app_link(&text) {
                 return Some(text);
             }
         }
     }
-    links::first_change_link(&std::env::args().collect::<Vec<_>>())
+    links::first_swarmdraft_link(&std::env::args().collect::<Vec<_>>())
 }
 
 #[tauri::command]
@@ -1393,7 +1393,7 @@ pub fn run() {
             if let Some(path) = draft_path_from_argv(&argv) {
                 platform::deliver_opened_draft(app, path);
             }
-            if let Some(url) = links::first_change_link(&argv) {
+            if let Some(url) = links::first_swarmdraft_link(&argv) {
                 let _ = app.emit("open-change-link", url);
             }
         }));

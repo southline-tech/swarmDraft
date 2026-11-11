@@ -27,6 +27,6 @@ Details: [bot-setup-prompt.md](../bot-setup-prompt.md). Server workflow notes: [
 2. Dedicated folder (for example `%USERPROFILE%\swarmdraft-bot-continuity`) with `pair.ps1` and `mcp.ps1` from [bot-setup-prompt.md](../bot-setup-prompt.md).
 3. `pair.ps1 -Mode request -Name "Continuity editor" -Dir <folder>` → author clicks **Allow**.
 4. Poll until the key is stored in that folder’s `key.txt`; use `mcp.ps1 -Tok <path-to-key.txt>` for all tool calls.
-5. Verify **Settings → Agents** shows MCP connected before starting continuity passes.
+5. Verify **Settings → Agents** shows Connected before starting continuity passes.
 
 Pairing will simplify after [#195](https://github.com/southline-tech/swarmDraft/issues/195); do not share keys in chat at any time.

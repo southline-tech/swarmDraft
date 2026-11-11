@@ -30,6 +30,21 @@ export function visibleItems<T extends { author: string }>(
   return filter ? items.filter((i) => i.author === filter) : [...items];
 }
 
+/** Keep changes whose ids are in a review link. `null` leaves the list alone. */
+export function filterChangesById<T extends { id: string }>(
+  items: readonly T[],
+  changeIds: readonly string[] | null,
+): T[] {
+  if (!changeIds) return [...items];
+  const ids = new Set(changeIds);
+  return items.filter((item) => ids.has(item.id));
+}
+
+/** Chip copy for a review link. `count` is how many selected changes are still in the list. */
+export function selectedChangesLabel(count: number): string {
+  return `Showing ${count} selected change${count === 1 ? '' : 's'}`;
+}
+
 /** True when inline suggestion marks for this author should show (matches panel view). */
 export function authorVisibleInFilter(filter: AuthorFilter, author: string): boolean {
   return filter ? author === filter : true;
@@ -87,6 +102,11 @@ export function bulkActionLabel(
 ): string {
   const verb = decision === 'accept' ? 'Accept all' : 'Reject all';
   return filter ? `${verb} from ${displayName}` : verb;
+}
+
+/** Accept all / Reject all while a review link is the visible set, not an author filter. */
+export function selectedBulkActionLabel(decision: 'accept' | 'reject'): string {
+  return decision === 'accept' ? 'Accept all selected' : 'Reject all selected';
 }
 
 export const REVIEW_VIEW_CYCLE = { next: 'Alt+]', prev: 'Alt+[' } as const;

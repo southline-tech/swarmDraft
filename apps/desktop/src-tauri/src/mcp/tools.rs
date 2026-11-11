@@ -202,6 +202,20 @@ pub struct ListSuggestionsArgs {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct LinkToEditArgs {
+    pub manuscript_id: String,
+    /// Suggestion id from `suggest_edit`, `suggest_insert`, `suggest_style`, or `list_suggestions`.
+    pub change_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct LinkToReviewArgs {
+    pub manuscript_id: String,
+    /// Suggestion ids to open together in the review list. At most 50.
+    pub change_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ExportFormat {
     Pdf,
@@ -458,6 +472,61 @@ impl SwarmdraftMcp {
         let doc = self.store.load_doc(&s.doc_id)?;
         Ok((s, content::decode_checked(&doc).map_err(ToolErr::invalid)?))
     }
+
+    fn require_manuscript(&self, manuscript_id: &str) -> Result<(), ToolErr> {
+        match self.store.get_manuscript(manuscript_id) {
+            Ok(_) => Ok(()),
+            Err(crate::storage::StorageError::NotFound(_)) => Err(ToolErr::invalid(format!(
+                "manuscript {manuscript_id} was not found"
+            ))),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn require_known_changes(&self, manuscript_id: &str, ids: &[String]) -> Result<(), ToolErr> {
+        let known: std::collections::HashSet<String> = self
+            .store
+            .suggestions_for_manuscript(manuscript_id)?
+            .into_iter()
+            .map(|s| s.id)
+            .collect();
+        for id in ids {
+            if !known.contains(id) {
+                return Err(ToolErr::invalid(format!(
+                    "change {id} was not found in this manuscript"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn normalize_change_ids(ids: &[String]) -> Result<Vec<String>, ToolErr> {
+    if ids.is_empty() {
+        return Err(ToolErr::invalid(
+            "change_ids must include at least one change",
+        ));
+    }
+    if ids.len() > crate::links::MAX_LINKED_CHANGES {
+        return Err(ToolErr::invalid(format!(
+            "too many changes ({}; the limit is {})",
+            ids.len(),
+            crate::links::MAX_LINKED_CHANGES
+        )));
+    }
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for raw in ids {
+        let id = raw.trim();
+        if id.is_empty() {
+            return Err(ToolErr::invalid("change id must not be empty"));
+        }
+        check_len("change_id", id, MAX_ID)?;
+        if seen.insert(id.to_string()) {
+            out.push(id.to_string());
+        }
+    }
+    Ok(out)
 }
 
 #[tool_router]
@@ -643,6 +712,70 @@ impl SwarmdraftMcp {
                     }
                 }
                 Ok(Output::Json(json!({ "suggestions": out })))
+            },
+        )
+    }
+
+    #[tool(
+        description = "Build a swarmdraft:// link that opens this manuscript on one suggestion. The change id must already exist (from suggest_edit, suggest_insert, suggest_style, or list_suggestions). Returns { url }."
+    )]
+    async fn link_to_edit(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(a): Parameters<LinkToEditArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let change_id = a.change_id.trim().to_string();
+        let args = json!({
+            "manuscriptId": a.manuscript_id,
+            "changeId": clip(&change_id, MAX_ID),
+        });
+        self.run(
+            &parts,
+            "read",
+            "link_to_edit",
+            Some(&a.manuscript_id),
+            args,
+            |_| {
+                check_ids(&[
+                    ("manuscript_id", Some(&a.manuscript_id)),
+                    ("change_id", Some(&change_id)),
+                ])?;
+                if change_id.is_empty() {
+                    return Err(ToolErr::invalid("change_id must not be empty"));
+                }
+                self.require_manuscript(&a.manuscript_id)?;
+                self.require_known_changes(&a.manuscript_id, std::slice::from_ref(&change_id))?;
+                let url = crate::links::encode_change_link(&a.manuscript_id, &change_id);
+                Ok(Output::Json(json!({ "url": url })))
+            },
+        )
+    }
+
+    #[tool(
+        description = "Build a swarmdraft:// link that opens this manuscript with Review filtered to the given suggestion ids (at most 50). Every id must already exist. Returns { url }."
+    )]
+    async fn link_to_review(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(a): Parameters<LinkToReviewArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let args = json!({
+            "manuscriptId": a.manuscript_id,
+            "changeCount": a.change_ids.len(),
+        });
+        self.run(
+            &parts,
+            "read",
+            "link_to_review",
+            Some(&a.manuscript_id),
+            args,
+            |_| {
+                check_ids(&[("manuscript_id", Some(&a.manuscript_id))])?;
+                let ids = normalize_change_ids(&a.change_ids)?;
+                self.require_manuscript(&a.manuscript_id)?;
+                self.require_known_changes(&a.manuscript_id, &ids)?;
+                let url = crate::links::encode_review_link(&a.manuscript_id, &ids);
+                Ok(Output::Json(json!({ "url": url })))
             },
         )
     }
@@ -1757,6 +1890,7 @@ impl ServerHandler for SwarmdraftMcp {
 read_chapter (markdown with block ids) and search_text before edits; suggest_edit to replace or \
 delete an exact quote; suggest_insert for new paragraphs or scenes; suggest_style for paragraph \
 format; add_comment and write_note for comments; list_suggestions to see pending work; \
+link_to_edit and link_to_review to give the author a link that opens one change or a filtered review list; \
 trigger_export/get_export only when the author asks; send_feedback to report bugs or ideas (batch into one daily digest per agent, max 4000 chars; author approves first). Pair with request_pairing/poll_pairing. \
 Accepting or rejecting suggestions is human-only in the app."
             ),
@@ -2149,5 +2283,163 @@ mod tests {
         // Text on one side of the footnote still works.
         let r = edit("lantern").await.unwrap();
         assert_ne!(r.is_error, Some(true), "{r:?}");
+    }
+
+    fn suggestion(id: &str, section_id: &str, agent_id: &str) -> crate::manuscripts::Suggestion {
+        crate::manuscripts::Suggestion {
+            id: id.into(),
+            section_id: section_id.into(),
+            block_id: None,
+            kind: "replace".into(),
+            quote: Some("lantern".into()),
+            replacement: Some("lamp".into()),
+            rationale: None,
+            author: crate::manuscripts::Author {
+                kind: "agent".into(),
+                id: agent_id.into(),
+                name: "Synthetic agent".into(),
+            },
+            status: "open".into(),
+            created_at: "1970-01-01T00:00:00.000Z".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn link_tools_require_a_known_manuscript_and_known_changes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(tmp.path()).unwrap();
+        let m = store.create_manuscript("Synthetic").unwrap();
+        let s = store
+            .import_section_json(
+                &m.id,
+                "chapter",
+                "One",
+                &json!({"type":"doc","content":[
+                    {"type":"paragraph","content":[{"type":"text","text":"The lantern was lit."}]}
+                ]}),
+            )
+            .unwrap();
+        let agent = store.create_agent("Synthetic agent", "#123456").unwrap();
+        store
+            .set_agent_manuscript_access_mode(&agent.id, "all")
+            .unwrap();
+        store
+            .insert_suggestion(&m.id, &suggestion("chg-1", &s.id, &agent.id))
+            .unwrap();
+        store
+            .insert_suggestion(&m.id, &suggestion("chg-2", &s.id, &agent.id))
+            .unwrap();
+        let scopes = vec!["read".to_string()];
+        let tok = store.create_token(&agent.id, Some(&scopes)).unwrap();
+        let principal = store.authenticate(&tok.token).unwrap().unwrap();
+        let mcp = SwarmdraftMcp::new(
+            store.clone(),
+            std::sync::Arc::new(crate::draft::DraftService::new(
+                store.data_dir().to_path_buf(),
+                "0.1.1".into(),
+            )),
+            None,
+            None,
+        );
+        let parts = || {
+            let (mut parts, ()) = axum::http::Request::new(()).into_parts();
+            parts.extensions.insert(principal.clone());
+            Extension(parts)
+        };
+
+        let one = mcp
+            .link_to_edit(
+                parts(),
+                Parameters(LinkToEditArgs {
+                    manuscript_id: m.id.clone(),
+                    change_id: "chg-1".into(),
+                }),
+            )
+            .await
+            .unwrap();
+        assert_ne!(one.is_error, Some(true), "{one:?}");
+        let expected = crate::links::encode_change_link(&m.id, "chg-1");
+        assert!(format!("{one:?}").contains(&expected), "{one:?}");
+
+        let many = mcp
+            .link_to_review(
+                parts(),
+                Parameters(LinkToReviewArgs {
+                    manuscript_id: m.id.clone(),
+                    change_ids: vec!["chg-2".into(), "chg-1".into(), "chg-1".into()],
+                }),
+            )
+            .await
+            .unwrap();
+        assert_ne!(many.is_error, Some(true), "{many:?}");
+        let review = crate::links::encode_review_link(&m.id, &["chg-2".into(), "chg-1".into()]);
+        assert!(format!("{many:?}").contains(&review), "{many:?}");
+
+        let missing_book = mcp
+            .link_to_edit(
+                parts(),
+                Parameters(LinkToEditArgs {
+                    manuscript_id: "no-such-book".into(),
+                    change_id: "chg-1".into(),
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(missing_book.is_error, Some(true), "{missing_book:?}");
+        assert!(
+            format!("{missing_book:?}").contains("was not found"),
+            "{missing_book:?}"
+        );
+
+        let missing_change = mcp
+            .link_to_review(
+                parts(),
+                Parameters(LinkToReviewArgs {
+                    manuscript_id: m.id.clone(),
+                    change_ids: vec!["chg-1".into(), "missing".into()],
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(missing_change.is_error, Some(true), "{missing_change:?}");
+        assert!(
+            format!("{missing_change:?}").contains("change missing was not found"),
+            "{missing_change:?}"
+        );
+
+        let empty = mcp
+            .link_to_review(
+                parts(),
+                Parameters(LinkToReviewArgs {
+                    manuscript_id: m.id.clone(),
+                    change_ids: vec![],
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(empty.is_error, Some(true), "{empty:?}");
+        assert!(
+            format!("{empty:?}").contains("at least one change"),
+            "{empty:?}"
+        );
+
+        let too_many: Vec<String> = (0..=crate::links::MAX_LINKED_CHANGES)
+            .map(|n| format!("c{n}"))
+            .collect();
+        let limited = mcp
+            .link_to_review(
+                parts(),
+                Parameters(LinkToReviewArgs {
+                    manuscript_id: m.id.clone(),
+                    change_ids: too_many,
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(limited.is_error, Some(true), "{limited:?}");
+        assert!(
+            format!("{limited:?}").contains("too many changes"),
+            "{limited:?}"
+        );
     }
 }

@@ -10,6 +10,7 @@ import { Plugin, PluginKey, type EditorState } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { Mark, Node as PMNode } from '@tiptap/pm/model';
 import { formatChangeSummary, readFormatAttrs } from './format-change';
+import type { SuggestionIdVisible } from './author-suggestion-colors';
 
 export const authorLabelsKey = new PluginKey<DecorationSet>('swarmdraftAuthorLabels');
 export type AuthorLabel = (author: string) => string;
@@ -37,13 +38,18 @@ function decorate(
   doc: PMNode,
   label: AuthorLabel,
   authorVisible: AuthorLabelVisible,
+  suggestionVisible: SuggestionIdVisible,
 ): DecorationSet {
   const decos: Decoration[] = [];
   doc.descendants((node, pos) => {
     if (!node.isText) return true;
     const titles = node.marks
       .filter((m) => KIND[m.type.name] || m.type.name === 'format_change')
-      .filter((m) => authorVisible(String(m.attrs.author ?? '').trim()))
+      .filter(
+        (m) =>
+          suggestionVisible(String(m.attrs.id ?? '')) &&
+          authorVisible(String(m.attrs.author ?? '').trim()),
+      )
       .map((m) => markHoverTitle(m, label))
       .filter((t): t is string => !!t);
     if (titles.length)
@@ -56,20 +62,27 @@ function decorate(
 export const AuthorLabels = Extension.create<{
   label: AuthorLabel;
   authorVisible: AuthorLabelVisible;
+  suggestionVisible: SuggestionIdVisible;
 }>({
   name: 'authorLabels',
-  addOptions: () => ({ label: (a: string) => a, authorVisible: () => true }),
+  addOptions: () => ({
+    label: (a: string) => a,
+    authorVisible: () => true,
+    suggestionVisible: () => true,
+  }),
   addProseMirrorPlugins() {
     const label: AuthorLabel = (a) => this.options.label(a);
     const authorVisible: AuthorLabelVisible = (a) => this.options.authorVisible(a);
+    const suggestionVisible: SuggestionIdVisible = (id) => this.options.suggestionVisible(id);
     return [
       new Plugin<DecorationSet>({
         key: authorLabelsKey,
         state: {
-          init: (_, state: EditorState) => decorate(state.doc, label, authorVisible),
+          init: (_, state: EditorState) =>
+            decorate(state.doc, label, authorVisible, suggestionVisible),
           apply: (tr, old) =>
             tr.docChanged || tr.getMeta(authorLabelsKey)
-              ? decorate(tr.doc, label, authorVisible)
+              ? decorate(tr.doc, label, authorVisible, suggestionVisible)
               : old,
         },
         props: { decorations: (state) => authorLabelsKey.getState(state) },
