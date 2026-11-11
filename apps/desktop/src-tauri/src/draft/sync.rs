@@ -370,11 +370,12 @@ fn open_suggestion_ids(repo: &DraftRepo) -> Result<HashSet<String>, DraftRepoErr
 
 /// Put a suggestion that is still open back into `main_bytes` from unmerged bot tips,
 /// as that branch stored it. A delete mark and a format mark are put on the words that
-/// remain. A paragraph the bot inserted between two others is inserted there again. Text
-/// already on `main` stays, including a keystroke and a deletion in that paragraph, and
-/// an inline insert stays where the bot put it. A later paragraph that still has the old
-/// sentence does not take the mark. A rejected insert is not copied. Returns the new
-/// state only when a mark was added.
+/// remain, including when the paragraph also gained characters or kept less than half
+/// of them. A paragraph the bot inserted between two others is inserted there again,
+/// and a keystroke in that paragraph stays in it with the insert. Text already on
+/// `main` stays, and an inline insert stays where the bot put it. A later paragraph
+/// that still has the old sentence does not take the mark. A rejected insert is not
+/// copied. Returns the new state only when a mark was added.
 fn restore_open_suggestions(
     repo: &DraftRepo,
     section_id: &str,
@@ -456,6 +457,13 @@ struct NewBlock {
     inserts: Vec<InsertRun>,
 }
 
+struct PendingRestore {
+    block: NewBlock,
+    /// The bot paragraph had no text of its own. A main paragraph sitting in that
+    /// same slot is the keystroke the writer typed into it.
+    shell: bool,
+}
+
 /// One open mark on a bot block, still in that block's own plain-text coordinates.
 struct BotOp {
     insert: bool,
@@ -482,14 +490,18 @@ fn merge_open_suggestions(
     let mut splices: Vec<(usize, InsertRun)> = Vec::new();
     let mut mark_runs: Vec<(usize, MarkRun)> = Vec::new();
     let mut place: Vec<(usize, NewBlock)> = Vec::new();
-    let mut pending: Vec<NewBlock> = Vec::new();
+    let mut pending: Vec<PendingRestore> = Vec::new();
     let mut mi = 0usize;
+    let mut seen_match = false;
     for block in &bot_blocks {
         let ops = bot_ops(&block.node, open_ids, skip);
         let bot_plain = plain_text(&block.node);
         if bot_plain.is_empty() {
             if let Some(new_block) = new_block_from_inserts(&block.node, &ops) {
-                pending.push(new_block);
+                pending.push(PendingRestore {
+                    block: new_block,
+                    shell: true,
+                });
             }
             continue;
         }
@@ -500,15 +512,25 @@ fn merge_open_suggestions(
         });
         let Some(rel) = found else {
             if let Some(new_block) = new_block_from_inserts(&block.node, &ops) {
-                pending.push(new_block);
+                pending.push(PendingRestore {
+                    block: new_block,
+                    shell: false,
+                });
             }
             continue;
         };
         let idx = mi + rel;
+        settle_pending(
+            &mut pending,
+            (mi, idx),
+            seen_match,
+            &main_blocks,
+            &mut splices,
+            &mut place,
+            applied,
+        );
+        seen_match = true;
         mi = idx + 1;
-        for new_block in pending.drain(..) {
-            place.push((idx, new_block));
-        }
         if ops.is_empty() {
             continue;
         }
@@ -524,7 +546,7 @@ fn merge_open_suggestions(
             mark_runs.push((idx, run));
         }
     }
-    let tail = pending;
+    let tail: Vec<NewBlock> = pending.into_iter().map(|item| item.block).collect();
     if splices.is_empty() && mark_runs.is_empty() && place.is_empty() && tail.is_empty() {
         return false;
     }
@@ -541,6 +563,49 @@ fn merge_open_suggestions(
     });
     apply_open_runs(main, main_blocks.len(), &splices, &mark_runs, &place, &tail);
     true
+}
+
+/// Place insert-only paragraphs that are still waiting.
+/// Between two matched paragraphs, one shell per main paragraph in that gap is the
+/// keystroke the writer typed into the bot's inserted paragraph: the insert is added
+/// after that keystroke. Anything else is a new paragraph just before the match.
+fn settle_pending(
+    pending: &mut Vec<PendingRestore>,
+    gap: (usize, usize),
+    between_matches: bool,
+    main_blocks: &[content::Block],
+    splices: &mut Vec<(usize, InsertRun)>,
+    place: &mut Vec<(usize, NewBlock)>,
+    applied: &mut HashSet<String>,
+) {
+    let (gap_start, gap_end) = gap;
+    let gap_len = gap_end.saturating_sub(gap_start);
+    let absorb = between_matches
+        && !pending.is_empty()
+        && gap_len == pending.len()
+        && pending.iter().all(|item| item.shell);
+    if absorb {
+        for (offset, item) in pending.drain(..).enumerate() {
+            let main_idx = gap_start + offset;
+            let end = utf16_len(&plain_text(&main_blocks[main_idx].node));
+            note_applied_tail(applied, &item.block);
+            for run in item.block.inserts {
+                splices.push((
+                    main_idx,
+                    InsertRun {
+                        offset: end,
+                        seq: run.seq,
+                        text: run.text,
+                        marks: run.marks,
+                    },
+                ));
+            }
+        }
+        return;
+    }
+    for item in pending.drain(..) {
+        place.push((gap_end, item.block));
+    }
 }
 
 fn note_applied(applied: &mut HashSet<String>, ops: &[BotOp]) {
@@ -923,9 +988,10 @@ fn mark_anchor(align: &[Option<usize>], at: usize, end: usize) -> Option<(usize,
 }
 
 /// Map bot characters onto `main`. A contiguous copy wins, including a keystroke around
-/// it. When the writer deleted characters, the ones that remain still line up, as long
-/// as at least half the paragraph is left. `None` when this is a different paragraph.
-/// Each entry is that bot character's index in `main`, or `None` when it was deleted.
+/// it. When the writer also deleted characters, the longest stretches still shared line
+/// up, including a remnant shorter than half the original sentence. `None` when this is
+/// a different paragraph, so a later copy of the old sentence is left alone. Each entry
+/// is that bot character's index in `main`, or `None` when it was deleted.
 fn align_chars(bot: &[char], main: &[char]) -> Option<Vec<Option<usize>>> {
     if bot.is_empty() || main.is_empty() {
         return None;
@@ -933,18 +999,83 @@ fn align_chars(bot: &[char], main: &[char]) -> Option<Vec<Option<usize>>> {
     if let Some(full) = align_full(bot, main) {
         return Some(full.into_iter().map(Some).collect());
     }
-    // A short different paragraph can be a subsequence of this one. Half the
-    // original length keeps a deletion on the paragraph the bot stored it on,
-    // and leaves a later copy of the old sentence alone.
-    if main.len().saturating_mul(2) < bot.len() {
+    let mut map = vec![None; bot.len()];
+    let matched = align_shared(bot, main, &mut map, 0, 0);
+    // Shared characters have to be at least half of the two paragraphs together.
+    // That keeps a short remnant such as "old phrase" or "ome" on the sentence it
+    // came from, and rejects a fragment such as "the" that merely occurs inside it.
+    if matched == 0 || matched.saturating_mul(4) < bot.len() + main.len() {
         return None;
     }
-    let main_at = align_greedy(main, bot)?;
-    let mut map = vec![None; bot.len()];
-    for (main_i, bot_i) in main_at.into_iter().enumerate() {
-        map[bot_i] = Some(main_i);
-    }
     Some(map)
+}
+
+/// Longest shared stretches, written into `map` as bot-offset → main index.
+/// A stretch shorter than two characters is noise and is not used.
+fn align_shared(
+    bot: &[char],
+    main: &[char],
+    map: &mut [Option<usize>],
+    bot_off: usize,
+    main_off: usize,
+) -> usize {
+    let Some((start_bot, start_main, len)) = longest_common_substring(bot, main) else {
+        return 0;
+    };
+    if len < 2 {
+        return 0;
+    }
+    for step in 0..len {
+        map[bot_off + start_bot + step] = Some(main_off + start_main + step);
+    }
+    let left = align_shared(
+        &bot[..start_bot],
+        &main[..start_main],
+        map,
+        bot_off,
+        main_off,
+    );
+    let right = align_shared(
+        &bot[start_bot + len..],
+        &main[start_main + len..],
+        map,
+        bot_off + start_bot + len,
+        main_off + start_main + len,
+    );
+    left + len + right
+}
+
+/// Earliest longest common substring as `(bot start, main start, length)`.
+fn longest_common_substring(bot: &[char], main: &[char]) -> Option<(usize, usize, usize)> {
+    let n = bot.len();
+    let m = main.len();
+    if n == 0 || m == 0 || n.saturating_mul(m) > 2_000_000 {
+        return None;
+    }
+    let mut prev = vec![0usize; m + 1];
+    let mut best_len = 0usize;
+    let mut best_bot = 0usize;
+    let mut best_main = 0usize;
+    for (i, bot_ch) in bot.iter().enumerate() {
+        let mut curr = vec![0usize; m + 1];
+        for (j, main_ch) in main.iter().enumerate() {
+            if bot_ch == main_ch {
+                let len = prev[j] + 1;
+                curr[j + 1] = len;
+                if len > best_len {
+                    best_len = len;
+                    best_bot = i + 1 - len;
+                    best_main = j + 1 - len;
+                }
+            }
+        }
+        prev = curr;
+    }
+    if best_len == 0 {
+        None
+    } else {
+        Some((best_bot, best_main, best_len))
+    }
 }
 
 /// Map every bot character onto `main`. Prefer a contiguous copy, then the alignment
