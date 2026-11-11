@@ -86,6 +86,21 @@ Run this consolidated pass in order; do not hand off until every line that appli
 
 Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
 
+- 2026-11-10 · #119 · PR #347 · `view-scope-live` still said “Showing 0 selected changes” or kept the old count after the chip hid · the region stays empty while the chip is hidden and follows the same suggestion-row count when a decision lands in another chapter
+- 2026-11-10 · #119 · PR #347 · the accept-shortcut test dispatched Ctrl+Shift+Enter on `.manuscript-editor`, so the later chapter accepted its own change · the shortcut is dispatched on the lead `.tiptap`, and the later mark is gone while the lead mark stays
+- 2026-11-10 · #119 · PR #347 · the selection chip counted every id in the link and stayed up when the list was empty or suggestions failed to load · the chip counts suggestion rows still in the list and stays hidden while that list is empty or the load-failure line is showing
+- 2026-11-10 · #119 · PR #347 · Accept all and the accept shortcut wrote only the lead chapter · each locked key is decided in the mounted section that owns it, the same way a card's Accept is
+- 2026-11-10 · #119 · PR #347 · an unknown-id toast said “the others are in your review list” for one remaining change and for a history view · “the other” when one id is in the review list; the list is named only for ids passed to `showSelectedChanges`; history-only says the book stayed on the full list
+- 2026-11-10 · #119 · PR #347 · Accept all, Reject all, and the scope announcement still used the author filter during a review link · those labels and `view-scope-live` describe the selection (`Accept all selected`, `Showing N selected changes`)
+- 2026-11-10 · #119 · PR #347 · the PR summary still said the settings row is “Bots connected” · the summary matches the row, which says “Connected”
+- 2026-11-10 · #119 · PR #347 · Clear unmounted the selection chip and focus landed on the body · `clearSelection` emits, then focuses the Show changes from toggle, else the first list row, else the panel (`tabindex="-1"`)
+- 2026-11-10 · #119 · PR #347 · an unknown-id toast only named a count · the four copies say the rest are in the review list, or that the book stayed where you left off, on the existing AppToast
+- 2026-11-10 · #119 · PR #347 · Clear had no accessible name, the whole chip was `role=status`, and its hit target had no padding · `aria-label="Clear selected changes"`, `role=status` on the label span, padding `var(--ct-space-1) var(--ct-space-2)` with a 24px minimum
+- 2026-11-10 · #119 · PR #347 · Show resolved stayed visible while a review link filtered the list · the checkbox is hidden until Clear
+- 2026-11-10 · #119 · PR #347 · a review link filtered the list and left margin notes, inline marks, other mounted sections, and Alt+[ / Alt+] on the full set · selection hides non-selected marks and margin notes in every mounted section the same way an author filter does, and the author-cycle shortcut stays idle until Clear
+- 2026-11-10 · #119 · PR #347 · decided ids after the first never appeared · `openReviewLink` hands every decided id to the history view, and closing one shows the next
+- 2026-11-10 · #119 · PR #347 · an empty review-link selection showed “Nothing to review” and the load-failure line together with “None of the selected changes are still open.” · one message for an empty selection; the load-failure line is the only message while suggestions fail to load
+- 2026-11-10 · #119 · PR #347 · the per-agent status line said “Bots connected” · that row and the sentences that describe it say “Connected”
 - 2026-11-09 · #116 · PR #341 · opening or restoring a `.draft` replaced comment rows and dropped any id the tree did not have · import uses `insert_comment_if_missing` on open and restore; local rows, including a bot comment only on `bot/*`, stay and are not duplicated
 - 2026-11-09 · #116 · PR #341 · review decision `kind` was accepted and discarded · the commit message stores it as a `Kind` trailer when it is non-empty
 - 2026-11-09 · #116 · PR #341 · a cache miss walked change history while holding the draft op lock · the walk runs after the lock is released; the cache check stays inside it

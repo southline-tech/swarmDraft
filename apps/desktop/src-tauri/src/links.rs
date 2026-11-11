@@ -1,4 +1,5 @@
-//! Deep links to a tracked change (`swarmdraft://open?draft=&change=`).
+//! Deep links to a tracked change (`swarmdraft://open?draft=&change=`) and to a filtered
+//! review list (`swarmdraft://review?draft=&changes=`).
 //!
 //! Resolution goes through [`draft::DraftService::resolve_change`] (git history) only after the
 //! manuscript id is one path segment and an existing row. Anything else is the unknown result
@@ -20,6 +21,9 @@ pub struct ChangeLink {
     pub change_id: String,
 }
 
+/// How many change ids one review link may carry. Longer lists are refused.
+pub const MAX_LINKED_CHANGES: usize = 50;
+
 /// `swarmdraft://open?draft=<manuscriptId>&change=<changeId>`.
 pub fn encode_change_link(manuscript_id: &str, change_id: &str) -> String {
     format!(
@@ -31,26 +35,11 @@ pub fn encode_change_link(manuscript_id: &str, change_id: &str) -> String {
 
 /// Parse a change link. Anything else (wrong scheme, missing id, blank id) is `None`.
 pub fn parse_change_link(raw: &str) -> Option<ChangeLink> {
-    let raw = raw.trim();
-    let rest = strip_prefix_ignore_ascii_case(raw, SCHEME)?;
-    let (host, query) = rest.split_once('?')?;
-    let host = host.trim_end_matches('/');
-    if !host.eq_ignore_ascii_case("open") {
-        return None;
-    }
-    let query = query.split('#').next().unwrap_or(query);
+    let pairs = swarmdraft_query(raw, "open")?;
     let mut manuscript_id = None;
     let mut change_id = None;
-    for pair in query.split('&') {
-        if pair.is_empty() {
-            continue;
-        }
-        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-        let value = percent_decode(value).trim().to_string();
-        if value.is_empty() {
-            continue;
-        }
-        match key {
+    for (key, value) in pairs {
+        match key.as_str() {
             "draft" => manuscript_id = Some(value),
             "change" => change_id = Some(value),
             _ => {}
@@ -62,12 +51,101 @@ pub fn parse_change_link(raw: &str) -> Option<ChangeLink> {
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewLink {
+    pub manuscript_id: String,
+    pub change_ids: Vec<String>,
+}
+
+/// `swarmdraft://review?draft=<manuscriptId>&changes=<id1>,<id2>`.
+pub fn encode_review_link(manuscript_id: &str, change_ids: &[String]) -> String {
+    let changes = change_ids
+        .iter()
+        .map(|id| percent_encode(id))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "swarmdraft://review?draft={}&changes={changes}",
+        percent_encode(manuscript_id)
+    )
+}
+
+/// Parse a review link. A missing id, a blank id, or more than [`MAX_LINKED_CHANGES`] is `None`.
+pub fn parse_review_link(raw: &str) -> Option<ReviewLink> {
+    let pairs = swarmdraft_query(raw, "review")?;
+    let mut manuscript_id = None;
+    let mut changes = None;
+    for (key, value) in pairs {
+        match key.as_str() {
+            "draft" => manuscript_id = Some(value),
+            "changes" => changes = Some(value),
+            _ => {}
+        }
+    }
+    let manuscript_id = manuscript_id?;
+    let mut change_ids = Vec::new();
+    for id in changes?.split(',') {
+        let id = id.trim();
+        if !id.is_empty() {
+            change_ids.push(id.to_string());
+        }
+    }
+    if change_ids.is_empty() || change_ids.len() > MAX_LINKED_CHANGES {
+        return None;
+    }
+    Some(ReviewLink {
+        manuscript_id,
+        change_ids,
+    })
+}
+
+/// An open link or a review link.
+pub fn is_app_link(raw: &str) -> bool {
+    parse_change_link(raw).is_some() || parse_review_link(raw).is_some()
+}
+
 /// First argv entry that is a change link, in any position.
 pub fn first_change_link(argv: &[String]) -> Option<String> {
     argv.iter().find_map(|arg| {
         let text = arg.trim();
         parse_change_link(text).map(|_| text.to_string())
     })
+}
+
+/// First argv entry that opens one change or a filtered review list.
+pub fn first_swarmdraft_link(argv: &[String]) -> Option<String> {
+    argv.iter().find_map(|arg| {
+        let text = arg.trim();
+        if is_app_link(text) {
+            Some(text.to_string())
+        } else {
+            None
+        }
+    })
+}
+
+fn swarmdraft_query(raw: &str, host_name: &str) -> Option<Vec<(String, String)>> {
+    let raw = raw.trim();
+    let rest = strip_prefix_ignore_ascii_case(raw, SCHEME)?;
+    let (host, query) = rest.split_once('?')?;
+    let host = host.trim_end_matches('/');
+    if !host.eq_ignore_ascii_case(host_name) {
+        return None;
+    }
+    let query = query.split('#').next().unwrap_or(query);
+    let mut pairs = Vec::new();
+    for pair in query.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        let value = percent_decode(value).trim().to_string();
+        if value.is_empty() {
+            continue;
+        }
+        pairs.push((key.to_string(), value));
+    }
+    Some(pairs)
 }
 
 /// Remembers the cold-start URL so the webview can take it once.
@@ -607,6 +685,52 @@ mod tests {
             first_change_link(&argv).as_deref(),
             Some("swarmdraft://open?draft=book&change=chg-9")
         );
+    }
+
+    #[test]
+    fn review_link_round_trip_and_limits() {
+        let url = encode_review_link("ms 1", &["chg/1".into(), "chg 2".into()]);
+        assert_eq!(
+            url,
+            "swarmdraft://review?draft=ms%201&changes=chg%2F1,chg%202"
+        );
+        assert_eq!(
+            parse_review_link(&url),
+            Some(ReviewLink {
+                manuscript_id: "ms 1".into(),
+                change_ids: vec!["chg/1".into(), "chg 2".into()],
+            })
+        );
+        assert_eq!(
+            parse_review_link("swarmdraft://review/?draft=book&changes=a,b"),
+            Some(ReviewLink {
+                manuscript_id: "book".into(),
+                change_ids: vec!["a".into(), "b".into()],
+            })
+        );
+        assert!(parse_review_link("swarmdraft://open?draft=book&change=a").is_none());
+        assert!(parse_review_link("swarmdraft://review?draft=book").is_none());
+        assert!(parse_review_link("swarmdraft://review?draft=book&changes=").is_none());
+        assert!(parse_review_link("swarmdraft://review?changes=a").is_none());
+        let too_many = (0..MAX_LINKED_CHANGES + 1)
+            .map(|n| format!("c{n}"))
+            .collect::<Vec<_>>();
+        let long = encode_review_link("book", &too_many);
+        assert!(parse_review_link(&long).is_none());
+        assert!(parse_change_link(&url).is_none());
+    }
+
+    #[test]
+    fn argv_finds_a_review_link() {
+        let argv = vec![
+            "swarmdraft".into(),
+            "swarmdraft://review?draft=book&changes=a,b".into(),
+        ];
+        assert_eq!(
+            first_swarmdraft_link(&argv).as_deref(),
+            Some("swarmdraft://review?draft=book&changes=a,b")
+        );
+        assert!(first_change_link(&argv).is_none());
     }
 
     #[test]

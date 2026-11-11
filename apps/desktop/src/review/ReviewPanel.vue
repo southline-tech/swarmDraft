@@ -16,11 +16,13 @@ import {
   authorKind,
   authorsOf,
   bulkActionLabel,
+  selectedBulkActionLabel,
   groupChanges,
   outdatedCountForAuthor,
   pendingCountForAuthor,
   REVIEW_SHORTCUTS,
   REVIEW_VIEW_CYCLE,
+  selectedChangesLabel,
   viewScopeAnnouncement,
   visibleItems,
   type AuthorFilter,
@@ -68,6 +70,8 @@ const props = withDefaults(
     /** Suggestion count for rail badge and view menu (filter applies). */
     suggestionCount?: number;
     showResolved?: boolean;
+    /** Review-link selection (#119). Null shows the usual list. */
+    changeIds?: readonly string[] | null;
   }>(),
   {
     filter: null,
@@ -83,6 +87,7 @@ const props = withDefaults(
     listItems: () => [],
     suggestionCount: undefined,
     showResolved: false,
+    changeIds: null,
   },
 );
 const emit = defineEmits<{
@@ -101,23 +106,36 @@ const emit = defineEmits<{
   'update:showResolved': [on: boolean];
   'comment-reply': [threadId: string, body: string];
   'comment-resolve': [threadId: string, resolved: boolean];
+  /** Drop a review-link selection and show every change again. */
+  'clear-change-ids': [];
 }>();
 
 const changes = computed(() =>
   props.bookChanges != null ? [...props.bookChanges] : groupChanges(props.items),
 );
 const authors = computed(() => authorsOf(changes.value));
-const listRows = computed(() =>
-  props.listItems.length
+const listRows = computed(() => {
+  const base = props.listItems.length
     ? [...props.listItems]
     : visibleItems(changes.value, props.filter).map((change) => ({
         kind: 'suggestion' as const,
         key: change.key,
         from: 0,
         change,
-      })),
+      }));
+  const selected = props.changeIds;
+  if (!selected) return base;
+  const ids = new Set(selected);
+  return base.filter((row) => row.kind === 'suggestion' && ids.has(row.change.id));
+});
+const visibleSuggestions = computed(() =>
+  props.changeIds
+    ? suggestionItems(listRows.value).map((row) => row.change)
+    : visibleItems(changes.value, props.filter),
 );
-const visibleSuggestions = computed(() => visibleItems(changes.value, props.filter));
+const selectedCount = computed(() =>
+  props.changeIds ? suggestionItems(listRows.value).length : 0,
+);
 const badgeCount = computed(() => props.suggestionCount ?? visibleSuggestions.value.length);
 const visible = computed(() => listRows.value);
 const index = computed(() => visible.value.findIndex((v) => v.key === props.currentKey));
@@ -180,10 +198,14 @@ function pickView(author: string | null) {
   closeViewMenu(true);
 }
 const acceptAllLabel = computed(() =>
-  bulkActionLabel('accept', props.filter, props.filter ? name(props.filter) : ''),
+  props.changeIds
+    ? selectedBulkActionLabel('accept')
+    : bulkActionLabel('accept', props.filter, props.filter ? name(props.filter) : ''),
 );
 const rejectAllLabel = computed(() =>
-  bulkActionLabel('reject', props.filter, props.filter ? name(props.filter) : ''),
+  props.changeIds
+    ? selectedBulkActionLabel('reject')
+    : bulkActionLabel('reject', props.filter, props.filter ? name(props.filter) : ''),
 );
 /** Theme-aware author color: a --ct-collab-N token keyed by the raw author id, never the name. */
 const hue = (a: string) => ({ '--ct-suggester': collabColor(a) });
@@ -218,6 +240,23 @@ const groupedVisible = computed(() => {
 });
 
 const listEl = ref<HTMLElement | null>(null);
+const panelEl = ref<HTMLElement | null>(null);
+/** Drop the review-link chip, then move focus to whatever is left in the panel. */
+function clearSelection() {
+  emit('clear-change-ids');
+  void nextTick(() => {
+    if (viewToggle.value) {
+      viewToggle.value.focus();
+      return;
+    }
+    const row = listEl.value?.querySelector<HTMLElement>('[data-review-row-key]');
+    if (row) {
+      row.focus();
+      return;
+    }
+    panelEl.value?.focus();
+  });
+}
 const rowRefs = new Map<string, HTMLElement>();
 function setRowRef(key: string, el: unknown) {
   if (el instanceof HTMLElement) rowRefs.set(key, el);
@@ -345,8 +384,10 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
   <aside
     v-else
     :id="REVIEW_CHANGES_REGION_ID"
+    ref="panelEl"
     class="review-panel"
     aria-label="Review changes"
+    tabindex="-1"
     data-test="review-panel"
   >
     <header class="head">
@@ -390,8 +431,22 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
       </button>
     </header>
 
+    <div v-if="changeIds && selectedCount" class="selection-chip" data-test="selected-changes-chip">
+      <span role="status" data-test="selected-changes-label">{{
+        selectedChangesLabel(selectedCount)
+      }}</span>
+      <button
+        type="button"
+        data-test="clear-selected-changes"
+        aria-label="Clear selected changes"
+        @click="clearSelection"
+      >
+        Clear
+      </button>
+    </div>
+
     <div
-      v-if="authors.length > 1"
+      v-if="authors.length > 1 && !changeIds"
       ref="viewFilterRoot"
       class="view-filter"
       data-test="view-switcher"
@@ -480,7 +535,7 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
     </div>
 
     <label
-      v-if="changes.length || listRows.some((r) => r.kind === 'comment')"
+      v-if="!changeIds && (changes.length || listRows.some((r) => r.kind === 'comment'))"
       class="show-resolved"
     >
       <input
@@ -493,29 +548,42 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
     </label>
 
     <p
-      v-if="!changes.length && !listRows.length && loadFailed"
+      v-if="loadFailed && !listRows.length && (!changes.length || changeIds)"
       class="muted"
       data-test="empty-load-failed"
     >
       Suggestions couldn't be loaded for this section.
     </p>
     <EmptyState
-      v-else-if="!changes.length && !listRows.length"
+      v-else-if="!changeIds && !changes.length && !listRows.length"
       data-test="empty"
       icon="sparkle"
       tone="success"
       :title="emptyStates.reviewTitle"
       :text="emptyStates.reviewText"
     />
+    <p v-else-if="changeIds && !listRows.length" class="muted" data-test="selected-changes-empty">
+      None of the selected changes are still open.
+    </p>
     <p
-      v-if="filter && !visibleSuggestions.length && !listRows.some((r) => r.kind === 'comment')"
+      v-if="
+        !changeIds &&
+        filter &&
+        !visibleSuggestions.length &&
+        !listRows.some((r) => r.kind === 'comment')
+      "
       class="muted"
       data-test="empty-filtered"
     >
       No suggestions from this author. Choose All to see the rest.
     </p>
     <p
-      v-if="filter && !visibleSuggestions.length && listRows.some((r) => r.kind === 'comment')"
+      v-if="
+        !changeIds &&
+        filter &&
+        !visibleSuggestions.length &&
+        listRows.some((r) => r.kind === 'comment')
+      "
       class="muted"
       data-test="empty-filtered"
     >
@@ -865,6 +933,31 @@ button.primary:disabled {
   color: var(--ct-text-muted);
   background: var(--ct-surface);
   border-bottom: 1px solid var(--ct-border);
+}
+.selection-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ct-space-2);
+  font-size: var(--ct-text-sm);
+  font-weight: var(--ct-weight-semibold);
+  padding: var(--ct-space-1) var(--ct-space-3);
+  border-radius: var(--ct-radius-full);
+  border: 1px solid var(--ct-border);
+  background: color-mix(in srgb, var(--ct-surface-raised) 88%, transparent);
+  color: var(--ct-text);
+}
+.selection-chip button {
+  font: inherit;
+  font-weight: var(--ct-weight-semibold);
+  color: var(--ct-text);
+  background: none;
+  border: 0;
+  box-sizing: border-box;
+  min-width: var(--ct-space-6);
+  min-height: var(--ct-space-6);
+  padding: var(--ct-space-1) var(--ct-space-2);
+  cursor: pointer;
 }
 .follow-chip {
   position: sticky;

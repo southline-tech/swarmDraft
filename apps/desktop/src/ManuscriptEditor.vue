@@ -37,6 +37,7 @@ import OverlapPopover, { type OverlapEntry } from './review/OverlapPopover.vue';
 import {
   DecisionLog,
   keyOf,
+  filterChangesById,
   groupChanges,
   changeTypeLabel,
   inForeignInput,
@@ -51,6 +52,7 @@ import {
   authorsOf,
   cycleAuthorView,
   selectAuthorView,
+  selectedChangesLabel,
   viewScopeAnnouncement,
   reviewViewCycleFor,
   type AuthorFilter,
@@ -141,6 +143,7 @@ import {
   isCommentReviewKey,
   loadShowResolved,
   saveShowResolved,
+  suggestionItems,
   threadIdFromCommentReviewKey,
   type ReviewListItem,
 } from './review/review-inline';
@@ -254,6 +257,8 @@ const props = defineProps<{
   reviewFollow?: boolean;
   /** Book-wide author filter owned by ContinuousManuscript (#241). */
   authorFilter?: AuthorFilter | null;
+  /** Review-link selection (#119). Null shows every change. */
+  changeIds?: readonly string[] | null;
   chapterOpsEnabled?: boolean;
   canMergePrevChapter?: boolean;
   chapterNumber?: number;
@@ -292,6 +297,7 @@ const emit = defineEmits<{
   'open-suggestions': [items: SuggestionItem[]];
   'update:reviewFollow': [on: boolean];
   'update:authorFilter': [filter: AuthorFilter];
+  'clear-change-ids': [];
   'comment-reply': [threadId: string, body: string];
   'comment-resolve': [threadId: string, resolved: boolean];
   'split-chapter': [payload: { blockIndex: number; title: string; removeLine: boolean }];
@@ -766,7 +772,6 @@ const filter = computed({
     else localAuthorFilter.value = v;
   },
 });
-const viewScopeLive = shallowRef('');
 const currentKey = shallowRef<string | null>(null);
 let currentIndex = -1;
 watch(currentKey, (key) => {
@@ -779,14 +784,33 @@ watch(currentKey, (key) => {
 });
 const collapsed = shallowRef(loadCollapsed());
 watch(collapsed, (v) => saveCollapsed(v));
+watch(
+  () => props.changeIds,
+  (ids) => {
+    if (!ids?.length || props.sliceMode) return;
+    reviewOpen.value = true;
+    collapsed.value = false;
+    if (focusMode.value) focusMode.value = false;
+  },
+  { immediate: true },
+);
 const changes = computed(() => {
   const local = groupChanges(suggestions.value);
   if (!props.reviewTarget || props.bookChanges == null) return local;
   if (!props.sectionId) return [...props.bookChanges];
   return mergeSectionBookChanges(props.sectionId, props.bookChanges, suggestions.value);
 });
+/** Review-link ids. Null shows every change; a selection hides the rest like an author filter. */
+const reviewSelection = computed(() =>
+  props.changeIds && props.changeIds.length ? props.changeIds : null,
+);
 /** Margin callouts align to marks in this section's doc only (#212); the rail may stay book-wide. */
-const marginChanges = computed(() => visibleItems(groupChanges(suggestions.value), filter.value));
+const marginChanges = computed(() => {
+  const grouped = groupChanges(suggestions.value);
+  return reviewSelection.value
+    ? filterChangesById(grouped, reviewSelection.value)
+    : visibleItems(grouped, filter.value);
+});
 
 const commentThreads = computed((): CommentThread[] => {
   const e = editor.value;
@@ -799,6 +823,9 @@ const commentThreads = computed((): CommentThread[] => {
 });
 
 function reviewListKey(item: ReviewListItem): string {
+  // A book-wide suggestion already names its section. Re-scoping it onto the lead
+  // chapter makes Accept all and the accept shortcut write the wrong document.
+  if (item.kind === 'suggestion' && parseBookChangeKey(item.key)) return item.key;
   const base =
     item.kind === 'comment'
       ? commentReviewKey(item.thread.id)
@@ -838,16 +865,36 @@ function fromOfThread(thread: CommentThread): number {
 
 const reviewListItems = computed(() =>
   buildReviewList({
-    changes: changes.value,
-    threads: commentThreads.value,
-    filter: filter.value,
+    changes: reviewSelection.value
+      ? filterChangesById(changes.value, reviewSelection.value)
+      : changes.value,
+    threads: reviewSelection.value ? [] : commentThreads.value,
+    filter: reviewSelection.value ? null : filter.value,
     showResolved: showResolved.value,
     fromOfChange,
     fromOfThread,
   }).map((item) => ({ ...item, key: reviewListKey(item) })),
 );
 
-const filteredSuggestions = computed(() => visibleItems(changes.value, filter.value));
+const filteredSuggestions = computed(() =>
+  reviewSelection.value
+    ? filterChangesById(changes.value, reviewSelection.value)
+    : visibleItems(changes.value, filter.value),
+);
+/**
+ * Same suggestion rows the selection chip counts. A decision in another chapter updates this
+ * without refreshing the lead editor. The chip hides at zero, including a failed load, so the
+ * polite region stays empty and the panel's one line is the only message.
+ */
+const viewScopeLive = computed(() => {
+  if (reviewSelection.value) {
+    const count = suggestionItems(reviewListItems.value).length;
+    return count ? selectedChangesLabel(count) : '';
+  }
+  const count = filteredSuggestions.value.length;
+  const display = filter.value ? labelAuthor(filter.value).name : 'everyone';
+  return viewScopeAnnouncement(filter.value, display, count);
+});
 
 function marginSelectedKey(): string | null {
   const key = currentKey.value;
@@ -892,15 +939,6 @@ function refreshReview(e: Editor) {
   currentIndex = i;
   currentKey.value = i >= 0 ? visible.value[i]!.key : null;
   emit('open-suggestions', suggestions.value);
-  announceViewScope();
-}
-function announceViewScope() {
-  const display = filter.value ? labelAuthor(filter.value).name : 'everyone';
-  viewScopeLive.value = viewScopeAnnouncement(
-    filter.value,
-    display,
-    filteredSuggestions.value.length,
-  );
 }
 function refreshAuthorFilterDecorations() {
   const e = editor.value;
@@ -915,7 +953,13 @@ watch(
   () => {
     refreshAuthorFilterDecorations();
     if (editor.value) refreshReview(editor.value);
-    else announceViewScope();
+  },
+);
+watch(
+  () => props.changeIds,
+  () => {
+    refreshAuthorFilterDecorations();
+    if (editor.value && !editor.value.isDestroyed) refreshReview(editor.value);
   },
 );
 watch(
@@ -1167,19 +1211,23 @@ const targetOf = (key: string | null) => {
   const local = parsed?.changeKey ?? key;
   return changes.value.find((c) => c.key === key || c.key === local)?.targets ?? [];
 };
+/** A key from another mounted section is decided there, the same way a card's Accept is. */
+function decideInOwningSection(key: string, decision: Decision): boolean {
+  const parsed = parseBookChangeKey(key);
+  if (!parsed || !continuousNav || parsed.sectionId === props.sectionId) return false;
+  continuousNav.decideInSection(parsed.sectionId, parsed.changeKey, decision);
+  return true;
+}
 const decideCurrent = (d: Decision) => {
   const key = currentKey.value;
   if (!key) return;
   const ck = parseBookChangeKey(key)?.changeKey ?? key;
   if (isCommentReviewKey(ck)) return;
+  if (decideInOwningSection(key, d)) return;
   decide(targetOf(key), d);
 };
 const decideOne = (key: string, d: Decision) => {
-  const parsed = parseBookChangeKey(key);
-  if (parsed && continuousNav && parsed.sectionId !== props.sectionId) {
-    continuousNav.decideInSection(parsed.sectionId, parsed.changeKey, d);
-    return;
-  }
+  if (decideInOwningSection(key, d)) return;
   currentKey.value = key;
   currentIndex = visible.value.findIndex((v) => v.key === key);
   decide(targetOf(key), d);
@@ -1192,11 +1240,18 @@ function decideLocalChange(changeKey: string, decision: Decision) {
   decide(targetOf(scoped), decision);
 }
 /** Bulk decision over the change keys locked when the confirmation opened. */
-const decideVisible = (d: Decision, keys: readonly string[]) =>
-  decide(
-    keys.flatMap((k) => targetOf(k)),
-    d,
-  );
+const decideVisible = (d: Decision, keys: readonly string[]) => {
+  const local: string[] = [];
+  for (const key of keys) {
+    if (!decideInOwningSection(key, d)) local.push(key);
+  }
+  if (local.length) {
+    decide(
+      local.flatMap((k) => targetOf(k)),
+      d,
+    );
+  }
+};
 
 function overlapEntries(cluster: OverlapCluster): OverlapEntry[] {
   const keys = new Set(cluster.spans.map((s) => keyOf(s)));
@@ -1281,6 +1336,9 @@ function onKeydown(ev: KeyboardEvent) {
     !inForeignInput(ev.target, editor.value?.view.dom ?? null)
   ) {
     ev.preventDefault();
+    // A review link owns the page until Clear. Cycling authors would announce a
+    // new scope and repaint marks the list is no longer using.
+    if (reviewSelection.value) return;
     filter.value = cycleAuthorView(authorsOf(changes.value), filter.value, cycle);
     return;
   }
@@ -1619,6 +1677,17 @@ defineExpose({
   feedbackExcerpt,
 });
 
+/** Author filter, unless a review link is choosing ids. Selection then hides the other marks. */
+function suggestionAuthorVisible(author: string): boolean {
+  if (reviewSelection.value) return true;
+  return authorVisibleInFilter(filter.value, author);
+}
+function suggestionIdVisible(id: string): boolean {
+  const selected = reviewSelection.value;
+  if (!selected) return true;
+  return selected.includes(id);
+}
+
 /** Set when the content does not fit the schema; the editor is then read-only and never emits. */
 const loadError = shallowRef<string>('');
 // Shown in an always-mounted assertive region one frame after it is set (#79).
@@ -1639,15 +1708,18 @@ const options: Partial<EditorOptions> = {
     }),
     AuthorLabels.configure({
       label: authorLabel,
-      authorVisible: (author) => authorVisibleInFilter(filter.value, author),
+      authorVisible: suggestionAuthorVisible,
+      suggestionVisible: suggestionIdVisible,
     }),
     AuthorSuggestionColors.configure({
       colorFor: collabColor,
-      authorVisible: (author) => authorVisibleInFilter(filter.value, author),
+      authorVisible: suggestionAuthorVisible,
+      suggestionVisible: suggestionIdVisible,
     }),
     SuggestionOverlap.configure({
-      filterAuthor: () => filter.value,
-      authorVisible: (author) => authorVisibleInFilter(filter.value, author),
+      filterAuthor: () => (reviewSelection.value ? null : filter.value),
+      authorVisible: suggestionAuthorVisible,
+      suggestionVisible: suggestionIdVisible,
       handlers: () => ({
         labelAuthor: (author) => labelAuthor(author).name,
         onGutterClick: (author) => {
@@ -2024,6 +2096,7 @@ onBeforeUnmount(() => {
             :follow="reviewTarget ? (reviewFollow ?? true) : true"
             :load-failed="!!loadError"
             :filter="filter"
+            :change-ids="changeIds ?? null"
             :current-key="currentKey"
             :collapsed="collapsed"
             :busy="!editor?.isEditable"
@@ -2035,6 +2108,7 @@ onBeforeUnmount(() => {
             @decide-visible="decideVisible"
             @toggle-collapsed="collapsed = !collapsed"
             @select-view="onSelectView"
+            @clear-change-ids="emit('clear-change-ids')"
             @dismiss-one="dismissOne"
             @update:follow="emit('update:reviewFollow', $event)"
             @update:show-resolved="showResolved = $event"

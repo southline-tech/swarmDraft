@@ -66,7 +66,7 @@ an approved computer) pairs like this:
 2. You get an in-app prompt. Click **Allow** (or **Deny**).
 3. The bot calls `poll_pairing` with `{ pairing_id, pairing_secret }` and receives its key.
 4. The bot **saves the key to a file** on disk. The key is never pasted into chat and never printed.
-5. In **Settings → Agents**, the bot appears with an MCP connected status. Revoke it there anytime.
+5. In **Settings → Agents**, the bot appears as Connected. Revoke it there anytime.
 
 A ready-to-paste setup prompt for your bot (pairing helpers included) is in
 [docs/bot-setup-prompt.md](docs/bot-setup-prompt.md).

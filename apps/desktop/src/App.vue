@@ -1306,13 +1306,20 @@ onMounted(() => {
       await editorPane.value?.focusResolvedChange(sectionId, changeId);
     },
     showHistory: (view) => {
-      dismissLinkToast();
       dismissToast();
-      oldChange.value = view;
+      presentOldChange(view);
     },
     showToast: (message) => {
-      oldChange.value = null;
       showLinkToast(message, 'alert');
+    },
+    resetLinkUi: () => {
+      clearOldChanges();
+      dismissLinkToast();
+      selectedChangeIds.value = null;
+    },
+    showSelectedChanges: (changeIds) => {
+      focusMode.value = false;
+      selectedChangeIds.value = changeIds;
     },
     clearOpenError: () => {
       openError.value = '';
@@ -1580,6 +1587,9 @@ async function ensureManuscriptForLink(manuscriptId: string): Promise<boolean> {
 }
 
 /** Open an imported manuscript (exposed for tests and the Tauri open-file flow). */
+/** Change ids from a review link. Null shows the full review list (#119). */
+const selectedChangeIds = ref<string[] | null>(null);
+
 function open(next: ManuscriptSession) {
   const switching = session.value !== next;
   const prev = switching ? session.value : null;
@@ -1590,6 +1600,7 @@ function open(next: ManuscriptSession) {
   }
   // A toast from an earlier book must never describe this one; callers re-show it on success.
   dismissToast();
+  selectedChangeIds.value = null;
   saveFailure.value = saveSucceeded();
   saveStatusShown.value = false;
   saveDirty.value = false;
@@ -1654,6 +1665,29 @@ const openToast = ref('');
 const linkToast = ref('');
 const linkToastIcon = ref<'check' | 'alert'>('alert');
 const oldChange = ref<OldChangeViewModel | null>(null);
+/** Decided review-link ids after the one currently on screen. */
+let oldChangeQueue: OldChangeViewModel[] = [];
+/** Bumped when a new link replaces the queue, so a pending advance cannot overwrite it. */
+let oldChangeEpoch = 0;
+function presentOldChange(view: OldChangeViewModel) {
+  if (oldChange.value) oldChangeQueue.push(view);
+  else oldChange.value = view;
+}
+function clearOldChanges() {
+  oldChangeEpoch += 1;
+  oldChange.value = null;
+  oldChangeQueue = [];
+}
+function advanceOldChange() {
+  const epoch = oldChangeEpoch;
+  const next = oldChangeQueue.shift() ?? null;
+  oldChange.value = null;
+  if (!next) return;
+  void nextTick(() => {
+    if (epoch !== oldChangeEpoch) return;
+    oldChange.value = next;
+  });
+}
 let linkToastTimer: ReturnType<typeof setTimeout> | undefined;
 function dismissLinkToast() {
   clearTimeout(linkToastTimer);
@@ -1677,10 +1711,11 @@ function focusEditorAfterOldChange() {
 }
 function onOldChangeGoChapter() {
   const id = oldChange.value?.sectionId;
-  oldChange.value = null;
-  if (!id) return;
-  selectedId.value = id;
-  void nextTick(() => editorPane.value?.focusSection(id));
+  if (id) {
+    selectedId.value = id;
+    void nextTick(() => editorPane.value?.focusSection(id));
+  }
+  advanceOldChange();
 }
 const oldChangeChapter = computed(() => {
   const view = oldChange.value;
@@ -2463,7 +2498,7 @@ defineExpose({ open, closeSession });
         :view="oldChange"
         :chapter-number="oldChangeChapter"
         :focus-editor="focusEditorAfterOldChange"
-        @close="oldChange = null"
+        @close="advanceOldChange"
         @go-chapter="onOldChangeGoChapter"
       />
       <HistoryPanel
@@ -2676,12 +2711,14 @@ defineExpose({ open, closeSession });
               :computer-name="info?.computerName"
               :decision-records-by-section="decisionRecordsBySection"
               :manuscript-id="session.id"
+              :change-ids="selectedChangeIds"
               :draft-label="draftPickerLabel"
               :draft-rows="draftRows"
               :current-draft-id="session.id"
               :comment-meta-version="commentMetaVersion"
               :lead-chapter-ops="leadChapterOps"
               :split-across-thread-ids="splitAcrossThreadIds"
+              @clear-change-ids="selectedChangeIds = null"
               @update:selected-id="selectedId = $event"
               @split-chapter="onEditorSplitChapter"
               @merge-prev-chapter="onEditorMergePrev"

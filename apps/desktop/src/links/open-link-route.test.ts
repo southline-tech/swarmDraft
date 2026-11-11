@@ -35,6 +35,8 @@ function route(): ChangeLinkRoute & { opened: ReturnType<typeof vi.fn> } {
     focusChange: vi.fn(async () => {}),
     showHistory: vi.fn(),
     showToast: vi.fn(),
+    resetLinkUi: vi.fn(),
+    showSelectedChanges: vi.fn(),
     clearOpenError: vi.fn(),
     onFailure: vi.fn(),
   };

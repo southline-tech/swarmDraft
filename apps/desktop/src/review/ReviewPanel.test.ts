@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { flushPromises, mount } from '@vue/test-utils';
+import { defineComponent, h, nextTick, ref } from 'vue';
 import type { SuggestionItem } from '@swarmdraft/editor';
 import ReviewPanel from './ReviewPanel.vue';
 import { REVIEW_CHANGES_REGION_ID } from './review-panel-a11y';
@@ -17,6 +18,28 @@ const items: SuggestionItem[] = [
 const key = (i: SuggestionItem) => `${i.author}\u0000${i.id}`;
 const NAMES: Record<string, string> = { 'agent:a': 'Writing assistant', brett: 'Mara' };
 const labels = (a: string) => ({ name: NAMES[a] ?? a, agent: a.startsWith('agent:') });
+
+/** Parent clears the selection during the emit, the same way App does. */
+function mountClearing(panelItems: SuggestionItem[], ids: string[]) {
+  const changeIds = ref<readonly string[] | null>(ids);
+  return mount(
+    defineComponent({
+      name: 'ClearHost',
+      setup() {
+        return () =>
+          h(ReviewPanel, {
+            items: panelItems,
+            labels,
+            changeIds: changeIds.value,
+            onClearChangeIds: () => {
+              changeIds.value = null;
+            },
+          });
+      },
+    }),
+    { attachTo: document.body },
+  );
+}
 
 describe('ReviewPanel (RAD-258)', () => {
   beforeEach(resetCollabSlots);
@@ -441,5 +464,96 @@ describe('ReviewPanel (RAD-258)', () => {
     await card.find('[data-test=dismiss]').trigger('click');
     expect(w.emitted('dismiss-one')).toEqual([[key(outdatedItems[0]!)]]);
     w.unmount();
+  });
+
+  it('filters to the selected changes and clears the chip (#119)', async () => {
+    const w = mount(ReviewPanel, { props: { items, labels, changeIds: ['s1', 's3'] } });
+    expect(w.findAll('[data-test=item]')).toHaveLength(2);
+    expect(w.find('[data-test=item]').text()).toContain('flickered');
+    expect(w.text()).not.toContain('glowed');
+    expect(w.find('[data-test=show-resolved]').exists()).toBe(false);
+    const chip = w.get('[data-test=selected-changes-chip]');
+    expect(chip.attributes('role')).toBeUndefined();
+    const label = chip.get('[data-test=selected-changes-label]');
+    expect(label.attributes('role')).toBe('status');
+    expect(label.text()).toBe('Showing 2 selected changes');
+    const clear = chip.get('[data-test=clear-selected-changes]');
+    expect(clear.attributes('aria-label')).toBe('Clear selected changes');
+    await clear.trigger('click');
+    expect(w.emitted('clear-change-ids')).toHaveLength(1);
+    await w.setProps({ changeIds: null });
+    expect(w.find('[data-test=selected-changes-chip]').exists()).toBe(false);
+    expect(w.find('[data-test=show-resolved]').exists()).toBe(true);
+    expect(w.findAll('[data-test=item]')).toHaveLength(3);
+    const css = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), 'ReviewPanel.vue'),
+      'utf8',
+    );
+    expect(css).toMatch(
+      /\.selection-chip button\s*\{[^}]*padding:\s*var\(--ct-space-1\)\s*var\(--ct-space-2\)/s,
+    );
+    expect(css).toMatch(/min-width:\s*var\(--ct-space-6\)/);
+    expect(css).toMatch(/min-height:\s*var\(--ct-space-6\)/);
+  });
+
+  it('moves focus after Clear instead of leaving it on the body (#119)', async () => {
+    const withAuthors = mountClearing(items, ['s1', 's3']);
+    const clear = withAuthors.get('[data-test=clear-selected-changes]');
+    (clear.element as HTMLButtonElement).focus();
+    expect(document.activeElement).toBe(clear.element);
+    await clear.trigger('click');
+    await nextTick();
+    expect(withAuthors.find('[data-test=selected-changes-chip]').exists()).toBe(false);
+    expect(document.activeElement).toBe(withAuthors.get('[data-test=filter-toggle]').element);
+    withAuthors.unmount();
+
+    const oneAuthor: SuggestionItem[] = [
+      { id: 's1', kind: 'suggestion_insert', author: 'agent:a', ts: 't', text: 'flickered' },
+      { id: 's3', kind: 'suggestion_insert', author: 'agent:a', ts: 't', text: 'fell' },
+    ];
+    const withList = mountClearing(oneAuthor, ['s1']);
+    expect(withList.find('[data-test=filter-toggle]').exists()).toBe(false);
+    await withList.get('[data-test=clear-selected-changes]').trigger('click');
+    await nextTick();
+    expect(document.activeElement).toBe(withList.get('[data-test=item]').element);
+    withList.unmount();
+
+    const empty = mountClearing([], ['missing']);
+    expect(empty.find('[data-test=filter-toggle]').exists()).toBe(false);
+    expect(empty.find('[data-test=item]').exists()).toBe(false);
+    expect(empty.find('[data-test=selected-changes-chip]').exists()).toBe(false);
+    expect(empty.get('[data-test=review-panel]').attributes('tabindex')).toBe('-1');
+    empty.unmount();
+  });
+
+  it('uses one message when a review link matches nothing (#119)', () => {
+    const empty = mount(ReviewPanel, { props: { items: [], changeIds: ['missing'] } });
+    expect(empty.find('[data-test=selected-changes-empty]').text()).toBe(
+      'None of the selected changes are still open.',
+    );
+    expect(empty.find('[data-test=selected-changes-chip]').exists()).toBe(false);
+    expect(empty.find('[data-test=empty]').exists()).toBe(false);
+    expect(empty.text()).not.toContain('Nothing to review');
+    empty.unmount();
+
+    const failed = mount(ReviewPanel, {
+      props: { items: [], changeIds: ['missing'], loadFailed: true },
+    });
+    expect(failed.find('[data-test=empty-load-failed]').text()).toBe(
+      "Suggestions couldn't be loaded for this section.",
+    );
+    expect(failed.find('[data-test=selected-changes-chip]').exists()).toBe(false);
+    expect(failed.find('[data-test=selected-changes-empty]').exists()).toBe(false);
+    expect(failed.find('[data-test=empty]').exists()).toBe(false);
+    failed.unmount();
+
+    const oneLeft = mount(ReviewPanel, {
+      props: { items: [items[0]!], labels, changeIds: ['s1', 's3'] },
+    });
+    expect(oneLeft.findAll('[data-test=item]')).toHaveLength(1);
+    expect(oneLeft.get('[data-test=selected-changes-label]').text()).toBe(
+      'Showing 1 selected change',
+    );
+    oneLeft.unmount();
   });
 });
