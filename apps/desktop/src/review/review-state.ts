@@ -40,7 +40,7 @@ export function filterChangesById<T extends { id: string }>(
   return items.filter((item) => ids.has(item.id));
 }
 
-/** Chip copy for a review link. `count` is how many changes the link selected. */
+/** Chip copy for a review link. `count` is how many selected changes are still in the list. */
 export function selectedChangesLabel(count: number): string {
   return `Showing ${count} selected change${count === 1 ? '' : 's'}`;
 }

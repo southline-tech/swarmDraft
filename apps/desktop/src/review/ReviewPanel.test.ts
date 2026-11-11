@@ -521,11 +521,8 @@ describe('ReviewPanel (RAD-258)', () => {
     const empty = mountClearing([], ['missing']);
     expect(empty.find('[data-test=filter-toggle]').exists()).toBe(false);
     expect(empty.find('[data-test=item]').exists()).toBe(false);
-    const panel = empty.get('[data-test=review-panel]');
-    expect(panel.attributes('tabindex')).toBe('-1');
-    await empty.get('[data-test=clear-selected-changes]').trigger('click');
-    await nextTick();
-    expect(document.activeElement).toBe(panel.element);
+    expect(empty.find('[data-test=selected-changes-chip]').exists()).toBe(false);
+    expect(empty.get('[data-test=review-panel]').attributes('tabindex')).toBe('-1');
     empty.unmount();
   });
 
@@ -534,6 +531,7 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(empty.find('[data-test=selected-changes-empty]').text()).toBe(
       'None of the selected changes are still open.',
     );
+    expect(empty.find('[data-test=selected-changes-chip]').exists()).toBe(false);
     expect(empty.find('[data-test=empty]').exists()).toBe(false);
     expect(empty.text()).not.toContain('Nothing to review');
     empty.unmount();
@@ -544,8 +542,18 @@ describe('ReviewPanel (RAD-258)', () => {
     expect(failed.find('[data-test=empty-load-failed]').text()).toBe(
       "Suggestions couldn't be loaded for this section.",
     );
+    expect(failed.find('[data-test=selected-changes-chip]').exists()).toBe(false);
     expect(failed.find('[data-test=selected-changes-empty]').exists()).toBe(false);
     expect(failed.find('[data-test=empty]').exists()).toBe(false);
     failed.unmount();
+
+    const oneLeft = mount(ReviewPanel, {
+      props: { items: [items[0]!], labels, changeIds: ['s1', 's3'] },
+    });
+    expect(oneLeft.findAll('[data-test=item]')).toHaveLength(1);
+    expect(oneLeft.get('[data-test=selected-changes-label]').text()).toBe(
+      'Showing 1 selected change',
+    );
+    oneLeft.unmount();
   });
 });

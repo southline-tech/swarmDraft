@@ -200,6 +200,101 @@ describe('ContinuousManuscript review (#240, #241)', () => {
     w.unmount();
   });
 
+  function laterChapterDoc() {
+    return {
+      'ch-1': {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'text',
+                text: 'lead ',
+                marks: [{ type: 'suggestion_insert', attrs: { id: 's-lead', ...byLine } }],
+              },
+            ],
+          },
+        ],
+      },
+      'ch-2': {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'text',
+                text: 'later',
+                marks: [{ type: 'suggestion_insert', attrs: { id: 's-later', ...byOther } }],
+              },
+            ],
+          },
+        ],
+      },
+    };
+  }
+
+  async function selectLaterChange() {
+    const { w } = await mountContinuous('ch-1', laterChapterDoc());
+    await vi.waitFor(() => {
+      expect(
+        document.querySelectorAll('#continuous-review-rail [data-test=item]').length,
+      ).toBeGreaterThanOrEqual(2);
+    });
+    await w.setProps({ changeIds: ['s-later'] });
+    await flushPromises();
+    expect(document.querySelectorAll('#continuous-review-rail [data-test=item]')).toHaveLength(1);
+    return w;
+  }
+
+  function laterMark(): Element | null {
+    return document.querySelector(
+      '[data-section-anchor="ch-2"] [data-suggestion][data-id="s-later"]',
+    );
+  }
+
+  it('#119: Accept all applies a review link in another chapter', async () => {
+    const w = await selectLaterChange();
+    const acceptAll = document.querySelector(
+      '#continuous-review-rail [data-test=accept-all]',
+    ) as HTMLButtonElement | null;
+    expect(acceptAll?.textContent).toBe('Accept all selected');
+    acceptAll!.click();
+    await flushPromises();
+    const yes = document.querySelector(
+      '#continuous-review-rail [data-test=confirm-yes]',
+    ) as HTMLButtonElement | null;
+    expect(yes).toBeTruthy();
+    yes!.click();
+    await flushPromises();
+    expect(laterMark()).toBeNull();
+    expect(document.querySelector('[data-section-anchor="ch-2"]')?.textContent).toContain('later');
+    expect(
+      document.querySelector('[data-section-anchor="ch-1"] [data-suggestion][data-id="s-lead"]'),
+    ).toBeTruthy();
+    w.unmount();
+  });
+
+  it('#119: the accept shortcut applies a review link in another chapter', async () => {
+    const w = await selectLaterChange();
+    document.querySelector('[data-test="lead-editor"] .manuscript-editor')?.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    );
+    await flushPromises();
+    expect(laterMark()).toBeNull();
+    expect(document.querySelector('[data-section-anchor="ch-2"]')?.textContent).toContain('later');
+    expect(
+      document.querySelector('[data-section-anchor="ch-1"] [data-suggestion][data-id="s-lead"]'),
+    ).toBeTruthy();
+    w.unmount();
+  });
+
   it('#241: new manuscript session resets author filter to All', async () => {
     const { w } = await mountContinuous('ch-1', {
       title: {

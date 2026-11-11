@@ -133,7 +133,9 @@ const visibleSuggestions = computed(() =>
     ? suggestionItems(listRows.value).map((row) => row.change)
     : visibleItems(changes.value, props.filter),
 );
-const selectedCount = computed(() => (props.changeIds ? new Set(props.changeIds).size : 0));
+const selectedCount = computed(() =>
+  props.changeIds ? suggestionItems(listRows.value).length : 0,
+);
 const badgeCount = computed(() => props.suggestionCount ?? visibleSuggestions.value.length);
 const visible = computed(() => listRows.value);
 const index = computed(() => visible.value.findIndex((v) => v.key === props.currentKey));
@@ -429,7 +431,7 @@ onBeforeUnmount(() => clearTimeout(followResumeTimer));
       </button>
     </header>
 
-    <div v-if="changeIds" class="selection-chip" data-test="selected-changes-chip">
+    <div v-if="changeIds && selectedCount" class="selection-chip" data-test="selected-changes-chip">
       <span role="status" data-test="selected-changes-label">{{
         selectedChangesLabel(selectedCount)
       }}</span>

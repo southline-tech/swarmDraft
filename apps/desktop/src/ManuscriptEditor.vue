@@ -823,6 +823,9 @@ const commentThreads = computed((): CommentThread[] => {
 });
 
 function reviewListKey(item: ReviewListItem): string {
+  // A book-wide suggestion already names its section. Re-scoping it onto the lead
+  // chapter makes Accept all and the accept shortcut write the wrong document.
+  if (item.kind === 'suggestion' && parseBookChangeKey(item.key)) return item.key;
   const base =
     item.kind === 'comment'
       ? commentReviewKey(item.thread.id)
@@ -1206,19 +1209,23 @@ const targetOf = (key: string | null) => {
   const local = parsed?.changeKey ?? key;
   return changes.value.find((c) => c.key === key || c.key === local)?.targets ?? [];
 };
+/** A key from another mounted section is decided there, the same way a card's Accept is. */
+function decideInOwningSection(key: string, decision: Decision): boolean {
+  const parsed = parseBookChangeKey(key);
+  if (!parsed || !continuousNav || parsed.sectionId === props.sectionId) return false;
+  continuousNav.decideInSection(parsed.sectionId, parsed.changeKey, decision);
+  return true;
+}
 const decideCurrent = (d: Decision) => {
   const key = currentKey.value;
   if (!key) return;
   const ck = parseBookChangeKey(key)?.changeKey ?? key;
   if (isCommentReviewKey(ck)) return;
+  if (decideInOwningSection(key, d)) return;
   decide(targetOf(key), d);
 };
 const decideOne = (key: string, d: Decision) => {
-  const parsed = parseBookChangeKey(key);
-  if (parsed && continuousNav && parsed.sectionId !== props.sectionId) {
-    continuousNav.decideInSection(parsed.sectionId, parsed.changeKey, d);
-    return;
-  }
+  if (decideInOwningSection(key, d)) return;
   currentKey.value = key;
   currentIndex = visible.value.findIndex((v) => v.key === key);
   decide(targetOf(key), d);
@@ -1231,11 +1238,18 @@ function decideLocalChange(changeKey: string, decision: Decision) {
   decide(targetOf(scoped), decision);
 }
 /** Bulk decision over the change keys locked when the confirmation opened. */
-const decideVisible = (d: Decision, keys: readonly string[]) =>
-  decide(
-    keys.flatMap((k) => targetOf(k)),
-    d,
-  );
+const decideVisible = (d: Decision, keys: readonly string[]) => {
+  const local: string[] = [];
+  for (const key of keys) {
+    if (!decideInOwningSection(key, d)) local.push(key);
+  }
+  if (local.length) {
+    decide(
+      local.flatMap((k) => targetOf(k)),
+      d,
+    );
+  }
+};
 
 function overlapEntries(cluster: OverlapCluster): OverlapEntry[] {
   const keys = new Set(cluster.spans.map((s) => keyOf(s)));

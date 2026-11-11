@@ -86,6 +86,8 @@ Run this consolidated pass in order; do not hand off until every line that appli
 
 Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
 
+- 2026-11-10 · #119 · PR #347 · the selection chip counted every id in the link and stayed up when the list was empty or suggestions failed to load · the chip counts suggestion rows still in the list and stays hidden while that list is empty or the load-failure line is showing
+- 2026-11-10 · #119 · PR #347 · Accept all and the accept shortcut wrote only the lead chapter · each locked key is decided in the mounted section that owns it, the same way a card's Accept is
 - 2026-11-10 · #119 · PR #347 · an unknown-id toast said “the others are in your review list” for one remaining change and for a history view · “the other” when one id is in the review list; the list is named only for ids passed to `showSelectedChanges`; history-only says the book stayed on the full list
 - 2026-11-10 · #119 · PR #347 · Accept all, Reject all, and the scope announcement still used the author filter during a review link · those labels and `view-scope-live` describe the selection (`Accept all selected`, `Showing N selected changes`)
 - 2026-11-10 · #119 · PR #347 · the PR summary still said the settings row is “Bots connected” · the summary matches the row, which says “Connected”
