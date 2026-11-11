@@ -740,7 +740,7 @@ impl DraftService {
             .ok()
             .and_then(|repo| unmerged_bot_omit(&repo).ok())
             .unwrap_or_default();
-        let mut guard = self.bot_writes.lock().expect("bot writes");
+        let guard = self.bot_writes.lock().expect("bot writes");
         let mut omit = git_omit;
         for write in guard
             .pending
@@ -765,21 +765,13 @@ impl DraftService {
                     .or_insert_with(|| "open".into());
             }
         }
-        let discovered = sync::sync_store_to_worktree(store, manuscript_id, dir, &omit)
+        // Ids found while replaying the chapter stay out of this commit inside
+        // `chapter_doc_for_sync`. They are not copied onto each pending write:
+        // that would link every comment on the chapter to every suggestion.
+        // Each write keeps the ids captured when it was saved.
+        sync::sync_store_to_worktree(store, manuscript_id, dir, &omit)
             .map_err(|e| format!("sync: {e}"))?;
-        for write in guard
-            .pending
-            .iter_mut()
-            .filter(|write| write.manuscript_id == manuscript_id)
-        {
-            if let Some(doc_id) = &write.doc_id {
-                if let Some(ids) = discovered.get(doc_id) {
-                    if !ids.is_empty() {
-                        write.change_ids = ids.iter().cloned().collect();
-                    }
-                }
-            }
-        }
+        drop(guard);
         Ok(())
     }
 

@@ -2949,6 +2949,158 @@ fn rejecting_one_suggestion_still_lets_the_other_be_accepted() {
     assert!(still_open.resolved_at.is_none());
 }
 
+/// Two suggestions saved before the book has a commit. The first checkpoint
+/// leaves those ids out of `main`. Rejecting one resolves only its comment.
+#[test]
+fn rejecting_one_suggestion_before_the_first_commit_leaves_the_other_comment_open() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "bot-before-first-commit.draft");
+    set_chapter_plain(&store, &chapter.doc_id, "chapter start");
+
+    let doc = store.load_doc(&chapter.doc_id).unwrap();
+    let since = state_vector(&doc);
+    content::encode(
+        &doc,
+        &json!({"type":"doc","content":[{"type":"paragraph","content":[{
+            "type":"text",
+            "text":"first wording",
+            "marks":[{"type":"suggestion_insert","attrs":{"id":"chg-a","author":"agent:agent-test-1","ts":"t"}}]
+        }]}]}),
+    )
+    .unwrap();
+    let first_update = doc_update_since(&doc, &since);
+    let mut first = sample_comment("c-a", &chapter.id, "Comment on the first.");
+    first.author.kind = "agent".into();
+    first.author.id = "agent-test-1".into();
+    first.author.name = "Line Editor".into();
+    svc.record_bot_write(
+        &store,
+        &m.id,
+        BotRetention {
+            comment: Some(first.clone()),
+            doc_id: Some(chapter.doc_id.clone()),
+            doc_update: Some(first_update.clone()),
+        },
+        || {
+            store
+                .insert_comment(&m.id, &first)
+                .map_err(|e| e.to_string())?;
+            store
+                .append_doc_update(&chapter.doc_id, &first_update)
+                .map_err(|e| e.to_string())?;
+            Ok::<(), String>(())
+        },
+    )
+    .unwrap();
+
+    let doc = store.load_doc(&chapter.doc_id).unwrap();
+    let since = state_vector(&doc);
+    content::encode(
+        &doc,
+        &json!({"type":"doc","content":[{"type":"paragraph","content":[
+            {
+                "type":"text",
+                "text":"first wording",
+                "marks":[{"type":"suggestion_insert","attrs":{"id":"chg-a","author":"agent:agent-test-1","ts":"t"}}]
+            },
+            {
+                "type":"text",
+                "text":" second wording",
+                "marks":[{"type":"suggestion_insert","attrs":{"id":"chg-b","author":"agent:agent-test-1","ts":"t"}}]
+            }
+        ]}]}),
+    )
+    .unwrap();
+    let second_update = doc_update_since(&doc, &since);
+    let mut second = sample_comment("c-b", &chapter.id, "Comment on the second.");
+    second.author.kind = "agent".into();
+    second.author.id = "agent-test-1".into();
+    second.author.name = "Line Editor".into();
+    svc.record_bot_write(
+        &store,
+        &m.id,
+        BotRetention {
+            comment: Some(second.clone()),
+            doc_id: Some(chapter.doc_id.clone()),
+            doc_update: Some(second_update.clone()),
+        },
+        || {
+            store
+                .insert_comment(&m.id, &second)
+                .map_err(|e| e.to_string())?;
+            store
+                .append_doc_update(&chapter.doc_id, &second_update)
+                .map_err(|e| e.to_string())?;
+            Ok::<(), String>(())
+        },
+    )
+    .unwrap();
+
+    svc.commit_bot_suggestion(
+        &store,
+        &m.id,
+        "agent-test-1",
+        "Line Editor",
+        "Bot suggestions",
+    )
+    .unwrap()
+    .expect("bot suggestions");
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let main = repo.head_oid().unwrap().unwrap();
+    let checkpoint = repo
+        .file_bytes(&main, "review/changes.json")
+        .unwrap()
+        .map(|bytes| String::from_utf8(bytes).unwrap())
+        .unwrap_or_default();
+    assert!(
+        !checkpoint.contains("chg-a") && !checkpoint.contains("chg-b"),
+        "the first checkpoint published a suggestion that was not decided: {checkpoint}"
+    );
+    drop(repo);
+
+    svc.commit_review_decision(
+        &store,
+        &m.id,
+        false,
+        "Line Editor",
+        &chapter.title,
+        "author",
+        Some("agent-test-1"),
+        Some("chg-a"),
+        Some("suggestion_insert"),
+        Some(&chapter.id),
+    )
+    .unwrap();
+    let comments = store.comments_for_manuscript(&m.id).unwrap();
+    assert!(
+        comments
+            .iter()
+            .find(|row| row.id == "c-a")
+            .unwrap()
+            .resolved_at
+            .is_some(),
+        "rejecting the first suggestion left its comment open"
+    );
+    assert!(
+        comments
+            .iter()
+            .find(|row| row.id == "c-b")
+            .unwrap()
+            .resolved_at
+            .is_none(),
+        "rejecting the first suggestion resolved the other comment"
+    );
+    assert!(
+        svc.bot_branch_exists(&store, &m.id, "agent-test-1", "Line Editor")
+            .unwrap(),
+        "the branch merged while a suggestion was still open"
+    );
+}
+
 /// Accept one suggestion and reject another on the same bot branch.
 /// The branch stays open until both are decided, then merges once.
 /// Main keeps the editor's text. The rejected wording stays only in the bot branch.
