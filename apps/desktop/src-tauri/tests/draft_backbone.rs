@@ -3625,6 +3625,66 @@ fn type_at_paragraph_start(store: &Store, doc_id: &str, extra: &str) {
     type_at_paragraph(store, doc_id, 0, extra);
 }
 
+fn type_at_paragraph_end(store: &Store, doc_id: &str, paragraph: usize, extra: &str) {
+    use yrs::types::Attrs;
+    use yrs::{GetString, Text, Transact, XmlFragment, XmlOut};
+    let doc = store.load_doc(doc_id).unwrap();
+    let since = state_vector(&doc);
+    let frag = doc.get_or_insert_xml_fragment(content::FRAGMENT);
+    let (text, len) = {
+        let txn = doc.transact();
+        let mut found = None;
+        let mut seen = 0usize;
+        for child in frag.children(&txn) {
+            let XmlOut::Element(el) = child else {
+                continue;
+            };
+            if seen == paragraph {
+                for inner in el.children(&txn) {
+                    let XmlOut::Text(text) = inner else {
+                        continue;
+                    };
+                    let len = text.get_string(&txn).encode_utf16().count() as u32;
+                    found = Some((text, len));
+                    break;
+                }
+                break;
+            }
+            seen += 1;
+        }
+        found.unwrap_or_else(|| panic!("paragraph {paragraph} has no text"))
+    };
+    {
+        let mut txn = doc.transact_mut();
+        // Empty attrs close the suggestion mark, so this keystroke stays the writer's.
+        text.insert_with_attributes(&mut txn, len, extra, Attrs::new());
+    }
+    let update = doc_update_since(&doc, &since);
+    store.append_doc_update(doc_id, &update).unwrap();
+}
+
+fn suggest_paragraph_at_start(doc: &yrs::Doc, text: &str, id: &str) {
+    use yrs::types::Attrs;
+    use yrs::{Any, Text, Transact, Xml, XmlElementPrelim, XmlFragment, XmlTextPrelim};
+    let marks = json!([{
+        "type": "suggestion_insert",
+        "attrs": {"id": id, "author": "agent:agent-test-1", "ts": "t"}
+    }]);
+    let keys = content::mark_keys(marks.as_array().unwrap()).unwrap();
+    let mut attrs = Attrs::new();
+    for (mark, key) in marks.as_array().unwrap().iter().zip(keys) {
+        let value = mark.get("attrs").cloned().unwrap_or(json!({}));
+        let any = serde_json::from_value(value).unwrap_or(Any::Null);
+        attrs.insert(key.into(), any);
+    }
+    let frag = doc.get_or_insert_xml_fragment(content::FRAGMENT);
+    let mut txn = doc.transact_mut();
+    let el = frag.insert(&mut txn, 0, XmlElementPrelim::empty("paragraph"));
+    el.insert_attribute(&mut txn, "style", Any::String("body".into()));
+    let text_node = el.push_back(&mut txn, XmlTextPrelim::new(""));
+    text_node.insert_with_attributes(&mut txn, 0, text, attrs);
+}
+
 fn type_at_paragraph(store: &Store, doc_id: &str, paragraph: usize, extra: &str) {
     use yrs::{Text, Transact, XmlFragment, XmlOut};
     let doc = store.load_doc(doc_id).unwrap();
@@ -3984,6 +4044,204 @@ fn reopening_keeps_a_suggestion_after_a_keystroke_and_a_deletion() {
             "omega".to_string(),
         ],
         "reopen left the keystroke outside the inserted paragraph: {opened}"
+    );
+}
+
+/// A remnant shorter than "old phrase" keeps the suggestion, including when a later
+/// paragraph still has the old sentence. A keystroke in a paragraph the bot inserted
+/// stays in that paragraph at the start of the chapter, at the end, and after the
+/// insert. A deletion in a paragraph of about 1,500 characters keeps an inline insert
+/// inline and a format mark on the words that remain.
+#[test]
+fn reopening_keeps_a_short_remnant_and_a_long_paragraph() {
+    let (checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-short-remnant.draft",
+        json!([
+            {"type": "paragraph", "content": [{"type": "text", "text": "Keep the old phrase here."}]},
+            {"type": "paragraph", "content": [{"type": "text", "text": "Keep the old phrase here. Extra."}]}
+        ]),
+        |doc| suggest_replacement(doc, "old phrase", "new phrase", "chg-rep"),
+        |store, doc_id| {
+            delete_in_paragraph(store, doc_id, 0, "Keep the ");
+            delete_in_paragraph(store, doc_id, 0, " here.");
+            delete_in_paragraph(store, doc_id, 0, "ase");
+        },
+    );
+    assert_eq!(
+        paragraph_bodies(&checkpoint),
+        vec![
+            "old phr".to_string(),
+            "Keep the old phrase here. Extra.".to_string(),
+        ],
+        "checkpoint restored deleted words or published the replacement: {checkpoint}"
+    );
+    assert_eq!(
+        paragraph_bodies(&opened),
+        vec![
+            "{--old phr--}{>>suggestion:chg-rep<<}{++new phrase++}{>>suggestion:chg-rep<<}"
+                .to_string(),
+            "Keep the old phrase here. Extra.".to_string(),
+        ],
+        "reopen put the short remnant on the later paragraph: {opened}"
+    );
+
+    let (checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-shell-end.draft",
+        json!([{
+            "type": "paragraph",
+            "content": [{"type": "text", "text": "alpha"}]
+        }]),
+        |doc| suggest_paragraph_after_first(doc, "inserted scene", "chg-para"),
+        |store, doc_id| type_at_paragraph(store, doc_id, 1, "note "),
+    );
+    assert_eq!(
+        paragraph_bodies(&checkpoint),
+        vec!["alpha".to_string(), "note".to_string()],
+        "checkpoint published the inserted paragraph or dropped the keystroke: {checkpoint}"
+    );
+    assert_eq!(
+        paragraph_bodies(&opened),
+        vec![
+            "alpha".to_string(),
+            "note {++inserted scene++}{>>suggestion:chg-para<<}".to_string(),
+        ],
+        "reopen left the keystroke outside the inserted paragraph at the end: {opened}"
+    );
+
+    let (checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-shell-start.draft",
+        json!([{
+            "type": "paragraph",
+            "content": [{"type": "text", "text": "omega"}]
+        }]),
+        |doc| suggest_paragraph_at_start(doc, "inserted scene", "chg-para"),
+        |store, doc_id| type_at_paragraph(store, doc_id, 0, "note "),
+    );
+    assert_eq!(
+        paragraph_bodies(&checkpoint),
+        vec!["note".to_string(), "omega".to_string()],
+        "checkpoint published the inserted paragraph or dropped the keystroke: {checkpoint}"
+    );
+    assert_eq!(
+        paragraph_bodies(&opened),
+        vec![
+            "note {++inserted scene++}{>>suggestion:chg-para<<}".to_string(),
+            "omega".to_string(),
+        ],
+        "reopen left the keystroke outside the inserted paragraph at the start: {opened}"
+    );
+
+    let (checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-shell-after.draft",
+        json!([
+            {"type": "paragraph", "content": [{"type": "text", "text": "alpha"}]},
+            {"type": "paragraph", "content": [{"type": "text", "text": "omega"}]}
+        ]),
+        |doc| suggest_paragraph_after_first(doc, "inserted scene", "chg-para"),
+        |store, doc_id| type_at_paragraph_end(store, doc_id, 1, " note"),
+    );
+    assert_eq!(
+        paragraph_bodies(&checkpoint),
+        vec!["alpha".to_string(), "note".to_string(), "omega".to_string()],
+        "checkpoint published the inserted paragraph or dropped the keystroke: {checkpoint}"
+    );
+    assert_eq!(
+        paragraph_bodies(&opened),
+        vec![
+            "alpha".to_string(),
+            "{++inserted scene++}{>>suggestion:chg-para<<} note".to_string(),
+            "omega".to_string(),
+        ],
+        "reopen put the keystroke before the insert: {opened}"
+    );
+
+    let long = format!("{}TAIL", "word ".repeat(300));
+    let (checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-long-format.draft",
+        json!([{
+            "type": "paragraph",
+            "content": [{"type": "text", "text": long}]
+        }]),
+        |doc| mark_paragraph_format(doc, "chg-fmt"),
+        |store, doc_id| delete_in_paragraph(store, doc_id, 0, "TAIL"),
+    );
+    let checkpoint_body = paragraph_bodies(&checkpoint);
+    assert_eq!(checkpoint_body.len(), 1, "{checkpoint}");
+    assert_eq!(
+        checkpoint_body[0].matches("word").count(),
+        300,
+        "{checkpoint}"
+    );
+    assert!(
+        !checkpoint_body[0].contains("TAIL") && !checkpoint.contains("{~~"),
+        "checkpoint published the format mark or restored TAIL: {checkpoint}"
+    );
+    let opened_body = paragraph_bodies(&opened);
+    assert_eq!(opened_body.len(), 1, "{opened}");
+    assert!(
+        opened_body[0].starts_with("{~~word ")
+            && opened_body[0].contains("{>>format:chg-fmt: add bold<<}")
+            && opened_body[0].matches("word").count() == 300
+            && !opened_body[0].contains("TAIL"),
+        "reopen dropped the format mark on the long paragraph: {opened}"
+    );
+
+    let long = format!("HEAD {}", "word ".repeat(300));
+    let (checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-long-insert.draft",
+        json!([{
+            "type": "paragraph",
+            "content": [{"type": "text", "text": long}]
+        }]),
+        |doc| insert_suggestion_after(doc, "HEAD ", "very ", "chg-in"),
+        |store, doc_id| delete_in_paragraph(store, doc_id, 0, "word "),
+    );
+    let checkpoint_body = paragraph_bodies(&checkpoint);
+    assert_eq!(checkpoint_body.len(), 1, "{checkpoint}");
+    assert!(
+        checkpoint_body[0].starts_with("HEAD word")
+            && checkpoint_body[0].matches("word").count() == 299
+            && !checkpoint_body[0].contains("very"),
+        "checkpoint published the insert or restored the deleted word: {checkpoint}"
+    );
+    let opened_body = paragraph_bodies(&opened);
+    assert_eq!(opened_body.len(), 1, "{opened}");
+    assert!(
+        opened_body[0].starts_with("HEAD {++very ++}{>>suggestion:chg-in<<}word")
+            && opened_body[0].matches("word").count() == 299,
+        "reopen pulled the insert out of the long paragraph: {opened}"
+    );
+
+    let long = format!("{}TAIL", "word ".repeat(300));
+    let (checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-long-both-ends.draft",
+        json!([{
+            "type": "paragraph",
+            "content": [{"type": "text", "text": long}]
+        }]),
+        |doc| mark_paragraph_format(doc, "chg-fmt"),
+        |store, doc_id| {
+            type_at_paragraph(store, doc_id, 0, "Today ");
+            delete_in_paragraph(store, doc_id, 0, "TAIL");
+        },
+    );
+    let checkpoint_body = paragraph_bodies(&checkpoint);
+    assert_eq!(checkpoint_body.len(), 1, "{checkpoint}");
+    assert!(
+        checkpoint_body[0].starts_with("Today word")
+            && checkpoint_body[0].matches("word").count() == 300
+            && !checkpoint_body[0].contains("TAIL")
+            && !checkpoint.contains("{~~"),
+        "checkpoint published the format mark or dropped the keystroke: {checkpoint}"
+    );
+    let opened_body = paragraph_bodies(&opened);
+    assert_eq!(opened_body.len(), 1, "{opened}");
+    assert!(
+        opened_body[0].starts_with("Today {~~word ")
+            && opened_body[0].contains("{>>format:chg-fmt: add bold<<}")
+            && opened_body[0].matches("word").count() == 300
+            && !opened_body[0].contains("TAIL"),
+        "reopen dropped the format mark after the long paragraph was retyped: {opened}"
     );
 }
 

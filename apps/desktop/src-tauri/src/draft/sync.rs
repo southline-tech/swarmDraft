@@ -208,6 +208,10 @@ pub fn sync_store_to_worktree(
     Ok(discovered)
 }
 
+/// Utf-16 offsets, in the text that stays, where an open insert was removed.
+/// Reopen reads this so a keystroke typed into an inserted paragraph keeps its side.
+const WITHHELD_INSERT_AT: &str = "withheldInsertAt";
+
 /// Chapter snapshot for `main`. Returns a new doc only when a withheld mark was removed,
 /// so an unchanged chapter keeps its bytes.
 fn strip_withheld_marks(doc: &Doc, status: &HashMap<String, String>) -> Option<Doc> {
@@ -242,6 +246,8 @@ fn strip_withheld_marks(doc: &Doc, status: &HashMap<String, String>) -> Option<D
 }
 
 /// Drop pending and rejected inserts. Keep accepted text without the mark.
+/// An open insert removed from a paragraph that still has the writer's text records
+/// its utf-16 offset, so reopen can put that insert back on the same side of the keystroke.
 /// Returns whether `node` changed.
 fn filter_withheld_node(node: &mut serde_json::Value, status: &HashMap<String, String>) -> bool {
     let Some(children) = node
@@ -252,13 +258,24 @@ fn filter_withheld_node(node: &mut serde_json::Value, status: &HashMap<String, S
     };
     let mut changed = false;
     let mut kept = Vec::with_capacity(children.len());
+    let mut plain = 0u32;
+    let mut anchors = Vec::new();
     for mut child in children.drain(..) {
         if child["type"] == "text" {
             match withheld_text(&child, status) {
-                WithheldText::Drop => changed = true,
-                WithheldText::Same => kept.push(child),
+                WithheldText::Drop => {
+                    changed = true;
+                    if is_open_suggestion_insert(&child, status) {
+                        anchors.push(plain);
+                    }
+                }
+                WithheldText::Same => {
+                    plain += utf16_len(child["text"].as_str().unwrap_or(""));
+                    kept.push(child);
+                }
                 WithheldText::Edited(next) => {
                     changed = true;
+                    plain += utf16_len(next["text"].as_str().unwrap_or(""));
                     kept.push(next);
                 }
             }
@@ -272,7 +289,45 @@ fn filter_withheld_node(node: &mut serde_json::Value, status: &HashMap<String, S
         }
     }
     *children = kept;
+    if plain > 0 && !anchors.is_empty() {
+        let text = anchors
+            .iter()
+            .map(|offset| offset.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let attrs = node.as_object_mut().and_then(|object| {
+            object
+                .entry("attrs")
+                .or_insert_with(|| json!({}))
+                .as_object_mut()
+        });
+        if let Some(attrs) = attrs {
+            attrs.insert(WITHHELD_INSERT_AT.to_string(), json!(text));
+        }
+    }
     changed
+}
+
+fn is_open_suggestion_insert(node: &serde_json::Value, status: &HashMap<String, String>) -> bool {
+    let Some(marks) = node["marks"].as_array() else {
+        return false;
+    };
+    marks.iter().any(|mark| {
+        if mark["type"] != "suggestion_insert" {
+            return false;
+        }
+        let id = mark["attrs"]["id"].as_str().unwrap_or("");
+        status.get(id).is_some_and(|state| state == "open")
+    })
+}
+
+fn withheld_offsets(node: &serde_json::Value) -> Vec<u32> {
+    node["attrs"][WITHHELD_INSERT_AT]
+        .as_str()
+        .unwrap_or("")
+        .split(',')
+        .filter_map(|piece| piece.parse().ok())
+        .collect()
 }
 
 enum WithheldText {
@@ -371,11 +426,13 @@ fn open_suggestion_ids(repo: &DraftRepo) -> Result<HashSet<String>, DraftRepoErr
 /// Put a suggestion that is still open back into `main_bytes` from unmerged bot tips,
 /// as that branch stored it. A delete mark and a format mark are put on the words that
 /// remain, including when the paragraph also gained characters or kept less than half
-/// of them. A paragraph the bot inserted between two others is inserted there again,
-/// and a keystroke in that paragraph stays in it with the insert. Text already on
-/// `main` stays, and an inline insert stays where the bot put it. A later paragraph
-/// that still has the old sentence does not take the mark. A rejected insert is not
-/// copied. Returns the new state only when a mark was added.
+/// of them, and when only a short remnant such as "old phr" is left. A paragraph the
+/// bot inserted is inserted there again. A keystroke in that paragraph stays in it,
+/// before or after the insert, including when the paragraph is first or last. Text
+/// already on `main` stays, and an inline insert stays where the bot put it. A later
+/// paragraph that still has the old sentence does not take the mark. A long paragraph
+/// keeps the mark after a short deletion. A rejected insert is not copied. Returns the
+/// new state only when a mark was added.
 fn restore_open_suggestions(
     repo: &DraftRepo,
     section_id: &str,
@@ -546,8 +603,23 @@ fn merge_open_suggestions(
             mark_runs.push((idx, run));
         }
     }
+    absorb_anchored_shells(
+        &mut pending,
+        &main_blocks,
+        mi..main_blocks.len(),
+        &mut splices,
+        applied,
+    );
     let tail: Vec<NewBlock> = pending.into_iter().map(|item| item.block).collect();
-    if splices.is_empty() && mark_runs.is_empty() && place.is_empty() && tail.is_empty() {
+    let clear_anchors = main_blocks
+        .iter()
+        .any(|block| !withheld_offsets(&block.node).is_empty());
+    if splices.is_empty()
+        && mark_runs.is_empty()
+        && place.is_empty()
+        && tail.is_empty()
+        && !clear_anchors
+    {
         return false;
     }
     for block in &place {
@@ -566,9 +638,13 @@ fn merge_open_suggestions(
 }
 
 /// Place insert-only paragraphs that are still waiting.
-/// Between two matched paragraphs, one shell per main paragraph in that gap is the
-/// keystroke the writer typed into the bot's inserted paragraph: the insert is added
-/// after that keystroke. Anything else is a new paragraph just before the match.
+/// A paragraph that kept a keystroke in the bot's inserted paragraph carries the
+/// offset where that insert was removed. The insert is put back there, including
+/// when the paragraph is the first or last in the chapter, and including when the
+/// keystroke was typed after the insert. Between two matched paragraphs, one shell
+/// per main paragraph with no recorded offset is still that keystroke typed at the
+/// start: the insert is added after it. Anything else is a new paragraph just before
+/// the match.
 fn settle_pending(
     pending: &mut Vec<PendingRestore>,
     gap: (usize, usize),
@@ -579,6 +655,9 @@ fn settle_pending(
     applied: &mut HashSet<String>,
 ) {
     let (gap_start, gap_end) = gap;
+    if absorb_anchored_shells(pending, main_blocks, gap_start..gap_end, splices, applied) {
+        return;
+    }
     let gap_len = gap_end.saturating_sub(gap_start);
     let absorb = between_matches
         && !pending.is_empty()
@@ -606,6 +685,51 @@ fn settle_pending(
     for item in pending.drain(..) {
         place.push((gap_end, item.block));
     }
+}
+
+/// Pair each waiting shell with a main paragraph that recorded where its insert was
+/// removed. Returns false when the gap is not exactly those shells, so the caller
+/// can keep the older placement.
+fn absorb_anchored_shells(
+    pending: &mut Vec<PendingRestore>,
+    main_blocks: &[content::Block],
+    range: std::ops::Range<usize>,
+    splices: &mut Vec<(usize, InsertRun)>,
+    applied: &mut HashSet<String>,
+) -> bool {
+    if pending.is_empty() || pending.iter().any(|item| !item.shell) {
+        return false;
+    }
+    let anchors: Vec<(usize, Vec<u32>)> = range
+        .filter_map(|idx| {
+            let offsets = withheld_offsets(&main_blocks[idx].node);
+            if offsets.is_empty() {
+                None
+            } else {
+                Some((idx, offsets))
+            }
+        })
+        .collect();
+    if anchors.len() != pending.len() {
+        return false;
+    }
+    for (item, (main_idx, offsets)) in pending.drain(..).zip(anchors) {
+        let end = utf16_len(&plain_text(&main_blocks[main_idx].node));
+        note_applied_tail(applied, &item.block);
+        for (n, run) in item.block.inserts.into_iter().enumerate() {
+            let offset = offsets.get(n).copied().unwrap_or(end);
+            splices.push((
+                main_idx,
+                InsertRun {
+                    offset,
+                    seq: run.seq,
+                    text: run.text,
+                    marks: run.marks,
+                },
+            ));
+        }
+    }
+    true
 }
 
 fn note_applied(applied: &mut HashSet<String>, ops: &[BotOp]) {
@@ -657,6 +781,15 @@ fn apply_open_runs(
         .collect();
     if elements.len() != block_count {
         eprintln!("draft open left a suggestion out; the chapter shape changed");
+    }
+    let clear: Vec<bool> = elements
+        .iter()
+        .map(|element| element.get_attribute(&txn, WITHHELD_INSERT_AT).is_some())
+        .collect();
+    for (element, clear) in elements.iter().zip(clear) {
+        if clear {
+            element.remove_attribute(&mut txn, &WITHHELD_INSERT_AT);
+        }
     }
     for (idx, run) in mark_runs {
         let Some(element) = elements.get(*idx) else {
@@ -1001,10 +1134,12 @@ fn align_chars(bot: &[char], main: &[char]) -> Option<Vec<Option<usize>>> {
     }
     let mut map = vec![None; bot.len()];
     let matched = align_shared(bot, main, &mut map, 0, 0);
-    // Shared characters have to be at least half of the two paragraphs together.
-    // That keeps a short remnant such as "old phrase" or "ome" on the sentence it
-    // came from, and rejects a fragment such as "the" that merely occurs inside it.
-    if matched == 0 || matched.saturating_mul(4) < bot.len() + main.len() {
+    // Half of the two lengths together keeps "old phrase" and "ome" and rejects a
+    // fragment such as "the". A remnant that is the whole of the shorter paragraph
+    // still counts at seven characters, so "old phr" stays on that sentence.
+    let half = matched.saturating_mul(4) >= bot.len() + main.len();
+    let remnant = matched >= 7 && (matched == bot.len() || matched == main.len());
+    if matched == 0 || !(half || remnant) {
         return None;
     }
     Some(map)
@@ -1046,12 +1181,58 @@ fn align_shared(
 }
 
 /// Earliest longest common substring as `(bot start, main start, length)`.
+/// A shared prefix or suffix is returned directly, so a short deletion in a long
+/// paragraph does not build a table. A long middle uses a checked rolling hash.
 fn longest_common_substring(bot: &[char], main: &[char]) -> Option<(usize, usize, usize)> {
     let n = bot.len();
     let m = main.len();
-    if n == 0 || m == 0 || n.saturating_mul(m) > 2_000_000 {
+    if n == 0 || m == 0 {
         return None;
     }
+    let prefix = bot
+        .iter()
+        .zip(main.iter())
+        .take_while(|(left, right)| left == right)
+        .count();
+    let suffix = bot[prefix..]
+        .iter()
+        .rev()
+        .zip(main[prefix..].iter().rev())
+        .take_while(|(left, right)| left == right)
+        .count();
+    let core_n = n - prefix - suffix;
+    let core_m = m - prefix - suffix;
+    if prefix.max(suffix) >= core_n.min(core_m) {
+        return end_match(n, m, prefix, suffix);
+    }
+    if n.saturating_mul(m) > 2_000_000 {
+        let ends = end_match(n, m, prefix, suffix);
+        let core = lcs_hash(
+            &bot[prefix..prefix + core_n],
+            &main[prefix..prefix + core_m],
+        )
+        .map(|(start_bot, start_main, len)| (prefix + start_bot, prefix + start_main, len));
+        return match (ends, core) {
+            (Some(end), Some(middle)) if middle.2 > end.2 => Some(middle),
+            (Some(end), _) => Some(end),
+            (None, middle) => middle,
+        };
+    }
+    lcs_table(bot, main)
+}
+
+fn end_match(n: usize, m: usize, prefix: usize, suffix: usize) -> Option<(usize, usize, usize)> {
+    if prefix >= suffix && prefix > 0 {
+        Some((0, 0, prefix))
+    } else if suffix > 0 {
+        Some((n - suffix, m - suffix, suffix))
+    } else {
+        None
+    }
+}
+
+fn lcs_table(bot: &[char], main: &[char]) -> Option<(usize, usize, usize)> {
+    let m = main.len();
     let mut prev = vec![0usize; m + 1];
     let mut best_len = 0usize;
     let mut best_bot = 0usize;
@@ -1076,6 +1257,73 @@ fn longest_common_substring(bot: &[char], main: &[char]) -> Option<(usize, usize
     } else {
         Some((best_bot, best_main, best_len))
     }
+}
+
+/// Earliest longest common substring when the character table would be too large.
+/// Each candidate is compared as characters, so a hash collision cannot count.
+fn lcs_hash(bot: &[char], main: &[char]) -> Option<(usize, usize, usize)> {
+    let limit = bot.len().min(main.len());
+    if limit == 0 {
+        return None;
+    }
+    let mut lo = 1usize;
+    let mut hi = limit;
+    let mut best: Option<(usize, usize, usize)> = None;
+    while lo <= hi {
+        let mid = lo + (hi - lo) / 2;
+        if let Some((start_bot, start_main)) = find_common_window(bot, main, mid) {
+            best = Some((start_bot, start_main, mid));
+            lo = mid + 1;
+        } else if mid == 0 {
+            break;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    best
+}
+
+fn find_common_window(bot: &[char], main: &[char], len: usize) -> Option<(usize, usize)> {
+    if len == 0 || len > bot.len() || len > main.len() {
+        return None;
+    }
+    const BASE: u64 = 257;
+    let mut pow = 1u64;
+    for _ in 1..len {
+        pow = pow.wrapping_mul(BASE);
+    }
+    let hash_at = |text: &[char], index: usize, prev: u64| -> u64 {
+        if index == 0 {
+            let mut hash = 0u64;
+            for ch in &text[..len] {
+                hash = hash.wrapping_mul(BASE).wrapping_add(*ch as u64);
+            }
+            hash
+        } else {
+            prev.wrapping_sub((text[index - 1] as u64).wrapping_mul(pow))
+                .wrapping_mul(BASE)
+                .wrapping_add(text[index + len - 1] as u64)
+        }
+    };
+    let mut by_hash: HashMap<u64, Vec<usize>> = HashMap::new();
+    let mut main_hash = 0u64;
+    for index in 0..=main.len() - len {
+        main_hash = hash_at(main, index, main_hash);
+        by_hash.entry(main_hash).or_default().push(index);
+    }
+    let mut bot_hash = 0u64;
+    for index in 0..=bot.len() - len {
+        bot_hash = hash_at(bot, index, bot_hash);
+        let Some(hits) = by_hash.get(&bot_hash) else {
+            continue;
+        };
+        for &main_at in hits {
+            if bot[index..index + len] == main[main_at..main_at + len] {
+                return Some((index, main_at));
+            }
+        }
+    }
+    None
 }
 
 /// Map every bot character onto `main`. Prefer a contiguous copy, then the alignment
