@@ -3374,6 +3374,348 @@ fn reopening_restores_an_open_suggestion_and_keeps_a_keystroke() {
     assert_no_empty_paragraph(&store, &chapter.doc_id);
 }
 
+fn paragraph_bodies(md: &str) -> Vec<String> {
+    md.split("<!-- block:")
+        .skip(1)
+        .filter_map(|chunk| {
+            chunk
+                .split_once("-->")
+                .map(|(_, body)| body.trim().to_string())
+        })
+        .filter(|body| !body.is_empty())
+        .collect()
+}
+
+fn set_chapter_blocks(store: &Store, doc_id: &str, blocks: serde_json::Value) {
+    let doc = content::new_doc();
+    content::encode(&doc, &json!({"type":"doc","content": blocks})).unwrap();
+    let state = doc
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    store.replace_doc_state(doc_id, &state).unwrap();
+}
+
+/// Commit `edit` on the bot branch, checkpoint `main`, delete the database, and reopen.
+/// `after_bot` runs after the bot commit and before the checkpoint, so a keystroke can land
+/// on the live chapter while the suggestion is still only on `bot/*`.
+fn reopen_after_bot_edit(
+    file: &str,
+    blocks: serde_json::Value,
+    edit: impl FnOnce(&yrs::Doc),
+    after_bot: impl FnOnce(&Store, &str),
+) -> (String, String) {
+    let (dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let manuscript_id = stored.manuscript.id.clone();
+    let chapter = chapter(&stored);
+    let doc_id = chapter.doc_id.clone();
+    let section_id = chapter.id.clone();
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &manuscript_id, file);
+    set_chapter_blocks(&store, &doc_id, blocks);
+    let doc = store.load_doc(&doc_id).unwrap();
+    let since = state_vector(&doc);
+    edit(&doc);
+    let update = doc_update_since(&doc, &since);
+    svc.record_bot_write(
+        &store,
+        &manuscript_id,
+        BotRetention {
+            comment: None,
+            doc_id: Some(doc_id.clone()),
+            doc_update: Some(update.clone()),
+        },
+        || {
+            store
+                .append_doc_update(&doc_id, &update)
+                .map_err(|e| e.to_string())
+        },
+    )
+    .unwrap();
+    svc.commit_bot_suggestion(
+        &store,
+        &manuscript_id,
+        "agent-test-1",
+        "Line Editor",
+        "Bot suggestions",
+    )
+    .unwrap()
+    .expect("bot suggestions");
+    after_bot(&store, &doc_id);
+    svc.commit_now(
+        &store,
+        &manuscript_id,
+        "Checkpoint",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap()
+    .expect("checkpoint");
+    let repo = DraftRepo::open_working(&svc.worktree_path(&manuscript_id)).unwrap();
+    let main = repo.head_oid().unwrap().unwrap();
+    let checkpoint = markdown_from_yjs(
+        &repo
+            .file_bytes(&main, &format!("yjs/{section_id}.bin"))
+            .unwrap()
+            .expect("chapter"),
+    );
+    drop(repo);
+    let draft_path = store.draft_file_path(&manuscript_id).unwrap().unwrap();
+    let data = dir.path().to_path_buf();
+    drop(store);
+    drop(svc);
+    let (store, _svc, id) = reopen_without_database(&data, &draft_path);
+    let chapter = only_chapter(&store, &id);
+    let opened = chapter_text(&store, &chapter.doc_id);
+    (checkpoint, opened)
+}
+
+fn suggest_replacement(doc: &yrs::Doc, quote: &str, replacement: &str, id: &str) {
+    let block = decode(doc).into_iter().next().unwrap().id;
+    let mut txn = doc.transact_mut();
+    let range = swarmdraft_lib::anchor::resolve(doc, &txn, &block, quote).unwrap();
+    swarmdraft_lib::anchor::add_suggestion_marks(
+        &mut txn,
+        &range,
+        id,
+        "agent:agent-test-1",
+        "t",
+        replacement,
+    );
+}
+
+fn suggest_paragraph_after_first(doc: &yrs::Doc, text: &str, id: &str) {
+    let after = decode(doc).into_iter().next().unwrap().id;
+    let frag = doc.get_or_insert_xml_fragment(content::FRAGMENT);
+    let mut txn = doc.transact_mut();
+    swarmdraft_lib::anchor::insert_suggested_paragraphs(
+        &mut txn,
+        &frag,
+        Some(&after),
+        &[(text, "body")],
+        id,
+        "agent:agent-test-1",
+        "t",
+    )
+    .unwrap();
+}
+
+fn insert_suggestion_after(doc: &yrs::Doc, needle: &str, extra: &str, id: &str) {
+    use yrs::{GetString, Text, Transact, XmlFragment, XmlOut};
+    let marks = json!([{
+        "type": "suggestion_insert",
+        "attrs": {"id": id, "author": "agent:agent-test-1", "ts": "t"}
+    }]);
+    let keys = content::mark_keys(marks.as_array().unwrap()).unwrap();
+    let mut attrs = yrs::types::Attrs::new();
+    for (mark, key) in marks.as_array().unwrap().iter().zip(keys) {
+        let value = mark.get("attrs").cloned().unwrap_or(json!({}));
+        let any = serde_json::from_value(value).unwrap_or(yrs::Any::Null);
+        attrs.insert(key.into(), any);
+    }
+    let frag = doc.get_or_insert_xml_fragment(content::FRAGMENT);
+    let (text, index) = {
+        let txn = doc.transact();
+        let mut found = None;
+        for child in frag.children(&txn) {
+            let XmlOut::Element(el) = child else { continue };
+            for inner in el.children(&txn) {
+                let XmlOut::Text(text) = inner else { continue };
+                let value = text.get_string(&txn);
+                if let Some(pos) = value.find(needle) {
+                    let index = value[..pos + needle.len()].encode_utf16().count() as u32;
+                    found = Some((text, index));
+                }
+            }
+        }
+        found.unwrap_or_else(|| panic!("missing text {needle}"))
+    };
+    let mut txn = doc.transact_mut();
+    text.insert_with_attributes(&mut txn, index, extra, attrs);
+}
+
+fn mark_paragraph_format(doc: &yrs::Doc, id: &str) {
+    use yrs::{GetString, Text, Transact, XmlFragment, XmlOut};
+    let marks = json!([{
+        "type": "format_change",
+        "attrs": {
+            "id": id,
+            "author": "agent:agent-test-1",
+            "ts": "t",
+            "target": "bold",
+            "before": "0",
+            "after": "1"
+        }
+    }]);
+    let keys = content::mark_keys(marks.as_array().unwrap()).unwrap();
+    let mut attrs = yrs::types::Attrs::new();
+    for (mark, key) in marks.as_array().unwrap().iter().zip(keys) {
+        let value = mark.get("attrs").cloned().unwrap_or(json!({}));
+        let any = serde_json::from_value(value).unwrap_or(yrs::Any::Null);
+        attrs.insert(key.into(), any);
+    }
+    let frag = doc.get_or_insert_xml_fragment(content::FRAGMENT);
+    let (text, len) = {
+        let txn = doc.transact();
+        let mut found = None;
+        for child in frag.children(&txn) {
+            let XmlOut::Element(el) = child else { continue };
+            for inner in el.children(&txn) {
+                let XmlOut::Text(text) = inner else { continue };
+                let value = text.get_string(&txn);
+                if value.is_empty() {
+                    continue;
+                }
+                found = Some((text, value.encode_utf16().count() as u32));
+                break;
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+        found.expect("paragraph text")
+    };
+    let mut txn = doc.transact_mut();
+    text.format(&mut txn, 0, len, attrs);
+}
+
+fn type_at_paragraph_start(store: &Store, doc_id: &str, extra: &str) {
+    use yrs::{Text, Transact, XmlFragment, XmlOut};
+    let doc = store.load_doc(doc_id).unwrap();
+    let since = state_vector(&doc);
+    let frag = doc.get_or_insert_xml_fragment(content::FRAGMENT);
+    let text = {
+        let txn = doc.transact();
+        let mut found = None;
+        for child in frag.children(&txn) {
+            let XmlOut::Element(el) = child else { continue };
+            for inner in el.children(&txn) {
+                let XmlOut::Text(text) = inner else { continue };
+                found = Some(text);
+                break;
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+        found.expect("paragraph text")
+    };
+    {
+        let mut txn = doc.transact_mut();
+        text.insert(&mut txn, 0, extra);
+    }
+    let update = doc_update_since(&doc, &since);
+    store.append_doc_update(doc_id, &update).unwrap();
+}
+
+/// A replacement, a deletion, a format mark, and a paragraph inserted between two others
+/// come back as the bot branch stored them. A keystroke at the start of the suggestion's
+/// paragraph stays, and the insert stays between the words around it.
+#[test]
+fn reopening_restores_delete_format_and_inserted_paragraphs() {
+    let kept = json!([{
+        "type": "paragraph",
+        "content": [{"type": "text", "text": "Keep the old phrase here."}]
+    }]);
+    let (checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-replacement.draft",
+        kept.clone(),
+        |doc| suggest_replacement(doc, "old phrase", "new phrase", "chg-rep"),
+        |_, _| {},
+    );
+    assert_eq!(
+        paragraph_bodies(&checkpoint),
+        vec!["Keep the old phrase here.".to_string()],
+        "checkpoint published the replacement: {checkpoint}"
+    );
+    assert_eq!(
+        paragraph_bodies(&opened),
+        vec!["Keep the {--old phrase--}{>>suggestion:chg-rep<<}{++new phrase++}{>>suggestion:chg-rep<<} here.".to_string()],
+        "reopen dropped the delete mark on the replacement: {opened}"
+    );
+
+    let (checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-deletion.draft",
+        kept,
+        |doc| suggest_replacement(doc, "old phrase", "", "chg-del"),
+        |_, _| {},
+    );
+    assert_eq!(
+        paragraph_bodies(&checkpoint),
+        vec!["Keep the old phrase here.".to_string()],
+        "checkpoint published the deletion mark: {checkpoint}"
+    );
+    assert_eq!(
+        paragraph_bodies(&opened),
+        vec!["Keep the {--old phrase--}{>>suggestion:chg-del<<} here.".to_string()],
+        "reopen dropped the deletion: {opened}"
+    );
+
+    let (checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-paragraph.draft",
+        json!([
+            {"type": "paragraph", "content": [{"type": "text", "text": "alpha"}]},
+            {"type": "paragraph", "content": [{"type": "text", "text": "omega"}]}
+        ]),
+        |doc| suggest_paragraph_after_first(doc, "inserted scene", "chg-para"),
+        |_, _| {},
+    );
+    assert_eq!(
+        paragraph_bodies(&checkpoint),
+        vec!["alpha".to_string(), "omega".to_string()],
+        "checkpoint published the inserted paragraph: {checkpoint}"
+    );
+    assert_eq!(
+        paragraph_bodies(&opened),
+        vec![
+            "alpha".to_string(),
+            "{++inserted scene++}{>>suggestion:chg-para<<}".to_string(),
+            "omega".to_string(),
+        ],
+        "reopen did not put the inserted paragraph between the others: {opened}"
+    );
+
+    let (checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-keystroke.draft",
+        json!([{
+            "type": "paragraph",
+            "content": [{"type": "text", "text": "The quick fox"}]
+        }]),
+        |doc| insert_suggestion_after(doc, "The ", "very ", "chg-in"),
+        |store, doc_id| type_at_paragraph_start(store, doc_id, "Today "),
+    );
+    assert_eq!(
+        paragraph_bodies(&checkpoint),
+        vec!["Today The quick fox".to_string()],
+        "checkpoint published the insert or dropped the keystroke: {checkpoint}"
+    );
+    assert_eq!(
+        paragraph_bodies(&opened),
+        vec!["Today The {++very ++}{>>suggestion:chg-in<<}quick fox".to_string()],
+        "reopen moved the insert or dropped the keystroke: {opened}"
+    );
+
+    let (checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-format.draft",
+        json!([{
+            "type": "paragraph",
+            "content": [{"type": "text", "text": "styled words"}]
+        }]),
+        |doc| mark_paragraph_format(doc, "chg-fmt"),
+        |_, _| {},
+    );
+    assert_eq!(
+        paragraph_bodies(&checkpoint),
+        vec!["styled words".to_string()],
+        "checkpoint published the format mark: {checkpoint}"
+    );
+    assert_eq!(
+        paragraph_bodies(&opened),
+        vec!["{~~styled words~~}{>>format:chg-fmt: add bold<<}".to_string()],
+        "reopen dropped the format mark: {opened}"
+    );
+}
+
 /// Accept one suggestion and reject another on the same bot branch.
 /// The branch stays open until both are decided, then merges once.
 /// Main keeps the editor's text. The rejected wording stays only in the bot branch.

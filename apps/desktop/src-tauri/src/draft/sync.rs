@@ -11,7 +11,7 @@ use yrs::types::xml::{XmlFragment, XmlOut};
 use yrs::types::Attrs;
 use yrs::{
     Any, Array, Doc, GetString, Map, MapPrelim, Out, ReadTxn, StateVector, Text, Transact,
-    TransactionMut, XmlElementPrelim, XmlTextPrelim,
+    TransactionMut, Xml, XmlElementPrelim, XmlTextPrelim,
 };
 
 use crate::agent_access::{ACCESS_MODE_ALL, ACCESS_MODE_SELECTED};
@@ -368,9 +368,12 @@ fn open_suggestion_ids(repo: &DraftRepo) -> Result<HashSet<String>, DraftRepoErr
     Ok(open)
 }
 
-/// Put suggestion text that is still open back into `main_bytes` from unmerged bot tips.
-/// Text already on `main` stays, including a keystroke the bot snapshot does not have.
-/// A rejected insert is not copied. Returns the new state only when a mark was added.
+/// Put a suggestion that is still open back into `main_bytes` from unmerged bot tips,
+/// as that branch stored it. A delete mark and a format mark are put on the same words.
+/// A paragraph the bot inserted between two others is inserted there again. Text already
+/// on `main` stays, including a keystroke at the start of the paragraph, and an insert
+/// stays where the bot put it. A rejected insert is not copied. Returns the new state
+/// only when a mark was added.
 fn restore_open_suggestions(
     repo: &DraftRepo,
     section_id: &str,
@@ -381,8 +384,8 @@ fn restore_open_suggestions(
         return None;
     }
     let main = doc_from_update(main_bytes)?;
-    let mut seen = changes::suggestion_ids(&main);
-    seen.retain(|id| open_ids.contains(id));
+    let mut skip = changes::suggestion_ids(&main);
+    skip.retain(|id| open_ids.contains(id));
     let mut changed = false;
     let main_oid = repo.head_oid().ok().flatten()?;
     let tips = repo.search_ref_tips().ok()?;
@@ -404,9 +407,11 @@ fn restore_open_suggestions(
             eprintln!("draft open skipped a bot chapter that did not decode");
             continue;
         };
-        if merge_open_suggestions(&main, &bot, open_ids, &mut seen) {
+        let mut applied = HashSet::new();
+        if merge_open_suggestions(&main, &bot, open_ids, &skip, &mut applied) {
             changed = true;
         }
+        skip.extend(applied);
     }
     if !changed {
         return None;
@@ -428,7 +433,7 @@ fn doc_from_update(bytes: &[u8]) -> Option<Doc> {
     Some(doc)
 }
 
-struct OpenRun {
+struct InsertRun {
     /// Utf-16 offset in the block's text that is not a suggestion insert.
     offset: u32,
     /// Order within the block. Same-offset runs stay in this order.
@@ -437,59 +442,143 @@ struct OpenRun {
     marks: Vec<serde_json::Value>,
 }
 
-/// Insert open suggestion runs from `bot` into `main`. Ids already in `seen` are skipped.
+struct MarkRun {
+    /// Utf-16 offset in the block's text that is not a suggestion insert.
+    offset: u32,
+    len: u32,
+    marks: Vec<serde_json::Value>,
+}
+
+struct NewBlock {
+    tag: String,
+    attrs: Vec<(String, serde_json::Value)>,
+    inserts: Vec<InsertRun>,
+}
+
+/// One open mark on a bot block, still in that block's own plain-text coordinates.
+struct BotOp {
+    insert: bool,
+    /// Char offset in the block's text that is not a suggestion insert.
+    at: usize,
+    /// Exclusive end for a delete or format mark.
+    end: usize,
+    seq: u32,
+    text: String,
+    marks: Vec<serde_json::Value>,
+}
+
+/// Restore open marks from `bot` into `main`. Ids in `skip` are already on `main`
+/// or were restored from an earlier bot tip. Ids this call applies are added to `applied`.
 fn merge_open_suggestions(
     main: &Doc,
     bot: &Doc,
     open_ids: &HashSet<String>,
-    seen: &mut HashSet<String>,
+    skip: &HashSet<String>,
+    applied: &mut HashSet<String>,
 ) -> bool {
     let main_blocks = content::decode(main);
     let bot_blocks = content::decode(bot);
-    let mut splices: Vec<(usize, OpenRun)> = Vec::new();
-    let mut appends: Vec<Vec<OpenRun>> = Vec::new();
+    let mut splices: Vec<(usize, InsertRun)> = Vec::new();
+    let mut mark_runs: Vec<(usize, MarkRun)> = Vec::new();
+    let mut place: Vec<(usize, NewBlock)> = Vec::new();
+    let mut pending: Vec<NewBlock> = Vec::new();
     let mut mi = 0usize;
     for block in &bot_blocks {
-        let runs = open_runs(&block.node, open_ids, seen);
+        let ops = bot_ops(&block.node, open_ids, skip);
         let bot_plain = plain_text(&block.node);
-        if let Some(rel) = main_blocks[mi..]
-            .iter()
-            .position(|candidate| blocks_match(&plain_text(&candidate.node), &bot_plain))
-        {
-            let idx = mi + rel;
-            mi = idx + 1;
-            for run in runs {
-                if let Some(id) = suggestion_insert_id_in_marks(&run.marks) {
-                    seen.insert(id);
-                }
-                splices.push((idx, run));
+        if bot_plain.is_empty() {
+            if let Some(new_block) = new_block_from_inserts(&block.node, &ops) {
+                pending.push(new_block);
             }
-        } else if !runs.is_empty() {
-            for run in &runs {
-                if let Some(id) = suggestion_insert_id_in_marks(&run.marks) {
-                    seen.insert(id.to_string());
-                }
+            continue;
+        }
+        let bot_chars: Vec<char> = bot_plain.chars().collect();
+        let found = main_blocks[mi..].iter().position(|candidate| {
+            let main_chars: Vec<char> = plain_text(&candidate.node).chars().collect();
+            align_chars(&bot_chars, &main_chars).is_some()
+        });
+        let Some(rel) = found else {
+            if let Some(new_block) = new_block_from_inserts(&block.node, &ops) {
+                pending.push(new_block);
             }
-            appends.push(runs);
+            continue;
+        };
+        let idx = mi + rel;
+        mi = idx + 1;
+        for new_block in pending.drain(..) {
+            place.push((idx, new_block));
+        }
+        if ops.is_empty() {
+            continue;
+        }
+        let main_plain = plain_text(&main_blocks[idx].node);
+        let Some((inserts, marks)) = map_bot_ops(&bot_plain, &main_plain, &ops) else {
+            continue;
+        };
+        note_applied(applied, &ops);
+        for run in inserts {
+            splices.push((idx, run));
+        }
+        for run in marks {
+            mark_runs.push((idx, run));
         }
     }
-    if splices.is_empty() && appends.is_empty() {
+    let tail = pending;
+    if splices.is_empty() && mark_runs.is_empty() && place.is_empty() && tail.is_empty() {
         return false;
+    }
+    for block in &place {
+        note_applied_block(applied, block);
+    }
+    for block in &tail {
+        note_applied_tail(applied, block);
     }
     splices.sort_by(|a, b| {
         a.0.cmp(&b.0)
             .then(a.1.offset.cmp(&b.1.offset))
             .then(a.1.seq.cmp(&b.1.seq))
     });
-    apply_open_runs(main, main_blocks.len(), &splices, &appends);
+    apply_open_runs(main, main_blocks.len(), &splices, &mark_runs, &place, &tail);
     true
+}
+
+fn note_applied(applied: &mut HashSet<String>, ops: &[BotOp]) {
+    for op in ops {
+        for mark in &op.marks {
+            if let Some(id) = mark_id(mark) {
+                applied.insert(id);
+            }
+        }
+    }
+}
+
+fn note_applied_block(applied: &mut HashSet<String>, block: &(usize, NewBlock)) {
+    for run in &block.1.inserts {
+        for mark in &run.marks {
+            if let Some(id) = mark_id(mark) {
+                applied.insert(id);
+            }
+        }
+    }
+}
+
+fn note_applied_tail(applied: &mut HashSet<String>, block: &NewBlock) {
+    for run in &block.inserts {
+        for mark in &run.marks {
+            if let Some(id) = mark_id(mark) {
+                applied.insert(id);
+            }
+        }
+    }
 }
 
 fn apply_open_runs(
     doc: &Doc,
     block_count: usize,
-    splices: &[(usize, OpenRun)],
-    appends: &[Vec<OpenRun>],
+    splices: &[(usize, InsertRun)],
+    mark_runs: &[(usize, MarkRun)],
+    place: &[(usize, NewBlock)],
+    tail: &[NewBlock],
 ) {
     let frag = doc.get_or_insert_xml_fragment(content::FRAGMENT);
     let mut txn = doc.transact_mut();
@@ -503,6 +592,14 @@ fn apply_open_runs(
     if elements.len() != block_count {
         eprintln!("draft open left a suggestion out; the chapter shape changed");
     }
+    for (idx, run) in mark_runs {
+        let Some(element) = elements.get(*idx) else {
+            continue;
+        };
+        if let Err(err) = format_run(&mut txn, element, run) {
+            eprintln!("draft open left a suggestion out: {err}");
+        }
+    }
     for (idx, run) in splices {
         let Some(element) = elements.get(*idx) else {
             continue;
@@ -511,12 +608,45 @@ fn apply_open_runs(
             eprintln!("draft open left a suggestion out: {err}");
         }
     }
-    for runs in appends {
-        let element = frag.push_back(&mut txn, XmlElementPrelim::empty("paragraph"));
-        for run in runs {
-            if let Err(err) = insert_run(&mut txn, &element, run) {
-                eprintln!("draft open left a suggestion out: {err}");
-            }
+    // Higher indexes first, so an insert does not shift a later one.
+    let mut groups: Vec<(usize, Vec<&NewBlock>)> = Vec::new();
+    for (idx, block) in place {
+        if let Some(group) = groups.iter_mut().find(|(at, _)| at == idx) {
+            group.1.push(block);
+        } else {
+            groups.push((*idx, vec![block]));
+        }
+    }
+    groups.sort_by_key(|group| std::cmp::Reverse(group.0));
+    for (idx, blocks) in groups {
+        for (n, block) in blocks.iter().enumerate() {
+            insert_restored_block(&mut txn, &frag, Some((idx + n) as u32), block);
+        }
+    }
+    for block in tail {
+        insert_restored_block(&mut txn, &frag, None, block);
+    }
+}
+
+fn insert_restored_block(
+    txn: &mut TransactionMut,
+    frag: &yrs::XmlFragmentRef,
+    index: Option<u32>,
+    block: &NewBlock,
+) {
+    let prelim = XmlElementPrelim::empty(block.tag.as_str());
+    let element = if let Some(index) = index {
+        frag.insert(txn, index, prelim)
+    } else {
+        frag.push_back(txn, prelim)
+    };
+    for (key, value) in &block.attrs {
+        let any = serde_json::from_value(value.clone()).unwrap_or(Any::Null);
+        element.insert_attribute(txn, key.as_str(), any);
+    }
+    for run in &block.inserts {
+        if let Err(err) = insert_run(txn, &element, run) {
+            eprintln!("draft open left a suggestion out: {err}");
         }
     }
 }
@@ -524,7 +654,7 @@ fn apply_open_runs(
 fn insert_run(
     txn: &mut TransactionMut,
     element: &yrs::XmlElementRef,
-    run: &OpenRun,
+    run: &InsertRun,
 ) -> Result<(), String> {
     let attrs = marks_to_attrs(&run.marks)?;
     let texts: Vec<_> = element
@@ -582,33 +712,285 @@ fn marks_to_attrs(marks: &[serde_json::Value]) -> Result<Attrs, String> {
     Ok(attrs)
 }
 
-fn open_runs(
+fn format_run(
+    txn: &mut TransactionMut,
+    element: &yrs::XmlElementRef,
+    run: &MarkRun,
+) -> Result<(), String> {
+    let texts: Vec<_> = element
+        .children(txn)
+        .filter_map(|child| match child {
+            XmlOut::Text(text) => Some(text),
+            _ => None,
+        })
+        .collect();
+    let end = run.offset.saturating_add(run.len);
+    let mut edits = Vec::new();
+    let mut plain = 0u32;
+    for text in &texts {
+        let mut index = 0u32;
+        for diff in text.diff(txn, YChange::identity) {
+            let chunk = match &diff.insert {
+                Out::Any(Any::String(value)) => value.to_string(),
+                _ => continue,
+            };
+            let len = utf16_len(&chunk);
+            let insert_mark = diff.attributes.as_ref().is_some_and(|attrs| {
+                attrs
+                    .keys()
+                    .any(|key| key.as_ref().starts_with("suggestion_insert"))
+            });
+            if !insert_mark {
+                let chunk_end = plain + len;
+                let overlap_start = run.offset.max(plain);
+                let overlap_end = end.min(chunk_end);
+                if overlap_start < overlap_end {
+                    let at = index + overlap_start - plain;
+                    edits.push((text.clone(), at, overlap_end - overlap_start));
+                }
+                plain = chunk_end;
+            }
+            index += len;
+        }
+    }
+    if edits.is_empty() {
+        return Err("format range missed the paragraph".into());
+    }
+    for (text, at, len) in edits {
+        text.format(txn, at, len, marks_to_attrs(&run.marks)?);
+    }
+    Ok(())
+}
+
+fn bot_ops(
     node: &serde_json::Value,
     open_ids: &HashSet<String>,
-    seen: &HashSet<String>,
-) -> Vec<OpenRun> {
-    let mut runs = Vec::new();
-    let mut plain = 0u32;
+    skip: &HashSet<String>,
+) -> Vec<BotOp> {
+    let mut ops = Vec::new();
+    let mut plain = 0usize;
+    let mut seq = 0u32;
     for child in node["content"].as_array().into_iter().flatten() {
         if child["type"] != "text" {
             continue;
         }
         let text = child["text"].as_str().unwrap_or("");
+        let marks = child["marks"].as_array().cloned().unwrap_or_default();
         if let Some(id) = suggestion_insert_id(child) {
-            if open_ids.contains(&id) && !seen.contains(&id) {
-                let marks = child["marks"].as_array().cloned().unwrap_or_default();
-                runs.push(OpenRun {
-                    offset: plain,
-                    seq: runs.len() as u32,
+            if open_ids.contains(&id) && !skip.contains(&id) {
+                ops.push(BotOp {
+                    insert: true,
+                    at: plain,
+                    end: plain,
+                    seq,
                     text: text.to_string(),
                     marks,
                 });
+                seq += 1;
             }
             continue;
         }
-        plain += utf16_len(text);
+        let keep: Vec<serde_json::Value> = marks
+            .into_iter()
+            .filter(|mark| {
+                let kind = mark["type"].as_str().unwrap_or("");
+                if kind != "suggestion_delete" && kind != "format_change" {
+                    return false;
+                }
+                let Some(id) = mark_id(mark) else {
+                    return false;
+                };
+                open_ids.contains(&id) && !skip.contains(&id)
+            })
+            .collect();
+        let n = text.chars().count();
+        if !keep.is_empty() && n > 0 {
+            ops.push(BotOp {
+                insert: false,
+                at: plain,
+                end: plain + n,
+                seq,
+                text: String::new(),
+                marks: keep,
+            });
+            seq += 1;
+        }
+        plain += n;
     }
-    runs
+    ops
+}
+
+fn new_block_from_inserts(node: &serde_json::Value, ops: &[BotOp]) -> Option<NewBlock> {
+    let inserts: Vec<InsertRun> = ops
+        .iter()
+        .filter(|op| op.insert)
+        .map(|op| InsertRun {
+            offset: 0,
+            seq: op.seq,
+            text: op.text.clone(),
+            marks: op.marks.clone(),
+        })
+        .collect();
+    if inserts.is_empty() {
+        return None;
+    }
+    let attrs = node["attrs"]
+        .as_object()
+        .map(|object| {
+            object
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(NewBlock {
+        tag: node["type"].as_str().unwrap_or("paragraph").to_string(),
+        attrs,
+        inserts,
+    })
+}
+
+fn map_bot_ops(
+    bot_plain: &str,
+    main_plain: &str,
+    ops: &[BotOp],
+) -> Option<(Vec<InsertRun>, Vec<MarkRun>)> {
+    let bot: Vec<char> = bot_plain.chars().collect();
+    let main: Vec<char> = main_plain.chars().collect();
+    let align = align_chars(&bot, &main)?;
+    let utf16_at = |chars: &[char], idx: usize| -> u32 {
+        chars.iter().take(idx).map(|ch| ch.len_utf16() as u32).sum()
+    };
+    let mut inserts = Vec::new();
+    let mut marks = Vec::new();
+    for op in ops {
+        if op.insert {
+            let main_at = if op.at >= bot.len() {
+                align[bot.len() - 1] + 1
+            } else {
+                align[op.at]
+            };
+            inserts.push(InsertRun {
+                offset: utf16_at(&main, main_at),
+                seq: op.seq,
+                text: op.text.clone(),
+                marks: op.marks.clone(),
+            });
+            continue;
+        }
+        if op.end <= op.at || op.at >= bot.len() {
+            continue;
+        }
+        let last = (op.end - 1).min(bot.len() - 1);
+        let start = align[op.at];
+        let end = align[last] + 1;
+        if end <= start {
+            continue;
+        }
+        marks.push(MarkRun {
+            offset: utf16_at(&main, start),
+            len: utf16_at(&main, end) - utf16_at(&main, start),
+            marks: op.marks.clone(),
+        });
+    }
+    Some((inserts, marks))
+}
+
+/// Map every bot character onto `main`. Prefer a contiguous copy, then the alignment
+/// that keeps the longest runs together. `None` when `bot` is not a subsequence.
+fn align_chars(bot: &[char], main: &[char]) -> Option<Vec<usize>> {
+    let n = bot.len();
+    let m = main.len();
+    if n == 0 {
+        return Some(Vec::new());
+    }
+    if n > m {
+        return None;
+    }
+    if let Some(start) = (0..=m - n).find(|&start| main[start..start + n] == bot[..]) {
+        return Some((start..start + n).collect());
+    }
+    if n.saturating_mul(m) > 2_000_000 {
+        return align_greedy(bot, main);
+    }
+    const NONE: i32 = i32::MIN / 4;
+    let mut score = vec![vec![NONE; m]; n];
+    let mut parent: Vec<Vec<Option<usize>>> = vec![vec![None; m]; n];
+    for (j, ch) in main.iter().enumerate() {
+        if *ch == bot[0] {
+            score[0][j] = 0;
+        }
+    }
+    for i in 1..n {
+        let mut best = NONE;
+        let mut best_j: Option<usize> = None;
+        for j in 0..m {
+            if main[j] == bot[i] {
+                let mut next = best;
+                let mut prev = best_j;
+                if j > 0 && score[i - 1][j - 1] > NONE / 2 {
+                    let adjacent = score[i - 1][j - 1].saturating_add(1);
+                    if adjacent > next {
+                        next = adjacent;
+                        prev = Some(j - 1);
+                    }
+                }
+                if next > NONE / 2 && prev.is_some() {
+                    score[i][j] = next;
+                    parent[i][j] = prev;
+                }
+            }
+            if score[i - 1][j] > best {
+                best = score[i - 1][j];
+                best_j = Some(j);
+            }
+        }
+    }
+    let mut end_j = None;
+    let mut best = NONE;
+    for (j, cell) in score[n - 1].iter().enumerate() {
+        if *cell > best {
+            best = *cell;
+            end_j = Some(j);
+        }
+    }
+    let mut j = end_j?;
+    let mut out = vec![0usize; n];
+    for i in (0..n).rev() {
+        out[i] = j;
+        if i == 0 {
+            break;
+        }
+        j = parent[i][j]?;
+    }
+    if out.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return None;
+    }
+    if out.iter().zip(bot).any(|(&at, ch)| main[at] != *ch) {
+        return None;
+    }
+    Some(out)
+}
+
+fn align_greedy(bot: &[char], main: &[char]) -> Option<Vec<usize>> {
+    let mut out = Vec::with_capacity(bot.len());
+    let mut from = 0usize;
+    for ch in bot {
+        let found = main[from..].iter().position(|candidate| candidate == ch)?;
+        let at = from + found;
+        out.push(at);
+        from = at + 1;
+    }
+    Some(out)
+}
+
+fn mark_id(mark: &serde_json::Value) -> Option<String> {
+    let id = mark["attrs"]["id"].as_str().unwrap_or("");
+    if id.is_empty() {
+        None
+    } else {
+        Some(id.to_string())
+    }
 }
 
 fn suggestion_insert_id(node: &serde_json::Value) -> Option<String> {
@@ -638,15 +1020,6 @@ fn plain_text(node: &serde_json::Value) -> String {
         }
     }
     out
-}
-
-/// The same paragraph. An empty bot paragraph is a suggestion block and is not a match.
-/// `main` may be longer when a keystroke landed after the bot snapshot.
-fn blocks_match(main_plain: &str, bot_plain: &str) -> bool {
-    if bot_plain.is_empty() || main_plain.is_empty() {
-        return false;
-    }
-    main_plain.starts_with(bot_plain) || bot_plain.starts_with(main_plain)
 }
 
 fn utf16_len(text: &str) -> u32 {
