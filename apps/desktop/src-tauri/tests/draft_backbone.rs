@@ -3579,6 +3579,48 @@ fn mark_paragraph_format(doc: &yrs::Doc, id: &str) {
     text.format(&mut txn, 0, len, attrs);
 }
 
+fn delete_in_paragraph(store: &Store, doc_id: &str, paragraph: usize, needle: &str) {
+    use yrs::types::text::YChange;
+    use yrs::{Any, Out, Text, Transact, XmlFragment, XmlOut};
+    let doc = store.load_doc(doc_id).unwrap();
+    let since = state_vector(&doc);
+    let frag = doc.get_or_insert_xml_fragment(content::FRAGMENT);
+    let (text, index, len) = {
+        let txn = doc.transact();
+        let mut found = None;
+        let mut seen = 0usize;
+        for child in frag.children(&txn) {
+            let XmlOut::Element(el) = child else { continue };
+            if seen == paragraph {
+                for inner in el.children(&txn) {
+                    let XmlOut::Text(text) = inner else { continue };
+                    let mut plain = String::new();
+                    for diff in text.diff(&txn, YChange::identity) {
+                        if let Out::Any(Any::String(value)) = &diff.insert {
+                            plain.push_str(value);
+                        }
+                    }
+                    if let Some(pos) = plain.find(needle) {
+                        let index = plain[..pos].encode_utf16().count() as u32;
+                        let len = needle.encode_utf16().count() as u32;
+                        found = Some((text, index, len));
+                        break;
+                    }
+                }
+                break;
+            }
+            seen += 1;
+        }
+        found.unwrap_or_else(|| panic!("paragraph {paragraph} has no {needle:?}"))
+    };
+    {
+        let mut txn = doc.transact_mut();
+        text.remove_range(&mut txn, index, len);
+    }
+    let update = doc_update_since(&doc, &since);
+    store.append_doc_update(doc_id, &update).unwrap();
+}
+
 fn type_at_paragraph_start(store: &Store, doc_id: &str, extra: &str) {
     use yrs::{Text, Transact, XmlFragment, XmlOut};
     let doc = store.load_doc(doc_id).unwrap();
@@ -3713,6 +3755,123 @@ fn reopening_restores_delete_format_and_inserted_paragraphs() {
         paragraph_bodies(&opened),
         vec!["{~~styled words~~}{>>format:chg-fmt: add bold<<}".to_string()],
         "reopen dropped the format mark: {opened}"
+    );
+}
+
+/// Deleting a word that was already in the paragraph keeps that deletion. The suggestion
+/// comes back on that same paragraph: the delete mark and the format mark cover the words
+/// that remain, an inline insert stays inline, and a paragraph inserted between two others
+/// stays between them. A later paragraph that still has the old sentence does not take the mark.
+#[test]
+fn reopening_keeps_a_suggestion_after_a_deleted_word() {
+    let (checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-delete-word-replacement.draft",
+        json!([{
+            "type": "paragraph",
+            "content": [{"type": "text", "text": "Keep the old phrase here."}]
+        }]),
+        |doc| suggest_replacement(doc, "old phrase", "new phrase", "chg-rep"),
+        |store, doc_id| delete_in_paragraph(store, doc_id, 0, "here"),
+    );
+    assert_eq!(
+        paragraph_bodies(&checkpoint),
+        vec!["Keep the old phrase .".to_string()],
+        "checkpoint published the replacement or restored the deleted word: {checkpoint}"
+    );
+    assert_eq!(
+        paragraph_bodies(&opened),
+        vec!["Keep the {--old phrase--}{>>suggestion:chg-rep<<}{++new phrase++}{>>suggestion:chg-rep<<} .".to_string()],
+        "reopen moved the replacement off the paragraph the writer edited: {opened}"
+    );
+
+    let (checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-delete-word-insert.draft",
+        json!([{
+            "type": "paragraph",
+            "content": [{"type": "text", "text": "The quick fox"}]
+        }]),
+        |doc| insert_suggestion_after(doc, "The ", "very ", "chg-in"),
+        |store, doc_id| delete_in_paragraph(store, doc_id, 0, " fox"),
+    );
+    assert_eq!(
+        paragraph_bodies(&checkpoint),
+        vec!["The quick".to_string()],
+        "checkpoint published the insert or restored fox: {checkpoint}"
+    );
+    assert_eq!(
+        paragraph_bodies(&opened),
+        vec!["The {++very ++}{>>suggestion:chg-in<<}quick".to_string()],
+        "reopen pulled the insert out of the paragraph: {opened}"
+    );
+
+    let (checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-delete-word-paragraph.draft",
+        json!([
+            {"type": "paragraph", "content": [{"type": "text", "text": "alpha"}]},
+            {"type": "paragraph", "content": [{"type": "text", "text": "omega"}]}
+        ]),
+        |doc| suggest_paragraph_after_first(doc, "inserted scene", "chg-para"),
+        |store, doc_id| delete_in_paragraph(store, doc_id, 2, "ga"),
+    );
+    assert_eq!(
+        paragraph_bodies(&checkpoint),
+        vec!["alpha".to_string(), "ome".to_string()],
+        "checkpoint published the inserted paragraph or restored ga: {checkpoint}"
+    );
+    assert_eq!(
+        paragraph_bodies(&opened),
+        vec![
+            "alpha".to_string(),
+            "{++inserted scene++}{>>suggestion:chg-para<<}".to_string(),
+            "ome".to_string(),
+        ],
+        "reopen moved the inserted paragraph after the edited one: {opened}"
+    );
+
+    let (checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-delete-word-format.draft",
+        json!([{
+            "type": "paragraph",
+            "content": [{"type": "text", "text": "styled words"}]
+        }]),
+        |doc| mark_paragraph_format(doc, "chg-fmt"),
+        |store, doc_id| delete_in_paragraph(store, doc_id, 0, " words"),
+    );
+    assert_eq!(
+        paragraph_bodies(&checkpoint),
+        vec!["styled".to_string()],
+        "checkpoint published the format mark or restored words: {checkpoint}"
+    );
+    assert_eq!(
+        paragraph_bodies(&opened),
+        vec!["{~~styled~~}{>>format:chg-fmt: add bold<<}".to_string()],
+        "reopen dropped the format mark after the deletion: {opened}"
+    );
+
+    let (checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-delete-word-later.draft",
+        json!([
+            {"type": "paragraph", "content": [{"type": "text", "text": "Keep the old phrase here."}]},
+            {"type": "paragraph", "content": [{"type": "text", "text": "Keep the old phrase here. Extra."}]}
+        ]),
+        |doc| suggest_replacement(doc, "old phrase", "new phrase", "chg-rep"),
+        |store, doc_id| delete_in_paragraph(store, doc_id, 0, "here"),
+    );
+    assert_eq!(
+        paragraph_bodies(&checkpoint),
+        vec![
+            "Keep the old phrase .".to_string(),
+            "Keep the old phrase here. Extra.".to_string(),
+        ],
+        "checkpoint changed the later paragraph: {checkpoint}"
+    );
+    assert_eq!(
+        paragraph_bodies(&opened),
+        vec![
+            "Keep the {--old phrase--}{>>suggestion:chg-rep<<}{++new phrase++}{>>suggestion:chg-rep<<} .".to_string(),
+            "Keep the old phrase here. Extra.".to_string(),
+        ],
+        "reopen put the replacement on the later paragraph: {opened}"
     );
 }
 

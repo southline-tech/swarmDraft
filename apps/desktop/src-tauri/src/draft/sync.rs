@@ -369,11 +369,12 @@ fn open_suggestion_ids(repo: &DraftRepo) -> Result<HashSet<String>, DraftRepoErr
 }
 
 /// Put a suggestion that is still open back into `main_bytes` from unmerged bot tips,
-/// as that branch stored it. A delete mark and a format mark are put on the same words.
-/// A paragraph the bot inserted between two others is inserted there again. Text already
-/// on `main` stays, including a keystroke at the start of the paragraph, and an insert
-/// stays where the bot put it. A rejected insert is not copied. Returns the new state
-/// only when a mark was added.
+/// as that branch stored it. A delete mark and a format mark are put on the words that
+/// remain. A paragraph the bot inserted between two others is inserted there again. Text
+/// already on `main` stays, including a keystroke and a deletion in that paragraph, and
+/// an inline insert stays where the bot put it. A later paragraph that still has the old
+/// sentence does not take the mark. A rejected insert is not copied. Returns the new
+/// state only when a mark was added.
 fn restore_open_suggestions(
     repo: &DraftRepo,
     section_id: &str,
@@ -865,11 +866,7 @@ fn map_bot_ops(
     let mut marks = Vec::new();
     for op in ops {
         if op.insert {
-            let main_at = if op.at >= bot.len() {
-                align[bot.len() - 1] + 1
-            } else {
-                align[op.at]
-            };
+            let main_at = insert_anchor(&align, op.at, main.len());
             inserts.push(InsertRun {
                 offset: utf16_at(&main, main_at),
                 seq: op.seq,
@@ -878,27 +875,81 @@ fn map_bot_ops(
             });
             continue;
         }
-        if op.end <= op.at || op.at >= bot.len() {
+        let Some((start, end)) = mark_anchor(&align, op.at, op.end) else {
             continue;
-        }
-        let last = (op.end - 1).min(bot.len() - 1);
-        let start = align[op.at];
-        let end = align[last] + 1;
-        if end <= start {
+        };
+        let offset = utf16_at(&main, start);
+        let end_off = utf16_at(&main, end);
+        if end_off <= offset {
             continue;
         }
         marks.push(MarkRun {
-            offset: utf16_at(&main, start),
-            len: utf16_at(&main, end) - utf16_at(&main, start),
+            offset,
+            len: end_off - offset,
             marks: op.marks.clone(),
         });
     }
     Some((inserts, marks))
 }
 
+/// Where an insert that sat before bot character `at` belongs in `main`.
+/// A deleted anchor uses the next character that is still there, then the one before it.
+fn insert_anchor(align: &[Option<usize>], at: usize, main_len: usize) -> usize {
+    if let Some(j) = align.get(at).copied().flatten() {
+        return j;
+    }
+    if at < align.len() {
+        if let Some(j) = align[at..].iter().copied().flatten().next() {
+            return j;
+        }
+    }
+    let before = at.min(align.len());
+    if let Some(j) = align[..before].iter().rev().copied().flatten().next() {
+        return (j + 1).min(main_len);
+    }
+    0
+}
+
+/// Main range covering the bot slice `[at, end)` after deleted characters are left out.
+fn mark_anchor(align: &[Option<usize>], at: usize, end: usize) -> Option<(usize, usize)> {
+    if end <= at || at >= align.len() {
+        return None;
+    }
+    let end = end.min(align.len());
+    let mut matched = align[at..end].iter().copied().flatten();
+    let start = matched.next()?;
+    let last = matched.last().unwrap_or(start);
+    Some((start, last + 1))
+}
+
+/// Map bot characters onto `main`. A contiguous copy wins, including a keystroke around
+/// it. When the writer deleted characters, the ones that remain still line up, as long
+/// as at least half the paragraph is left. `None` when this is a different paragraph.
+/// Each entry is that bot character's index in `main`, or `None` when it was deleted.
+fn align_chars(bot: &[char], main: &[char]) -> Option<Vec<Option<usize>>> {
+    if bot.is_empty() || main.is_empty() {
+        return None;
+    }
+    if let Some(full) = align_full(bot, main) {
+        return Some(full.into_iter().map(Some).collect());
+    }
+    // A short different paragraph can be a subsequence of this one. Half the
+    // original length keeps a deletion on the paragraph the bot stored it on,
+    // and leaves a later copy of the old sentence alone.
+    if main.len().saturating_mul(2) < bot.len() {
+        return None;
+    }
+    let main_at = align_greedy(main, bot)?;
+    let mut map = vec![None; bot.len()];
+    for (main_i, bot_i) in main_at.into_iter().enumerate() {
+        map[bot_i] = Some(main_i);
+    }
+    Some(map)
+}
+
 /// Map every bot character onto `main`. Prefer a contiguous copy, then the alignment
 /// that keeps the longest runs together. `None` when `bot` is not a subsequence.
-fn align_chars(bot: &[char], main: &[char]) -> Option<Vec<usize>> {
+fn align_full(bot: &[char], main: &[char]) -> Option<Vec<usize>> {
     let n = bot.len();
     let m = main.len();
     if n == 0 {
