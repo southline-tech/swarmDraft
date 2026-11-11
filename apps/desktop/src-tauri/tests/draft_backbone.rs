@@ -104,6 +104,66 @@ fn insert_into_text(doc: &yrs::Doc, needle: &str, extra: &str) {
     text.insert(&mut txn, index, extra);
 }
 
+fn markdown_has_empty_paragraph(md: &str) -> bool {
+    md.split("<!-- block:").skip(1).any(|chunk| {
+        chunk
+            .split_once("-->")
+            .is_some_and(|(_, body)| body.trim().is_empty())
+    })
+}
+
+fn assert_no_empty_paragraph(store: &Store, doc_id: &str) {
+    let doc = store.load_doc(doc_id).unwrap();
+    for block in decode(&doc) {
+        if block.node["type"] != "paragraph" {
+            continue;
+        }
+        let text = block.node["content"]
+            .as_array()
+            .map(|nodes| {
+                nodes
+                    .iter()
+                    .filter_map(|node| node["text"].as_str())
+                    .collect::<String>()
+            })
+            .unwrap_or_default();
+        assert!(
+            !text.is_empty(),
+            "empty paragraph in {}",
+            chapter_text(store, doc_id)
+        );
+    }
+}
+
+fn only_chapter(store: &Store, manuscript_id: &str) -> swarmdraft_lib::manuscripts::Section {
+    store
+        .list_sections(manuscript_id)
+        .unwrap()
+        .into_iter()
+        .find(|section| section.kind == "chapter")
+        .expect("chapter")
+}
+
+fn reopen_without_database(data: &Path, draft_path: &str) -> (Store, DraftService, String) {
+    for name in ["swarmdraft.db", "swarmdraft.db-wal", "swarmdraft.db-shm"] {
+        let path = data.join(name);
+        if path.exists() {
+            fs::remove_file(&path).unwrap();
+        }
+    }
+    let store = Store::open(data).unwrap();
+    let svc = DraftService::new(data.to_path_buf(), "0.2.1".into());
+    let opened = svc
+        .open_draft_path(&store, draft_path, true)
+        .unwrap()
+        .unwrap();
+    assert!(
+        opened.recovery.is_none(),
+        "reopen asked to save a newer copy"
+    );
+    (store, svc, opened.manuscript_id)
+}
+
 fn link_draft(store: &Store, manuscript_id: &str, name: &str) {
     let path = store.data_dir().join("drafts").join(name);
     store
@@ -788,6 +848,9 @@ fn resolve_change_uses_the_bot_commit_that_added_the_id() {
     let introduced = found(svc.resolve_change(&store, &m.id, "chg-bot").unwrap());
     assert_eq!(introduced.introduced_commit, bot_oid);
     assert!(introduced.introduced_ref.starts_with("bot/"));
+    // The open insert stays off main, and the checkpoint does not keep an empty
+    // paragraph in its place. A real edit is what makes the later snapshot.
+    set_chapter_plain(&store, &chapter.doc_id, "later wording");
     let main_oid = svc
         .commit_now(
             &store,
@@ -3099,6 +3162,216 @@ fn rejecting_one_suggestion_before_the_first_commit_leaves_the_other_comment_ope
             .unwrap(),
         "the branch merged while a suggestion was still open"
     );
+}
+
+/// Two open suggestions are stored on the bot branch, not in the chapter on `main`.
+/// Reopening puts both back. A keystroke that was checkpointed on `main` stays.
+/// Rejecting one leaves that wording out, keeps the other, and does not leave an
+/// empty paragraph where the strip removed an insert.
+#[test]
+fn reopening_restores_an_open_suggestion_and_keeps_a_keystroke() {
+    let (dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "bot-reopen-suggestions.draft");
+    set_chapter_plain(&store, &chapter.doc_id, "chapter start");
+
+    let doc = store.load_doc(&chapter.doc_id).unwrap();
+    let since = state_vector(&doc);
+    content::encode(
+        &doc,
+        &json!({"type":"doc","content":[{"type":"paragraph","content":[{
+            "type":"text",
+            "text":"first wording",
+            "marks":[{"type":"suggestion_insert","attrs":{"id":"chg-a","author":"agent:agent-test-1","ts":"t"}}]
+        }]}]}),
+    )
+    .unwrap();
+    let first_update = doc_update_since(&doc, &since);
+    let mut first = sample_comment("c-a", &chapter.id, "Comment on the first.");
+    first.author.kind = "agent".into();
+    first.author.id = "agent-test-1".into();
+    first.author.name = "Line Editor".into();
+    svc.record_bot_write(
+        &store,
+        &m.id,
+        BotRetention {
+            comment: Some(first.clone()),
+            doc_id: Some(chapter.doc_id.clone()),
+            doc_update: Some(first_update.clone()),
+        },
+        || {
+            store
+                .insert_comment(&m.id, &first)
+                .map_err(|e| e.to_string())?;
+            store
+                .append_doc_update(&chapter.doc_id, &first_update)
+                .map_err(|e| e.to_string())?;
+            Ok::<(), String>(())
+        },
+    )
+    .unwrap();
+
+    let doc = store.load_doc(&chapter.doc_id).unwrap();
+    let since = state_vector(&doc);
+    content::encode(
+        &doc,
+        &json!({"type":"doc","content":[{"type":"paragraph","content":[
+            {
+                "type":"text",
+                "text":"first wording",
+                "marks":[{"type":"suggestion_insert","attrs":{"id":"chg-a","author":"agent:agent-test-1","ts":"t"}}]
+            },
+            {
+                "type":"text",
+                "text":" second wording",
+                "marks":[{"type":"suggestion_insert","attrs":{"id":"chg-b","author":"agent:agent-test-1","ts":"t"}}]
+            }
+        ]}]}),
+    )
+    .unwrap();
+    let second_update = doc_update_since(&doc, &since);
+    let mut second = sample_comment("c-b", &chapter.id, "Comment on the second.");
+    second.author.kind = "agent".into();
+    second.author.id = "agent-test-1".into();
+    second.author.name = "Line Editor".into();
+    svc.record_bot_write(
+        &store,
+        &m.id,
+        BotRetention {
+            comment: Some(second.clone()),
+            doc_id: Some(chapter.doc_id.clone()),
+            doc_update: Some(second_update.clone()),
+        },
+        || {
+            store
+                .insert_comment(&m.id, &second)
+                .map_err(|e| e.to_string())?;
+            store
+                .append_doc_update(&chapter.doc_id, &second_update)
+                .map_err(|e| e.to_string())?;
+            Ok::<(), String>(())
+        },
+    )
+    .unwrap();
+    svc.commit_bot_suggestion(
+        &store,
+        &m.id,
+        "agent-test-1",
+        "Line Editor",
+        "Bot suggestions",
+    )
+    .unwrap()
+    .expect("bot suggestions");
+
+    let doc = store.load_doc(&chapter.doc_id).unwrap();
+    let since = state_vector(&doc);
+    insert_into_text(&doc, "chapter start", " KEY");
+    let typed = doc_update_since(&doc, &since);
+    store.append_doc_update(&chapter.doc_id, &typed).unwrap();
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Checkpoint",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap()
+    .expect("checkpoint");
+    let repo = DraftRepo::open_working(&svc.worktree_path(&m.id)).unwrap();
+    let main = repo.head_oid().unwrap().unwrap();
+    let checkpoint_md = markdown_from_yjs(
+        &repo
+            .file_bytes(&main, &format!("yjs/{}.bin", chapter.id))
+            .unwrap()
+            .expect("chapter"),
+    );
+    assert!(
+        checkpoint_md.contains("KEY") && checkpoint_md.contains("chapter start"),
+        "checkpoint dropped the keystroke: {checkpoint_md}"
+    );
+    assert!(
+        !checkpoint_md.contains("first wording") && !checkpoint_md.contains("second wording"),
+        "checkpoint wrote an open suggestion onto main: {checkpoint_md}"
+    );
+    assert!(
+        !markdown_has_empty_paragraph(&checkpoint_md),
+        "checkpoint left an empty paragraph: {checkpoint_md}"
+    );
+    drop(repo);
+    let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
+    let data = dir.path().to_path_buf();
+    drop(store);
+    drop(svc);
+
+    let (store, svc, id) = reopen_without_database(&data, &draft_path);
+    let chapter = only_chapter(&store, &id);
+    let opened = chapter_text(&store, &chapter.doc_id);
+    assert!(
+        opened.contains("first wording") && opened.contains("suggestion:chg-a"),
+        "reopen dropped the first suggestion: {opened}"
+    );
+    assert!(
+        opened.contains("second wording") && opened.contains("suggestion:chg-b"),
+        "reopen dropped the second suggestion: {opened}"
+    );
+    assert!(
+        opened.contains("chapter start") && opened.contains("KEY"),
+        "reopen dropped the keystroke: {opened}"
+    );
+    assert_no_empty_paragraph(&store, &chapter.doc_id);
+
+    svc.commit_review_decision(
+        &store,
+        &id,
+        false,
+        "Line Editor",
+        &chapter.title,
+        "author",
+        Some("agent-test-1"),
+        Some("chg-b"),
+        Some("suggestion_insert"),
+        Some(&chapter.id),
+    )
+    .unwrap();
+    let repo = DraftRepo::open_working(&svc.worktree_path(&id)).unwrap();
+    let main = repo.head_oid().unwrap().unwrap();
+    let rejected_md = markdown_from_yjs(
+        &repo
+            .file_bytes(&main, &format!("yjs/{}.bin", chapter.id))
+            .unwrap()
+            .expect("chapter"),
+    );
+    assert!(
+        rejected_md.contains("KEY") && !rejected_md.contains("second wording"),
+        "the reject checkpoint put the rejected wording on main: {rejected_md}"
+    );
+    assert!(
+        !markdown_has_empty_paragraph(&rejected_md),
+        "the reject checkpoint left an empty paragraph: {rejected_md}"
+    );
+    drop(repo);
+    drop(store);
+    drop(svc);
+
+    let (store, _svc, id) = reopen_without_database(&data, &draft_path);
+    let chapter = only_chapter(&store, &id);
+    let reopened = chapter_text(&store, &chapter.doc_id);
+    assert!(
+        reopened.contains("first wording") && reopened.contains("suggestion:chg-a"),
+        "reopen dropped the suggestion that is still open: {reopened}"
+    );
+    assert!(
+        !reopened.contains("second wording") && !reopened.contains("suggestion:chg-b"),
+        "reopen brought the rejected wording back: {reopened}"
+    );
+    assert!(
+        reopened.contains("KEY") && reopened.contains("chapter start"),
+        "reopen dropped the keystroke after the reject: {reopened}"
+    );
+    assert_no_empty_paragraph(&store, &chapter.doc_id);
 }
 
 /// Accept one suggestion and reject another on the same bot branch.

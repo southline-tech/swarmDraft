@@ -86,6 +86,7 @@ Run this consolidated pass in order; do not hand off until every line that appli
 
 Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
 
+- 2026-11-10 · #344 · PR #345 · an open suggestion was gone after the book was reopened, and rejecting one of two left an empty paragraph in place of the other · opening puts a still-open suggestion back from the bot branch; a keystroke already on main stays; a rejected insert stays out; a checkpoint drops a paragraph the strip emptied
 - 2026-11-10 · #344 · PR #345 · two suggestions saved before the first commit were both stamped with every suggestion id on the chapter, so rejecting one resolved the other comment · each write keeps the ids captured when it was saved; the first checkpoint still leaves those ids out of `main`
 - 2026-11-10 · #344 · PR #345 · a later commit from another bot copied a comment that had already merged, and the next checkpoint deleted it from main, so a resolve was gone after rebuild · a checkpoint only omits a comment or a decision this open branch introduced that main does not already have
 - 2026-11-10 · #344 · PR #345 · accepting a suggestion before any checkpoint failed because main was unborn, and a history link read the decision only on main HEAD · the first checkpoint is written before the bot branch is created, and Decided-By is read from that branch or from a merge parent

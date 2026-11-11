@@ -6,7 +6,13 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use yrs::{Array, Doc, Map, MapPrelim, ReadTxn, StateVector, Transact};
+use yrs::types::text::YChange;
+use yrs::types::xml::{XmlFragment, XmlOut};
+use yrs::types::Attrs;
+use yrs::{
+    Any, Array, Doc, GetString, Map, MapPrelim, Out, ReadTxn, StateVector, Text, Transact,
+    TransactionMut, XmlElementPrelim, XmlTextPrelim,
+};
 
 use crate::agent_access::{ACCESS_MODE_ALL, ACCESS_MODE_SELECTED};
 use crate::content::{self, decode};
@@ -90,6 +96,11 @@ pub fn sync_worktree_to_store(
     store
         .save_outline(manuscript_id, &outline)
         .map_err(storage_err)?;
+    let repo = DraftRepo::open_working(worktree).ok();
+    let open_ids = repo
+        .as_ref()
+        .and_then(|repo| open_suggestion_ids(repo).ok())
+        .unwrap_or_default();
     for section in store.list_sections(manuscript_id).map_err(storage_err)? {
         if section.kind != "chapter" {
             continue;
@@ -98,7 +109,12 @@ pub fn sync_worktree_to_store(
         if !yjs_path.is_file() {
             continue;
         }
-        let state = fs::read(&yjs_path)?;
+        let mut state = fs::read(&yjs_path)?;
+        if let Some(repo) = &repo {
+            if let Some(merged) = restore_open_suggestions(repo, &section.id, &state, &open_ids) {
+                state = merged;
+            }
+        }
         store
             .replace_doc_state(&section.doc_id, &state)
             .map_err(storage_err)?;
@@ -208,6 +224,11 @@ fn strip_withheld_marks(doc: &Doc, status: &HashMap<String, String>) -> Option<D
         let mut node = block.node;
         if filter_withheld_node(&mut node, status) {
             changed = true;
+            // A paragraph whose only words were a withheld insert would stay as a
+            // blank block. The checkpoint drops that block.
+            if is_empty_paragraph(&node) {
+                continue;
+            }
         }
         content.push(node);
     }
@@ -243,7 +264,9 @@ fn filter_withheld_node(node: &mut serde_json::Value, status: &HashMap<String, S
             }
         } else if filter_withheld_node(&mut child, status) {
             changed = true;
-            kept.push(child);
+            if !is_empty_paragraph(&child) {
+                kept.push(child);
+            }
         } else {
             kept.push(child);
         }
@@ -293,6 +316,341 @@ fn withheld_text(node: &serde_json::Value, status: &HashMap<String, String>) -> 
         next["marks"] = serde_json::Value::Array(next_marks);
     }
     WithheldText::Edited(next)
+}
+
+/// A paragraph or heading with no text and no inline atom left.
+fn is_empty_paragraph(node: &serde_json::Value) -> bool {
+    let ty = node["type"].as_str().unwrap_or("");
+    if ty != "paragraph" && ty != "heading" {
+        return false;
+    }
+    let Some(content) = node.get("content").and_then(|value| value.as_array()) else {
+        return true;
+    };
+    !content.iter().any(|child| match child["type"].as_str() {
+        Some("text") => !child["text"].as_str().unwrap_or("").is_empty(),
+        Some("hard_break" | "image" | "footnote") => true,
+        _ => !is_empty_paragraph(child),
+    })
+}
+
+/// Suggestion ids still open on an unmerged `bot/*` tip.
+/// An id accepted or rejected on `main` or on any bot tip is not open.
+fn open_suggestion_ids(repo: &DraftRepo) -> Result<HashSet<String>, DraftRepoError> {
+    let Some(main) = repo.head_oid()? else {
+        return Ok(HashSet::new());
+    };
+    let mut decided = HashSet::new();
+    let mut open = HashSet::new();
+    for entry in changes::changes_in_commit(repo, &main)? {
+        if entry.status == "accepted" || entry.status == "rejected" {
+            decided.insert(entry.id);
+        }
+    }
+    for tip in repo.search_ref_tips()? {
+        if !tip.name.starts_with("bot/") {
+            continue;
+        }
+        let Some(base) = repo.merge_base(&tip.oid, &main)? else {
+            continue;
+        };
+        let unmerged = base != tip.oid;
+        for entry in changes::changes_in_commit(repo, &tip.oid)? {
+            if entry.status == "accepted" || entry.status == "rejected" {
+                decided.insert(entry.id.clone());
+                open.remove(&entry.id);
+            } else if unmerged && entry.status == "open" {
+                open.insert(entry.id);
+            }
+        }
+    }
+    open.retain(|id| !decided.contains(id));
+    Ok(open)
+}
+
+/// Put suggestion text that is still open back into `main_bytes` from unmerged bot tips.
+/// Text already on `main` stays, including a keystroke the bot snapshot does not have.
+/// A rejected insert is not copied. Returns the new state only when a mark was added.
+fn restore_open_suggestions(
+    repo: &DraftRepo,
+    section_id: &str,
+    main_bytes: &[u8],
+    open_ids: &HashSet<String>,
+) -> Option<Vec<u8>> {
+    if open_ids.is_empty() {
+        return None;
+    }
+    let main = doc_from_update(main_bytes)?;
+    let mut seen = changes::suggestion_ids(&main);
+    seen.retain(|id| open_ids.contains(id));
+    let mut changed = false;
+    let main_oid = repo.head_oid().ok().flatten()?;
+    let tips = repo.search_ref_tips().ok()?;
+    let path = format!("yjs/{section_id}.bin");
+    for tip in tips {
+        if !tip.name.starts_with("bot/") {
+            continue;
+        }
+        let Ok(Some(base)) = repo.merge_base(&tip.oid, &main_oid) else {
+            continue;
+        };
+        if base == tip.oid {
+            continue;
+        }
+        let Ok(Some(bytes)) = repo.file_bytes(&tip.oid, &path) else {
+            continue;
+        };
+        let Some(bot) = doc_from_update(&bytes) else {
+            eprintln!("draft open skipped a bot chapter that did not decode");
+            continue;
+        };
+        if merge_open_suggestions(&main, &bot, open_ids, &mut seen) {
+            changed = true;
+        }
+    }
+    if !changed {
+        return None;
+    }
+    let state = main
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    Some(state)
+}
+
+fn doc_from_update(bytes: &[u8]) -> Option<Doc> {
+    use yrs::updates::decoder::Decode;
+    use yrs::Update;
+    let doc = content::new_doc();
+    let update = Update::decode_v1(bytes).ok()?;
+    if doc.transact_mut().apply_update(update).is_err() {
+        return None;
+    }
+    Some(doc)
+}
+
+struct OpenRun {
+    /// Utf-16 offset in the block's text that is not a suggestion insert.
+    offset: u32,
+    /// Order within the block. Same-offset runs stay in this order.
+    seq: u32,
+    text: String,
+    marks: Vec<serde_json::Value>,
+}
+
+/// Insert open suggestion runs from `bot` into `main`. Ids already in `seen` are skipped.
+fn merge_open_suggestions(
+    main: &Doc,
+    bot: &Doc,
+    open_ids: &HashSet<String>,
+    seen: &mut HashSet<String>,
+) -> bool {
+    let main_blocks = content::decode(main);
+    let bot_blocks = content::decode(bot);
+    let mut splices: Vec<(usize, OpenRun)> = Vec::new();
+    let mut appends: Vec<Vec<OpenRun>> = Vec::new();
+    let mut mi = 0usize;
+    for block in &bot_blocks {
+        let runs = open_runs(&block.node, open_ids, seen);
+        let bot_plain = plain_text(&block.node);
+        if let Some(rel) = main_blocks[mi..]
+            .iter()
+            .position(|candidate| blocks_match(&plain_text(&candidate.node), &bot_plain))
+        {
+            let idx = mi + rel;
+            mi = idx + 1;
+            for run in runs {
+                if let Some(id) = suggestion_insert_id_in_marks(&run.marks) {
+                    seen.insert(id);
+                }
+                splices.push((idx, run));
+            }
+        } else if !runs.is_empty() {
+            for run in &runs {
+                if let Some(id) = suggestion_insert_id_in_marks(&run.marks) {
+                    seen.insert(id.to_string());
+                }
+            }
+            appends.push(runs);
+        }
+    }
+    if splices.is_empty() && appends.is_empty() {
+        return false;
+    }
+    splices.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then(a.1.offset.cmp(&b.1.offset))
+            .then(a.1.seq.cmp(&b.1.seq))
+    });
+    apply_open_runs(main, main_blocks.len(), &splices, &appends);
+    true
+}
+
+fn apply_open_runs(
+    doc: &Doc,
+    block_count: usize,
+    splices: &[(usize, OpenRun)],
+    appends: &[Vec<OpenRun>],
+) {
+    let frag = doc.get_or_insert_xml_fragment(content::FRAGMENT);
+    let mut txn = doc.transact_mut();
+    let elements: Vec<_> = frag
+        .children(&txn)
+        .filter_map(|child| match child {
+            XmlOut::Element(element) => Some(element),
+            _ => None,
+        })
+        .collect();
+    if elements.len() != block_count {
+        eprintln!("draft open left a suggestion out; the chapter shape changed");
+    }
+    for (idx, run) in splices {
+        let Some(element) = elements.get(*idx) else {
+            continue;
+        };
+        if let Err(err) = insert_run(&mut txn, element, run) {
+            eprintln!("draft open left a suggestion out: {err}");
+        }
+    }
+    for runs in appends {
+        let element = frag.push_back(&mut txn, XmlElementPrelim::empty("paragraph"));
+        for run in runs {
+            if let Err(err) = insert_run(&mut txn, &element, run) {
+                eprintln!("draft open left a suggestion out: {err}");
+            }
+        }
+    }
+}
+
+fn insert_run(
+    txn: &mut TransactionMut,
+    element: &yrs::XmlElementRef,
+    run: &OpenRun,
+) -> Result<(), String> {
+    let attrs = marks_to_attrs(&run.marks)?;
+    let texts: Vec<_> = element
+        .children(txn)
+        .filter_map(|child| match child {
+            XmlOut::Text(text) => Some(text),
+            _ => None,
+        })
+        .collect();
+    let mut plain = 0u32;
+    for text in &texts {
+        let mut index = 0u32;
+        for diff in text.diff(txn, YChange::identity) {
+            let chunk = match &diff.insert {
+                Out::Any(Any::String(value)) => value.to_string(),
+                _ => continue,
+            };
+            let len = utf16_len(&chunk);
+            let insert_mark = diff.attributes.as_ref().is_some_and(|attrs| {
+                attrs
+                    .keys()
+                    .any(|key| key.as_ref().starts_with("suggestion_insert"))
+            });
+            if insert_mark {
+                index += len;
+                continue;
+            }
+            if plain == run.offset || (plain < run.offset && plain + len >= run.offset) {
+                let at = index + run.offset.saturating_sub(plain);
+                text.insert_with_attributes(txn, at, &run.text, attrs);
+                return Ok(());
+            }
+            plain += len;
+            index += len;
+        }
+    }
+    if let Some(text) = texts.last() {
+        let len = utf16_len(&text.get_string(txn));
+        text.insert_with_attributes(txn, len, &run.text, attrs);
+        return Ok(());
+    }
+    let text = element.push_back(txn, XmlTextPrelim::new(""));
+    text.insert_with_attributes(txn, 0, &run.text, attrs);
+    Ok(())
+}
+
+fn marks_to_attrs(marks: &[serde_json::Value]) -> Result<Attrs, String> {
+    let keys = content::mark_keys(marks)?;
+    let mut attrs = Attrs::new();
+    for (mark, key) in marks.iter().zip(keys) {
+        let value = mark.get("attrs").cloned().unwrap_or_else(|| json!({}));
+        let any = serde_json::from_value(value).unwrap_or(Any::Null);
+        attrs.insert(key.into(), any);
+    }
+    Ok(attrs)
+}
+
+fn open_runs(
+    node: &serde_json::Value,
+    open_ids: &HashSet<String>,
+    seen: &HashSet<String>,
+) -> Vec<OpenRun> {
+    let mut runs = Vec::new();
+    let mut plain = 0u32;
+    for child in node["content"].as_array().into_iter().flatten() {
+        if child["type"] != "text" {
+            continue;
+        }
+        let text = child["text"].as_str().unwrap_or("");
+        if let Some(id) = suggestion_insert_id(child) {
+            if open_ids.contains(&id) && !seen.contains(&id) {
+                let marks = child["marks"].as_array().cloned().unwrap_or_default();
+                runs.push(OpenRun {
+                    offset: plain,
+                    seq: runs.len() as u32,
+                    text: text.to_string(),
+                    marks,
+                });
+            }
+            continue;
+        }
+        plain += utf16_len(text);
+    }
+    runs
+}
+
+fn suggestion_insert_id(node: &serde_json::Value) -> Option<String> {
+    let marks = node["marks"].as_array()?;
+    suggestion_insert_id_in_marks(marks)
+}
+
+fn suggestion_insert_id_in_marks(marks: &[serde_json::Value]) -> Option<String> {
+    marks.iter().find_map(|mark| {
+        if mark["type"] != "suggestion_insert" {
+            return None;
+        }
+        let id = mark["attrs"]["id"].as_str().unwrap_or("");
+        if id.is_empty() {
+            None
+        } else {
+            Some(id.to_string())
+        }
+    })
+}
+
+fn plain_text(node: &serde_json::Value) -> String {
+    let mut out = String::new();
+    for child in node["content"].as_array().into_iter().flatten() {
+        if child["type"] == "text" && suggestion_insert_id(child).is_none() {
+            out.push_str(child["text"].as_str().unwrap_or(""));
+        }
+    }
+    out
+}
+
+/// The same paragraph. An empty bot paragraph is a suggestion block and is not a match.
+/// `main` may be longer when a keystroke landed after the bot snapshot.
+fn blocks_match(main_plain: &str, bot_plain: &str) -> bool {
+    if bot_plain.is_empty() || main_plain.is_empty() {
+        return false;
+    }
+    main_plain.starts_with(bot_plain) || bot_plain.starts_with(main_plain)
+}
+
+fn utf16_len(text: &str) -> u32 {
+    text.encode_utf16().count() as u32
 }
 
 /// Chapter document to write. Pending bot updates are left out when the rest of the
