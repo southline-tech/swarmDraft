@@ -889,8 +889,10 @@ async fn manuscript_review_decisions(
 
 /// Human reply on an existing comment thread (#255).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn section_comment_reply(
     store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
     manuscript_id: String,
     section_id: String,
     thread_id: String,
@@ -898,32 +900,85 @@ async fn section_comment_reply(
     author_name: String,
     author_id: String,
 ) -> Result<ReviewCommentRow, String> {
-    blocking(&store, move |s| {
-        Ok(review_comment_row(s.human_comment_reply(
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    let store_for_git = store.inner().clone();
+    let row = tauri::async_runtime::spawn_blocking(move || {
+        draft::commit_comment_mutation(
+            &drafts,
+            &store_for_git,
             &manuscript_id,
-            &section_id,
-            &thread_id,
-            &body,
-            &author_name,
-            &author_id,
-        )?))
+            "Comment reply",
+            |s| {
+                s.human_comment_reply(
+                    &manuscript_id,
+                    &section_id,
+                    &thread_id,
+                    &body,
+                    &author_name,
+                    &author_id,
+                )
+                .map_err(err)
+            },
+        )
     })
     .await
+    .map_err(|e| e.to_string())??;
+    Ok(review_comment_row(row))
 }
 
 /// Resolve or reopen a comment thread (#255).
 #[tauri::command]
 async fn section_comment_resolve(
     store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
     manuscript_id: String,
     section_id: String,
     thread_id: String,
     resolved: bool,
 ) -> Result<(), String> {
-    blocking(&store, move |s| {
-        s.set_comment_thread_resolved(&manuscript_id, &section_id, &thread_id, resolved)
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    let store_for_git = store.inner().clone();
+    let message = if resolved {
+        "Resolved comment"
+    } else {
+        "Reopened comment"
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        draft::commit_comment_mutation(&drafts, &store_for_git, &manuscript_id, message, |s| {
+            s.set_comment_thread_resolved(&manuscript_id, &section_id, &thread_id, resolved)
+                .map_err(err)
+        })
     })
     .await
+    .map_err(|e| e.to_string())??;
+    Ok(())
+}
+
+/// Delete one comment. The git record is a tombstone under `comments/`, written off this call.
+#[tauri::command]
+async fn section_comment_delete(
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+    comment_id: String,
+) -> Result<(), String> {
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    let store_for_git = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        draft::commit_comment_mutation(
+            &drafts,
+            &store_for_git,
+            &manuscript_id,
+            "Deleted comment",
+            |s| {
+                s.tombstone_comment(&manuscript_id, &comment_id)
+                    .map_err(err)
+            },
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(())
 }
 
 /// Replace the decision log for one section (#51).
@@ -1505,6 +1560,7 @@ pub fn run() {
             section_review_meta,
             section_comment_reply,
             section_comment_resolve,
+            section_comment_delete,
             manuscript_review_decisions,
             section_save_review_decisions,
             section_mark_suggestions_outdated,

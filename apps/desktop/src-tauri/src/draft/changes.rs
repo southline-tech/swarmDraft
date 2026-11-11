@@ -9,7 +9,9 @@ use serde_json::Value;
 use crate::manuscripts::{ReviewDecisionRecord, Suggestion};
 use crate::storage::{StorageError, Store};
 
-use super::repo::{message_trailers, trailer_value, trailer_values, DraftRepo, DraftRepoError};
+use super::repo::{
+    message_trailers, trailer_value, trailer_values, DraftRepo, DraftRepoError, HistoryCommit,
+};
 use super::sync::{to_pretty, write_stable};
 
 const QUOTE_CHARS: usize = 200;
@@ -26,6 +28,11 @@ pub struct ChangeEntry {
     pub author_name: String,
     pub status: String,
     pub quote: String,
+    /// Set when `status` is accepted or rejected. Omitted for an open change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decided_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decided_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -70,10 +77,23 @@ pub fn write_change_index(
     store: &Store,
     manuscript_id: &str,
     worktree: &Path,
+    except: &HashSet<String>,
 ) -> Result<(), DraftRepoError> {
-    let changes = build_change_index(store, manuscript_id)?;
+    let mut changes = build_change_index(store, manuscript_id)?;
+    if !except.is_empty() {
+        changes.retain(|entry| !except.contains(&entry.id));
+    }
     let bytes = index_bytes(&changes)?;
     write_stable(&worktree.join("review").join("changes.json"), &bytes)
+}
+
+/// Suggestion, deletion, and format-change ids marked in `doc`.
+pub(crate) fn suggestion_ids(doc: &yrs::Doc) -> HashSet<String> {
+    let mut marks: HashMap<String, MarkAcc> = HashMap::new();
+    for block in crate::content::decode(doc) {
+        walk_marks(&block.node, &mut marks);
+    }
+    marks.into_keys().collect()
 }
 
 pub fn index_bytes(changes: &[ChangeEntry]) -> Result<Vec<u8>, DraftRepoError> {
@@ -100,6 +120,29 @@ pub fn parse_change_index(bytes: &[u8]) -> Result<Vec<ChangeEntry>, ()> {
         }
     }
     Ok(out)
+}
+
+/// Change rows listed in one commit's `review/changes.json`. Empty when the file is missing.
+pub(crate) fn changes_in_commit(
+    repo: &DraftRepo,
+    oid: &str,
+) -> Result<Vec<ChangeEntry>, DraftRepoError> {
+    let Some(bytes) = repo.file_bytes(oid, CHANGES_PATH)? else {
+        return Ok(Vec::new());
+    };
+    Ok(parse_change_index(&bytes).unwrap_or_default())
+}
+
+/// Change ids listed in one commit's `review/changes.json`. Empty when the file is missing.
+pub(crate) fn change_ids_in_commit(
+    repo: &DraftRepo,
+    oid: &str,
+) -> Result<HashSet<String>, DraftRepoError> {
+    Ok(changes_in_commit(repo, oid)?
+        .into_iter()
+        .map(|entry| entry.id)
+        .filter(|id| !id.is_empty())
+        .collect())
 }
 
 pub fn build_change_index(
@@ -136,6 +179,8 @@ pub fn build_change_index(
                     },
                     status: "open".into(),
                     quote: clip_quote(&quote),
+                    decided_by: None,
+                    decided_at: None,
                 },
             );
         }
@@ -205,6 +250,8 @@ fn apply_suggestion(by_id: &mut HashMap<String, ChangeEntry>, suggestion: &Sugge
                     author_name: suggestion.author.name.clone(),
                     status,
                     quote,
+                    decided_by: None,
+                    decided_at: None,
                 },
             );
         }
@@ -217,13 +264,19 @@ fn apply_decision(
     record: &ReviewDecisionRecord,
 ) {
     let status = normalize_status(&record.status);
+    let decided_by = Some(record.decided_by.clone());
+    let decided_at = Some(record.decided_at.clone());
     match by_id.get_mut(&record.id) {
         Some(entry) => {
             entry.status = status;
+            entry.decided_by = decided_by;
+            entry.decided_at = decided_at;
             if entry.section_id.is_empty() {
                 entry.section_id = section_id.to_string();
             }
-            if entry.kind.is_empty() {
+            // The decision row is the source of truth. A suggestion stub created
+            // for the same id defaults to insert and must not hide accept vs reject kind.
+            if !record.kind.is_empty() || entry.kind.is_empty() {
                 entry.kind = map_kind(&record.kind).into();
             }
         }
@@ -239,6 +292,8 @@ fn apply_decision(
                     author_name: record.decided_by.clone(),
                     status,
                     quote: String::new(),
+                    decided_by,
+                    decided_at,
                 },
             );
         }
@@ -347,7 +402,7 @@ fn author_parts(author: &str) -> (String, String, String) {
     }
 }
 
-fn map_kind(kind: &str) -> &'static str {
+pub(crate) fn map_kind(kind: &str) -> &'static str {
     match kind {
         "delete" | "suggestion_delete" => "suggestion_delete",
         "style" | "format_change" => "format_change",
@@ -377,6 +432,65 @@ struct DecisionHit {
     at: i64,
     decision: String,
     session_id: Option<String>,
+}
+
+/// Latest `Change-Id` / `Decision` trailers on `commit` replace an older hit.
+fn note_decision_trailers(commit: &HistoryCommit, decided: &mut HashMap<String, DecisionHit>) {
+    let trailers = message_trailers(&commit.message);
+    let session = trailer_value(&trailers, "Session");
+    let decisions = trailer_values(&trailers, "Decision");
+    for (index, id) in trailer_values(&trailers, "Change-Id")
+        .into_iter()
+        .enumerate()
+    {
+        if id.is_empty() {
+            continue;
+        }
+        let decision = decisions
+            .get(index)
+            .or_else(|| decisions.last())
+            .cloned()
+            .unwrap_or_default();
+        let replace = decided
+            .get(&id)
+            .map(|hit| commit.time_unix > hit.at)
+            .unwrap_or(true);
+        if replace {
+            decided.insert(
+                id,
+                DecisionHit {
+                    commit: commit.oid.clone(),
+                    at: commit.time_unix,
+                    decision,
+                    session_id: session.clone(),
+                },
+            );
+        }
+    }
+}
+
+/// Decision commits reachable from a merge parent, stopping at commits this
+/// ref walk has already read. Does not record introductions.
+fn note_decision_chain(
+    repo: &DraftRepo,
+    start: &str,
+    already: &HashSet<String>,
+    decided: &mut HashMap<String, DecisionHit>,
+) -> Result<(), DraftRepoError> {
+    let mut oid = start.to_string();
+    let mut local = HashSet::new();
+    loop {
+        if already.contains(&oid) || !local.insert(oid.clone()) {
+            break;
+        }
+        let commit = repo.history_commit(&oid)?;
+        note_decision_trailers(&commit, decided);
+        let Some(parent) = repo.parent_oid(&oid)? else {
+            break;
+        };
+        oid = parent;
+    }
+    Ok(())
 }
 
 /// Cache key for change lookup. Includes every searched tip so a bot or session
@@ -424,38 +538,18 @@ pub fn resolve_all(
         let mut oid = tip.oid;
         loop {
             let commit = repo.history_commit(&oid)?;
+            note_decision_trailers(&commit, &mut decided);
             let trailers = message_trailers(&commit.message);
             let session = trailer_value(&trailers, "Session");
-            let decisions = trailer_values(&trailers, "Decision");
-            for (index, id) in trailer_values(&trailers, "Change-Id")
-                .into_iter()
-                .enumerate()
-            {
-                if id.is_empty() {
-                    continue;
-                }
-                let decision = decisions
-                    .get(index)
-                    .or_else(|| decisions.last())
-                    .cloned()
-                    .unwrap_or_default();
-                let replace = decided
-                    .get(&id)
-                    .map(|hit| commit.time_unix > hit.at)
-                    .unwrap_or(true);
-                if replace {
-                    decided.insert(
-                        id,
-                        DecisionHit {
-                            commit: commit.oid.clone(),
-                            at: commit.time_unix,
-                            decision,
-                            session_id: session.clone(),
-                        },
-                    );
-                }
+            // First parent is this ref's own history. A merge's other parents are
+            // the bot decision, which is not on main's first-parent chain. Read
+            // those trailers too, and do not mark them seen: the bot ref still
+            // names the introducing commit.
+            let parents = repo.parent_oids(&oid)?;
+            for extra in parents.iter().skip(1) {
+                note_decision_chain(repo, extra, &seen, &mut decided)?;
             }
-            let parent = repo.parent_oid(&oid)?;
+            let parent = parents.into_iter().next();
             let parent_ids = match &parent {
                 Some(parent_oid) => change_id_set(repo, parent_oid, &mut index_cache)?,
                 None => HashSet::new(),
@@ -603,6 +697,8 @@ mod tests {
             author_name: "Author".into(),
             status: "open".into(),
             quote: quote.into(),
+            decided_by: None,
+            decided_at: None,
         }
     }
 

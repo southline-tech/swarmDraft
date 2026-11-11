@@ -933,6 +933,28 @@ mod tests {
         assert_eq!(view.decided_at, Some(20));
     }
 
+    /// Decision commit for `chg-1`: the bot branch tip, or a merge parent of main.
+    fn decision_on_bot_or_merged(repo: &DraftRepo) -> (String, String) {
+        let mut oids = Vec::new();
+        for tip in repo.search_ref_tips().unwrap() {
+            oids.push(tip.oid);
+        }
+        let mut seen = std::collections::HashSet::new();
+        while let Some(oid) = oids.pop() {
+            if !seen.insert(oid.clone()) {
+                continue;
+            }
+            let message = repo.commit_message(&oid).unwrap();
+            if message.contains("Change-Id: chg-1") && message.contains("Decided-By: Sam") {
+                return (oid, message);
+            }
+            if let Ok(parents) = repo.parent_oids(&oid) {
+                oids.extend(parents);
+            }
+        }
+        panic!("decision commit not on a bot branch or in merged history");
+    }
+
     #[test]
     fn accepted_link_names_the_writer_and_the_bots_saved_name() {
         use crate::content;
@@ -991,12 +1013,14 @@ mod tests {
             .expect("decision commit");
 
         let repo = DraftRepo::open_working(&drafts.worktree_path(&manuscript_id)).unwrap();
-        let head = repo.head_oid().unwrap().unwrap();
-        let message = repo.commit_message(&head).unwrap();
-        assert!(message.contains("Decided-By: Sam"));
+        // The decision is a commit on `bot/<bot>/<session>`, including when that
+        // commit is only a parent of the merge on main. Main's tip is the checkpoint
+        // or the merge, and its message is not the decision.
+        let (decided, message) = decision_on_bot_or_merged(&repo);
+        assert!(message.contains("Decided-By: Sam"), "{message}");
         let git = git2::Repository::open(drafts.worktree_path(&manuscript_id)).unwrap();
         let committer = git
-            .find_commit(git2::Oid::from_str(&head).unwrap())
+            .find_commit(git2::Oid::from_str(&decided).unwrap())
             .unwrap()
             .committer()
             .name()

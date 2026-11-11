@@ -207,14 +207,34 @@ impl DraftRepo {
         })
     }
 
+    /// Best common ancestor of two commits, when git can find one.
+    pub fn merge_base(&self, a: &str, b: &str) -> Result<Option<String>, DraftRepoError> {
+        match self.repo.merge_base(parse_oid(a)?, parse_oid(b)?) {
+            Ok(oid) => Ok(Some(oid.to_string())),
+            Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// First parent, when this commit has one.
     pub fn parent_oid(&self, oid: &str) -> Result<Option<String>, DraftRepoError> {
+        Ok(self.parent_oids(oid)?.into_iter().next())
+    }
+
+    /// Every parent, first parent first. A bot merge has main, then the bot tip.
+    pub fn parent_oids(&self, oid: &str) -> Result<Vec<String>, DraftRepoError> {
         let commit = self.repo.find_commit(parse_oid(oid)?)?;
-        if commit.parent_count() == 0 {
-            Ok(None)
-        } else {
-            Ok(Some(commit.parent_id(0)?.to_string()))
+        let mut out = Vec::new();
+        for index in 0..commit.parent_count() {
+            out.push(commit.parent_id(index)?.to_string());
         }
+        Ok(out)
+    }
+
+    pub fn committer_name(&self, oid: &str) -> Result<String, DraftRepoError> {
+        let commit = self.repo.find_commit(parse_oid(oid)?)?;
+        let name = commit.committer().name().unwrap_or("Author").to_string();
+        Ok(name)
     }
 
     pub fn file_bytes(&self, oid: &str, path: &str) -> Result<Option<Vec<u8>>, DraftRepoError> {
@@ -315,6 +335,8 @@ impl DraftRepo {
         Ok(out)
     }
 
+    /// New commit on the current branch. Manuscript text (`book.json`, `chapters/`, `yjs/`)
+    /// comes from `oid`. Comments, notes, sessions, and the review index stay at HEAD.
     pub fn restore_as_new_commit(
         &self,
         oid: &str,
@@ -323,10 +345,21 @@ impl DraftRepo {
         message: &str,
         advance_branch: Option<&str>,
     ) -> Result<String, DraftRepoError> {
-        let old = self.repo.find_commit(parse_oid(oid)?)?;
-        let tree = old.tree()?;
-        let sig = placeholder_signature(committer_name, committer_email)?;
+        let target = self.repo.find_commit(parse_oid(oid)?)?;
         let parent = self.repo.head()?.peel_to_commit()?;
+        let target_tree = target.tree()?;
+        let parent_tree = parent.tree()?;
+        let mut builder = self.repo.treebuilder(Some(&target_tree))?;
+        for name in ["comments", "notes", "sessions", "review"] {
+            if let Some(entry) = parent_tree.get_name(name) {
+                builder.insert(name, entry.id(), entry.filemode())?;
+            } else if builder.get(name)?.is_some() {
+                builder.remove(name)?;
+            }
+        }
+        let tree_id = builder.write()?;
+        let tree = self.repo.find_tree(tree_id)?;
+        let sig = placeholder_signature(committer_name, committer_email)?;
         let new_oid = self
             .repo
             .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?;
@@ -335,6 +368,29 @@ impl DraftRepo {
             self.point_branch(branch, &new_oid.to_string())?;
         }
         Ok(new_oid.to_string())
+    }
+
+    /// Blob paths under `prefix` (`comments/` includes `comments/thread.json`).
+    pub fn list_tree_files(&self, oid: &str, prefix: &str) -> Result<Vec<String>, DraftRepoError> {
+        let commit = self.repo.find_commit(parse_oid(oid)?)?;
+        let tree = commit.tree()?;
+        let mut out = Vec::new();
+        tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
+            if entry.kind() != Some(git2::ObjectType::Blob) {
+                return git2::TreeWalkResult::Ok;
+            }
+            let name = entry.name().unwrap_or("");
+            let path = if root.is_empty() {
+                name.to_string()
+            } else {
+                format!("{root}{name}")
+            };
+            if path.starts_with(prefix) {
+                out.push(path);
+            }
+            git2::TreeWalkResult::Ok
+        })?;
+        Ok(out)
     }
 
     pub fn checkout_head(&self) -> Result<(), DraftRepoError> {
@@ -371,12 +427,48 @@ impl DraftRepo {
         Ok(())
     }
 
+    /// Commit `files` onto `branch` without moving HEAD or the worktree.
+    /// `None` bytes delete that path. An unchanged tree is skipped unless
+    /// `allow_empty` is set, so a decision still records its message.
+    pub fn commit_files_on_branch(
+        &self,
+        branch: &str,
+        message: &str,
+        committer_name: &str,
+        committer_email: &str,
+        files: &[(&str, Option<&[u8]>)],
+        allow_empty: bool,
+    ) -> Result<Option<String>, DraftRepoError> {
+        let reference = format!("refs/heads/{branch}");
+        let parent = self.repo.find_reference(&reference)?.peel_to_commit()?;
+        let mut tree_id = parent.tree_id();
+        for (path, bytes) in files {
+            let tree = self.repo.find_tree(tree_id)?;
+            tree_id = upsert_tree_path(&self.repo, &tree, path, *bytes)?;
+        }
+        if !allow_empty && tree_id == parent.tree_id() {
+            return Ok(None);
+        }
+        let tree = self.repo.find_tree(tree_id)?;
+        let sig = placeholder_signature(committer_name, committer_email)?;
+        let oid = self
+            .repo
+            .commit(Some(&reference), &sig, &sig, message, &tree, &[&parent])?;
+        Ok(Some(oid.to_string()))
+    }
+
+    /// Merge `branch_name` into `main` once the branch is settled.
+    /// The tree starts as main's, so chapter text, notes, and a chapter the
+    /// writer deleted stay as they are on main. `overlay` replaces those
+    /// paths (the decision index and bot comments). The real merge base is
+    /// required. The bot ref is kept.
     pub fn merge_bot_branch(
         &self,
         branch_name: &str,
         committer_name: &str,
         advance_branch: Option<&str>,
-    ) -> Result<(), DraftRepoError> {
+        overlay: &[(&str, &[u8])],
+    ) -> Result<String, DraftRepoError> {
         let sig = placeholder_signature(committer_name, "author@swarmdraft.local")?;
         let main_commit = self
             .repo
@@ -389,27 +481,40 @@ impl DraftRepo {
             .find_branch(branch_name, BranchType::Local)?
             .get()
             .peel_to_commit()?;
-        let main_tree = main_commit.tree()?;
-        let bot_tree = bot_commit.tree()?;
-        let merged_tree = self
-            .repo
-            .merge_trees(&main_tree, &main_tree, &bot_tree, None)?
-            .write_tree_to(&self.repo)?;
-        let merged = self.repo.find_tree(merged_tree)?;
+        match self.repo.merge_base(main_commit.id(), bot_commit.id()) {
+            Ok(_) => {}
+            Err(e) if e.code() == git2::ErrorCode::NotFound => {
+                return Err(DraftRepoError::Invalid(
+                    "bot branch has no common ancestor with main".into(),
+                ));
+            }
+            Err(e) => return Err(e.into()),
+        }
+        let mut tree_id = main_commit.tree_id();
+        for (path, bytes) in overlay {
+            let tree = self.repo.find_tree(tree_id)?;
+            tree_id = upsert_tree_path(&self.repo, &tree, path, Some(bytes))?;
+        }
+        let tree = self.repo.find_tree(tree_id)?;
+        let main_ref = if self.repo.find_branch("main", BranchType::Local).is_ok() {
+            "refs/heads/main"
+        } else {
+            "refs/heads/master"
+        };
         let oid = self.repo.commit(
-            Some("refs/heads/main"),
+            Some(main_ref),
             &sig,
             &sig,
             &format!("Merged {branch_name}"),
-            &merged,
+            &tree,
             &[&main_commit, &bot_commit],
         )?;
-        self.repo.set_head("refs/heads/main")?;
+        self.repo.set_head(main_ref)?;
         self.checkout_head()?;
         if let Some(branch) = advance_branch {
             self.point_branch(branch, &oid.to_string())?;
         }
-        Ok(())
+        Ok(oid.to_string())
     }
 
     /// Copy the working repo's `.git` directory into bare layout (`repo.git/` in the zip).
@@ -441,6 +546,54 @@ fn copy_dir_all(from: &Path, to: &Path) -> Result<(), DraftRepoError> {
         }
     }
     Ok(())
+}
+
+/// Replace or delete one path inside `tree`, returning the new tree id.
+/// `bytes` of `None` removes the blob. Missing parent directories are created.
+fn upsert_tree_path(
+    repo: &git2::Repository,
+    tree: &git2::Tree,
+    path: &str,
+    bytes: Option<&[u8]>,
+) -> Result<git2::Oid, DraftRepoError> {
+    let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
+    if parts.is_empty() {
+        return Err(DraftRepoError::Invalid(
+            "refusing to write an empty git path".into(),
+        ));
+    }
+    upsert_tree_parts(repo, Some(tree), &parts, bytes)
+}
+
+fn upsert_tree_parts(
+    repo: &git2::Repository,
+    tree: Option<&git2::Tree>,
+    parts: &[&str],
+    bytes: Option<&[u8]>,
+) -> Result<git2::Oid, DraftRepoError> {
+    let name = parts[0];
+    let mut builder = repo.treebuilder(tree)?;
+    if parts.len() == 1 {
+        match bytes {
+            Some(bytes) => {
+                let blob = repo.blob(bytes)?;
+                builder.insert(name, blob, i32::from(git2::FileMode::Blob))?;
+            }
+            None => {
+                let _ = builder.remove(name);
+            }
+        }
+    } else {
+        let child = tree.and_then(|tree| tree.get_name(name)).and_then(|entry| {
+            entry
+                .to_object(repo)
+                .ok()
+                .and_then(|object| object.into_tree().ok())
+        });
+        let child_id = upsert_tree_parts(repo, child.as_ref(), &parts[1..], bytes)?;
+        builder.insert(name, child_id, i32::from(git2::FileMode::Tree))?;
+    }
+    Ok(builder.write()?)
 }
 
 fn parse_oid(oid: &str) -> Result<git2::Oid, DraftRepoError> {

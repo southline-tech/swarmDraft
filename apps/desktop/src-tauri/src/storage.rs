@@ -247,6 +247,42 @@ const MIGRATIONS: &[&str] = &[
      );
      CREATE INDEX IF NOT EXISTS feedback_pending_status ON feedback_pending(status, expires_at);",
     DRAFT_FILE_PATH_MIGRATION,
+    // #344: comment deletes are tombstones, and format decisions can be stored.
+    // Idempotent: the book-author repair test rewinds one version and reopens.
+    "CREATE TABLE IF NOT EXISTS comment_tombstones (
+        id TEXT PRIMARY KEY,
+        manuscript_id TEXT NOT NULL,
+        thread_id TEXT NOT NULL,
+        section_id TEXT NOT NULL,
+        block_id TEXT,
+        quote TEXT,
+        body TEXT NOT NULL,
+        author_kind TEXT NOT NULL,
+        author_id TEXT NOT NULL,
+        author_name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        resolved_at TEXT,
+        deleted_at TEXT NOT NULL
+     );
+     CREATE INDEX IF NOT EXISTS comment_tombstones_manuscript ON comment_tombstones(manuscript_id);
+     PRAGMA foreign_keys=OFF;
+     CREATE TABLE review_decisions_v2 (
+        section_id TEXT NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('suggestion_insert','suggestion_delete','format_change')),
+        suggestion_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('accepted','rejected')),
+        decided_at TEXT NOT NULL,
+        decided_by TEXT NOT NULL,
+        PRIMARY KEY (section_id, kind, suggestion_id)
+     );
+     INSERT INTO review_decisions_v2
+       SELECT section_id, kind, suggestion_id, status, decided_at, decided_by FROM review_decisions;
+     DROP TABLE review_decisions;
+     ALTER TABLE review_decisions_v2 RENAME TO review_decisions;
+     CREATE INDEX review_decisions_section ON review_decisions(section_id);
+     PRAGMA foreign_keys=ON;",
+    // #344: a decision can outlive the section it was made on (restore rolls text back).
+    REVIEW_DECISION_MANUSCRIPT_MIGRATION,
 ];
 
 /// Sentinel for the #259 trailing repair; not executed as SQL.
@@ -257,6 +293,9 @@ const LAST_OPENED_AT_MIGRATION: &str = "__swarmdraft_add_last_opened_at__";
 
 /// Sentinel for #302; real work is `ensure_manuscripts_draft_file_path` in `migrate_with`.
 const DRAFT_FILE_PATH_MIGRATION: &str = "__swarmdraft_add_draft_file_path__";
+
+/// Sentinel for #344; real work is `ensure_review_decision_manuscript` in `migrate_with`.
+const REVIEW_DECISION_MANUSCRIPT_MIGRATION: &str = "__swarmdraft_review_decision_manuscript__";
 
 /// SHA-256 of the 14 migrations before #259 (length-prefixed). Update only when appending.
 #[cfg(test)]
@@ -586,6 +625,8 @@ fn migrate_with(conn: &mut Connection, migrations: &[&str]) -> Result<(), Storag
             ensure_manuscripts_last_opened_at(&tx)?;
         } else if *sql == DRAFT_FILE_PATH_MIGRATION {
             ensure_manuscripts_draft_file_path(&tx)?;
+        } else if *sql == REVIEW_DECISION_MANUSCRIPT_MIGRATION {
+            ensure_review_decision_manuscript(&tx)?;
         } else {
             tx.execute_batch(sql)?;
         }
@@ -619,6 +660,79 @@ fn ensure_manuscripts_draft_file_path(tx: &rusqlite::Transaction<'_>) -> Result<
         .any(|name| name == "draft_file_path");
     if !has {
         tx.execute_batch("ALTER TABLE manuscripts ADD COLUMN draft_file_path TEXT;")?;
+    }
+    Ok(())
+}
+
+/// Decisions and comments stay addressable after their section leaves the outline, so a
+/// restore can keep an accept and a comment that name a chapter the old text does not have.
+fn ensure_review_decision_manuscript(tx: &rusqlite::Transaction<'_>) -> Result<(), StorageError> {
+    let mut stmt = tx.prepare("PRAGMA table_info(review_decisions)")?;
+    let has = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .filter_map(|c| c.ok())
+        .any(|name| name == "manuscript_id");
+    drop(stmt);
+    if !has {
+        tx.execute_batch(
+            "CREATE TABLE review_decisions_v3 (
+                manuscript_id TEXT NOT NULL,
+                section_id TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK (kind IN ('suggestion_insert','suggestion_delete','format_change')),
+                suggestion_id TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('accepted','rejected')),
+                decided_at TEXT NOT NULL,
+                decided_by TEXT NOT NULL,
+                PRIMARY KEY (section_id, kind, suggestion_id)
+             );
+             INSERT INTO review_decisions_v3 (
+                manuscript_id, section_id, kind, suggestion_id, status, decided_at, decided_by
+             )
+               SELECT s.manuscript_id, rd.section_id, rd.kind, rd.suggestion_id, rd.status,
+                      rd.decided_at, rd.decided_by
+               FROM review_decisions rd
+               INNER JOIN sections s ON s.id = rd.section_id;
+             DROP TABLE review_decisions;
+             ALTER TABLE review_decisions_v3 RENAME TO review_decisions;
+             CREATE INDEX review_decisions_section ON review_decisions(section_id);
+             CREATE INDEX review_decisions_manuscript ON review_decisions(manuscript_id);",
+        )?;
+    }
+    // Bundled SQLite enforces foreign keys. A comment has to remain after its chapter
+    // is restored away, so section_id is not a foreign key.
+    let mut fk = tx.prepare("PRAGMA foreign_key_list(comments)")?;
+    let section_fk = fk
+        .query_map([], |r| Ok((r.get::<_, String>(2)?, r.get::<_, String>(3)?)))?
+        .filter_map(|row| row.ok())
+        .any(|(table, from)| table == "sections" && from == "section_id");
+    drop(fk);
+    if section_fk {
+        tx.execute_batch(
+            "CREATE TABLE comments_v2 (
+                id TEXT PRIMARY KEY,
+                manuscript_id TEXT NOT NULL REFERENCES manuscripts(id),
+                section_id TEXT NOT NULL,
+                block_id TEXT,
+                quote TEXT,
+                body TEXT NOT NULL,
+                thread_id TEXT,
+                author_kind TEXT NOT NULL CHECK (author_kind IN ('human','agent')),
+                author_id TEXT NOT NULL,
+                author_name TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                resolved_at TEXT
+             );
+             INSERT INTO comments_v2 (
+                id, manuscript_id, section_id, block_id, quote, body, thread_id,
+                author_kind, author_id, author_name, created_at, resolved_at
+             )
+               SELECT id, manuscript_id, section_id, block_id, quote, body, thread_id,
+                      author_kind, author_id, author_name, created_at, resolved_at
+               FROM comments;
+             DROP TABLE comments;
+             ALTER TABLE comments_v2 RENAME TO comments;
+             CREATE INDEX comments_section ON comments(section_id);",
+        )?;
     }
     Ok(())
 }
