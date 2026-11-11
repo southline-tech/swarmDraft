@@ -260,6 +260,9 @@ describe('ContinuousManuscript review (#240, #241)', () => {
       '#continuous-review-rail [data-test=accept-all]',
     ) as HTMLButtonElement | null;
     expect(acceptAll?.textContent).toBe('Accept all selected');
+    expect(document.querySelector('[data-test="view-scope-live"]')?.textContent?.trim()).toBe(
+      'Showing 1 selected change',
+    );
     acceptAll!.click();
     await flushPromises();
     const yes = document.querySelector(
@@ -273,12 +276,19 @@ describe('ContinuousManuscript review (#240, #241)', () => {
     expect(
       document.querySelector('[data-section-anchor="ch-1"] [data-suggestion][data-id="s-lead"]'),
     ).toBeTruthy();
+    expect(document.querySelector('[data-test="selected-changes-chip"]')).toBeNull();
+    expect(document.querySelector('[data-test="selected-changes-empty"]')?.textContent).toContain(
+      'None of the selected changes are still open.',
+    );
+    expect(document.querySelector('[data-test="view-scope-live"]')?.textContent?.trim()).toBe('');
     w.unmount();
   });
 
   it('#119: the accept shortcut applies a review link in another chapter', async () => {
     const w = await selectLaterChange();
-    document.querySelector('[data-test="lead-editor"] .manuscript-editor')?.dispatchEvent(
+    // The lead ProseMirror is the only contenteditable. Other chapters then treat the chord as a
+    // foreign field, so the later mark moves only when the lead routes the key.
+    document.querySelector('[data-test="lead-editor"] .tiptap')?.dispatchEvent(
       new KeyboardEvent('keydown', {
         key: 'Enter',
         ctrlKey: true,

@@ -143,6 +143,7 @@ import {
   isCommentReviewKey,
   loadShowResolved,
   saveShowResolved,
+  suggestionItems,
   threadIdFromCommentReviewKey,
   type ReviewListItem,
 } from './review/review-inline';
@@ -771,7 +772,6 @@ const filter = computed({
     else localAuthorFilter.value = v;
   },
 });
-const viewScopeLive = shallowRef('');
 const currentKey = shallowRef<string | null>(null);
 let currentIndex = -1;
 watch(currentKey, (key) => {
@@ -881,6 +881,20 @@ const filteredSuggestions = computed(() =>
     ? filterChangesById(changes.value, reviewSelection.value)
     : visibleItems(changes.value, filter.value),
 );
+/**
+ * Same suggestion rows the selection chip counts. A decision in another chapter updates this
+ * without refreshing the lead editor. The chip hides at zero, including a failed load, so the
+ * polite region stays empty and the panel's one line is the only message.
+ */
+const viewScopeLive = computed(() => {
+  if (reviewSelection.value) {
+    const count = suggestionItems(reviewListItems.value).length;
+    return count ? selectedChangesLabel(count) : '';
+  }
+  const count = filteredSuggestions.value.length;
+  const display = filter.value ? labelAuthor(filter.value).name : 'everyone';
+  return viewScopeAnnouncement(filter.value, display, count);
+});
 
 function marginSelectedKey(): string | null {
   const key = currentKey.value;
@@ -925,17 +939,6 @@ function refreshReview(e: Editor) {
   currentIndex = i;
   currentKey.value = i >= 0 ? visible.value[i]!.key : null;
   emit('open-suggestions', suggestions.value);
-  announceViewScope();
-}
-function announceViewScope() {
-  const count = filteredSuggestions.value.length;
-  // A review link ignores the author filter. The live region has to say so too.
-  if (reviewSelection.value) {
-    viewScopeLive.value = selectedChangesLabel(count);
-    return;
-  }
-  const display = filter.value ? labelAuthor(filter.value).name : 'everyone';
-  viewScopeLive.value = viewScopeAnnouncement(filter.value, display, count);
 }
 function refreshAuthorFilterDecorations() {
   const e = editor.value;
@@ -950,7 +953,6 @@ watch(
   () => {
     refreshAuthorFilterDecorations();
     if (editor.value) refreshReview(editor.value);
-    else announceViewScope();
   },
 );
 watch(

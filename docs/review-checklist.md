@@ -86,6 +86,8 @@ Run this consolidated pass in order; do not hand off until every line that appli
 
 Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
 
+- 2026-11-10 · #119 · PR #347 · `view-scope-live` still said “Showing 0 selected changes” or kept the old count after the chip hid · the region stays empty while the chip is hidden and follows the same suggestion-row count when a decision lands in another chapter
+- 2026-11-10 · #119 · PR #347 · the accept-shortcut test dispatched Ctrl+Shift+Enter on `.manuscript-editor`, so the later chapter accepted its own change · the shortcut is dispatched on the lead `.tiptap`, and the later mark is gone while the lead mark stays
 - 2026-11-10 · #119 · PR #347 · the selection chip counted every id in the link and stayed up when the list was empty or suggestions failed to load · the chip counts suggestion rows still in the list and stays hidden while that list is empty or the load-failure line is showing
 - 2026-11-10 · #119 · PR #347 · Accept all and the accept shortcut wrote only the lead chapter · each locked key is decided in the mounted section that owns it, the same way a card's Accept is
 - 2026-11-10 · #119 · PR #347 · an unknown-id toast said “the others are in your review list” for one remaining change and for a history view · “the other” when one id is in the review list; the list is named only for ids passed to `showSelectedChanges`; history-only says the book stayed on the full list

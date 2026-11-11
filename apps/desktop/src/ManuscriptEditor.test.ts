@@ -983,4 +983,65 @@ describe('inline toolbar shortcuts (#87 review)', () => {
     expect(confirm).not.toContain('Mara');
     w.unmount();
   });
+
+  it('uses one message when a review link matches nothing (#119)', async () => {
+    const doc = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              marks: [
+                { type: 'suggestion_insert', attrs: { id: 's1', author: 'agent:a', ts: 't' } },
+              ],
+              text: 'alpha',
+            },
+          ],
+        },
+      ],
+    };
+    const empty = mount(ManuscriptEditor, {
+      props: { content: doc, changeIds: ['missing'] },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    expect(empty.find('[data-test="selected-changes-empty"]').text()).toBe(
+      'None of the selected changes are still open.',
+    );
+    expect(empty.find('[data-test="selected-changes-chip"]').exists()).toBe(false);
+    expect(empty.find('[data-test="empty"]').exists()).toBe(false);
+    expect(empty.find('[data-test="view-scope-live"]').text()).toBe('');
+    expect(empty.text()).not.toContain('Showing 0 selected');
+    expect(empty.text()).not.toContain('Nothing to review');
+    empty.unmount();
+
+    const failed = mount(ManuscriptEditor, {
+      props: {
+        content: {
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: 'keep', marks: [{ type: 'mystery_mark' }] }],
+            },
+          ],
+        },
+        changeIds: ['missing'],
+      },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    await new Promise((r) => requestAnimationFrame(() => r(undefined)));
+    await flushPromises();
+    expect(failed.find('[data-test="empty-load-failed"]').text()).toBe(
+      "Suggestions couldn't be loaded for this section.",
+    );
+    expect(failed.find('[data-test="selected-changes-chip"]').exists()).toBe(false);
+    expect(failed.find('[data-test="selected-changes-empty"]').exists()).toBe(false);
+    expect(failed.find('[data-test="view-scope-live"]').text()).toBe('');
+    expect(failed.text()).not.toContain('Showing 0 selected');
+    failed.unmount();
+  });
 });
