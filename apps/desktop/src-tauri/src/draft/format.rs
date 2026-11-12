@@ -143,8 +143,7 @@ pub fn pack_draft(
     zip.start_file(MANIFEST_NAME, store_options())?;
     zip.write_all(&manifest_bytes)?;
     add_dir_to_zip(&mut zip, repo_dir, REPO_DIR)?;
-    let file = zip.finish()?;
-    file.sync_all()?;
+    zip.finish()?.sync_all()?;
     rename_draft_tmp(&tmp, dest)?;
     guard.disarm();
     cleanup_stale_draft_write_temps(parent);

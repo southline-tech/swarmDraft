@@ -369,53 +369,57 @@ describe('landing feedback modal', () => {
     expect(css).not.toMatch(/\.footer-link-btn/);
   });
 
-  it('lifts the send row by the keyboard inset when the visual viewport shrinks', () => {
-    const listeners = {};
-    const viewport = {
-      height: 320,
-      offsetTop: 0,
-      addEventListener(type, fn) {
-        listeners[type] = fn;
-      },
-      removeEventListener(type, fn) {
-        if (listeners[type] === fn) delete listeners[type];
-      },
-    };
-    vi.stubGlobal('visualViewport', viewport);
-    window.innerHeight = 800;
-    const root = buildFeedbackDom({ withCss: true });
-    initFeedback(root);
-    root.querySelector('#feedback').click();
-    const card = root.querySelector('.feedback-dialog__card');
-    const actions = card.querySelector('.feedback-actions');
-    expect(card.style.getPropertyValue('--feedback-keyboard-inset')).toBe('480px');
-    expect(getComputedStyle(actions).bottom).toBe('0px');
-    expect(getComputedStyle(card).marginBottom).toBe('480px');
-    expect(getComputedStyle(card).paddingBottom.includes('480')).toBe(false);
-    viewport.height = 800;
-    listeners.resize();
-    expect(card.style.getPropertyValue('--feedback-keyboard-inset')).toBe('0px');
-    expect(getComputedStyle(actions).bottom).toBe('0px');
-    expect(getComputedStyle(card).marginBottom).toBe('0px');
-    root.querySelector('[data-feedback-close]').click();
-    expect(card.style.getPropertyValue('--feedback-keyboard-inset')).toBe('');
-    expect(listeners.resize).toBeUndefined();
+  it(
+    'lifts the send row by the keyboard inset when the visual viewport shrinks',
+    { timeout: 30_000 },
+    () => {
+      const listeners = {};
+      const viewport = {
+        height: 320,
+        offsetTop: 0,
+        addEventListener(type, fn) {
+          listeners[type] = fn;
+        },
+        removeEventListener(type, fn) {
+          if (listeners[type] === fn) delete listeners[type];
+        },
+      };
+      vi.stubGlobal('visualViewport', viewport);
+      window.innerHeight = 800;
+      const root = buildFeedbackDom({ withCss: true });
+      initFeedback(root);
+      root.querySelector('#feedback').click();
+      const card = root.querySelector('.feedback-dialog__card');
+      const actions = card.querySelector('.feedback-actions');
+      expect(card.style.getPropertyValue('--feedback-keyboard-inset')).toBe('480px');
+      expect(getComputedStyle(actions).bottom).toBe('0px');
+      expect(getComputedStyle(card).marginBottom).toBe('480px');
+      expect(getComputedStyle(card).paddingBottom.includes('480')).toBe(false);
+      viewport.height = 800;
+      listeners.resize();
+      expect(card.style.getPropertyValue('--feedback-keyboard-inset')).toBe('0px');
+      expect(getComputedStyle(actions).bottom).toBe('0px');
+      expect(getComputedStyle(card).marginBottom).toBe('0px');
+      root.querySelector('[data-feedback-close]').click();
+      expect(card.style.getPropertyValue('--feedback-keyboard-inset')).toBe('');
+      expect(listeners.resize).toBeUndefined();
 
-    const laidOut = measureFeedbackSheetInChrome();
-    const open = laidOut.withKeyboard;
-    expect(open.innerWidth).toBeLessThanOrEqual(640);
-    expect(Math.abs(open.card.bottom - open.vvBottom)).toBeLessThanOrEqual(1);
-    expect(open.actions.top).toBeGreaterThanOrEqual(open.vvTop - 1);
-    expect(open.actions.bottom).toBeLessThanOrEqual(open.vvBottom + 1);
-    expect(open.actions.bottom).toBeLessThanOrEqual(open.card.bottom + 1);
-    const messageFits =
-      open.message.top >= open.card.top - 1 && open.message.bottom <= open.actions.top + 1;
-    const messageScrollsIntoGap =
-      open.scrollHeight > open.clientHeight + 1 &&
-      open.message.top < open.actions.top &&
-      open.message.bottom > open.card.top;
-    expect(messageFits || messageScrollsIntoGap).toBe(true);
-  });
+      const laidOut = measureFeedbackSheetInChrome();
+      const open = laidOut.withKeyboard;
+      expect(open.innerWidth).toBeLessThanOrEqual(640);
+      expect(Math.abs(open.card.bottom - open.vvBottom)).toBeLessThanOrEqual(1);
+      expect(open.actions.top).toBeGreaterThanOrEqual(open.vvTop - 1);
+      expect(open.actions.bottom).toBeLessThanOrEqual(open.vvBottom + 1);
+      expect(open.actions.bottom).toBeLessThanOrEqual(open.card.bottom + 1);
+      const messageFits =
+        open.message.top >= open.card.top - 1 && open.message.bottom <= open.actions.top + 1;
+      const messageScrollsIntoGap =
+        open.scrollHeight > open.clientHeight + 1 &&
+        open.message.top < open.actions.top &&
+        open.message.bottom > open.card.top;
+      expect(messageFits || messageScrollsIntoGap).toBe(true);
+    },
+  );
 });
 
 function chromeBinary() {
@@ -510,8 +514,11 @@ function measureFeedbackSheetInChrome() {
         '--dump-dom',
         `file://${htmlPath}`,
       ],
-      { encoding: 'utf8' },
+      { encoding: 'utf8', timeout: 20_000 },
     );
+    if (res.error?.code === 'ETIMEDOUT') {
+      throw new Error('chrome timed out measuring the feedback sheet');
+    }
     if (res.status !== 0) {
       throw new Error(res.stderr || `chrome exited ${res.status}`);
     }
