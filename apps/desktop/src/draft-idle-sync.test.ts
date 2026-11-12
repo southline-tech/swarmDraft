@@ -1,47 +1,38 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  DRAFT_IDLE_SYNC_MS,
-  flushIdleDraftSync,
-  resetIdleDraftSyncTimers,
-  scheduleIdleDraftSync,
+  DRAFT_IDLE_CHECKPOINT_MS,
+  flushIdleDraftCheckpoint,
+  resetIdleDraftCheckpointTimers,
+  scheduleIdleDraftCheckpoint,
 } from './draft-idle-sync';
 
 afterEach(() => {
   vi.useRealTimers();
-  resetIdleDraftSyncTimers();
+  resetIdleDraftCheckpointTimers();
 });
 
-describe('draft idle sync (#356)', () => {
-  it('debounces checkpoint then pack', async () => {
+describe('draft idle checkpoint (#356)', () => {
+  it('debounces git checkpoint without packing', async () => {
     vi.useFakeTimers();
     const checkpoint = vi.fn();
-    const pack = vi.fn();
-    scheduleIdleDraftSync(checkpoint, pack);
+    scheduleIdleDraftCheckpoint(checkpoint);
     expect(checkpoint).not.toHaveBeenCalled();
-    expect(pack).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(DRAFT_IDLE_SYNC_MS);
+    await vi.advanceTimersByTimeAsync(DRAFT_IDLE_CHECKPOINT_MS);
     expect(checkpoint).toHaveBeenCalledTimes(1);
-    expect(pack).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(DRAFT_IDLE_SYNC_MS);
-    expect(pack).toHaveBeenCalledTimes(1);
   });
 
-  it('resetting the debounce does not pack on every section save tick', async () => {
+  it('resetting the debounce does not checkpoint on every section save tick', async () => {
     vi.useFakeTimers();
     const checkpoint = vi.fn();
-    const pack = vi.fn();
-    for (let i = 0; i < 5; i++) scheduleIdleDraftSync(checkpoint, pack);
-    await vi.advanceTimersByTimeAsync(DRAFT_IDLE_SYNC_MS * 2 + 10);
+    for (let i = 0; i < 5; i++) scheduleIdleDraftCheckpoint(checkpoint);
+    await vi.advanceTimersByTimeAsync(DRAFT_IDLE_CHECKPOINT_MS + 10);
     expect(checkpoint).toHaveBeenCalledTimes(1);
-    expect(pack).toHaveBeenCalledTimes(1);
   });
 
-  it('flush runs checkpoint and pack immediately', () => {
+  it('flush runs a pending checkpoint immediately', () => {
     const checkpoint = vi.fn();
-    const pack = vi.fn();
-    scheduleIdleDraftSync(checkpoint, pack);
-    flushIdleDraftSync(checkpoint, pack);
+    scheduleIdleDraftCheckpoint(checkpoint);
+    flushIdleDraftCheckpoint(checkpoint);
     expect(checkpoint).toHaveBeenCalledTimes(1);
-    expect(pack).toHaveBeenCalledTimes(1);
   });
 });

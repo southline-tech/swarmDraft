@@ -210,10 +210,7 @@ function readWidth(el: Element | null | undefined): number {
   return el?.getBoundingClientRect().width ?? 0;
 }
 
-function inlineSetsEqual(
-  a: Set<ToolbarOverflowItemId>,
-  b: Set<ToolbarOverflowItemId>,
-): boolean {
+function inlineSetsEqual(a: Set<ToolbarOverflowItemId>, b: Set<ToolbarOverflowItemId>): boolean {
   if (a.size !== b.size) return false;
   for (const id of a) if (!b.has(id)) return false;
   return true;

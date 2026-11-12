@@ -339,7 +339,7 @@ impl DraftService {
                 &author_name(store),
                 "author@swarmdraft.local",
                 false,
-                immediate,
+                false,
             )?;
             if oid.is_some() {
                 last.insert(manuscript_id.to_string(), now);
@@ -711,7 +711,7 @@ impl DraftService {
         // A tree that already matches the branch still means the suggestion is in git.
         self.clear_pending_bot_writes(&tokens);
         if oid.is_some() {
-            self.pack_if_linked_inner(store, manuscript_id)?;
+            self.mark_pack_pending(manuscript_id);
         }
         Ok(oid)
     }
@@ -923,6 +923,21 @@ impl DraftService {
 
     pub fn pack_if_linked(&self, store: &Store, manuscript_id: &str) -> Result<(), String> {
         self.with_op(|| self.pack_if_linked_inner(store, manuscript_id))
+    }
+
+    /// True when the git worktree is ahead of the linked `.draft` on disk.
+    pub fn draft_file_behind(&self, manuscript_id: &str) -> bool {
+        self.pack_pending
+            .lock()
+            .expect("pack pending")
+            .contains(manuscript_id)
+    }
+
+    fn mark_pack_pending(&self, manuscript_id: &str) {
+        self.pack_pending
+            .lock()
+            .expect("pack pending")
+            .insert(manuscript_id.to_string());
     }
 
     fn pack_if_linked_inner(&self, store: &Store, manuscript_id: &str) -> Result<(), String> {
@@ -2239,7 +2254,7 @@ impl DraftService {
         )
         .map_err(|e| format!("Couldn't merge bot changes: {e}"))?;
         self.end_bot_session(manuscript_id, Some(bot_agent_id), "");
-        self.pack_if_linked_inner(store, manuscript_id)?;
+        self.mark_pack_pending(manuscript_id);
         Ok(())
     }
 
@@ -2505,7 +2520,7 @@ impl DraftService {
                 false,
             )?;
             if oid.is_some() {
-                self.pack_if_linked_inner(store, manuscript_id)?;
+                self.mark_pack_pending(manuscript_id);
             }
         }
         let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;

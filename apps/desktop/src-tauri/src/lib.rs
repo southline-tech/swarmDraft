@@ -1194,6 +1194,14 @@ async fn draft_pack_if_due(
 }
 
 #[tauri::command]
+fn draft_file_behind(
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+) -> bool {
+    drafts.draft_file_behind(&manuscript_id)
+}
+
+#[tauri::command]
 async fn draft_history(
     store: tauri::State<'_, storage::Store>,
     drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
@@ -1615,6 +1623,7 @@ pub fn run() {
             draft_save,
             draft_checkpoint,
             draft_pack_if_due,
+            draft_file_behind,
             draft_history,
             draft_restore,
             draft_review_commit,
