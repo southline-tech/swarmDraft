@@ -14,6 +14,8 @@ pub const DRAFT_FORMAT_VERSION: u32 = 2;
 pub const MANIFEST_NAME: &str = "manifest.json";
 pub const REPO_DIR: &str = "repo.git";
 
+const DRAFT_WRITE_TMP_PREFIX: &str = ".draft-write-";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DraftManifest {
@@ -59,6 +61,62 @@ pub fn read_manifest(bytes: &[u8]) -> Result<DraftManifest, DraftFormatError> {
     Ok(m)
 }
 
+/// Remove leftover `.draft-write-*.tmp` files in `dir` (best-effort).
+pub fn cleanup_stale_draft_write_temps(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with(DRAFT_WRITE_TMP_PREFIX) && name.ends_with(".tmp") {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
+struct TmpGuard {
+    path: PathBuf,
+    keep: bool,
+}
+
+impl TmpGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { path, keep: false }
+    }
+
+    fn disarm(&mut self) {
+        self.keep = true;
+    }
+}
+
+impl Drop for TmpGuard {
+    fn drop(&mut self) {
+        if !self.keep {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn is_sharing_violation(e: &std::io::Error) -> bool {
+    cfg!(windows) && matches!(e.raw_os_error(), Some(32) | Some(5))
+}
+
+fn rename_draft_tmp(from: &Path, to: &Path) -> Result<(), DraftFormatError> {
+    let mut delay = std::time::Duration::from_millis(20);
+    for attempt in 0.. {
+        match fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(e) if attempt < 5 && is_sharing_violation(&e) => {
+                std::thread::sleep(delay);
+                delay *= 2;
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    unreachable!()
+}
+
 /// Pack `repo_dir` (bare git) and manifest into `dest` atomically.
 pub fn pack_draft(
     dest: &Path,
@@ -72,23 +130,24 @@ pub fn pack_draft(
         .parent()
         .ok_or_else(|| invalid("draft path has no parent"))?;
     fs::create_dir_all(parent)?;
+    cleanup_stale_draft_write_temps(parent);
     let tmp = parent.join(format!(
-        ".draft-write-{}-{}.tmp",
+        "{DRAFT_WRITE_TMP_PREFIX}{}-{}.tmp",
         std::process::id(),
         now_ms()
     ));
-    {
-        let file = File::create(&tmp)?;
-        let mut zip = ZipWriter::new(file);
-        let manifest_bytes = write_manifest(manifest)?;
-        zip.start_file(MANIFEST_NAME, store_options())?;
-        zip.write_all(&manifest_bytes)?;
-        add_dir_to_zip(&mut zip, repo_dir, REPO_DIR)?;
-        zip.finish()?;
-    }
-    sync_file(&tmp)?;
-    fs::rename(&tmp, dest)?;
-    sync_dir(parent)?;
+    let mut guard = TmpGuard::new(tmp.clone());
+    let file = File::create(&tmp)?;
+    let mut zip = ZipWriter::new(file);
+    let manifest_bytes = write_manifest(manifest)?;
+    zip.start_file(MANIFEST_NAME, store_options())?;
+    zip.write_all(&manifest_bytes)?;
+    add_dir_to_zip(&mut zip, repo_dir, REPO_DIR)?;
+    zip.finish()?.sync_all()?;
+    rename_draft_tmp(&tmp, dest)?;
+    guard.disarm();
+    cleanup_stale_draft_write_temps(parent);
+    let _ = sync_dir(parent);
     Ok(())
 }
 
@@ -194,12 +253,6 @@ fn now_ms() -> u128 {
         .unwrap_or(0)
 }
 
-fn sync_file(path: &Path) -> Result<(), DraftFormatError> {
-    let f = File::open(path)?;
-    f.sync_all()?;
-    Ok(())
-}
-
 fn sync_dir(path: &Path) -> Result<(), DraftFormatError> {
     if cfg!(unix) {
         if let Ok(f) = File::open(path) {
@@ -214,12 +267,65 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    fn draft_write_temps_in(dir: &Path) -> Vec<PathBuf> {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return Vec::new();
+        };
+        entries
+            .flatten()
+            .filter(|e| {
+                let name = e.file_name();
+                let name = name.to_string_lossy();
+                name.starts_with(DRAFT_WRITE_TMP_PREFIX) && name.ends_with(".tmp")
+            })
+            .map(|e| e.path())
+            .collect()
+    }
+
+    fn sample_manifest() -> DraftManifest {
+        DraftManifest {
+            format: DRAFT_FORMAT.into(),
+            format_version: DRAFT_FORMAT_VERSION,
+            app_version: "0.1.1".into(),
+            book_id: "b1".into(),
+            title: "Test".into(),
+        }
+    }
+
+    fn sample_repo(work: &Path) -> PathBuf {
+        let repo = work.join("repo.git");
+        fs::create_dir_all(repo.join("objects")).unwrap();
+        fs::write(repo.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        repo
+    }
+
+    #[test]
+    fn pack_writes_dest_and_leaves_no_tmp() {
+        let work = tempdir().unwrap();
+        let repo = sample_repo(work.path());
+        let manifest = sample_manifest();
+        let draft = work.path().join("book.draft");
+        pack_draft(&draft, &manifest, &repo).unwrap();
+        assert!(draft.is_file());
+        assert!(draft_write_temps_in(work.path()).is_empty());
+    }
+
+    #[test]
+    fn pack_failure_removes_tmp() {
+        let work = tempdir().unwrap();
+        let repo = sample_repo(work.path());
+        let manifest = sample_manifest();
+        let draft = work.path().join("blocked.draft");
+        fs::create_dir(&draft).unwrap();
+        let err = pack_draft(&draft, &manifest, &repo);
+        assert!(err.is_err());
+        assert!(draft_write_temps_in(work.path()).is_empty());
+    }
+
     #[test]
     fn pack_replace_never_leaves_gap_without_dest() {
         let work = tempdir().unwrap();
-        let repo = work.path().join("repo.git");
-        fs::create_dir_all(repo.join("objects")).unwrap();
-        fs::write(repo.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        let repo = sample_repo(work.path());
         let manifest = DraftManifest {
             format: DRAFT_FORMAT.into(),
             format_version: DRAFT_FORMAT_VERSION,
@@ -234,21 +340,14 @@ mod tests {
         // after a successful replace-style pack.
         pack_draft(&draft, &manifest, &repo).unwrap();
         assert!(draft.is_file());
+        assert!(draft_write_temps_in(work.path()).is_empty());
     }
 
     #[test]
     fn pack_unpack_round_trip() {
         let work = tempdir().unwrap();
-        let repo = work.path().join("repo.git");
-        fs::create_dir_all(repo.join("objects")).unwrap();
-        fs::write(repo.join("HEAD"), "ref: refs/heads/main\n").unwrap();
-        let manifest = DraftManifest {
-            format: DRAFT_FORMAT.into(),
-            format_version: DRAFT_FORMAT_VERSION,
-            app_version: "0.1.1".into(),
-            book_id: "b1".into(),
-            title: "Test".into(),
-        };
+        let repo = sample_repo(work.path());
+        let manifest = sample_manifest();
         let draft = work.path().join("book.draft");
         pack_draft(&draft, &manifest, &repo).unwrap();
         let out = work.path().join("out");

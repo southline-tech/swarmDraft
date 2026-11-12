@@ -887,8 +887,10 @@ impl DraftService {
         if let Some(parent) = Path::new(&draft_path).parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        format::pack_draft(Path::new(&draft_path), &manifest, bare.path())
-            .map_err(|e| e.to_string())?;
+        format::pack_draft(Path::new(&draft_path), &manifest, bare.path()).map_err(|e| {
+            eprintln!("swarmDraft: draft pack failed: {e}");
+            e.to_string()
+        })?;
         Ok(())
     }
 

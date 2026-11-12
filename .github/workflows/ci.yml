@@ -71,3 +71,20 @@ jobs:
       - run: rustup target add x86_64-pc-windows-gnu
       - run: cargo check --locked --target x86_64-pc-windows-gnu
         working-directory: apps/desktop/src-tauri
+
+  windows-draft-pack:
+    name: Windows draft pack tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - name: Placeholder frontend dist (generate_context! needs it)
+        run: mkdir -p apps/desktop/dist && echo '<!doctype html>' > apps/desktop/dist/index.html
+        shell: bash
+      - run: cargo test --locked --lib pack_
+        working-directory: apps/desktop/src-tauri

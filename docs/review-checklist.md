@@ -365,6 +365,10 @@ Implementor: add one line here for every review, design or QA finding, in the sa
 - 2026-11-05 · #302 · PR #325 combined review @ 1de1ff4 · Save with no linked `.draft` silently no-op · `DraftSaveOutcome::NeedsSaveAs` + File menu runs Save As; test `save_without_linked_path_needs_save_as`
 - 2026-11-05 · #302 · PR #325 combined review @ 1de1ff4 · Save As allowed non-`.draft` paths · `path_with_draft_extension`; unit test in `service.rs`
 - 2026-11-05 · #302 · PR #325 combined review @ 1de1ff4 · two-rename pack left no `.draft` mid-crash · single rename replace in `pack_draft`; test `pack_replace_never_leaves_gap_without_dest`
+- 2026-11-11 · #354 · Windows `sync_file` used read-only `File::open` before rename · flush on `zip.finish()` handle; tmp guard; rename retry; `eprintln` on pack failure; Windows CI `draft::format` tests
+- 2026-11-11 · #354 · PR #355 review · Windows draft-pack job used `mkdir apps\\desktop\\dist` under Git Bash · `mkdir -p apps/desktop/dist` like the Linux job
+- 2026-11-11 · #354 · PR #355 review · `feedback.ui.test.js` Chrome layout probe could outlive Vitest’s default 5s timeout on slow CI · 30s test timeout and 20s `spawnSync` cap on headless Chrome
+- 2026-11-11 · #354 · PR #355 bugbot · `pack_draft` kept the `zip.finish()` handle open through `rename_draft_tmp` · `zip.finish()?.sync_all()?` so the temp file closes before rename like `backup.rs`
 - 2026-11-05 · #302 · PR #325 combined review @ 1de1ff4 · bot branch only at accept; merge errors swallowed · MCP suggest commits on `bot/{id}/{session}`; merge errors surface; test `bot_branch_exists_before_accept_and_merges_after`
 - 2026-11-05 · #302 · PR #325 combined review @ 1de1ff4 · Word import skipped `.draft` · `draft_after_word_import` after import; test `word_import_creates_draft_file`
 - 2026-11-05 · #302 · PR #325 combined review @ 1de1ff4 · double-click `.draft` did not open · `tauri-plugin-single-instance` + argv/`open-draft-path` event
