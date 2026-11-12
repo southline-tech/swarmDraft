@@ -1450,6 +1450,16 @@ pub fn run() {
             if let Err(e) = draft::repair_draft_file_paths(&store, &dir, local.as_deref()) {
                 eprintln!("swarmDraft: draft path repair: {e}");
             }
+            draft::cleanup_stale_draft_write_temps(&dir.join("drafts"));
+            if let Ok(ids) = store.list_manuscript_ids() {
+                for id in ids {
+                    if let Ok(Some(path)) = store.draft_file_path(&id) {
+                        if let Some(parent) = std::path::Path::new(&path).parent() {
+                            draft::cleanup_stale_draft_write_temps(parent);
+                        }
+                    }
+                }
+            }
             let draft_service = std::sync::Arc::new(draft_service);
             app.manage(draft_service.clone());
             app.manage(store.clone());

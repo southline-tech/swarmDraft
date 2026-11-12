@@ -15,7 +15,8 @@ mod sync;
 
 pub use changes::DraftChangeResolve;
 pub use format::{
-    pack_draft, unpack_draft, DraftFormatError, DraftManifest, DRAFT_FORMAT, DRAFT_FORMAT_VERSION,
+    cleanup_stale_draft_write_temps, pack_draft, unpack_draft, DraftFormatError, DraftManifest,
+    DRAFT_FORMAT, DRAFT_FORMAT_VERSION,
 };
 pub use migrate::{migrate_legacy_books_to_draft, DraftMigrationNotice};
 pub use repair::repair_draft_file_paths;
