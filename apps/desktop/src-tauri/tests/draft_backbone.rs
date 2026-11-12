@@ -592,6 +592,31 @@ fn resolve_change_finds_introducing_and_deciding_commits() {
 }
 
 #[test]
+fn checkpoint_defers_zip_pack_until_pack_if_due() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "defer-pack.draft");
+    set_chapter_plain(&store, &chapter.doc_id, "typed");
+    let path = store.draft_file_path(&m.id).unwrap().expect("linked");
+    assert!(!Path::new(&path).exists());
+    svc.checkpoint_if_due(&store, &m.id, "Edited chapter", false)
+        .unwrap()
+        .expect("checkpoint");
+    assert!(
+        !Path::new(&path).exists(),
+        "idle checkpoint must not re-pack the .draft"
+    );
+    assert!(
+        svc.pack_if_due(&store, &m.id, true).unwrap(),
+        "pack runs when due"
+    );
+    assert!(Path::new(&path).is_file());
+}
+
+#[test]
 fn checkpoint_commits_yjs_and_live_edit_does_not_wait() {
     let (_dir, store) = temp_store();
     let stored = store.create_blank_manuscript_with_progress(None).unwrap();

@@ -1450,9 +1450,10 @@ function bindMarginNoteEl(key: string, el: Element | null) {
   void nextTick(() => {
     if (!el.isConnected) return;
     const h = el.offsetHeight;
-    if (marginNoteHeights.value[key] === h) return;
+    const prev = marginNoteHeights.value[key] ?? 0;
+    if (Math.abs(h - prev) < 2) return;
     marginNoteHeights.value = { ...marginNoteHeights.value, [key]: h };
-    measureMarginNotes();
+    scheduleMeasureMarginNotes();
   });
 }
 
@@ -1486,9 +1487,12 @@ onMounted(() => {
   deskEl.value?.addEventListener('scroll', onDeskScroll, { passive: true });
   if (!deskEl.value || typeof ResizeObserver === 'undefined') return;
   deskObserver = new ResizeObserver(() => {
-    deskWidth.value = deskEl.value?.clientWidth ?? 0;
-    deskLeft.value = deskEl.value?.getBoundingClientRect().left ?? 0;
-    measureMarginNotes();
+    const nextW = deskEl.value?.clientWidth ?? 0;
+    const nextL = deskEl.value?.getBoundingClientRect().left ?? 0;
+    if (nextW === deskWidth.value && nextL === deskLeft.value) return;
+    deskWidth.value = nextW;
+    deskLeft.value = nextL;
+    scheduleMeasureMarginNotes();
   });
   deskObserver.observe(deskEl.value);
   void nextTick(measureMarginNotes);

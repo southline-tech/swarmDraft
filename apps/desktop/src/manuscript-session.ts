@@ -274,6 +274,8 @@ export const REMOTE_ORIGIN = 'swarmdraft:remote';
 export const SAVE_DEBOUNCE_MS = 500;
 /** How often an open stored manuscript checks for writes made elsewhere (RAD-264). */
 export const LIVE_POLL_MS = 500;
+/** After several quiet polls, interval backs off up to this cap (#356). */
+export const LIVE_POLL_MAX_MS = 10_000;
 export const RETRY_MAX_MS = 30_000;
 export const SAVE_TIMEOUT_MS = 10_000;
 
@@ -415,6 +417,14 @@ export type PollUpdates = (after: number) => Promise<UpdatesSince | null>;
  * Updates already in a doc (e.g. the author's own saved edits) are no-ops. Polls never overlap;
  * a failed poll is retried on the next tick. Returns `stop`.
  */
+function livePollDelay(idleQuietRounds: number, baseMs: number): number {
+  const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+  const backoff = hidden
+    ? LIVE_POLL_MAX_MS
+    : Math.min(baseMs * 2 ** Math.min(idleQuietRounds, 4), LIVE_POLL_MAX_MS);
+  return backoff;
+}
+
 export function followUpdates(
   docs: Map<string, Y.Doc>,
   cursor: number,
@@ -424,30 +434,61 @@ export function followUpdates(
 ): () => void {
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const tick = async () => {
-    try {
-      // Drain: a full page means more may be waiting.
-      for (;;) {
-        const r = await poll(cursor);
-        if (stopped || !r) return;
-        for (const u of r.updates) {
-          const doc = docs.get(u.docId);
-          if (doc) Y.applyUpdate(doc, Uint8Array.from(u.update), REMOTE_ORIGIN);
-        }
-        const advanced = r.cursor > cursor;
-        cursor = Math.max(cursor, r.cursor);
-        onCursor?.(cursor);
-        if (!advanced || !r.updates.length) break;
-      }
-    } catch {
-      // Keep the cursor: the same updates are fetched again next time.
-    }
-    if (!stopped) timer = setTimeout(tick, intervalMs);
+  let idleQuietRounds = 0;
+  let inflight: Promise<void> | undefined;
+  const schedule = () => {
+    if (stopped) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => void tick(), livePollDelay(idleQuietRounds, intervalMs));
   };
-  timer = setTimeout(tick, intervalMs);
+  const tick = async () => {
+    if (inflight) return;
+    let sawUpdates = false;
+    let pollFailed = false;
+    inflight = (async () => {
+      try {
+        // Drain: a full page means more may be waiting.
+        for (;;) {
+          const r = await poll(cursor);
+          if (stopped || !r) return;
+          if (r.updates.length) sawUpdates = true;
+          for (const u of r.updates) {
+            const doc = docs.get(u.docId);
+            if (doc) Y.applyUpdate(doc, Uint8Array.from(u.update), REMOTE_ORIGIN);
+          }
+          const advanced = r.cursor > cursor;
+          cursor = Math.max(cursor, r.cursor);
+          onCursor?.(cursor);
+          if (!advanced || !r.updates.length) break;
+        }
+      } catch {
+        pollFailed = true;
+        // Keep the cursor: the same updates are fetched again next time.
+      }
+    })().finally(() => {
+      inflight = undefined;
+      if (stopped) return;
+      if (sawUpdates) idleQuietRounds = 0;
+      else if (!pollFailed) idleQuietRounds++;
+      clearTimeout(timer);
+      timer = setTimeout(
+        () => void tick(),
+        pollFailed ? intervalMs : livePollDelay(idleQuietRounds, intervalMs),
+      );
+    });
+    await inflight;
+  };
+  const onVis = () => {
+    if (stopped || inflight) return;
+    clearTimeout(timer);
+    schedule();
+  };
+  document.addEventListener('visibilitychange', onVis);
+  schedule();
   return () => {
     stopped = true;
     clearTimeout(timer);
+    document.removeEventListener('visibilitychange', onVis);
   };
 }
 

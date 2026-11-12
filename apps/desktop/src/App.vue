@@ -42,6 +42,7 @@ import {
   draftSave,
   draftSaveAs,
   draftCheckpoint,
+  draftPackIfDue,
   draftAbandonSession,
   draftBeginSession,
   draftEndSession,
@@ -137,6 +138,7 @@ import { useDeferredValue } from './a11y/deferred';
 import './shells/shells.css';
 import { applyThemeParam, readPreview } from './shells/preview';
 import { CLOSE_FLUSH_TIMEOUT_MS, confirmQuit, flushOnClose, flushWithTimeout } from './close-flush';
+import { flushIdleDraftSync, scheduleIdleDraftSync } from './draft-idle-sync';
 import { loadReadingPosition, saveReadingPosition, type ReadingPosition } from './reading-position';
 import {
   shouldShowImportHome,
@@ -391,10 +393,20 @@ const persistHooks = {
     const title =
       session.value?.outline.value.find((s) => s.id === selectedId.value)?.title ?? 'chapter';
     if (id && isTauri()) {
-      void draftCheckpoint(id, `Edited ${title}`).catch((err) => {
-        console.error('Draft checkpoint failed', err);
-        saveFailure.value = saveFailed(saveFailure.value, err);
-      });
+      scheduleIdleDraftSync(
+        () => {
+          void draftCheckpoint(id, `Edited ${title}`).catch((err) => {
+            console.error('Draft checkpoint failed', err);
+            saveFailure.value = saveFailed(saveFailure.value, err);
+          });
+        },
+        () => {
+          void draftPackIfDue(id).catch((err) => {
+            console.error('Draft pack failed', err);
+            saveFailure.value = saveFailed(saveFailure.value, err);
+          });
+        },
+      );
     }
   },
 };
@@ -403,10 +415,31 @@ function checkpointOpenDraft(immediate = false) {
   if (!id || !isTauri()) return;
   const title =
     session.value?.outline.value.find((s) => s.id === selectedId.value)?.title ?? 'chapter';
+  if (immediate) {
+    flushIdleDraftSync(
+      () => {
+        void draftCheckpoint(id, `Edited ${title}`, true).catch((err) => {
+          console.error('Draft checkpoint failed', err);
+          saveFailure.value = saveFailed(saveFailure.value, err);
+        });
+      },
+      () => {
+        void draftPackIfDue(id, true).catch((err) => {
+          console.error('Draft pack failed', err);
+          saveFailure.value = saveFailed(saveFailure.value, err);
+        });
+      },
+    );
+    return;
+  }
   void draftCheckpoint(id, `Edited ${title}`, immediate).catch((err) => {
     console.error('Draft checkpoint failed', err);
     saveFailure.value = saveFailed(saveFailure.value, err);
   });
+}
+function onWindowBlur() {
+  if (!session.value?.id || !isTauri()) return;
+  checkpointOpenDraft(true);
 }
 function failDraftSessionEnd(err: unknown) {
   console.error('Draft session end failed', err);
@@ -1273,6 +1306,7 @@ onMounted(() => {
   window.addEventListener('dragover', blockFileNavigation);
   window.addEventListener('drop', blockFileNavigation);
   window.addEventListener('focus', reloadAgents);
+  window.addEventListener('blur', onWindowBlur);
   window.addEventListener('keydown', onAppMenuKey);
   window.addEventListener('keydown', onUpdatePromptEscape);
   void refreshAgents();
@@ -1339,6 +1373,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('dragover', blockFileNavigation);
   window.removeEventListener('drop', blockFileNavigation);
   window.removeEventListener('focus', reloadAgents);
+  window.removeEventListener('blur', onWindowBlur);
   stopAppMenuKeys();
   stopOpenDraftPath();
   stopChangeLinks();

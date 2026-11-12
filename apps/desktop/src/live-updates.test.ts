@@ -306,6 +306,20 @@ describe('live agent updates (RAD-264)', () => {
     await done();
   });
 
+  it('backs off live polling when no updates arrive (#356)', async () => {
+    vi.useFakeTimers();
+    const poll = vi.fn(async (after: number): Promise<UpdatesSince> => ({
+      cursor: Math.max(after, 3),
+      updates: [],
+    }));
+    const docs = new Map<string, Y.Doc>();
+    const stop = followUpdates(docs, 3, poll, LIVE_POLL_MS);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(poll.mock.calls.length).toBeGreaterThan(0);
+    expect(poll.mock.calls.length).toBeLessThanOrEqual(3);
+    stop();
+  });
+
   it('retries a failed poll from the same cursor and ignores unknown docs', async () => {
     vi.useFakeTimers();
     const docs = new Map();

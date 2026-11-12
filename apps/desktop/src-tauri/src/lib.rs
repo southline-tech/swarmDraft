@@ -1177,6 +1177,23 @@ async fn draft_checkpoint(
 }
 
 #[tauri::command]
+async fn draft_pack_if_due(
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+    immediate: Option<bool>,
+) -> Result<bool, String> {
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    let immediate = immediate.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || {
+        drafts.pack_if_due(&store, &manuscript_id, immediate)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn draft_history(
     store: tauri::State<'_, storage::Store>,
     drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
@@ -1597,6 +1614,7 @@ pub fn run() {
             draft_save_as,
             draft_save,
             draft_checkpoint,
+            draft_pack_if_due,
             draft_history,
             draft_restore,
             draft_review_commit,
