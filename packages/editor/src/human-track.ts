@@ -226,7 +226,12 @@ export const HumanTrackChanges = Extension.create({
         key: humanTrackKey,
         state: {
           init: () => ({ active: active(), author: author() }),
-          apply: () => ({ active: active(), author: author() }),
+          apply: (_tr, prev) => {
+            const nextActive = active();
+            const nextAuthor = author();
+            if (prev.active === nextActive && prev.author === nextAuthor) return prev;
+            return { active: nextActive, author: nextAuthor };
+          },
         },
         appendTransaction: (transactions, oldState, newState) => {
           if (!active()) return null;

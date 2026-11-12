@@ -42,6 +42,7 @@ import {
   draftSave,
   draftSaveAs,
   draftCheckpoint,
+  draftFileBehind as queryDraftFileBehind,
   draftAbandonSession,
   draftBeginSession,
   draftEndSession,
@@ -137,6 +138,7 @@ import { useDeferredValue } from './a11y/deferred';
 import './shells/shells.css';
 import { applyThemeParam, readPreview } from './shells/preview';
 import { CLOSE_FLUSH_TIMEOUT_MS, confirmQuit, flushOnClose, flushWithTimeout } from './close-flush';
+import { flushIdleDraftCheckpoint, scheduleIdleDraftCheckpoint } from './draft-idle-sync';
 import { loadReadingPosition, saveReadingPosition, type ReadingPosition } from './reading-position';
 import {
   shouldShowImportHome,
@@ -369,6 +371,8 @@ const saveError = computed(() => saveFailure.value.failing);
 /** RAD-265 / #204: footer save line after at least one successful persist. */
 const saveStatusShown = ref(false);
 const saveDirty = ref(false);
+/** Git cache has commits not yet written to the linked `.draft` file (#356). */
+const draftFileBehind = ref(false);
 const lastSavedAt = ref<number | null>(null);
 /** Manuscript id for the in-flight save callbacks (ignore stale flushes after switch). */
 const saveHookManuscriptId = ref<string | undefined>();
@@ -391,22 +395,53 @@ const persistHooks = {
     const title =
       session.value?.outline.value.find((s) => s.id === selectedId.value)?.title ?? 'chapter';
     if (id && isTauri()) {
-      void draftCheckpoint(id, `Edited ${title}`).catch((err) => {
-        console.error('Draft checkpoint failed', err);
-        saveFailure.value = saveFailed(saveFailure.value, err);
+      scheduleIdleDraftCheckpoint(() => {
+        void draftCheckpoint(id, `Edited ${title}`)
+          .then((oid) => {
+            if (oid) draftFileBehind.value = true;
+            else void refreshDraftFileBehind();
+          })
+          .catch((err) => {
+            console.error('Draft checkpoint failed', err);
+            saveFailure.value = saveFailed(saveFailure.value, err);
+          });
       });
     }
   },
 };
-function checkpointOpenDraft(immediate = false) {
+async function refreshDraftFileBehind() {
+  const id = session.value?.id;
+  if (!id || !isTauri()) {
+    draftFileBehind.value = false;
+    return;
+  }
+  try {
+    draftFileBehind.value = await queryDraftFileBehind(id);
+  } catch (err) {
+    console.error('Draft file status check failed', err);
+  }
+}
+function runDraftCheckpoint(immediate = false) {
   const id = session.value?.id;
   if (!id || !isTauri()) return;
   const title =
     session.value?.outline.value.find((s) => s.id === selectedId.value)?.title ?? 'chapter';
-  void draftCheckpoint(id, `Edited ${title}`, immediate).catch((err) => {
-    console.error('Draft checkpoint failed', err);
-    saveFailure.value = saveFailed(saveFailure.value, err);
-  });
+  const commit = () => {
+    void draftCheckpoint(id, `Edited ${title}`, immediate)
+      .then((oid) => {
+        if (oid) draftFileBehind.value = true;
+        else void refreshDraftFileBehind();
+      })
+      .catch((err) => {
+        console.error('Draft checkpoint failed', err);
+        saveFailure.value = saveFailed(saveFailure.value, err);
+      });
+  };
+  if (immediate) {
+    flushIdleDraftCheckpoint(commit);
+    return;
+  }
+  scheduleIdleDraftCheckpoint(commit);
 }
 function failDraftSessionEnd(err: unknown) {
   console.error('Draft session end failed', err);
@@ -439,6 +474,7 @@ const manuscriptSave = computed((): ManuscriptSaveView | undefined => {
     return { phase: 'error', message: '' };
   }
   if (saveDirty.value) return { phase: 'saving' };
+  if (draftFileBehind.value) return { phase: 'unsaved' };
   if (saveStatusShown.value && lastSavedAt.value != null) {
     return { phase: 'saved', savedAt: lastSavedAt.value };
   }
@@ -702,7 +738,7 @@ async function onCommentReply(sectionId: string, threadId: string, body: string)
   try {
     await sectionCommentReply(session.value.id, sectionId, threadId, body, profile.name, 'local');
     commentMetaVersion.value++;
-    checkpointOpenDraft(true);
+    runDraftCheckpoint(true);
   } catch (err) {
     console.error('Comment reply save failed', err);
     saveFailure.value = saveFailed(saveFailure.value, err);
@@ -713,7 +749,7 @@ async function onCommentResolve(sectionId: string, threadId: string, resolved: b
   try {
     await sectionCommentResolve(session.value.id, sectionId, threadId, resolved);
     commentMetaVersion.value++;
-    checkpointOpenDraft(true);
+    runDraftCheckpoint(true);
   } catch (err) {
     console.error('Comment resolve save failed', err);
     saveFailure.value = saveFailed(saveFailure.value, err);
@@ -1103,6 +1139,7 @@ async function onMenuSave() {
       return;
     }
     saveFailure.value = saveSucceeded();
+    draftFileBehind.value = false;
   } catch (e) {
     console.error('Save draft failed', e);
     saveFailure.value = saveFailed(saveFailure.value, e);
@@ -1122,6 +1159,7 @@ async function onMenuSaveAs() {
     const path = await draftSaveAs(session.value.id);
     if (path) {
       saveFailure.value = saveSucceeded();
+      draftFileBehind.value = false;
       saveCopyRelinkOffer.value = false;
       await refreshDraftRows();
     }
@@ -1167,13 +1205,26 @@ async function openRecentBook(id: string) {
     openingRecent = false;
   }
 }
+async function flushBeforeClose(): Promise<void> {
+  persistReadingPositionForClose();
+  const id = session.value?.id;
+  await (session.value?.flush() ?? Promise.resolve());
+  if (id && isTauri()) {
+    await draftEndSession(id)
+      .then(() => {
+        draftFileBehind.value = false;
+      })
+      .catch((err) => {
+        failDraftSessionEnd(err);
+        throw err;
+      });
+  }
+}
+
 async function quitApp() {
   if (!isTauri()) return;
   const win = getCurrentWindow();
-  const flushed = await flushWithTimeout(
-    () => session.value?.flush() ?? Promise.resolve(),
-    CLOSE_FLUSH_TIMEOUT_MS,
-  );
+  const flushed = await flushWithTimeout(() => flushBeforeClose(), CLOSE_FLUSH_TIMEOUT_MS);
   if (flushed !== 'saved' && !(await confirmQuit())) {
     await macosQuitCancelled();
     return;
@@ -1389,14 +1440,7 @@ onMounted(async () => {
   } else {
     startupResume.value = 'done';
   }
-  stopCloseFlush = await flushOnClose(async () => {
-    persistReadingPositionForClose();
-    const id = session.value?.id;
-    await (session.value?.flush() ?? Promise.resolve());
-    if (id && isTauri()) {
-      await draftEndSession(id).catch((err) => failDraftSessionEnd(err));
-    }
-  });
+  stopCloseFlush = await flushOnClose(() => flushBeforeClose());
   if (isTauri()) {
     appUpdater = createAppUpdater(defaultUpdaterDeps(), (s) => {
       updatePrompt.value = s;
@@ -1516,6 +1560,7 @@ function closeSession() {
   storyNotesOpen.value = false;
   saveStatusShown.value = false;
   saveDirty.value = false;
+  draftFileBehind.value = false;
   lastSavedAt.value = null;
   decisionRecordsBySection.value = {};
   selectedId.value = undefined;
@@ -1604,7 +1649,9 @@ function open(next: ManuscriptSession) {
   saveFailure.value = saveSucceeded();
   saveStatusShown.value = false;
   saveDirty.value = false;
+  draftFileBehind.value = false;
   lastSavedAt.value = null;
+  void refreshDraftFileBehind();
   // A manuscript is open again, so an earlier "please restart" or open failure no longer holds.
   fatalError.value = '';
   openError.value = '';

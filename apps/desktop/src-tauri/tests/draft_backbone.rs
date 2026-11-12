@@ -171,6 +171,11 @@ fn link_draft(store: &Store, manuscript_id: &str, name: &str) {
         .unwrap();
 }
 
+fn pack_linked_draft(svc: &DraftService, store: &Store, manuscript_id: &str) {
+    svc.pack_if_linked(store, manuscript_id)
+        .expect("pack linked draft for test");
+}
+
 struct FoundChange {
     change_id: String,
     status: String,
@@ -589,6 +594,63 @@ fn resolve_change_finds_introducing_and_deciding_commits() {
         DraftChangeResolve::NotFound { change_id } => assert_eq!(change_id, "only-in-corrupt"),
         other => panic!("corrupt index should not fail resolve: {other:?}"),
     }
+}
+
+#[test]
+fn open_offers_recovery_when_worktree_is_newer_than_the_draft_file() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "crash-recovery.draft");
+    set_chapter_plain(&store, &chapter.doc_id, "v1");
+    svc.checkpoint_if_due(&store, &m.id, "Saved", true)
+        .unwrap()
+        .expect("first checkpoint");
+    svc.pack_if_due(&store, &m.id, true).unwrap();
+    let path = store.draft_file_path(&m.id).unwrap().expect("linked");
+    assert!(Path::new(&path).is_file(), "baseline pack");
+    set_chapter_plain(&store, &chapter.doc_id, "v2 after crash");
+    svc.checkpoint_if_due(&store, &m.id, "Edited chapter", true)
+        .unwrap()
+        .expect("checkpoint without pack");
+    assert!(
+        svc.draft_file_behind(&m.id),
+        "cache ahead of the on-disk .draft"
+    );
+    let offered = svc.open_draft_path(&store, &path, false).unwrap();
+    assert!(offered.is_some(), "open returns");
+    let offered = offered.unwrap();
+    assert!(
+        offered.recovery.is_some(),
+        "must offer to restore newer cache instead of discarding it"
+    );
+}
+
+#[test]
+fn checkpoint_defers_zip_pack_until_pack_if_due() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "defer-pack.draft");
+    set_chapter_plain(&store, &chapter.doc_id, "typed");
+    let path = store.draft_file_path(&m.id).unwrap().expect("linked");
+    assert!(!Path::new(&path).exists());
+    svc.checkpoint_if_due(&store, &m.id, "Edited chapter", false)
+        .unwrap()
+        .expect("checkpoint");
+    assert!(
+        !Path::new(&path).exists(),
+        "idle checkpoint must not re-pack the .draft"
+    );
+    assert!(
+        svc.pack_if_due(&store, &m.id, true).unwrap(),
+        "pack runs when due"
+    );
+    assert!(Path::new(&path).is_file());
 }
 
 #[test]
@@ -1114,6 +1176,7 @@ fn bot_comment_only_on_bot_branch_survives_open_and_restore() {
         .file_bytes(&main, "comments/cthread-bot.json")
         .unwrap()
         .is_none());
+    pack_linked_draft(&svc, &store, &m.id);
     let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
     svc.open_draft_path(&store, &draft_path, true)
         .unwrap()
@@ -1127,6 +1190,7 @@ fn bot_comment_only_on_bot_branch_survives_open_and_restore() {
     assert_eq!(after_restore.len(), 1);
     assert_eq!(after_restore[0].id, "cthread-bot");
     assert_eq!(after_restore[0].body, "Only on the bot branch.");
+    pack_linked_draft(&svc, &store, &m.id);
     svc.open_draft_path(&store, &draft_path, true)
         .unwrap()
         .unwrap();
@@ -1367,6 +1431,7 @@ fn deleting_the_local_database_rebuilds_comments_and_decisions() {
     assert!(before.iter().any(|row| row.0 == "ckeep" && row.2.is_none()));
     assert!(before.iter().all(|row| row.0 != "cdelete"));
     assert_eq!(decisions_before.len(), 2);
+    pack_linked_draft(&svc, &store, &m.id);
     let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
     let data = dir.path().to_path_buf();
     drop(store);
@@ -1600,6 +1665,7 @@ fn accepting_after_an_author_edit_keeps_the_accepted_chapter() {
     )
     .unwrap();
     assert!(comment_on_main.contains("On the suggestion."));
+    pack_linked_draft(&svc, &store, &m.id);
     let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
     let opened = svc
         .open_draft_path(&store, &draft_path, false)
@@ -1730,6 +1796,7 @@ fn accepting_after_the_writer_deletes_a_chapter_the_bot_snapshot_copied() {
     assert!(!work.join(&yjs_path).exists());
     assert_accepted_chapter(&chapter_text(&store, &chapter.doc_id), "version-one");
 
+    pack_linked_draft(&svc, &store, &m.id);
     let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
     let unpacked = tempfile::tempdir().unwrap();
     unpack_draft(Path::new(&draft_path), unpacked.path()).unwrap();
@@ -2261,6 +2328,7 @@ fn decision_around_a_pending_bot_commit(accepted: bool, decide_before_bot: bool)
             "reject left the comment unresolved: {text}"
         );
     }
+    pack_linked_draft(&svc, &store, &m.id);
     let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
     let data = dir.path().to_path_buf();
     drop(store);
@@ -2478,6 +2546,7 @@ fn reject_before_checkpoint_keeps_the_bot_comment_resolved() {
         chapter_md.contains("version-one") && !chapter_md.contains("guttered"),
         "reject put the suggestion back: {chapter_md}"
     );
+    pack_linked_draft(&svc, &store, &m.id);
     let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
     let data = dir.path().to_path_buf();
     drop(store);
@@ -3301,6 +3370,7 @@ fn reopening_restores_an_open_suggestion_and_keeps_a_keystroke() {
         "checkpoint left an empty paragraph: {checkpoint_md}"
     );
     drop(repo);
+    pack_linked_draft(&svc, &store, &m.id);
     let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
     let data = dir.path().to_path_buf();
     drop(store);
@@ -3353,6 +3423,7 @@ fn reopening_restores_an_open_suggestion_and_keeps_a_keystroke() {
         "the reject checkpoint left an empty paragraph: {rejected_md}"
     );
     drop(repo);
+    pack_linked_draft(&svc, &store, &id);
     drop(store);
     drop(svc);
 
@@ -3460,6 +3531,7 @@ fn reopen_after_bot_edit(
             .expect("chapter"),
     );
     drop(repo);
+    pack_linked_draft(&svc, &store, &manuscript_id);
     let draft_path = store.draft_file_path(&manuscript_id).unwrap().unwrap();
     let data = dir.path().to_path_buf();
     drop(store);
@@ -4455,6 +4527,7 @@ fn mixed_decisions_merge_once_and_keep_main_text() {
         change_status(&changes, "chg-keep").as_deref(),
         Some("accepted")
     );
+    pack_linked_draft(&svc, &store, &m.id);
     let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
     let opened = svc
         .open_draft_path(&store, &draft_path, true)

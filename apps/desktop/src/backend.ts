@@ -473,6 +473,16 @@ export async function draftCheckpoint(
   return invoke<string | null>('draft_checkpoint', { manuscriptId, message, immediate });
 }
 
+export async function draftPackIfDue(manuscriptId: string, immediate = false): Promise<boolean> {
+  if (!isTauri()) return false;
+  return invoke<boolean>('draft_pack_if_due', { manuscriptId, immediate });
+}
+
+export async function draftFileBehind(manuscriptId: string): Promise<boolean> {
+  if (!isTauri()) return false;
+  return invoke<boolean>('draft_file_behind', { manuscriptId });
+}
+
 export async function draftHistory(
   manuscriptId: string,
   limit = 50,
