@@ -186,6 +186,34 @@ describe('draft backbone wiring (#116)', () => {
     w.unmount();
   });
 
+  it('commits a replacement once, not once per mark kind', async () => {
+    const backend = await import('./backend');
+    const { w, session } = await openBook();
+    const sectionId = session.outline.value.find((s) => s.kind === 'chapter')!.id;
+    vi.mocked(backend.draftReviewCommit).mockClear();
+    const decided = {
+      id: 'chg-replace',
+      status: 'accepted' as const,
+      decidedAt: '2026-01-02T00:00:00.000Z',
+      decidedBy: 'author',
+    };
+    w.findComponent(ContinuousManuscript).vm.$emit(
+      'decisions',
+      sectionId,
+      [
+        { ...decided, kind: 'suggestion_delete' },
+        { ...decided, kind: 'suggestion_insert' },
+      ],
+      'agent:bot-1',
+    );
+    await flushPromises();
+    expect(backend.draftReviewCommit).toHaveBeenCalledTimes(1);
+    expect(backend.draftReviewCommit).toHaveBeenCalledWith(
+      expect.objectContaining({ suggestionId: 'chg-replace', botAgentId: 'bot-1', accepted: true }),
+    );
+    w.unmount();
+  });
+
   it('shows the save failure when ending the editing session fails', async () => {
     const backend = await import('./backend');
     const { w, session } = await openBook();

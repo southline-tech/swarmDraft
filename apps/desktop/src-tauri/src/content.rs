@@ -648,6 +648,98 @@ pub fn doc_text(doc: &Doc) -> String {
     frag.get_string(&txn)
 }
 
+/// Settle the marks of decided suggestions inside `doc`, as small edits rather than a
+/// rewrite, so block ids and comment anchors stay. `decided` maps a suggestion id to
+/// `accepted` or `rejected`. Accepted inserts and rejected deletions keep their text
+/// without the mark; rejected inserts and accepted deletions are removed; a format mark
+/// is dropped. Returns whether anything changed.
+pub fn settle_suggestion_marks(
+    doc: &Doc,
+    decided: &std::collections::HashMap<String, String>,
+) -> bool {
+    if decided.is_empty() {
+        return false;
+    }
+    let frag: XmlFragmentRef = doc.get_or_insert_xml_fragment(FRAGMENT);
+    let mut txn = doc.transact_mut();
+    settle_children(&mut txn, &frag, decided)
+}
+
+fn settle_children(
+    txn: &mut TransactionMut,
+    parent: &impl XmlFragment,
+    decided: &std::collections::HashMap<String, String>,
+) -> bool {
+    let children: Vec<XmlOut> = parent.children(txn).collect();
+    let mut changed = false;
+    for child in children {
+        match child {
+            XmlOut::Text(t) => {
+                // (start, len, remove, mark keys to clear), in utf-16 units.
+                let mut ops: Vec<(u32, u32, bool, Vec<String>)> = Vec::new();
+                let mut at = 0u32;
+                for d in t.diff(txn, YChange::identity) {
+                    let len = match &d.insert {
+                        Out::Any(Any::String(s)) => s.encode_utf16().count() as u32,
+                        _ => 1,
+                    };
+                    let mut remove = false;
+                    let mut clear = Vec::new();
+                    if let Some(attrs) = &d.attributes {
+                        for (key, value) in attrs.iter() {
+                            if matches!(value, Any::Null) {
+                                continue;
+                            }
+                            let ty = mark_type_from_key(key);
+                            if !matches!(
+                                ty,
+                                "suggestion_insert" | "suggestion_delete" | "format_change"
+                            ) {
+                                continue;
+                            }
+                            let attrs = any_to_json(value);
+                            let id = match &attrs["id"] {
+                                Value::String(s) => s.clone(),
+                                Value::Number(n) => n.to_string(),
+                                _ => continue,
+                            };
+                            let Some(state) = decided.get(&id) else {
+                                continue;
+                            };
+                            let accepted = state == "accepted";
+                            match ty {
+                                "suggestion_insert" if !accepted => remove = true,
+                                "suggestion_delete" if accepted => remove = true,
+                                _ => {}
+                            }
+                            clear.push(key.to_string());
+                        }
+                    }
+                    if remove || !clear.is_empty() {
+                        ops.push((at, len, remove, clear));
+                    }
+                    at += len;
+                }
+                for (start, len, remove, clear) in ops.into_iter().rev() {
+                    changed = true;
+                    if remove {
+                        t.remove_range(txn, start, len);
+                    } else {
+                        let attrs: Attrs = clear
+                            .into_iter()
+                            .map(|key| (std::sync::Arc::<str>::from(key), Any::Null))
+                            .collect();
+                        t.format(txn, start, len, attrs);
+                    }
+                }
+            }
+            XmlOut::Element(e) => changed |= settle_children(txn, &e, decided),
+            XmlOut::Fragment(f) => changed |= settle_children(txn, &f, decided),
+        }
+    }
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

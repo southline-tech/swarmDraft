@@ -408,6 +408,35 @@ impl DraftRepo {
         Ok(())
     }
 
+    /// Tip of `main` (or `master`), ignoring which branch HEAD is on.
+    pub fn main_oid(&self) -> Result<Option<String>, DraftRepoError> {
+        match self.branch_target("main")? {
+            Some(oid) => Ok(Some(oid)),
+            None => self.branch_target("master"),
+        }
+    }
+
+    /// Local branches (`refs/heads/*`) whose tip commit `other` does not have.
+    /// Used to tell whether the working repo holds commits the packed `.draft` lacks,
+    /// such as an unsaved `bot/*` branch.
+    pub fn tips_missing_from(&self, other: &DraftRepo) -> Result<Vec<String>, DraftRepoError> {
+        let mut out = Vec::new();
+        for reference in self.repo.references()? {
+            let reference = reference?;
+            let Some(short) = reference.name().and_then(|n| n.strip_prefix("refs/heads/")) else {
+                continue;
+            };
+            let Some(oid) = reference.target() else {
+                continue;
+            };
+            if other.repo.find_commit(oid).is_err() {
+                out.push(short.to_string());
+            }
+        }
+        out.sort();
+        Ok(out)
+    }
+
     pub fn has_branch(&self, branch_name: &str) -> bool {
         self.repo
             .find_branch(branch_name, BranchType::Local)

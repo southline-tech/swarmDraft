@@ -117,6 +117,19 @@ describe('review panel in the editor (RAD-258)', () => {
     w.unmount();
   });
 
+  it('reports the bot that made a decided suggestion, after its marks are gone', async () => {
+    const { w, session } = await openLive();
+    const before = w.emitted('decisions')?.length ?? 0;
+    await w.findAll('[data-test=item]')[0]!.find('[data-test=accept]').trigger('click');
+    await flushPromises();
+    const fresh = (w.emitted('decisions') ?? []).slice(before);
+    expect(fresh.length).toBeGreaterThan(0);
+    // Without the author, the app committed the decision to a placeholder "editor" branch.
+    for (const [, author] of fresh) expect(author).toMatch(/^agent:./);
+    await session.close({ discard: true });
+    w.unmount();
+  });
+
   it('keeps the decision record in step with the page across undo and redo', async () => {
     const { w, session } = await openLive();
     const e = editorOf(w);

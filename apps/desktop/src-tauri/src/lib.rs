@@ -613,6 +613,15 @@ async fn manuscript_import_json(
     .await
 }
 
+/// A book loaded from the cache (launch reopen, recent list) skips the file-open rebuild,
+/// so decisions recorded in git are applied to the cache first, once per run. A failure
+/// is logged and the book still opens.
+fn reconcile_before_load(drafts: &draft::DraftService, store: &storage::Store, id: &str) {
+    if let Err(e) = drafts.reconcile_on_load(store, id) {
+        eprintln!("draft reconcile before load failed: {e}");
+    }
+}
+
 /// Resume title/id for the opening shell before the full load runs (#280).
 #[tauri::command]
 async fn manuscript_peek_resume(
@@ -626,9 +635,14 @@ async fn manuscript_peek_resume(
 async fn manuscript_open_latest(
     app: tauri::AppHandle,
     store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
 ) -> Result<Option<manuscripts::StoredManuscript>, String> {
     let app = app.clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
     blocking(&store, move |s| {
+        if let Ok(Some(id)) = s.resume_manuscript_id() {
+            reconcile_before_load(&drafts, s, &id);
+        }
         let mut emit = move |stage: &str, percent: u8, title: &str, chapters_found: u32| {
             opening_progress::emit(&app, stage, percent, title, chapters_found);
         };
@@ -664,10 +678,13 @@ async fn manuscript_touch_last_opened(
 async fn manuscript_load(
     app: tauri::AppHandle,
     store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
     manuscript_id: String,
 ) -> Result<manuscripts::StoredManuscript, String> {
     let app = app.clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
     blocking(&store, move |s| {
+        reconcile_before_load(&drafts, s, &manuscript_id);
         let mut emit = move |stage: &str, percent: u8, title: &str, chapters_found: u32| {
             opening_progress::emit(&app, stage, percent, title, chapters_found);
         };

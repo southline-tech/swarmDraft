@@ -1562,6 +1562,18 @@ impl Store {
                     record.decided_by
                 ],
             )?;
+            // Keep the suggestion index (`list_suggestions`) in step with the decision.
+            tx.execute(
+                "UPDATE suggestions SET status = ?1, decided_at = ?2, decided_by = ?3
+                 WHERE id = ?4 AND section_id = ?5 AND status != ?1",
+                params![
+                    record.status,
+                    record.decided_at,
+                    record.decided_by,
+                    record.id,
+                    section_id
+                ],
+            )?;
             tx.commit()?;
             Ok(())
         })
@@ -1614,6 +1626,13 @@ impl Store {
                         record.decided_at,
                         record.decided_by
                     ],
+                )?;
+                // `list_suggestions` reads the suggestion row. A decision from git wins
+                // over a row an older build reopened.
+                tx.execute(
+                    "UPDATE suggestions SET status = ?1, decided_at = ?2, decided_by = ?3
+                     WHERE id = ?4 AND status = 'open'",
+                    params![record.status, record.decided_at, record.decided_by, record.id],
                 )?;
             }
             tx.commit()?;

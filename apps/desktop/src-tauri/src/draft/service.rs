@@ -15,7 +15,8 @@ use crate::storage::Store;
 use super::changes::{self, DraftChangeResolve};
 use super::format::{self, DraftManifest, DRAFT_FORMAT, DRAFT_FORMAT_VERSION, REPO_DIR};
 use super::repo::{
-    append_trailers, message_trailers, CommitEntry, CommitOptions, DraftRepo, DraftRepoError,
+    append_trailers, message_trailers, trailer_value, CommitEntry, CommitOptions, DraftRepo,
+    DraftRepoError,
 };
 use super::sessions::{self, SessionRecord};
 use super::sync;
@@ -86,6 +87,8 @@ pub struct DraftService {
     /// Bot comments and document updates saved in SQLite and not yet on a `bot/*` commit.
     /// Reconcile keeps them, and the bot commit writes these bytes rather than the rebuilt cache.
     bot_writes: Mutex<BotWrites>,
+    /// Books whose cache was checked against git decisions this run.
+    reconciled: Mutex<HashSet<String>>,
     /// Test hook invoked once after restore or open has the op lock and before it rebuilds the cache.
     #[cfg(test)]
     op_entered: Mutex<Option<Box<dyn FnOnce() + Send>>>,
@@ -139,6 +142,7 @@ impl DraftService {
                 next_token: 1,
                 pending: Vec::new(),
             }),
+            reconciled: Mutex::new(HashSet::new()),
             #[cfg(test)]
             op_entered: Mutex::new(None),
         }
@@ -270,6 +274,33 @@ impl DraftService {
             .cloned()
             .collect();
         apply_pending_bot_writes(store, manuscript_id, &pending).map(|_| ())
+    }
+
+    /// Once per run, before the editor loads a book from its cache (the launch reopen and
+    /// the recent list skip the file-open rebuild): settle the marks of suggestions decided
+    /// in git, restore those decisions in the cache, and merge bot branches whose own
+    /// suggestions are all decided. A book with no working repo yet is left alone.
+    pub fn reconcile_on_load(&self, store: &Store, manuscript_id: &str) -> Result<(), String> {
+        if !self.work_dir(manuscript_id).join(".git").is_dir() {
+            return Ok(());
+        }
+        if !self
+            .reconciled
+            .lock()
+            .expect("draft reconciled")
+            .insert(manuscript_id.to_string())
+        {
+            return Ok(());
+        }
+        self.with_op(|| {
+            let dir = self.ensure_open_inner(store, manuscript_id)?;
+            {
+                let _guard = self.bot_writes.lock().expect("bot writes");
+                sync::reconcile_cache_with_git(store, manuscript_id, &dir)
+                    .map_err(|e| e.to_string())?;
+            }
+            self.merge_settled_bot_branches(store, manuscript_id)
+        })
     }
 
     pub fn ensure_open(&self, store: &Store, manuscript_id: &str) -> Result<PathBuf, String> {
@@ -559,6 +590,15 @@ impl DraftService {
         change_kind: Option<&str>,
         change_section_id: Option<&str>,
     ) -> Result<Option<String>, String> {
+        // The suggestion row knows which bot made the change. Prefer it over the
+        // caller's guess, so a decision lands on that bot's own branch and names it
+        // even when the editor no longer has the suggestion's author at hand.
+        let (owner_id, owner_name) = suggestion_owner(store, change_id);
+        let bot_agent_id =
+            owner_id.or_else(|| bot_agent_id.filter(|id| !id.is_empty()).map(str::to_string));
+        let bot_name = owner_name.unwrap_or_else(|| bot_name.to_string());
+        let bot_agent_id = bot_agent_id.as_deref();
+        let bot_name = bot_name.as_str();
         self.with_op(|| {
             let verb = if accepted { "Accepted" } else { "Rejected" };
             let base = format!("{verb} {bot_name}'s change in {chapter_title}");
@@ -586,6 +626,16 @@ impl DraftService {
             )?;
             if !accepted {
                 self.resolve_comments(store, manuscript_id, &linked)?;
+            }
+            // A replacement is an insert mark and a delete mark with one id, and the editor
+            // reports each. The first call already committed (and maybe merged) this
+            // decision; a second commit would open a fresh branch for nothing.
+            if let Some(id) = change_id.filter(|id| !id.is_empty()) {
+                let dir = self.ensure_open_inner(store, manuscript_id)?;
+                let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+                if decision_already_on_bot_branch(&repo, &bot_key, id, decision)? {
+                    return Ok(None);
+                }
             }
             let branch = self.ensure_bot_session_inner(store, manuscript_id, &bot_key)?;
             if !accepted && linked.is_empty() {
@@ -642,6 +692,8 @@ impl DraftService {
             if self.bot_branch_is_settled(store, manuscript_id, &branch, &bot_key)? {
                 self.merge_settled_bot_branch(store, manuscript_id, &branch, &bot_key)?;
             }
+            // This decision can also settle an older branch of the same bot.
+            self.merge_settled_bot_branches(store, manuscript_id)?;
             Ok(oid)
         })
     }
@@ -1088,7 +1140,6 @@ impl DraftService {
         if !archive_path.is_file() {
             return Err("That file isn't a swarmDraft draft.".into());
         }
-        let file_head = head_oid_from_archive(&archive_path)?;
         let id_preview = if let Some(existing) = store
             .manuscript_id_for_draft_path(path)
             .map_err(|e| e.to_string())?
@@ -1100,16 +1151,16 @@ impl DraftService {
                 format::unpack_draft(&archive_path, unpacked.path()).map_err(|e| e.to_string())?;
             manifest.book_id
         };
-        let work = self.work_dir(&id_preview);
-        if !force_discard_recovery {
-            if let Some(recovery) =
-                recovery_offer_if_worktree_newer(&work, path, &id_preview, &file_head)?
-            {
-                return Ok(Some(OpenDraftResult {
+        let preview_work = self.work_dir(&id_preview);
+        let against_file = compare_worktree_to_archive(&preview_work, &archive_path)?;
+        if !force_discard_recovery && against_file == WorktreeVsFile::Newer {
+            return Ok(Some(OpenDraftResult {
+                manuscript_id: id_preview.clone(),
+                recovery: Some(DraftRecoveryOffer {
                     manuscript_id: id_preview,
-                    recovery: Some(recovery),
-                }));
-            }
+                    draft_path: path.to_string(),
+                }),
+            }));
         }
         let unpacked = tempfile::tempdir().map_err(|e| e.to_string())?;
         let manifest =
@@ -1131,23 +1182,39 @@ impl DraftService {
             .set_draft_file_path(&id, path)
             .map_err(|e| e.to_string())?;
         let work = self.work_dir(&id);
-        if work.exists() {
-            std::fs::remove_dir_all(&work).map_err(|e| e.to_string())?;
+        if work == preview_work && against_file == WorktreeVsFile::Keep {
+            // The working repo already has everything in the file plus local-only
+            // commits (an unsaved `bot/*` branch). Rebuilding from the file would drop
+            // those suggestions, so open from the working repo instead.
+            let repo = DraftRepo::open_working(&work).map_err(|e| e.to_string())?;
+            repo.checkout_main().map_err(|e| e.to_string())?;
+            repo.checkout_head().map_err(|e| e.to_string())?;
+        } else {
+            if work.exists() {
+                std::fs::remove_dir_all(&work).map_err(|e| e.to_string())?;
+            }
+            std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+            let bare = unpacked.path().join(REPO_DIR);
+            copy_bare_to_working(&bare, &work).map_err(|e| e.to_string())?;
+            DraftRepo::open_working(&work)
+                .map_err(|e| e.to_string())?
+                .checkout_head()
+                .map_err(|e| e.to_string())?;
         }
-        std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
-        let bare = unpacked.path().join(REPO_DIR);
-        copy_bare_to_working(&bare, &work).map_err(|e| e.to_string())?;
-        DraftRepo::open_working(&work)
-            .map_err(|e| e.to_string())?
-            .checkout_head()
-            .map_err(|e| e.to_string())?;
         self.hydrate_from_worktree(store, &id, &work)?;
+        self.reconciled
+            .lock()
+            .expect("draft reconciled")
+            .insert(id.clone());
         self.working
             .lock()
             .expect("draft working")
             .insert(id.clone(), work);
         if let Err(e) = self.begin_editing_session_inner(store, &id) {
             eprintln!("draft session start failed: {e}");
+        }
+        if let Err(e) = self.merge_settled_bot_branches(store, &id) {
+            eprintln!("settled bot branch not merged on open: {e}");
         }
         Ok(Some(OpenDraftResult {
             manuscript_id: id,
@@ -1429,6 +1496,49 @@ fn pending_bot_identity(write: &PendingBotWrite) -> (String, String) {
     (id, name)
 }
 
+/// True when one of this bot's `bot/*` branches already has a commit deciding `change_id`
+/// the same way.
+fn decision_already_on_bot_branch(
+    repo: &DraftRepo,
+    bot_key: &str,
+    change_id: &str,
+    decision: &str,
+) -> Result<bool, String> {
+    let prefix = format!("bot/{}/", bot_slug(bot_key));
+    for tip in repo.search_ref_tips().map_err(|e| e.to_string())? {
+        if !tip.name.starts_with(&prefix) {
+            continue;
+        }
+        for commit in repo
+            .walk_first_parent(&tip.oid)
+            .map_err(|e| e.to_string())?
+        {
+            let trailers = message_trailers(&commit.message);
+            if trailer_value(&trailers, "Change-Id").as_deref() == Some(change_id)
+                && trailer_value(&trailers, "Decision").as_deref() == Some(decision)
+            {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Agent id and display name of the bot that made `change_id`, from the suggestion index.
+fn suggestion_owner(store: &Store, change_id: Option<&str>) -> (Option<String>, Option<String>) {
+    let Some(id) = change_id.map(str::trim).filter(|id| !id.is_empty()) else {
+        return (None, None);
+    };
+    let Ok(Some(row)) = store.get_suggestion(id) else {
+        return (None, None);
+    };
+    if row.author.kind != "agent" || row.author.id.is_empty() {
+        return (None, None);
+    }
+    let name = Some(row.author.name.trim().to_string()).filter(|n| !n.is_empty());
+    (Some(row.author.id), name)
+}
+
 fn bot_identity(
     comment: &Option<crate::manuscripts::Comment>,
     store: &Store,
@@ -1566,6 +1676,25 @@ fn unmerged_bot_omit(repo: &DraftRepo) -> Result<sync::SyncOmit, String> {
         .filter(|entry| entry.status == "accepted" || entry.status == "rejected")
         .map(|entry| entry.id)
         .collect();
+    // A decision on a bot branch that already merged also counts as on main. An older
+    // build merged a branch whose decisions a later checkpoint then left out of
+    // main's index, and withholding those ids as open would drop accepted text.
+    let mut main_decided = main_decided;
+    for tip in repo.search_ref_tips().map_err(|e| e.to_string())? {
+        if !tip.name.starts_with("bot/")
+            || repo
+                .merge_base(&tip.oid, &main)
+                .map_err(|e| e.to_string())?
+                != Some(tip.oid.clone())
+        {
+            continue;
+        }
+        for entry in changes::changes_in_commit(repo, &tip.oid).map_err(|e| e.to_string())? {
+            if entry.status == "accepted" || entry.status == "rejected" {
+                main_decided.insert(entry.id);
+            }
+        }
+    }
     let main_comments: std::collections::HashSet<String> =
         sync::comment_rows_in_commit(repo, &main)
             .map_err(|e| e.to_string())?
@@ -1599,8 +1728,11 @@ fn unmerged_bot_omit(repo: &DraftRepo) -> Result<sync::SyncOmit, String> {
             if main_decided.contains(&entry.id) {
                 continue;
             }
-            omit.change_status
-                .insert(entry.id.clone(), entry.status.clone());
+            // One open branch can say open where another already decided it.
+            let state = omit.change_status.entry(entry.id.clone()).or_default();
+            if state.is_empty() || state == "open" {
+                *state = entry.status.clone();
+            }
             omit.change_ids.insert(entry.id);
         }
         for row in sync::comment_rows_in_commit(repo, &tip.oid).map_err(|e| e.to_string())? {
@@ -1909,6 +2041,130 @@ fn bot_committer_email(bot_id: &str) -> String {
     format!("bot-{}@swarmdraft.local", bot_slug(bot_id))
 }
 
+/// Where a bot branch stands: its own suggestions and whether all of them are decided.
+struct BranchSettlement {
+    settled: bool,
+    decided: usize,
+}
+
+/// `None` when the branch or main is missing, or they share no history.
+fn branch_settlement(
+    repo: &DraftRepo,
+    branch: &str,
+    bot_agent_id: Option<&str>,
+) -> Result<Option<BranchSettlement>, DraftRepoError> {
+    let Some(bot_oid) = repo.branch_target(branch)? else {
+        return Ok(None);
+    };
+    let Some(main_oid) = repo.head_oid()? else {
+        return Ok(None);
+    };
+    let Some(base) = repo.merge_base(&bot_oid, &main_oid)? else {
+        return Ok(None);
+    };
+    let base_ids = changes::change_ids_in_commit(repo, &base)?;
+    let foreign = ids_first_on_other_branches(repo, branch, &bot_oid, &base, &main_oid)?;
+    let marked = suggestion_marks_in_commit(repo, &bot_oid)?;
+    // A decision can sit on another branch of the same bot, or on a legacy branch
+    // that already merged. It still decides the suggestion here.
+    let elsewhere = sync::git_decisions(repo)?;
+    let mut settled = true;
+    let mut decided = 0;
+    for entry in changes::changes_in_commit(repo, &bot_oid)? {
+        if base_ids.contains(&entry.id)
+            || foreign.contains(&entry.id)
+            || !change_authored_by_bot(&entry, bot_agent_id)
+        {
+            continue;
+        }
+        if entry.status == "accepted"
+            || entry.status == "rejected"
+            || elsewhere.contains_key(&entry.id)
+        {
+            decided += 1;
+        } else if marked.contains(&entry.id) {
+            settled = false;
+        }
+    }
+    Ok(Some(BranchSettlement { settled, decided }))
+}
+
+/// Earliest commit time of each change id on `tip`'s first-parent line, above `stop`.
+fn first_seen_on_line(
+    repo: &DraftRepo,
+    tip: &str,
+    stop: &str,
+) -> Result<HashMap<String, i64>, DraftRepoError> {
+    let mut seen: HashMap<String, i64> = HashMap::new();
+    // `walk_first_parent` lists the oldest commit first.
+    for commit in repo.walk_first_parent(tip)?.into_iter().rev() {
+        if commit.oid == stop {
+            break;
+        }
+        for id in changes::change_ids_in_commit(repo, &commit.oid)? {
+            let at = seen.entry(id).or_insert(commit.time_unix);
+            *at = (*at).min(commit.time_unix);
+        }
+    }
+    Ok(seen)
+}
+
+/// Ids on `branch` that another unmerged bot branch had strictly earlier. Every bot
+/// commit snapshots the whole cache, so an open suggestion from an older branch or
+/// session rides along on a newer branch without belonging to it.
+fn ids_first_on_other_branches(
+    repo: &DraftRepo,
+    branch: &str,
+    bot_oid: &str,
+    base: &str,
+    main_oid: &str,
+) -> Result<HashSet<String>, DraftRepoError> {
+    let mut other: HashMap<String, i64> = HashMap::new();
+    for tip in repo.search_ref_tips()? {
+        if tip.name == branch || !tip.name.starts_with("bot/") {
+            continue;
+        }
+        let Some(tip_base) = repo.merge_base(&tip.oid, main_oid)? else {
+            continue;
+        };
+        if tip_base == tip.oid {
+            continue;
+        }
+        for (id, at) in first_seen_on_line(repo, &tip.oid, &tip_base)? {
+            let earliest = other.entry(id).or_insert(at);
+            *earliest = (*earliest).min(at);
+        }
+    }
+    if other.is_empty() {
+        return Ok(HashSet::new());
+    }
+    Ok(first_seen_on_line(repo, bot_oid, base)?
+        .into_iter()
+        .filter(|(id, at)| other.get(id).is_some_and(|theirs| theirs < at))
+        .map(|(id, _)| id)
+        .collect())
+}
+
+/// Suggestion ids with a mark in any chapter of one commit.
+fn suggestion_marks_in_commit(
+    repo: &DraftRepo,
+    oid: &str,
+) -> Result<HashSet<String>, DraftRepoError> {
+    let mut ids = HashSet::new();
+    for path in repo.list_tree_files(oid, "yjs/")? {
+        if !path.ends_with(".bin") {
+            continue;
+        }
+        let Some(bytes) = repo.file_bytes(oid, &path)? else {
+            continue;
+        };
+        if let Some(doc) = sync::doc_from_update(&bytes) {
+            ids.extend(changes::suggestion_ids(&doc));
+        }
+    }
+    Ok(ids)
+}
+
 fn change_authored_by_bot(entry: &changes::ChangeEntry, bot_agent_id: Option<&str>) -> bool {
     if entry.author_kind != "agent" {
         return false;
@@ -2137,7 +2393,9 @@ impl DraftService {
 
     /// True when every bot suggestion on `branch` is accepted or rejected.
     /// A branch with no bot suggestions is settled, so a decision still merges.
-    /// A writer suggestion copied into the snapshot does not keep it open.
+    /// A writer suggestion copied into the snapshot does not keep it open, nor does an
+    /// open suggestion that another bot branch made first, nor a stale open row with no
+    /// mark left in the branch's chapters.
     fn bot_branch_is_settled(
         &self,
         store: &Store,
@@ -2147,28 +2405,47 @@ impl DraftService {
     ) -> Result<bool, String> {
         let dir = self.ensure_open_inner(store, manuscript_id)?;
         let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
-        let Some(bot_oid) = repo.branch_target(branch).map_err(|e| e.to_string())? else {
-            return Ok(false);
-        };
+        Ok(branch_settlement(&repo, branch, Some(bot_agent_id))
+            .map_err(|e| e.to_string())?
+            .is_some_and(|s| s.settled))
+    }
+
+    /// A settled bot branch left unmerged by an older build merges when the file opens.
+    /// Only a branch with at least one decided suggestion of its own merges, so a bot
+    /// that only left comments keeps its branch.
+    fn merge_settled_bot_branches(&self, store: &Store, manuscript_id: &str) -> Result<(), String> {
+        let dir = self.ensure_open_inner(store, manuscript_id)?;
+        let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
         let Some(main_oid) = repo.head_oid().map_err(|e| e.to_string())? else {
-            return Ok(false);
+            return Ok(());
         };
-        let Some(base) = repo
-            .merge_base(&bot_oid, &main_oid)
-            .map_err(|e| e.to_string())?
-        else {
-            return Ok(false);
-        };
-        let base_ids = changes::change_ids_in_commit(&repo, &base).map_err(|e| e.to_string())?;
-        let introduced: Vec<changes::ChangeEntry> = changes::changes_in_commit(&repo, &bot_oid)
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .filter(|entry| !base_ids.contains(&entry.id))
-            .filter(|entry| change_authored_by_bot(entry, Some(bot_agent_id)))
-            .collect();
-        Ok(introduced
-            .iter()
-            .all(|entry| entry.status == "accepted" || entry.status == "rejected"))
+        let mut ready = Vec::new();
+        for tip in repo.search_ref_tips().map_err(|e| e.to_string())? {
+            let mut parts = tip.name.splitn(3, '/');
+            let (Some("bot"), Some(key), Some(_)) = (parts.next(), parts.next(), parts.next())
+            else {
+                continue;
+            };
+            if repo
+                .merge_base(&tip.oid, &main_oid)
+                .map_err(|e| e.to_string())?
+                == Some(tip.oid.clone())
+            {
+                continue;
+            }
+            let Some(state) =
+                branch_settlement(&repo, &tip.name, Some(key)).map_err(|e| e.to_string())?
+            else {
+                continue;
+            };
+            if state.settled && state.decided > 0 {
+                ready.push((tip.name.clone(), key.to_string()));
+            }
+        }
+        for (branch, key) in ready {
+            self.merge_settled_bot_branch(store, manuscript_id, &branch, &key)?;
+        }
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2282,10 +2559,12 @@ impl DraftService {
             return Ok(Vec::new());
         };
         let base_ids = changes::change_ids_in_commit(&repo, &base).map_err(|e| e.to_string())?;
+        let foreign = ids_first_on_other_branches(&repo, branch, &bot_oid, &base, &main_oid)
+            .map_err(|e| e.to_string())?;
         let mut ids: Vec<String> = changes::changes_in_commit(&repo, &bot_oid)
             .map_err(|e| e.to_string())?
             .into_iter()
-            .filter(|entry| !base_ids.contains(&entry.id))
+            .filter(|entry| !base_ids.contains(&entry.id) && !foreign.contains(&entry.id))
             .filter(|entry| change_authored_by_bot(entry, bot_agent_id))
             .map(|entry| entry.id)
             .collect();
@@ -2497,11 +2776,24 @@ impl DraftService {
         bot_agent_id: &str,
     ) -> Result<String, String> {
         let key = (manuscript_id.to_string(), bot_agent_id.to_string());
-        let sessions = self.bot_sessions.lock().expect("bot sessions");
-        if let Some(s) = sessions.get(&key) {
-            return Ok(s.branch.clone());
+        let cached = self
+            .bot_sessions
+            .lock()
+            .expect("bot sessions")
+            .get(&key)
+            .map(|s| s.branch.clone());
+        if let Some(branch) = cached {
+            // Opening the file again can rebuild the working repo without this ref
+            // (the writer chose to discard newer local work). Recreate it from main so
+            // the next suggestion still commits instead of failing on checkout.
+            let dir = self.ensure_open_inner(store, manuscript_id)?;
+            let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+            if !repo.has_branch(&branch) && repo.head_oid().map_err(|e| e.to_string())?.is_some() {
+                repo.ensure_bot_branch(&branch)
+                    .map_err(|e| format!("create bot branch: {e}"))?;
+            }
+            return Ok(branch);
         }
-        drop(sessions);
         let session_id = new_bot_session_id();
         let branch = bot_branch_name(bot_agent_id, &session_id);
         let dir = self.ensure_open_inner(store, manuscript_id)?;
@@ -2632,41 +2924,52 @@ fn format_when_human(unix: i64) -> String {
         .unwrap_or_else(|| "unknown time".into())
 }
 
-fn head_oid_from_archive(archive: &Path) -> Result<Option<String>, String> {
-    let unpacked = tempfile::tempdir().map_err(|e| e.to_string())?;
-    format::unpack_draft(archive, unpacked.path()).map_err(|e| e.to_string())?;
-    let bare = unpacked.path().join(REPO_DIR);
-    let work = unpacked.path().join("work");
-    copy_bare_to_working(&bare, &work).map_err(|e| e.to_string())?;
-    DraftRepo::open_working(&work)
-        .map_err(|e| e.to_string())?
-        .head_oid()
-        .map_err(|e| e.to_string())
+/// How the working repo for a book compares with the `.draft` file being opened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorktreeVsFile {
+    /// Nothing local would be lost: rebuild the working repo from the file.
+    Discard,
+    /// Same `main` as the file, every commit in the file, plus local-only commits
+    /// (an unsaved `bot/*` branch). Open from the working repo.
+    Keep,
+    /// The working repo has commits the file lacks and the file has commits the
+    /// working repo lacks, or `main` differs. Ask before discarding.
+    Newer,
 }
 
-fn recovery_offer_if_worktree_newer(
-    work: &Path,
-    draft_path: &str,
-    manuscript_id: &str,
-    file_head: &Option<String>,
-) -> Result<Option<DraftRecoveryOffer>, String> {
-    let Some(file_oid) = file_head else {
-        return Ok(None);
-    };
+fn compare_worktree_to_archive(work: &Path, archive: &Path) -> Result<WorktreeVsFile, String> {
     if !work.join(".git").is_dir() {
-        return Ok(None);
+        return Ok(WorktreeVsFile::Discard);
     }
-    let repo = DraftRepo::open_working(work).map_err(|e| e.to_string())?;
-    let Some(work_oid) = repo.head_oid().map_err(|e| e.to_string())? else {
-        return Ok(None);
+    let unpacked = tempfile::tempdir().map_err(|e| e.to_string())?;
+    format::unpack_draft(archive, unpacked.path()).map_err(|e| e.to_string())?;
+    let file_work = unpacked.path().join("work");
+    copy_bare_to_working(&unpacked.path().join(REPO_DIR), &file_work).map_err(|e| e.to_string())?;
+    let file_repo = DraftRepo::open_working(&file_work).map_err(|e| e.to_string())?;
+    let Some(file_main) = file_repo.main_oid().map_err(|e| e.to_string())? else {
+        return Ok(WorktreeVsFile::Discard);
     };
-    if work_oid == *file_oid {
-        return Ok(None);
+    let repo = DraftRepo::open_working(work).map_err(|e| e.to_string())?;
+    let Some(work_main) = repo.main_oid().map_err(|e| e.to_string())? else {
+        return Ok(WorktreeVsFile::Discard);
+    };
+    if work_main != file_main {
+        return Ok(WorktreeVsFile::Newer);
     }
-    Ok(Some(DraftRecoveryOffer {
-        manuscript_id: manuscript_id.to_string(),
-        draft_path: draft_path.to_string(),
-    }))
+    let local_only = repo
+        .tips_missing_from(&file_repo)
+        .map_err(|e| e.to_string())?;
+    if local_only.is_empty() {
+        return Ok(WorktreeVsFile::Discard);
+    }
+    let file_only = file_repo
+        .tips_missing_from(&repo)
+        .map_err(|e| e.to_string())?;
+    if file_only.is_empty() {
+        Ok(WorktreeVsFile::Keep)
+    } else {
+        Ok(WorktreeVsFile::Newer)
+    }
 }
 
 pub(crate) fn sanitize_filename(title: &str) -> String {
