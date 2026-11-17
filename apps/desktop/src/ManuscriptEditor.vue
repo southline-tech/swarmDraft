@@ -917,15 +917,26 @@ watch(
   { immediate: true },
 );
 
+/**
+ * Author of every suggestion seen in this section. A decided suggestion's marks are gone by
+ * the time its decision is reported, so the lookup cannot use the live list alone.
+ */
+const suggestionAuthorsById = new Map<string, string>();
+function rememberSuggestionAuthors(list: readonly { id: string; author?: string }[]) {
+  for (const s of list) if (s.author) suggestionAuthorsById.set(s.id, s.author);
+}
 function suggestionAuthorForRecords(recs: DecisionRecord[]): string | undefined {
   const last = recs[recs.length - 1];
   if (!last) return undefined;
-  return suggestions.value.find((s) => s.id === last.id)?.author;
+  return (
+    suggestions.value.find((s) => s.id === last.id)?.author ?? suggestionAuthorsById.get(last.id)
+  );
 }
 
 function refreshReview(e: Editor) {
   review.value = collectReviewItems(e.state.doc);
   const raw = listSuggestions(e.state.doc.toJSON() as DocNode);
+  rememberSuggestionAuthors(raw);
   suggestions.value = withOutdatedFlags(
     withSuggestionReasons(raw, props.suggestionReasons),
     outdatedIds.value,

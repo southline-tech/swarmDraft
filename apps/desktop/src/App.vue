@@ -703,7 +703,10 @@ function onSectionDecisions(
     .then(async () => {
       if (!isTauri()) return;
       const prevIds = new Set(prev.map((row) => row.id));
-      const fresh = records.filter((row) => !prevIds.has(row.id));
+      // A replacement is an insert and a delete with one id: commit each decision once.
+      const fresh = records.filter(
+        (row, i) => !prevIds.has(row.id) && records.findIndex((r) => r.id === row.id) === i,
+      );
       if (fresh.length === 0) return;
       const manuscriptId = session.value?.id;
       if (!manuscriptId) return;

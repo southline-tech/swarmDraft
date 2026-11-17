@@ -15,7 +15,8 @@ use crate::storage::Store;
 use super::changes::{self, DraftChangeResolve};
 use super::format::{self, DraftManifest, DRAFT_FORMAT, DRAFT_FORMAT_VERSION, REPO_DIR};
 use super::repo::{
-    append_trailers, message_trailers, CommitEntry, CommitOptions, DraftRepo, DraftRepoError,
+    append_trailers, message_trailers, trailer_value, CommitEntry, CommitOptions, DraftRepo,
+    DraftRepoError,
 };
 use super::sessions::{self, SessionRecord};
 use super::sync;
@@ -559,6 +560,15 @@ impl DraftService {
         change_kind: Option<&str>,
         change_section_id: Option<&str>,
     ) -> Result<Option<String>, String> {
+        // The suggestion row knows which bot made the change. Prefer it over the
+        // caller's guess, so a decision lands on that bot's own branch and names it
+        // even when the editor no longer has the suggestion's author at hand.
+        let (owner_id, owner_name) = suggestion_owner(store, change_id);
+        let bot_agent_id =
+            owner_id.or_else(|| bot_agent_id.filter(|id| !id.is_empty()).map(str::to_string));
+        let bot_name = owner_name.unwrap_or_else(|| bot_name.to_string());
+        let bot_agent_id = bot_agent_id.as_deref();
+        let bot_name = bot_name.as_str();
         self.with_op(|| {
             let verb = if accepted { "Accepted" } else { "Rejected" };
             let base = format!("{verb} {bot_name}'s change in {chapter_title}");
@@ -586,6 +596,16 @@ impl DraftService {
             )?;
             if !accepted {
                 self.resolve_comments(store, manuscript_id, &linked)?;
+            }
+            // A replacement is an insert mark and a delete mark with one id, and the editor
+            // reports each. The first call already committed (and maybe merged) this
+            // decision; a second commit would open a fresh branch for nothing.
+            if let Some(id) = change_id.filter(|id| !id.is_empty()) {
+                let dir = self.ensure_open_inner(store, manuscript_id)?;
+                let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+                if decision_already_on_bot_branch(&repo, &bot_key, id, decision)? {
+                    return Ok(None);
+                }
             }
             let branch = self.ensure_bot_session_inner(store, manuscript_id, &bot_key)?;
             if !accepted && linked.is_empty() {
@@ -1435,6 +1455,49 @@ fn pending_bot_identity(write: &PendingBotWrite) -> (String, String) {
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| id.clone());
     (id, name)
+}
+
+/// True when one of this bot's `bot/*` branches already has a commit deciding `change_id`
+/// the same way.
+fn decision_already_on_bot_branch(
+    repo: &DraftRepo,
+    bot_key: &str,
+    change_id: &str,
+    decision: &str,
+) -> Result<bool, String> {
+    let prefix = format!("bot/{}/", bot_slug(bot_key));
+    for tip in repo.search_ref_tips().map_err(|e| e.to_string())? {
+        if !tip.name.starts_with(&prefix) {
+            continue;
+        }
+        for commit in repo
+            .walk_first_parent(&tip.oid)
+            .map_err(|e| e.to_string())?
+        {
+            let trailers = message_trailers(&commit.message);
+            if trailer_value(&trailers, "Change-Id").as_deref() == Some(change_id)
+                && trailer_value(&trailers, "Decision").as_deref() == Some(decision)
+            {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Agent id and display name of the bot that made `change_id`, from the suggestion index.
+fn suggestion_owner(store: &Store, change_id: Option<&str>) -> (Option<String>, Option<String>) {
+    let Some(id) = change_id.map(str::trim).filter(|id| !id.is_empty()) else {
+        return (None, None);
+    };
+    let Ok(Some(row)) = store.get_suggestion(id) else {
+        return (None, None);
+    };
+    if row.author.kind != "agent" || row.author.id.is_empty() {
+        return (None, None);
+    }
+    let name = Some(row.author.name.trim().to_string()).filter(|n| !n.is_empty());
+    (Some(row.author.id), name)
 }
 
 fn bot_identity(

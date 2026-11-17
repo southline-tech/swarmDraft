@@ -46,7 +46,7 @@ Human commits include:
 Session: <sessionId>
 ```
 
-Accept and reject are commits on the bot branch. The git committer is the bot. History on `main` shows the later merge, `Merged bot/…`, not these titles. The bot commit adds:
+Accept and reject are commits on the bot branch. The git committer is the bot. The bot is the one the suggestion index records as that suggestion's author, so a decision lands on that bot's own branch and the title names it. A replacement (an insert and a delete with one id) gets one decision commit. The same decision reported again for that id is not committed twice. Each decision also updates that suggestion's status in the index, which is what `list_suggestions` reads. History on `main` shows the later merge, `Merged bot/…`, not these titles. The bot commit adds:
 
 ```
 Change-Id: <suggestionId>
