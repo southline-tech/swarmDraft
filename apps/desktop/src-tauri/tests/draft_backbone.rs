@@ -699,6 +699,77 @@ fn review_decision_does_not_mark_draft_file_behind() {
 }
 
 #[test]
+fn end_editing_session_after_review_only_does_not_pack_draft() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "close-review-only.draft");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap();
+    set_chapter_mark(&store, &chapter.doc_id, "chg-close", "lighthouse");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Edited chapter",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap();
+    svc.pack_if_due(&store, &m.id, true).unwrap();
+    let path = store.draft_file_path(&m.id).unwrap().expect("linked");
+    let before = fs::read(&path).unwrap();
+    let before_meta = fs::metadata(&path).unwrap();
+    svc.begin_editing_session(&store, &m.id).unwrap();
+    store
+        .save_section_review_decisions(
+            &m.id,
+            &chapter.id,
+            &[ReviewDecisionRecord {
+                kind: "suggestion_insert".into(),
+                id: "chg-close".into(),
+                status: "accepted".into(),
+                decided_at: "2026-01-02T00:00:00.000Z".into(),
+                decided_by: "Author".into(),
+            }],
+        )
+        .unwrap();
+    svc.commit_review_decision(
+        &store,
+        &m.id,
+        true,
+        "Line Editor",
+        &chapter.title,
+        "Author",
+        None,
+        Some("chg-close"),
+        Some("suggestion_insert"),
+        Some(&chapter.id),
+    )
+    .unwrap();
+    assert!(
+        !svc.draft_file_behind(&m.id),
+        "review-only work must not mark the linked .draft behind"
+    );
+    svc.end_editing_session(&store, &m.id).unwrap();
+    let after = fs::read(&path).unwrap();
+    let after_meta = fs::metadata(&path).unwrap();
+    assert_eq!(after, before, "close after review must not rewrite the .draft");
+    assert_eq!(
+        after_meta.modified().unwrap(),
+        before_meta.modified().unwrap(),
+        "close after review must not repack the .draft"
+    );
+}
+
+#[test]
 fn checkpoint_defers_zip_pack_until_pack_if_due() {
     let (_dir, store) = temp_store();
     let stored = store.create_blank_manuscript_with_progress(None).unwrap();
@@ -1285,6 +1356,14 @@ fn failed_session_end_keeps_the_session_ref_moving() {
     )
     .unwrap();
     let session_id = svc.begin_editing_session(&store, &m.id).unwrap();
+    set_chapter_plain(&store, &chapter.doc_id, "during session");
+    svc.checkpoint_if_due(&store, &m.id, "Edited chapter", true)
+        .unwrap()
+        .expect("author typing during the session");
+    assert!(
+        svc.draft_file_behind(&m.id),
+        "close must pack when author text is still ahead of the .draft"
+    );
     let draft_path = store.draft_file_path(&m.id).unwrap().unwrap();
     fs::remove_file(&draft_path).unwrap();
     fs::create_dir(&draft_path).unwrap();

@@ -137,7 +137,13 @@ import { ImportCancelledError } from './import/import-cancelled';
 import { useDeferredValue } from './a11y/deferred';
 import './shells/shells.css';
 import { applyThemeParam, readPreview } from './shells/preview';
-import { CLOSE_FLUSH_TIMEOUT_MS, confirmQuit, flushOnClose, flushWithTimeout } from './close-flush';
+import {
+  CLOSE_FLUSH_TIMEOUT_MS,
+  confirmQuit,
+  flushOnClose,
+  flushWithTimeout,
+  type FlushWithTimeoutOptions,
+} from './close-flush';
 import { flushIdleDraftCheckpoint, scheduleIdleDraftCheckpoint } from './draft-idle-sync';
 import { loadReadingPosition, saveReadingPosition, type ReadingPosition } from './reading-position';
 import {
@@ -1233,10 +1239,16 @@ async function flushBeforeClose(): Promise<void> {
   }
 }
 
+const closeFlushOptions = (): FlushWithTimeoutOptions => ({
+  onSlow: () => {
+    saveDirty.value = true;
+  },
+});
+
 async function quitApp() {
   if (!isTauri()) return;
   const win = getCurrentWindow();
-  const flushed = await flushWithTimeout(() => flushBeforeClose(), CLOSE_FLUSH_TIMEOUT_MS);
+  const flushed = await flushWithTimeout(() => flushBeforeClose(), closeFlushOptions());
   if (flushed !== 'saved' && !(await confirmQuit())) {
     await macosQuitCancelled();
     return;
@@ -1452,7 +1464,11 @@ onMounted(async () => {
   } else {
     startupResume.value = 'done';
   }
-  stopCloseFlush = await flushOnClose(() => flushBeforeClose());
+  stopCloseFlush = await flushOnClose(
+    () => flushBeforeClose(),
+    CLOSE_FLUSH_TIMEOUT_MS,
+    closeFlushOptions(),
+  );
   if (isTauri()) {
     appUpdater = createAppUpdater(defaultUpdaterDeps(), (s) => {
       updatePrompt.value = s;

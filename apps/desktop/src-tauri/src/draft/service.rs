@@ -2762,6 +2762,7 @@ impl DraftService {
             .lock()
             .expect("sessions")
             .insert(manuscript_id.to_string(), record);
+        let pack = self.draft_file_behind(manuscript_id);
         match self.commit_now_inner(
             store,
             manuscript_id,
@@ -2769,7 +2770,7 @@ impl DraftService {
             &author_name(store),
             "author@swarmdraft.local",
             false,
-            true,
+            pack,
             true,
         ) {
             Ok(_) => {

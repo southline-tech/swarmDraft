@@ -19,7 +19,12 @@ vi.mock('@tauri-apps/api/window', () => ({
 }));
 vi.mock('@tauri-apps/plugin-dialog', () => ({ ask: win.ask }));
 
-import { flushOnClose, UNSAVED_QUIT_PROMPT } from './close-flush';
+import {
+  CLOSE_FLUSH_LONG_MS,
+  flushOnClose,
+  flushWithTimeout,
+  UNSAVED_QUIT_PROMPT,
+} from './close-flush';
 
 const requestClose = () => win.handler!({ preventDefault: () => {} });
 
@@ -75,7 +80,7 @@ describe('flushOnClose', () => {
 
   it('treats a flush that times out as unsaved and asks', async () => {
     vi.useFakeTimers();
-    await flushOnClose(() => new Promise<void>(() => {}), 1000);
+    await flushOnClose(() => new Promise<void>(() => {}), 1000, { longMs: 1000 });
     win.ask.mockResolvedValueOnce(true);
     const closing = requestClose();
     await vi.advanceTimersByTimeAsync(999);
@@ -105,6 +110,28 @@ describe('flushOnClose', () => {
     expect(win.destroy).toHaveBeenCalledTimes(2);
   });
 
+  it('does not ask when the flush finishes after the short timeout', async () => {
+    vi.useFakeTimers();
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    let done!: () => void;
+    const flushing = flushOnClose(
+      () =>
+        new Promise<void>((resolve) => {
+          done = resolve;
+        }),
+      3000,
+    );
+    await flushing;
+    const closing = requestClose();
+    await vi.advanceTimersByTimeAsync(3500);
+    done();
+    await vi.runAllTimersAsync();
+    await closing;
+    expect(win.ask).not.toHaveBeenCalled();
+    expect(win.destroy).toHaveBeenCalledTimes(1);
+    expect(info).toHaveBeenCalledWith(expect.stringMatching(/^close flush saved in \d+ms$/));
+  });
+
   it('flushes on pagehide as a fallback', async () => {
     const flush = vi.fn(async () => {});
     const stop = await flushOnClose(flush);
@@ -113,5 +140,33 @@ describe('flushOnClose', () => {
     stop();
     window.dispatchEvent(new Event('pagehide'));
     expect(flush).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('flushWithTimeout', () => {
+  it('resolves saved after the short timeout when the flush eventually succeeds', async () => {
+    vi.useFakeTimers();
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    let done!: () => void;
+    const result = flushWithTimeout(
+      () =>
+        new Promise<void>((resolve) => {
+          done = resolve;
+        }),
+      { shortMs: 3000, longMs: CLOSE_FLUSH_LONG_MS },
+    );
+    await vi.advanceTimersByTimeAsync(3500);
+    done();
+    await vi.runAllTimersAsync();
+    await expect(result).resolves.toBe('saved');
+    expect(info).toHaveBeenCalledWith(expect.stringMatching(/^close flush saved in \d+ms$/));
+  });
+
+  it('resolves unsaved when the flush rejects', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    await expect(flushWithTimeout(() => Promise.reject(new Error('locked')))).resolves.toBe(
+      'unsaved',
+    );
+    expect(info).toHaveBeenCalledWith(expect.stringMatching(/^close flush unsaved in \d+ms$/));
   });
 });
