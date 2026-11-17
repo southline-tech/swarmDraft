@@ -27,9 +27,9 @@ export function flushWithTimeout(
   flush: () => Promise<void>,
   options: number | FlushWithTimeoutOptions = CLOSE_FLUSH_TIMEOUT_MS,
 ): Promise<FlushCloseResult> {
-  const shortMs = typeof options === 'number' ? options : (options.shortMs ?? CLOSE_FLUSH_TIMEOUT_MS);
-  const longMs =
-    typeof options === 'number' ? options : (options.longMs ?? CLOSE_FLUSH_LONG_MS);
+  const shortMs =
+    typeof options === 'number' ? options : (options.shortMs ?? CLOSE_FLUSH_TIMEOUT_MS);
+  const longMs = typeof options === 'number' ? options : (options.longMs ?? CLOSE_FLUSH_LONG_MS);
   const onSlow = typeof options === 'number' ? undefined : options.onSlow;
   const started = Date.now();
 
