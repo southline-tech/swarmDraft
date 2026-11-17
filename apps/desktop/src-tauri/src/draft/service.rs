@@ -68,7 +68,8 @@ pub struct DraftService {
     working: Mutex<HashMap<String, PathBuf>>,
     last_checkpoint: Mutex<HashMap<String, u128>>,
     last_pack: Mutex<HashMap<String, u128>>,
-    /// Commits landed in git but the linked `.draft` zip has not been rewritten yet.
+    /// Author manuscript text landed in git but the linked `.draft` zip has not been rewritten yet.
+    /// Review decisions and bot-branch activity do not set this (#366).
     pack_pending: Mutex<HashSet<String>>,
     /// (manuscript id, bot id) → active bot branch session
     bot_sessions: Mutex<HashMap<(String, String), BotSession>>,
@@ -373,6 +374,7 @@ impl DraftService {
                 "author@swarmdraft.local",
                 false,
                 false,
+                true,
             )?;
             if oid.is_some() {
                 last.insert(manuscript_id.to_string(), now);
@@ -436,6 +438,7 @@ impl DraftService {
                 committer_email,
                 false,
                 true,
+                true,
             )
         })
     }
@@ -450,6 +453,7 @@ impl DraftService {
         committer_email: &str,
         allow_empty: bool,
         pack_now: bool,
+        track_draft_unsaved: bool,
     ) -> Result<Option<String>, String> {
         let dir = self
             .ensure_open_inner(store, manuscript_id)
@@ -481,7 +485,7 @@ impl DraftService {
                 .lock()
                 .expect("pack pending")
                 .remove(manuscript_id);
-        } else if oid.is_some() {
+        } else if oid.is_some() && track_draft_unsaved {
             self.pack_pending
                 .lock()
                 .expect("pack pending")
@@ -698,6 +702,7 @@ impl DraftService {
                 "author@swarmdraft.local",
                 false,
                 false,
+                false,
             )?;
             if self.bot_branch_is_settled(store, manuscript_id, &branch, &bot_key)? {
                 self.merge_settled_bot_branch(store, manuscript_id, &branch, &bot_key)?;
@@ -772,9 +777,6 @@ impl DraftService {
         }
         // A tree that already matches the branch still means the suggestion is in git.
         self.clear_pending_bot_writes(&tokens);
-        if oid.is_some() {
-            self.mark_pack_pending(manuscript_id);
-        }
         Ok(oid)
     }
 
@@ -937,6 +939,7 @@ impl DraftService {
                 "author@swarmdraft.local",
                 false,
                 true,
+                true,
             )?;
             Ok(DraftSaveOutcome::Committed { oid })
         })
@@ -971,6 +974,7 @@ impl DraftService {
                 "author@swarmdraft.local",
                 false,
                 true,
+                true,
             )?;
             Ok(path.to_string_lossy().into_owned())
         })
@@ -987,19 +991,12 @@ impl DraftService {
         self.with_op(|| self.pack_if_linked_inner(store, manuscript_id))
     }
 
-    /// True when the git worktree is ahead of the linked `.draft` on disk.
+    /// True when author manuscript text in git is not yet packed into the linked `.draft` file.
     pub fn draft_file_behind(&self, manuscript_id: &str) -> bool {
         self.pack_pending
             .lock()
             .expect("pack pending")
             .contains(manuscript_id)
-    }
-
-    fn mark_pack_pending(&self, manuscript_id: &str) {
-        self.pack_pending
-            .lock()
-            .expect("pack pending")
-            .insert(manuscript_id.to_string());
     }
 
     fn pack_if_linked_inner(&self, store: &Store, manuscript_id: &str) -> Result<(), String> {
@@ -1106,6 +1103,7 @@ impl DraftService {
             &author_name(store),
             "author@swarmdraft.local",
             false,
+            true,
             true,
         )?;
         Ok(path.to_string())
@@ -2560,7 +2558,6 @@ impl DraftService {
         )
         .map_err(|e| format!("Couldn't merge bot changes: {e}"))?;
         self.end_bot_session(manuscript_id, Some(bot_agent_id), "");
-        self.mark_pack_pending(manuscript_id);
         Ok(())
     }
 
@@ -2773,6 +2770,7 @@ impl DraftService {
             "author@swarmdraft.local",
             false,
             true,
+            true,
         ) {
             Ok(_) => {
                 self.human_sessions
@@ -2831,7 +2829,7 @@ impl DraftService {
         // writes stay out of it: this path does not flush them.
         let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
         if repo.head_oid().map_err(|e| e.to_string())?.is_none() {
-            let oid = self.commit_synced_main(
+            let _oid = self.commit_synced_main(
                 store,
                 manuscript_id,
                 &dir,
@@ -2840,9 +2838,6 @@ impl DraftService {
                 "author@swarmdraft.local",
                 false,
             )?;
-            if oid.is_some() {
-                self.mark_pack_pending(manuscript_id);
-            }
         }
         let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
         if repo.head_oid().map_err(|e| e.to_string())?.is_none() {

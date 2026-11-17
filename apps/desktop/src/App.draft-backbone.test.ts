@@ -1,4 +1,4 @@
-/** Accept passes the change id into the draft commit, and comment edits ask for a checkpoint (#116). */
+/** Accept passes the change id into the draft commit, comment edits ask for a checkpoint (#116), and decisions stay clean (#366). */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -73,6 +73,7 @@ vi.mock('./backend', async (orig) => ({
   draftSave: vi.fn(async () => ({ status: 'committed' as const, oid: null })),
   draftSaveAs: vi.fn(async () => null),
   draftCheckpoint: vi.fn(async () => 'oid'),
+  draftFileBehind: vi.fn(async () => false),
   draftBeginSession: vi.fn(async () => 'sess'),
   draftEndSession: vi.fn(async () => {}),
   draftHistory: vi.fn(async () => []),
@@ -211,6 +212,33 @@ describe('draft backbone wiring (#116)', () => {
     expect(backend.draftReviewCommit).toHaveBeenCalledWith(
       expect.objectContaining({ suggestionId: 'chg-replace', botAgentId: 'bot-1', accepted: true }),
     );
+    w.unmount();
+  });
+
+  it('review decisions do not idle-checkpoint or show unsaved footer text (#366)', async () => {
+    const backend = await import('./backend');
+    vi.mocked(backend.draftCheckpoint).mockClear();
+    vi.mocked(backend.draftFileBehind).mockResolvedValue(false);
+    const { w, session } = await openBook();
+    const sectionId = session.outline.value.find((s) => s.kind === 'chapter')!.id;
+    w.findComponent(ContinuousManuscript).vm.$emit(
+      'decisions',
+      sectionId,
+      [
+        {
+          id: 'chg-1',
+          kind: 'suggestion_insert',
+          status: 'accepted',
+          decidedAt: '2026-01-02T00:00:00.000Z',
+          decidedBy: 'author',
+        },
+      ],
+      'agent:bot-1',
+    );
+    await flushPromises();
+    await flushPromises();
+    expect(backend.draftCheckpoint).not.toHaveBeenCalled();
+    expect(backend.draftFileBehind).toHaveBeenCalled();
     w.unmount();
   });
 

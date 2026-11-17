@@ -371,8 +371,10 @@ const saveError = computed(() => saveFailure.value.failing);
 /** RAD-265 / #204: footer save line after at least one successful persist. */
 const saveStatusShown = ref(false);
 const saveDirty = ref(false);
-/** Git cache has commits not yet written to the linked `.draft` file (#356). */
+/** Author text in git is not yet packed into the linked `.draft` file (#356, #366). */
 const draftFileBehind = ref(false);
+/** Idle draft checkpoints are for author typing, not review decisions (#366). */
+let draftCheckpointSuppress = 0;
 const lastSavedAt = ref<number | null>(null);
 /** Manuscript id for the in-flight save callbacks (ignore stale flushes after switch). */
 const saveHookManuscriptId = ref<string | undefined>();
@@ -391,6 +393,7 @@ const persistHooks = {
     saveDirty.value = false;
     lastSavedAt.value = Date.now();
     saveStatusShown.value = true;
+    if (draftCheckpointSuppress > 0) return;
     const id = session.value?.id;
     const title =
       session.value?.outline.value.find((s) => s.id === selectedId.value)?.title ?? 'chapter';
@@ -710,24 +713,30 @@ function onSectionDecisions(
       if (fresh.length === 0) return;
       const manuscriptId = session.value?.id;
       if (!manuscriptId) return;
-      await session.value?.flush();
-      const chapter =
-        session.value?.outline.value.find((s) => s.id === sectionId)?.title ?? 'chapter';
-      const botName = suggestionAuthor || 'editor';
-      for (const latest of fresh) {
-        await draftReviewCommit({
-          manuscriptId,
-          accepted: latest.status === 'accepted',
-          botName,
-          chapterTitle: chapter,
-          botAgentId: agentIdFromSuggestionAuthor(suggestionAuthor),
-          suggestionId: latest.id,
-          kind: latest.kind,
-          sectionId,
-        }).catch((err) => {
-          console.error('Draft review commit failed', err);
-          saveFailure.value = saveFailed(saveFailure.value, err);
-        });
+      draftCheckpointSuppress++;
+      try {
+        await session.value?.flush();
+        const chapter =
+          session.value?.outline.value.find((s) => s.id === sectionId)?.title ?? 'chapter';
+        const botName = suggestionAuthor || 'editor';
+        for (const latest of fresh) {
+          await draftReviewCommit({
+            manuscriptId,
+            accepted: latest.status === 'accepted',
+            botName,
+            chapterTitle: chapter,
+            botAgentId: agentIdFromSuggestionAuthor(suggestionAuthor),
+            suggestionId: latest.id,
+            kind: latest.kind,
+            sectionId,
+          }).catch((err) => {
+            console.error('Draft review commit failed', err);
+            saveFailure.value = saveFailed(saveFailure.value, err);
+          });
+        }
+        await refreshDraftFileBehind();
+      } finally {
+        draftCheckpointSuppress--;
       }
     })
     .catch((err) => {

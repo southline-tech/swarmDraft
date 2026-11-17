@@ -629,6 +629,76 @@ fn open_offers_recovery_when_worktree_is_newer_than_the_draft_file() {
 }
 
 #[test]
+fn review_decision_does_not_mark_draft_file_behind() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let chapter = chapter(&stored);
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "decision-only.draft");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Baseline",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap();
+    set_chapter_mark(&store, &chapter.doc_id, "chg-dec", "lighthouse");
+    svc.commit_now(
+        &store,
+        &m.id,
+        "Edited chapter",
+        "Author",
+        "author@swarmdraft.local",
+    )
+    .unwrap();
+    svc.pack_if_due(&store, &m.id, true).unwrap();
+    assert!(
+        !svc.draft_file_behind(&m.id),
+        "packed baseline leaves file in sync"
+    );
+    store
+        .save_section_review_decisions(
+            &m.id,
+            &chapter.id,
+            &[ReviewDecisionRecord {
+                kind: "suggestion_insert".into(),
+                id: "chg-dec".into(),
+                status: "accepted".into(),
+                decided_at: "2026-01-02T00:00:00.000Z".into(),
+                decided_by: "Author".into(),
+            }],
+        )
+        .unwrap();
+    svc.commit_review_decision(
+        &store,
+        &m.id,
+        true,
+        "Line Editor",
+        &chapter.title,
+        "Author",
+        None,
+        Some("chg-dec"),
+        Some("suggestion_insert"),
+        Some(&chapter.id),
+    )
+    .unwrap();
+    assert!(
+        !svc.draft_file_behind(&m.id),
+        "review decision without author typing must not mark the draft file behind"
+    );
+    set_chapter_plain(&store, &chapter.doc_id, "author edit");
+    svc.checkpoint_if_due(&store, &m.id, "Edited chapter", true)
+        .unwrap()
+        .expect("author checkpoint");
+    assert!(
+        svc.draft_file_behind(&m.id),
+        "author text still marks the draft file behind until pack"
+    );
+}
+
+#[test]
 fn checkpoint_defers_zip_pack_until_pack_if_due() {
     let (_dir, store) = temp_store();
     let stored = store.create_blank_manuscript_with_progress(None).unwrap();
