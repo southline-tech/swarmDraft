@@ -671,11 +671,7 @@ fn merge_open_suggestions(
             continue;
         }
         let bot_chars: Vec<char> = bot_plain.chars().collect();
-        let found = main_blocks[mi..].iter().position(|candidate| {
-            let main_chars: Vec<char> = plain_text(&candidate.node).chars().collect();
-            align_chars(&bot_chars, &main_chars).is_some()
-        });
-        let Some(rel) = found else {
+        let Some(idx) = find_main_block(block, &bot_plain, &bot_chars, &main_blocks, mi) else {
             if let Some(new_block) = new_block_from_inserts(&block.node, &ops) {
                 pending.push(PendingRestore {
                     block: new_block,
@@ -684,7 +680,6 @@ fn merge_open_suggestions(
             }
             continue;
         };
-        let idx = mi + rel;
         settle_pending(
             &mut pending,
             (mi, idx),
@@ -763,7 +758,14 @@ fn settle_pending(
     applied: &mut HashSet<String>,
 ) {
     let (gap_start, gap_end) = gap;
-    if absorb_anchored_shells(pending, main_blocks, gap_start..gap_end, splices, applied) {
+    if settle_shells_with_anchors(
+        pending,
+        main_blocks,
+        gap_start..gap_end,
+        splices,
+        place,
+        applied,
+    ) {
         return;
     }
     let gap_len = gap_end.saturating_sub(gap_start);
@@ -795,6 +797,62 @@ fn settle_pending(
     }
 }
 
+/// Pair trailing shell paragraphs with main blocks that kept a withheld-insert offset.
+/// Shells before those paragraphs become new blocks at the start of the gap. Returns false
+/// when no anchored main paragraph sits in the range.
+fn settle_shells_with_anchors(
+    pending: &mut Vec<PendingRestore>,
+    main_blocks: &[content::Block],
+    range: std::ops::Range<usize>,
+    splices: &mut Vec<(usize, InsertRun)>,
+    place: &mut Vec<(usize, NewBlock)>,
+    applied: &mut HashSet<String>,
+) -> bool {
+    if pending.is_empty() || pending.iter().any(|item| !item.shell) {
+        return false;
+    }
+    let gap_end = range.end;
+    let anchored: Vec<(usize, Vec<u32>)> = range
+        .filter_map(|idx| {
+            let offsets = withheld_offsets(&main_blocks[idx].node);
+            if offsets.is_empty() {
+                None
+            } else {
+                Some((idx, offsets))
+            }
+        })
+        .collect();
+    if anchored.is_empty() {
+        return false;
+    }
+    if pending.len() < anchored.len() {
+        return false;
+    }
+    let mut anchor_iter = anchored.iter();
+    for item in pending.drain(..) {
+        if let Some((main_idx, offsets)) = anchor_iter.next() {
+            let end = utf16_len(&plain_text(&main_blocks[*main_idx].node));
+            note_applied_tail(applied, &item.block);
+            for (n, run) in item.block.inserts.into_iter().enumerate() {
+                let offset = offsets.get(n).copied().unwrap_or(end);
+                splices.push((
+                    *main_idx,
+                    InsertRun {
+                        offset,
+                        seq: run.seq,
+                        text: run.text,
+                        marks: run.marks,
+                    },
+                ));
+            }
+        } else {
+            note_applied_tail(applied, &item.block);
+            place.push((gap_end, item.block));
+        }
+    }
+    true
+}
+
 /// Pair each waiting shell with a main paragraph that recorded where its insert was
 /// removed. Returns false when the gap is not exactly those shells, so the caller
 /// can keep the older placement.
@@ -808,7 +866,7 @@ fn absorb_anchored_shells(
     if pending.is_empty() || pending.iter().any(|item| !item.shell) {
         return false;
     }
-    let anchors: Vec<(usize, Vec<u32>)> = range
+    let anchored: Vec<(usize, Vec<u32>)> = range
         .filter_map(|idx| {
             let offsets = withheld_offsets(&main_blocks[idx].node);
             if offsets.is_empty() {
@@ -818,10 +876,10 @@ fn absorb_anchored_shells(
             }
         })
         .collect();
-    if anchors.len() != pending.len() {
+    if anchored.len() != pending.len() {
         return false;
     }
-    for (item, (main_idx, offsets)) in pending.drain(..).zip(anchors) {
+    for (item, (main_idx, offsets)) in pending.drain(..).zip(anchored) {
         let end = utf16_len(&plain_text(&main_blocks[main_idx].node));
         note_applied_tail(applied, &item.block);
         for (n, run) in item.block.inserts.into_iter().enumerate() {
@@ -1228,6 +1286,43 @@ fn mark_anchor(align: &[Option<usize>], at: usize, end: usize) -> Option<(usize,
     Some((start, last + 1))
 }
 
+/// Pair a bot paragraph with a main paragraph: earliest main paragraph whose text still
+/// aligns. A new paragraph that only copies a short prefix of the bot sentence is skipped
+/// when a better-aligned paragraph comes later.
+fn find_main_block(
+    _bot: &content::Block,
+    bot_plain: &str,
+    bot_chars: &[char],
+    main_blocks: &[content::Block],
+    from: usize,
+) -> Option<usize> {
+    let mut matches = Vec::new();
+    for (rel, candidate) in main_blocks[from..].iter().enumerate() {
+        let main_plain = plain_text(&candidate.node);
+        let main_chars: Vec<char> = main_plain.chars().collect();
+        if align_chars(bot_chars, &main_chars).is_some() {
+            let prefix_echo = copied_prefix_paragraph(bot_plain, &main_plain);
+            matches.push((from + rel, prefix_echo));
+        }
+    }
+    if matches.is_empty() {
+        return None;
+    }
+    if let Some((idx, _)) = matches.iter().find(|(_, echo)| !*echo) {
+        return Some(*idx);
+    }
+    Some(matches[0].0)
+}
+
+/// True when `main` is a strict prefix of `bot` — usually a newly typed echo, not the
+/// paragraph the bot edited.
+fn copied_prefix_paragraph(bot_plain: &str, main_plain: &str) -> bool {
+    if main_plain.is_empty() || main_plain.len() >= bot_plain.len() {
+        return false;
+    }
+    bot_plain.starts_with(main_plain)
+}
+
 /// Map bot characters onto `main`. A contiguous copy wins, including a keystroke around
 /// it. When the writer also deleted characters, the longest stretches still shared line
 /// up, including a remnant shorter than half the original sentence. `None` when this is
@@ -1246,7 +1341,7 @@ fn align_chars(bot: &[char], main: &[char]) -> Option<Vec<Option<usize>>> {
     // fragment such as "the". A remnant that is the whole of the shorter paragraph
     // still counts at seven characters, so "old phr" stays on that sentence.
     let half = matched.saturating_mul(4) >= bot.len() + main.len();
-    let remnant = matched >= 7 && (matched == bot.len() || matched == main.len());
+    let remnant = matched >= 6 && (matched == bot.len() || matched == main.len());
     if matched == 0 || !(half || remnant) {
         return None;
     }
