@@ -2,9 +2,20 @@
  * Formatting toolbar model (RAD-254): what each control shows and which Tiptap command it runs.
  * Kept free of Vue so the state and the commands can be unit-tested against a real editor.
  */
-import type { Editor } from '@tiptap/core';
+import type { ChainedCommands, Editor } from '@tiptap/core';
 import type { ParagraphStyle } from '@swarmdraft/editor';
 import { styleLabels } from '../copy-deck';
+
+/** Keep the caret and section scroll when toolbar clicks refocus the editor (#339). */
+export function toolbarChain(editor: Editor): ChainedCommands {
+  return editor.chain().focus(null, { scrollIntoView: false });
+}
+
+/** Prevent toolbar mousedown from stealing focus and collapsing the editor selection. */
+export function keepEditorSelectionOnToolbarMouseDown(ev: MouseEvent) {
+  if (ev.button !== 0) return;
+  ev.preventDefault();
+}
 
 /** The four styles in the toolbar dropdown (epic RAD-253, WP 1). */
 export const TOOLBAR_STYLES = ['body', 'heading', 'scene_break', 'block_quote'] as const;
@@ -94,7 +105,7 @@ export type ToolbarCommand =
 export function runCommand(editor: Editor, cmd: ToolbarCommand): boolean {
   // Read-only (load-error mode, RAD-237 restore lock): the toolbar never edits.
   if (!editor.isEditable) return false;
-  const chain = editor.chain().focus();
+  const chain = toolbarChain(editor);
   switch (cmd) {
     case 'undo':
     case 'redo': {
@@ -133,7 +144,7 @@ export function runCommand(editor: Editor, cmd: ToolbarCommand): boolean {
 }
 
 function setParagraph(editor: Editor, style: ParagraphStyle): boolean {
-  const chain = editor.chain().focus();
+  const chain = toolbarChain(editor);
   if (editor.isActive('heading')) return chain.setNode('paragraph', { style }).run();
   return chain.setParagraphStyle(style).run();
 }
