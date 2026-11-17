@@ -154,4 +154,37 @@ describe('spellcheck decorations', () => {
     expect(lint.mock.calls.length).toBe(afterBurst);
     e.destroy();
   });
+
+  it('lints only on-screen paragraphs and the rest once they scroll into view (#356)', async () => {
+    let farTop = 5000;
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        const top = this.textContent?.includes('far') ? farTop : 0;
+        return { top, bottom: top + 20, left: 0, right: 100, width: 100, height: 20 } as DOMRect;
+      });
+    const lint = vi.fn<(text: string) => Promise<SpellLintResult[]>>(async () => []);
+    const e = editorWithSpell(
+      {
+        type: 'doc',
+        content: [
+          { type: 'paragraph', content: [{ type: 'text', text: 'near text' }] },
+          { type: 'paragraph', content: [{ type: 'text', text: 'far text' }] },
+        ],
+      },
+      lint,
+    );
+    try {
+      await vi.waitFor(() => expect(lint).toHaveBeenCalledWith('near text'));
+      await new Promise((r) => setTimeout(r, 30));
+      expect(lint.mock.calls.map((c) => c[0])).toEqual(['near text']);
+      farTop = 0;
+      window.dispatchEvent(new Event('scroll'));
+      await vi.waitFor(() => expect(lint).toHaveBeenCalledWith('far text'));
+      expect(lint).toHaveBeenCalledTimes(2);
+    } finally {
+      e.destroy();
+      rectSpy.mockRestore();
+    }
+  });
 });

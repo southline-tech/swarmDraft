@@ -73,7 +73,80 @@ fn build_dictionary(extra_words: &[String], ignored: &[String]) -> Arc<MergedDic
     Arc::new(merged)
 }
 
+/// Building the curated dictionary merge and the curated `LintGroup` costs far more than linting
+/// one paragraph (~200 ms in a debug build), and the editor lints paragraph by paragraph. Keep the
+/// last linter and reuse it while the manuscript's word lists are unchanged (#356).
+struct CachedLinter {
+    extra_words: Vec<String>,
+    ignored: Vec<String>,
+    dictionary: Arc<MergedDictionary>,
+    linter: harper_core::linting::LintGroup,
+}
+
+/// Single-entry cache: one manuscript is open at a time, so its word lists rarely change.
+struct LinterCache {
+    entry: Option<CachedLinter>,
+    /// How many times the linter was (re)built; read by tests.
+    #[cfg_attr(not(test), allow(dead_code))]
+    builds: usize,
+}
+
+impl LinterCache {
+    const fn new() -> Self {
+        Self {
+            entry: None,
+            builds: 0,
+        }
+    }
+
+    fn linter(
+        &mut self,
+        extra_words: &[String],
+        ignored: &[String],
+    ) -> (&Arc<MergedDictionary>, &mut harper_core::linting::LintGroup) {
+        let fresh = self
+            .entry
+            .as_ref()
+            .is_some_and(|c| c.extra_words == extra_words && c.ignored == ignored);
+        if !fresh {
+            self.builds += 1;
+            let dictionary = build_dictionary(extra_words, ignored);
+            let linter =
+                harper_core::linting::LintGroup::new_curated(dictionary.clone(), Dialect::American);
+            self.entry = Some(CachedLinter {
+                extra_words: extra_words.to_vec(),
+                ignored: ignored.to_vec(),
+                dictionary,
+                linter,
+            });
+        }
+        let cached = self.entry.as_mut().expect("linter cache filled above");
+        (&cached.dictionary, &mut cached.linter)
+    }
+}
+
+static LINTER_CACHE: std::sync::Mutex<LinterCache> = std::sync::Mutex::new(LinterCache::new());
+
 pub fn lint_plain_text(
+    text: &str,
+    extra_words: &[String],
+    ignored: &[String],
+    check_spelling: bool,
+    check_grammar: bool,
+) -> Vec<SpellLintIssue> {
+    let mut cache = LINTER_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    lint_with_cache(
+        &mut cache,
+        text,
+        extra_words,
+        ignored,
+        check_spelling,
+        check_grammar,
+    )
+}
+
+fn lint_with_cache(
+    cache: &mut LinterCache,
     text: &str,
     extra_words: &[String],
     ignored: &[String],
@@ -83,17 +156,15 @@ pub fn lint_plain_text(
     if text.trim().is_empty() || (!check_spelling && !check_grammar) {
         return Vec::new();
     }
-    let dict_arc = build_dictionary(extra_words, ignored);
-    let mut linter =
-        harper_core::linting::LintGroup::new_curated(dict_arc.clone(), Dialect::American);
-    let document = Document::new_plain_english(text, dict_arc.as_ref());
     let source: Vec<char> = text.chars().collect();
     let ignored_set: std::collections::HashSet<&str> = ignored.iter().map(String::as_str).collect();
     let dict_set: std::collections::HashSet<&str> =
         extra_words.iter().map(String::as_str).collect();
+    let (dict, linter) = cache.linter(extra_words, ignored);
+    let document = Document::new_plain_english(text, dict.as_ref());
+    let lints = linter.lint(&document);
 
-    linter
-        .lint(&document)
+    lints
         .into_iter()
         .filter(|lint| match lint.lint_kind {
             k if is_spelling_lint(k) => check_spelling,
@@ -212,29 +283,37 @@ impl Store {
     }
 }
 
+/// Async so Tauri runs it off the main thread: a sync command runs on the window's event loop,
+/// and linting a whole manuscript paragraph by paragraph kept that thread at 100% and froze
+/// input, Save As and Open until it finished (#356).
 #[tauri::command]
-pub fn spell_lint_paragraph(
+pub async fn spell_lint_paragraph(
     store: tauri::State<'_, Store>,
     manuscript_id: Option<String>,
     text: String,
     check_spelling: bool,
     check_grammar: bool,
 ) -> Result<Vec<SpellLintIssue>, String> {
-    let (extra, ignored) = if let Some(id) = manuscript_id.as_deref() {
-        (
-            store.spell_extra_words(id).map_err(|e| e.to_string())?,
-            store.spell_ignored_words(id).map_err(|e| e.to_string())?,
-        )
-    } else {
-        (Vec::new(), Vec::new())
-    };
-    Ok(lint_plain_text(
-        &text,
-        &extra,
-        &ignored,
-        check_spelling,
-        check_grammar,
-    ))
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (extra, ignored) = if let Some(id) = manuscript_id.as_deref() {
+            (
+                store.spell_extra_words(id).map_err(|e| e.to_string())?,
+                store.spell_ignored_words(id).map_err(|e| e.to_string())?,
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        Ok(lint_plain_text(
+            &text,
+            &extra,
+            &ignored,
+            check_spelling,
+            check_grammar,
+        ))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -314,6 +393,22 @@ mod tests {
         assert!(issues.is_empty());
         let issues = lint_plain_text("teh", &["teh".into()], &[], true, true);
         assert!(issues.is_empty());
+    }
+
+    #[test]
+    fn linter_is_built_once_per_word_list() {
+        let mut cache = LinterCache::new();
+        let words = vec!["zorbnax".to_string()];
+        for text in ["One teh paragraph.", "Another paragraph.", "A third tst."] {
+            lint_with_cache(&mut cache, text, &words, &[], true, true);
+        }
+        assert_eq!(
+            cache.builds, 1,
+            "paragraphs with the same word lists share one linter"
+        );
+        let issues = lint_with_cache(&mut cache, "teh", &words, &["teh".into()], true, true);
+        assert!(issues.is_empty(), "a changed ignore list must take effect");
+        assert_eq!(cache.builds, 2);
     }
 
     #[test]
