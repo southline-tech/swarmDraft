@@ -415,17 +415,79 @@ fn strip_decided_marks(state: &[u8], decided: &HashMap<String, String>) -> Optio
         return None;
     }
     let doc = doc_from_update(state)?;
-    if !changes::suggestion_ids(&doc)
-        .iter()
-        .any(|id| decided.contains_key(id))
-    {
+    if !content::settle_suggestion_marks(&doc, decided) {
         return None;
     }
-    let cleaned = strip_withheld_marks(&doc, decided)?;
-    let bytes = cleaned
+    let bytes = doc
         .transact()
         .encode_state_as_update_v1(&StateVector::default());
     Some(bytes)
+}
+
+/// Bring the cache in line with decisions recorded in git, without a rebuild. Used when
+/// the app reopens a book from its cache at launch, which never runs the file-open
+/// rebuild: a decided suggestion loses its marks (as one small edit appended to the
+/// chapter, so unsaved typing and block ids stay), and its decision and suggestion row
+/// are set. Returns whether a chapter changed.
+pub fn reconcile_cache_with_git(
+    store: &Store,
+    manuscript_id: &str,
+    worktree: &Path,
+) -> Result<bool, DraftRepoError> {
+    let repo = DraftRepo::open_working(worktree)?;
+    let (_, decided) = suggestion_states(&repo)?;
+    if decided.is_empty() {
+        return Ok(false);
+    }
+    let mut changed = false;
+    for section in store.list_sections(manuscript_id).map_err(storage_err)? {
+        if section.kind != "chapter" {
+            continue;
+        }
+        let doc = store.load_doc(&section.doc_id).map_err(storage_err)?;
+        if !changes::suggestion_ids(&doc)
+            .iter()
+            .any(|id| decided.contains_key(id))
+        {
+            continue;
+        }
+        let before = doc.transact().state_vector();
+        if !content::settle_suggestion_marks(&doc, &decided) {
+            continue;
+        }
+        let update = doc.transact().encode_state_as_update_v1(&before);
+        store
+            .append_doc_update(&section.doc_id, &update)
+            .map_err(storage_err)?;
+        changed = true;
+    }
+    let mut by_id: BTreeMap<String, (String, ReviewDecisionRecord)> = BTreeMap::new();
+    if let Some(main) = repo.head_oid()? {
+        if let Some(bytes) = repo.file_bytes(&main, "review/changes.json")? {
+            absorb_decision_bytes(&bytes, false, &mut by_id);
+        }
+    }
+    for tip in repo.search_ref_tips()? {
+        if !tip.name.starts_with("bot/") {
+            continue;
+        }
+        if let Some(bytes) = repo.file_bytes(&tip.oid, "review/changes.json")? {
+            absorb_decision_bytes(&bytes, true, &mut by_id);
+        }
+    }
+    for (section_id, record) in by_id.values() {
+        if store
+            .get_suggestion(&record.id)
+            .map_err(storage_err)?
+            .is_some_and(|row| row.status != "open")
+        {
+            continue;
+        }
+        if let Err(e) = store.ensure_review_decision(manuscript_id, section_id, record) {
+            eprintln!("decision from git not restored: {e}");
+        }
+    }
+    Ok(changed)
 }
 
 /// Status of every suggestion accepted or rejected on `main` or on any bot tip.

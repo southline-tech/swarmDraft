@@ -87,6 +87,8 @@ pub struct DraftService {
     /// Bot comments and document updates saved in SQLite and not yet on a `bot/*` commit.
     /// Reconcile keeps them, and the bot commit writes these bytes rather than the rebuilt cache.
     bot_writes: Mutex<BotWrites>,
+    /// Books whose cache was checked against git decisions this run.
+    reconciled: Mutex<HashSet<String>>,
     /// Test hook invoked once after restore or open has the op lock and before it rebuilds the cache.
     #[cfg(test)]
     op_entered: Mutex<Option<Box<dyn FnOnce() + Send>>>,
@@ -140,6 +142,7 @@ impl DraftService {
                 next_token: 1,
                 pending: Vec::new(),
             }),
+            reconciled: Mutex::new(HashSet::new()),
             #[cfg(test)]
             op_entered: Mutex::new(None),
         }
@@ -271,6 +274,33 @@ impl DraftService {
             .cloned()
             .collect();
         apply_pending_bot_writes(store, manuscript_id, &pending).map(|_| ())
+    }
+
+    /// Once per run, before the editor loads a book from its cache (the launch reopen and
+    /// the recent list skip the file-open rebuild): settle the marks of suggestions decided
+    /// in git, restore those decisions in the cache, and merge bot branches whose own
+    /// suggestions are all decided. A book with no working repo yet is left alone.
+    pub fn reconcile_on_load(&self, store: &Store, manuscript_id: &str) -> Result<(), String> {
+        if !self.work_dir(manuscript_id).join(".git").is_dir() {
+            return Ok(());
+        }
+        if !self
+            .reconciled
+            .lock()
+            .expect("draft reconciled")
+            .insert(manuscript_id.to_string())
+        {
+            return Ok(());
+        }
+        self.with_op(|| {
+            let dir = self.ensure_open_inner(store, manuscript_id)?;
+            {
+                let _guard = self.bot_writes.lock().expect("bot writes");
+                sync::reconcile_cache_with_git(store, manuscript_id, &dir)
+                    .map_err(|e| e.to_string())?;
+            }
+            self.merge_settled_bot_branches(store, manuscript_id)
+        })
     }
 
     pub fn ensure_open(&self, store: &Store, manuscript_id: &str) -> Result<PathBuf, String> {
@@ -1172,6 +1202,10 @@ impl DraftService {
                 .map_err(|e| e.to_string())?;
         }
         self.hydrate_from_worktree(store, &id, &work)?;
+        self.reconciled
+            .lock()
+            .expect("draft reconciled")
+            .insert(id.clone());
         self.working
             .lock()
             .expect("draft working")

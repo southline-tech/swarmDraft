@@ -490,3 +490,114 @@ fn a_settled_branch_left_unmerged_merges_on_open() {
     assert_eq!(status(&book, "s-a"), "accepted");
     assert_eq!(status(&book, "s-older"), "open");
 }
+
+/// Commit what an older build left on `branch`: these ids decided in the index only.
+fn decide_on_branch_only(book: &Book, branch: &str, decided: &[(&str, &str)]) {
+    let r = repo(book);
+    let tip = r.branch_target(branch).unwrap().unwrap();
+    let bytes = r.file_bytes(&tip, "review/changes.json").unwrap().unwrap();
+    let mut index: Value = serde_json::from_slice(&bytes).unwrap();
+    for row in index.as_array_mut().unwrap() {
+        if let Some((_, state)) = decided.iter().find(|(id, _)| row["id"] == *id) {
+            row["status"] = json!(state);
+            row["decidedAt"] = json!("2026-11-17T05:20:00.000Z");
+            row["decidedBy"] = json!("Author");
+        }
+    }
+    let out = serde_json::to_vec_pretty(&index).unwrap();
+    r.commit_files_on_branch(
+        branch,
+        "Accepted QA Line Editor's change",
+        BOT_NAME,
+        "bot@swarmdraft.local",
+        &[("review/changes.json", Some(out.as_slice()))],
+        false,
+    )
+    .unwrap();
+}
+
+/// The launch path: the app reopens the last book from its cache (`manuscript_open_latest`,
+/// or a book from the recent list via `manuscript_load`), with no file open and no rebuild.
+/// A relaunch on this build must still heal decided marks, restore decisions, and merge a
+/// settled branch, and must keep the working repo with its newer local work.
+#[test]
+fn launch_reopen_from_cache_heals_and_merges_without_a_rebuild() {
+    let mut book = blank_book();
+    bot_suggests(&book, &["s-older"]);
+    let path = save_and_pack(&book);
+    relaunch_and_open(&mut book, &path);
+    bot_suggests(&book, &["s-a", "s-b"]);
+    let branch = unmerged_bot_branches(&book)
+        .into_iter()
+        .find(|name| {
+            let r = repo(&book);
+            let tip = r.branch_target(name).unwrap().unwrap();
+            String::from_utf8(r.file_bytes(&tip, "review/changes.json").unwrap().unwrap())
+                .unwrap()
+                .contains("s-a")
+        })
+        .unwrap();
+    // An older build: both decisions are only in git, the cache kept the marks and
+    // reopened the rows. Nothing is saved to the file after that.
+    decide_on_branch_only(&book, &branch, &[("s-a", "accepted"), ("s-b", "rejected")]);
+    assert_eq!(status(&book, "s-a"), "open");
+    let blocks_before: Vec<String> = content::decode(&book.store.load_doc(&book.doc_id).unwrap())
+        .into_iter()
+        .map(|b| b.id)
+        .collect();
+    let work = book.svc.worktree_path(&book.manuscript_id);
+    std::fs::write(work.join(".git").join("zz-local-marker"), b"x").unwrap();
+    let main_before = repo(&book).main_oid().unwrap().unwrap();
+
+    // Relaunch: a new service, and the book comes back from the cache.
+    book.svc = DraftService::new(book.dir.path().to_path_buf(), "0.2.1".into());
+    book.svc
+        .reconcile_on_load(&book.store, &book.manuscript_id)
+        .unwrap();
+
+    assert!(
+        work.join(".git").join("zz-local-marker").is_file(),
+        "the working repo was rebuilt"
+    );
+    let r = repo(&book);
+    let main_after = r.main_oid().unwrap().unwrap();
+    assert!(
+        r.merge_base(&main_before, &main_after).unwrap().as_deref() == Some(main_before.as_str())
+    );
+    let merged = merges(&book);
+    assert_eq!(merged.len(), 1, "{merged:?}");
+    assert!(
+        merged[0].starts_with(&format!("Merged {branch}")),
+        "{merged:?}"
+    );
+    assert_eq!(unmerged_bot_branches(&book).len(), 1);
+    assert_eq!(status(&book, "s-a"), "accepted");
+    assert_eq!(status(&book, "s-b"), "rejected");
+    assert_eq!(status(&book, "s-older"), "open");
+    assert_eq!(
+        live_mark_ids(&book, &["s-a", "s-b", "s-older"]),
+        vec!["s-older".to_string()]
+    );
+    let text: String = chapter_json(&book).iter().map(Value::to_string).collect();
+    assert!(text.contains("new-s-a") && !text.contains("old-s-a"));
+    assert!(text.contains("old-s-b") && !text.contains("new-s-b"));
+    let blocks_after: Vec<String> = content::decode(&book.store.load_doc(&book.doc_id).unwrap())
+        .into_iter()
+        .map(|b| b.id)
+        .collect();
+    assert_eq!(blocks_before, blocks_after, "block ids changed");
+
+    // Once per run: a second load does nothing more, and a later file open agrees.
+    book.svc
+        .reconcile_on_load(&book.store, &book.manuscript_id)
+        .unwrap();
+    assert_eq!(merges(&book).len(), 1);
+    let path = save_and_pack(&book);
+    relaunch_and_open(&mut book, &path);
+    assert_eq!(status(&book, "s-a"), "accepted");
+    assert_eq!(status(&book, "s-b"), "rejected");
+    assert_eq!(
+        live_mark_ids(&book, &["s-a", "s-b", "s-older"]),
+        vec!["s-older".to_string()]
+    );
+}
