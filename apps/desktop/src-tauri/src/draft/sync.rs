@@ -23,7 +23,7 @@ use crate::manuscripts::{
 use crate::notes;
 use crate::storage::{StorageError, Store};
 
-use super::changes::{self, map_kind};
+use super::changes::{self, map_kind, ChangeEntry, DraftChangeResolve};
 use super::repo::{DraftRepo, DraftRepoError};
 use super::sessions::safe_file_id;
 
@@ -128,6 +128,7 @@ pub fn sync_worktree_to_store(
     import_notes_from_worktree(store, manuscript_id, worktree)?;
     import_comments_from_worktree(store, manuscript_id, worktree)?;
     import_decisions_from_worktree(store, manuscript_id, worktree)?;
+    cleanup_orphaned_open_suggestions(store, manuscript_id, worktree)?;
     Ok(())
 }
 
@@ -529,6 +530,149 @@ fn suggestion_states(
     }
     open.retain(|id| !decided.contains_key(id));
     Ok((open, decided))
+}
+
+/// Drop open suggestion rows that are no longer live work. Live rows still have a mark in the
+/// chapter, or still have a mark on the unmerged `bot/*` branch that introduced them. The rest
+/// are marked `outdated` in SQLite (so `list_suggestions` omits them) and pruned from main's
+/// `review/changes.json` on disk when present.
+pub(crate) fn cleanup_orphaned_open_suggestions(
+    store: &Store,
+    manuscript_id: &str,
+    worktree: &Path,
+) -> Result<(), DraftRepoError> {
+    let repo = DraftRepo::open_working(worktree)?;
+    let (_, decided) = suggestion_states(&repo)?;
+    let live = live_open_suggestion_ids(&repo, store, manuscript_id)?;
+    let marked_at = store.now().map_err(storage_err)?;
+    let marked_by = "system:cleanup";
+    let mut stale: HashSet<String> = HashSet::new();
+    for row in store
+        .suggestions_for_manuscript(manuscript_id)
+        .map_err(storage_err)?
+    {
+        if row.status != "open" {
+            continue;
+        }
+        if decided.contains_key(&row.id) || live.contains(&row.id) {
+            continue;
+        }
+        stale.insert(row.id.clone());
+        store
+            .mark_suggestions_outdated(
+                &row.section_id,
+                std::slice::from_ref(&row.id),
+                &marked_at,
+                marked_by,
+            )
+            .map_err(storage_err)?;
+    }
+    if stale.is_empty() {
+        return Ok(());
+    }
+    if let Some(bytes) = repo
+        .head_oid()?
+        .and_then(|main| repo.file_bytes(&main, "review/changes.json").ok().flatten())
+    {
+        if let Some(out) = prune_change_bytes(Some(bytes.as_slice()), &stale) {
+            write_stable(&worktree.join("review").join("changes.json"), &out)?;
+        }
+    }
+    Ok(())
+}
+
+/// Open suggestions that still count as live for Review and for bot-branch settlement.
+fn live_open_suggestion_ids(
+    repo: &DraftRepo,
+    store: &Store,
+    manuscript_id: &str,
+) -> Result<HashSet<String>, DraftRepoError> {
+    let (git_open, _) = suggestion_states(repo)?;
+    let resolved = changes::resolve_all(repo).unwrap_or_default();
+    let mut live: HashSet<String> = HashSet::new();
+    for section in store.list_sections(manuscript_id).map_err(storage_err)? {
+        if section.kind != "chapter" {
+            continue;
+        }
+        let Ok(doc) = store.load_doc(&section.doc_id) else {
+            continue;
+        };
+        live.extend(changes::suggestion_ids(&doc));
+    }
+    let Some(main) = repo.head_oid()? else {
+        return Ok(live);
+    };
+    for id in git_open {
+        if live.contains(&id) {
+            continue;
+        }
+        let Some(DraftChangeResolve::Found {
+            introduced_ref,
+            status,
+            ..
+        }) = resolved.get(&id)
+        else {
+            continue;
+        };
+        if status != "open"
+            || !introduced_ref.starts_with("bot/")
+            || !repo.has_branch(introduced_ref)
+        {
+            continue;
+        }
+        let Some(tip) = repo.branch_target(introduced_ref)? else {
+            continue;
+        };
+        let Some(base) = repo.merge_base(&tip, &main)? else {
+            continue;
+        };
+        if base == tip {
+            continue;
+        }
+        if suggestion_marks_in_tree(repo, &tip)?.contains(&id) {
+            live.insert(id);
+        }
+    }
+    Ok(live)
+}
+
+fn suggestion_marks_in_tree(
+    repo: &DraftRepo,
+    oid: &str,
+) -> Result<HashSet<String>, DraftRepoError> {
+    let mut ids = HashSet::new();
+    for path in repo.list_tree_files(oid, "yjs/")? {
+        if !path.ends_with(".bin") {
+            continue;
+        }
+        let Some(bytes) = repo.file_bytes(oid, &path)? else {
+            continue;
+        };
+        if let Some(doc) = doc_from_update(&bytes) {
+            ids.extend(changes::suggestion_ids(&doc));
+        }
+    }
+    Ok(ids)
+}
+
+fn prune_change_bytes(bytes: Option<&[u8]>, stale: &HashSet<String>) -> Option<Vec<u8>> {
+    let entries = changes::parse_change_index(bytes?).ok()?;
+    let mut changed = false;
+    let kept: Vec<ChangeEntry> = entries
+        .into_iter()
+        .filter(|entry| {
+            if entry.status == "open" && stale.contains(&entry.id) {
+                changed = true;
+                false
+            } else {
+                true
+            }
+        })
+        .collect();
+    if !changed {
+        return None;
+    }
+    changes::index_bytes(&kept).ok()
 }
 
 /// Put a suggestion that is still open back into `main_bytes` from unmerged bot tips,
