@@ -15,6 +15,7 @@ import {
   SHORTCUTS,
   STYLE_LABELS,
   TOOLBAR_STYLES,
+  keepEditorSelectionOnToolbarMouseDown,
   runCommand,
   toolbarState,
   type Align,
@@ -33,6 +34,8 @@ const props = withDefaults(
   defineProps<{
     editor: Editor;
     reviewOpen?: boolean;
+    /** Open bot comment threads not yet viewed this session (issue 339). */
+    unseenBotComments?: number;
     /** Whether the chapter navigator is showing (owned by App.vue). */
     navigatorOpen?: boolean;
     navigatorControls?: string;
@@ -62,6 +65,7 @@ const props = withDefaults(
     manuscriptId: undefined,
     bookTitle: undefined,
     tracking: false,
+    unseenBotComments: 0,
   },
 );
 const emit = defineEmits<{
@@ -144,6 +148,15 @@ function run(cmd: ToolbarCommand) {
   if (!ed().isEditable) return bump();
   runCommand(ed(), cmd);
   bump();
+}
+
+function onToolbarMouseDown(ev: MouseEvent) {
+  if (!editable.value) return;
+  const el = ev.target;
+  if (!(el instanceof Element)) return;
+  if (el.closest('select, [data-test="draft-picker"], a, input, textarea')) return;
+  if (!el.closest('button')) return;
+  keepEditorSelectionOnToolbarMouseDown(ev);
 }
 
 const styleOptions = computed(() => {
@@ -331,6 +344,7 @@ const themeLabel = computed(() =>
       aria-label="Manuscript"
       data-test="editor-toolbar"
       class="flex h-11 items-center gap-0.5 border-b border-border bg-surface px-2.5 font-ui text-text"
+      @mousedown="onToolbarMouseDown"
     >
       <div ref="leftPinnedEl" data-test="tb-pinned-left" class="flex shrink-0 items-center gap-0.5">
         <DraftPicker
@@ -446,9 +460,13 @@ const themeLabel = computed(() =>
         <button
           type="button"
           data-test="review-panel-toggle"
-          :class="btn"
+          :class="[btn, props.unseenBotComments ? 'tb-review-btn' : '']"
           :aria-pressed="props.reviewOpen"
-          aria-label="Review panel"
+          :aria-label="
+            props.unseenBotComments
+              ? `Review panel, ${props.unseenBotComments} new bot comments`
+              : 'Review panel'
+          "
           title="Review panel"
           @click="emit('toggle-review')"
         >
@@ -457,6 +475,13 @@ const themeLabel = computed(() =>
             <path d="M10 3v10" />
           </svg>
           Review
+          <span
+            v-if="props.unseenBotComments"
+            class="tb-review-badge"
+            data-test="tb-unseen-bot-comments"
+            aria-hidden="true"
+            >{{ props.unseenBotComments }}</span
+          >
         </button>
       </div>
 
@@ -660,5 +685,19 @@ const themeLabel = computed(() =>
   stroke-width: 1.6;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+.tb-review-btn {
+  position: relative;
+}
+.tb-review-badge {
+  margin-left: var(--ct-space-1);
+  min-width: 1.25rem;
+  text-align: center;
+  border-radius: var(--ct-radius-full);
+  background: var(--ct-accent);
+  color: var(--ct-accent-contrast);
+  font-size: var(--ct-text-xs);
+  padding: 0 var(--ct-space-1);
+  line-height: 1.25rem;
 }
 </style>

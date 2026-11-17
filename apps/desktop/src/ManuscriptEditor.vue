@@ -206,6 +206,8 @@ const props = defineProps<{
   suggestionReasons?: Readonly<Record<string, string>>;
   /** Comment rows for this section; used to label comment lines in the review sidebar (#47). */
   commentRows?: readonly CommentRow[];
+  /** Bot comment threads not yet viewed this session (#339). */
+  unseenBotComments?: number;
   /** Where the toolbar renders (#84): the parent's full-width row above the side panels. Without
    *  it the toolbar stays inline above the editor body. */
   toolbarTarget?: string;
@@ -300,6 +302,8 @@ const emit = defineEmits<{
   'clear-change-ids': [];
   'comment-reply': [threadId: string, body: string];
   'comment-resolve': [threadId: string, resolved: boolean];
+  /** Author opened a bot comment thread in Review (#339). */
+  'bot-comment-seen': [threadId: string];
   'split-chapter': [payload: { blockIndex: number; title: string; removeLine: boolean }];
   'merge-prev-chapter': [];
   /** Clipboard result for a change link (#117). The parent shows the toast. */
@@ -774,13 +778,26 @@ const filter = computed({
 });
 const currentKey = shallowRef<string | null>(null);
 let currentIndex = -1;
+function commentThreadIdFromReviewKey(key: string): string | null {
+  return threadIdFromCommentReviewKey(parseBookChangeKey(key)?.changeKey ?? key);
+}
+
+function maybeEmitBotCommentSeen(threadId: string | null) {
+  if (!threadId) return;
+  const rows = props.commentRows ?? [];
+  if (rows.some((r) => r.threadId === threadId && r.authorKind === 'agent' && !r.resolvedAt)) {
+    emit('bot-comment-seen', threadId);
+  }
+}
+
 watch(currentKey, (key) => {
   if (!key) {
     hoveredCommentId.value = null;
     return;
   }
-  hoveredCommentId.value =
-    threadIdFromCommentReviewKey(parseBookChangeKey(key)?.changeKey ?? key) ?? null;
+  const threadId = commentThreadIdFromReviewKey(key);
+  hoveredCommentId.value = threadId;
+  maybeEmitBotCommentSeen(threadId);
 });
 const collapsed = shallowRef(loadCollapsed());
 watch(collapsed, (v) => saveCollapsed(v));
@@ -1929,6 +1946,7 @@ onBeforeUnmount(() => {
           v-if="editor && !focusMode"
           :editor="editor"
           :review-open="reviewOpen"
+          :unseen-bot-comments="props.unseenBotComments ?? 0"
           :navigator-open="props.navigatorOpen"
           :navigator-controls="props.navigatorControls ?? 'chapter-navigator'"
           :read-only-reason="

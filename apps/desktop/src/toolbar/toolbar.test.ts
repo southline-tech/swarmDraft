@@ -289,6 +289,31 @@ describe('toolbar commands', () => {
     expect(caretStyle(e)).toBe('body');
     expect(runCommand(e, 'align:right')).toBe(false);
   });
+
+  it('alignment keeps the caret when the editor was blurred (#339)', () => {
+    const paras = Array.from({ length: 20 }, (_, i) => ({
+      type: 'paragraph' as const,
+      attrs: { style: 'body' },
+      content: [{ type: 'text' as const, text: `Line ${i} prose.` }],
+    }));
+    const e = make({
+      type: 'doc',
+      content: [
+        { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Title' }] },
+        ...paras,
+      ],
+    });
+    caretIn(e, 'Line 15');
+    const before = e.state.selection.from;
+    expect(before).toBeGreaterThan(10);
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    expect(e.view.hasFocus()).toBe(false);
+    for (const cmd of ['align:center', 'align:left', 'align:center'] as const) {
+      runCommand(e, cmd);
+      expect(e.state.selection.from).toBe(before);
+    }
+    expect(toolbarState(e).align).toBe('center');
+  });
 });
 
 describe('EditorToolbar', () => {
@@ -310,6 +335,17 @@ describe('EditorToolbar', () => {
     await flushPromises();
     return { e, w };
   }
+
+  it('shows unseen bot comment count on Review (#339)', async () => {
+    const { w } = await mountBar({ unseenBotComments: 2 });
+    const badge = w.find('[data-test="tb-unseen-bot-comments"]');
+    expect(badge.exists()).toBe(true);
+    expect(badge.text()).toBe('2');
+    expect(w.find('[data-test="review-panel-toggle"]').attributes('aria-label')).toBe(
+      'Review panel, 2 new bot comments',
+    );
+    w.unmount();
+  });
 
   it('lays out Wave 6a groups in D1 order (245)', async () => {
     const { w } = await mountBar({ manuscriptId: 'm1' });

@@ -45,6 +45,7 @@ import {
 import type { AuthorFilter, ReviewChange } from './review/review-state';
 import { restoreWindowScroll } from './shell-chrome';
 import { clampScrollTop, type ReadingPosition } from './reading-position';
+import { useUnseenBotComments } from './review/unseen-bot-comments';
 
 const REVIEW_RAIL = '#continuous-review-rail';
 import { docWordCount } from './status/wordcount';
@@ -94,6 +95,12 @@ const props = defineProps<{
 const commentRows = shallowRef<readonly CommentRow[]>([]);
 const authorSavedNames = shallowRef<Readonly<Record<string, string>>>({});
 const suggestionReasons = shallowRef<Readonly<Record<string, string>>>({});
+const {
+  unseenCount: unseenBotComments,
+  ingestRows,
+  markThreadSeen,
+  reset: resetUnseenBotComments,
+} = useUnseenBotComments();
 
 async function reloadReviewMeta(sectionId: string | undefined) {
   if (!sectionId) {
@@ -105,6 +112,7 @@ async function reloadReviewMeta(sectionId: string | undefined) {
   try {
     const meta = await sectionReviewMeta(sectionId);
     commentRows.value = meta.comments;
+    ingestRows(meta.comments);
     authorSavedNames.value = meta.authorSavedNames;
     suggestionReasons.value = meta.suggestionReasons;
   } catch (err) {
@@ -264,6 +272,7 @@ watch(
     if (id !== prev) {
       toolbarSectionId.value = props.selectedId;
       authorFilter.value = null;
+      resetUnseenBotComments();
     }
   },
 );
@@ -603,6 +612,7 @@ onBeforeUnmount(() => {
             :story-notes-panel-id="storyNotesPanelId"
             :author-labels="authorLabels"
             :comment-rows="sec.id === selectedId ? commentRows : []"
+            :unseen-bot-comments="sec.id === toolbarSectionId ? unseenBotComments : 0"
             :author-saved-names="sec.id === selectedId ? authorSavedNames : undefined"
             :suggestion-reasons="sec.id === selectedId ? suggestionReasons : undefined"
             :external-load-error="externalLoadError"
@@ -654,6 +664,7 @@ onBeforeUnmount(() => {
             @update:review-follow="reviewFollow = $event"
             @comment-reply="onCommentReply"
             @comment-resolve="onCommentResolve"
+            @bot-comment-seen="markThreadSeen"
           />
         </div>
       </div>
