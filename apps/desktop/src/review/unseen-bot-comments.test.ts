@@ -10,9 +10,7 @@ const row = (
   over: Partial<CommentRow> & Pick<CommentRow, 'threadId' | 'authorKind'>,
 ): CommentRow => ({
   id: over.id ?? 'r1',
-  threadId: over.threadId,
   body: over.body ?? 'Note',
-  authorKind: over.authorKind,
   authorId: over.authorId ?? 'a1',
   authorName: over.authorName ?? 'Agent',
   createdAt: over.createdAt ?? '2026-01-01T00:00:00Z',
