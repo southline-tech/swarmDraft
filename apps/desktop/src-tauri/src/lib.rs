@@ -27,6 +27,7 @@ pub mod pairing;
 pub mod platform;
 pub mod save_copy;
 pub mod storage;
+pub mod window_title;
 
 use serde::Serialize;
 use std::sync::Arc;
@@ -1194,11 +1195,22 @@ async fn draft_pack_if_due(
 }
 
 #[tauri::command]
-fn draft_file_behind(
+async fn draft_file_behind(
     drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
     manuscript_id: String,
-) -> bool {
-    drafts.draft_file_behind(&manuscript_id)
+) -> Result<bool, String> {
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    tauri::async_runtime::spawn_blocking(move || drafts.draft_file_behind(&manuscript_id))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn window_set_title_if_changed(
+    window: tauri::WebviewWindow,
+    title: String,
+) -> Result<bool, String> {
+    window_title::set_if_changed(&window, &title)
 }
 
 #[tauri::command]
@@ -1410,9 +1422,7 @@ fn draft_author_name(store: &storage::Store) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_deep_link::init())
+        // Must register first so a second instance exits before other plugins run (Tauri docs).
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             focus_main_window(app);
             if let Some(path) = draft_path_from_argv(&argv) {
@@ -1421,11 +1431,16 @@ pub fn run() {
             if let Some(url) = links::first_swarmdraft_link(&argv) {
                 let _ = app.emit("open-change-link", url);
             }
-        }));
+        }))
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_deep_link::init());
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    let builder = builder.device_event_filter(tauri::DeviceEventFilter::Always);
     builder
         .setup(|app| {
+            platform::install_idle_hardening(app.handle());
             if let Some(icon) = app.default_window_icon().cloned() {
                 if let Some(window) = app.get_webview_window("main") {
                     if let Err(e) = window.set_icon(icon) {
@@ -1624,6 +1639,7 @@ pub fn run() {
             draft_checkpoint,
             draft_pack_if_due,
             draft_file_behind,
+            window_set_title_if_changed,
             draft_history,
             draft_restore,
             draft_review_commit,

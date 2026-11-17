@@ -43,6 +43,7 @@ import {
   draftSaveAs,
   draftCheckpoint,
   draftFileBehind as queryDraftFileBehind,
+  windowSetTitleIfChanged,
   draftAbandonSession,
   draftBeginSession,
   draftEndSession,
@@ -1543,10 +1544,7 @@ onBeforeUnmount(() => {
 
 function syncWindowTitle(title: string) {
   document.title = title;
-  if (isTauri())
-    void getCurrentWindow()
-      .setTitle(title)
-      .catch((e) => console.error(e));
+  if (isTauri()) void windowSetTitleIfChanged(title).catch((e) => console.error(e));
 }
 
 /** Close the open manuscript, if any, and clear the selection. */

@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 
 use tauri::{Emitter, Manager};
 
+use crate::window_title;
+
 /// How long a path just handed to the window is treated as the same open.
 const OPEN_DEDUPE: Duration = Duration::from_secs(2);
 
@@ -142,6 +144,35 @@ pub fn deliver_opened_draft(app: &tauri::AppHandle, path: String) {
     let _ = app.emit("open-draft-path", path);
 }
 
+/// Counts Tao `MainEventsCleared` ticks (debug / regression tests). High rates at idle mean the
+/// Win32 pump is not blocking in `ControlFlow::Wait` (#356).
+#[derive(Default)]
+pub struct RunLoopProbe(std::sync::atomic::AtomicU64);
+
+impl RunLoopProbe {
+    pub fn cleared(&self) -> u64 {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn note_cleared(&self) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Drop raw device events so mouse moves do not wake the Tao thread when nothing listens (#356).
+pub fn install_idle_hardening(app: &tauri::AppHandle) {
+    app.manage(RunLoopProbe::default());
+    app.manage(window_title::MainWindowTitle::default());
+    if let Some(win) = app.get_webview_window("main") {
+        let title = app
+            .config()
+            .product_name
+            .clone()
+            .unwrap_or_else(|| "swarmDraft".into());
+        let _ = window_title::set_if_changed(&win, &title);
+    }
+}
+
 pub fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
     #[cfg(target_os = "macos")]
     if let tauri::RunEvent::Opened { urls } = event {
@@ -152,9 +183,10 @@ pub fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
         }
         return;
     }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (app, event);
+    if matches!(event, tauri::RunEvent::MainEventsCleared) {
+        if let Some(probe) = app.try_state::<RunLoopProbe>() {
+            probe.note_cleared();
+        }
     }
 }
 
@@ -200,6 +232,15 @@ mod tests {
             slot.offer("/tmp/a.draft".into()),
             OpenedDraft::Duplicate
         ));
+    }
+
+    #[test]
+    fn run_loop_probe_increments_on_cleared() {
+        let probe = RunLoopProbe::default();
+        assert_eq!(probe.cleared(), 0);
+        probe.note_cleared();
+        probe.note_cleared();
+        assert_eq!(probe.cleared(), 2);
     }
 
     #[test]

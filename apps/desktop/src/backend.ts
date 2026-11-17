@@ -483,6 +483,12 @@ export async function draftFileBehind(manuscriptId: string): Promise<boolean> {
   return invoke<boolean>('draft_file_behind', { manuscriptId });
 }
 
+/** Native caption update; no-op when the backend cache already matches (#356). */
+export async function windowSetTitleIfChanged(title: string): Promise<boolean> {
+  if (!isTauri()) return false;
+  return invoke<boolean>('window_set_title_if_changed', { title });
+}
+
 export async function draftHistory(
   manuscriptId: string,
   limit = 50,

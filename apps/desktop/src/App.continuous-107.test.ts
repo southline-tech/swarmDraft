@@ -11,18 +11,16 @@ import { sessionFromDocx } from './manuscript-session';
 import { sectionsInReadingOrder } from './manuscript-reading-order';
 import { docWordCount } from './status/wordcount';
 
-const setTitle = vi.hoisted(() => vi.fn(async () => {}));
+const setTitle = vi.hoisted(() => vi.fn(async () => true));
 vi.mock('@tauri-apps/api/core', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   isTauri: () => true,
-}));
-vi.mock('@tauri-apps/api/window', () => ({
-  getCurrentWindow: () => ({ setTitle: setTitle }),
 }));
 vi.mock('./backend', async (importOriginal) => {
   const real = await importOriginal<typeof import('./backend')>();
   return {
     ...real,
+    windowSetTitleIfChanged: setTitle,
     getAppInfo: async () => null,
     getRecoveryNotices: async () => [],
     getMigrationNotices: async () => [],
