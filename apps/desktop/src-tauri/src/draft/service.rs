@@ -299,6 +299,8 @@ impl DraftService {
                 sync::reconcile_cache_with_git(store, manuscript_id, &dir)
                     .map_err(|e| e.to_string())?;
             }
+            sync::cleanup_orphaned_open_suggestions(store, manuscript_id, &dir)
+                .map_err(|e| e.to_string())?;
             self.merge_settled_bot_branches(store, manuscript_id)
         })
     }
@@ -630,14 +632,22 @@ impl DraftService {
             // A replacement is an insert mark and a delete mark with one id, and the editor
             // reports each. The first call already committed (and maybe merged) this
             // decision; a second commit would open a fresh branch for nothing.
+            let dir = self.ensure_open_inner(store, manuscript_id)?;
+            let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
             if let Some(id) = change_id.filter(|id| !id.is_empty()) {
-                let dir = self.ensure_open_inner(store, manuscript_id)?;
-                let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
                 if decision_already_on_bot_branch(&repo, &bot_key, id, decision)? {
                     return Ok(None);
                 }
             }
-            let branch = self.ensure_bot_session_inner(store, manuscript_id, &bot_key)?;
+            let branch = if let Some(id) = change_id.filter(|id| !id.is_empty()) {
+                if let Some(introduced) = branch_for_change_id(&repo, &bot_key, id)? {
+                    introduced
+                } else {
+                    self.ensure_bot_session_inner(store, manuscript_id, &bot_key)?
+                }
+            } else {
+                self.ensure_bot_session_inner(store, manuscript_id, &bot_key)?
+            };
             if !accepted && linked.is_empty() {
                 let introduced = self.changes_introduced_on_branch(
                     store,
@@ -2019,6 +2029,25 @@ fn author_name(store: &Store) -> String {
         .flatten()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "Author".to_string())
+}
+
+/// Branch that introduced `change_id`, when it is still in the repo.
+fn branch_for_change_id(
+    repo: &DraftRepo,
+    bot_key: &str,
+    change_id: &str,
+) -> Result<Option<String>, String> {
+    let resolved = changes::resolve_all(repo).map_err(|e| e.to_string())?;
+    let Some(changes::DraftChangeResolve::Found { introduced_ref, .. }) = resolved.get(change_id)
+    else {
+        return Ok(None);
+    };
+    let prefix = format!("bot/{}/", bot_slug(bot_key));
+    if introduced_ref.starts_with(&prefix) && repo.has_branch(introduced_ref) {
+        Ok(Some(introduced_ref.clone()))
+    } else {
+        Ok(None)
+    }
 }
 
 fn bot_slug(bot_id: &str) -> String {

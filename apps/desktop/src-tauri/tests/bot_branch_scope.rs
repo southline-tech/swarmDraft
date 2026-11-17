@@ -291,6 +291,80 @@ fn relaunch_and_open(book: &mut Book, path: &str) {
     assert!(opened.recovery.is_none());
 }
 
+fn open_suggestion_ids(book: &Book) -> Vec<String> {
+    let mut ids: Vec<String> = book
+        .store
+        .open_suggestions(&book.section_id)
+        .unwrap()
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    ids.sort();
+    ids
+}
+
+#[test]
+fn stale_orphaned_rows_clear_on_file_reopen_and_cache_load() {
+    let mut book = blank_book();
+    bot_suggests(&book, &["s-live"]);
+    insert_row(&book, "s-stale");
+    assert_eq!(
+        open_suggestion_ids(&book),
+        vec!["s-live".to_string(), "s-stale".to_string()]
+    );
+    let path = save_and_pack(&book);
+    relaunch_and_open(&mut book, &path);
+    assert_eq!(status(&book, "s-stale"), "outdated");
+    assert_eq!(status(&book, "s-live"), "open");
+    assert_eq!(open_suggestion_ids(&book), vec!["s-live".to_string()]);
+
+    insert_row(&book, "s-stale-again");
+    book.svc = DraftService::new(book.dir.path().to_path_buf(), "0.2.1".into());
+    book.svc
+        .reconcile_on_load(&book.store, &book.manuscript_id)
+        .unwrap();
+    assert_eq!(status(&book, "s-stale-again"), "outdated");
+    assert_eq!(open_suggestion_ids(&book), vec!["s-live".to_string()]);
+}
+
+#[test]
+fn decision_on_an_older_session_lands_on_its_branch() {
+    let mut book = blank_book();
+    bot_suggests(&book, &["s-older"]);
+    let older_branch = unmerged_bot_branches(&book).pop().unwrap();
+    let path = save_and_pack(&book);
+    relaunch_and_open(&mut book, &path);
+    bot_suggests(&book, &["s-new"]);
+    let newer_branch = unmerged_bot_branches(&book)
+        .into_iter()
+        .find(|name| name != &older_branch)
+        .unwrap();
+    editor_decides(&book, "s-older", true);
+    let r = repo(&book);
+    let older_tip = r.branch_target(&older_branch).unwrap().unwrap();
+    let older_msgs: Vec<String> = r
+        .walk_first_parent(&older_tip)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.message)
+        .collect();
+    assert!(
+        older_msgs.iter().any(|m| m.contains("Change-Id: s-older")),
+        "{older_msgs:?}"
+    );
+    let newer_tip = r.branch_target(&newer_branch).unwrap().unwrap();
+    let newer_msgs: Vec<String> = r
+        .walk_first_parent(&newer_tip)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.message)
+        .collect();
+    assert!(
+        !newer_msgs.iter().any(|m| m.contains("Change-Id: s-older")),
+        "older decision landed on the new session branch: {newer_msgs:?}"
+    );
+}
+
 #[test]
 fn branch_merges_when_its_own_suggestions_are_decided() {
     let mut book = blank_book();
@@ -298,8 +372,9 @@ fn branch_merges_when_its_own_suggestions_are_decided() {
     bot_suggests(&book, &["s-older"]);
     let path = save_and_pack(&book);
     relaunch_and_open(&mut book, &path);
-    // A stale open row of the same bot, with no mark anywhere.
+    // A stale open row of the same bot, with no mark anywhere (left out of merge math already).
     insert_row(&book, "s-stale");
+    assert_eq!(status(&book, "s-stale"), "open");
     // Session two: the same bot suggests again, on a new branch.
     bot_suggests(&book, &["s-new-a", "s-new-b"]);
     let open_before = unmerged_bot_branches(&book);
@@ -333,6 +408,7 @@ fn branch_merges_when_its_own_suggestions_are_decided() {
     relaunch_and_open(&mut book, &path);
     assert_eq!(status(&book, "s-older"), "accepted");
     assert_eq!(status(&book, "s-new-a"), "accepted");
+    assert_eq!(status(&book, "s-stale"), "outdated");
     let text: String = chapter_json(&book).iter().map(Value::to_string).collect();
     assert!(text.contains("new-s-older") && !text.contains("old-s-older"));
     assert!(text.contains("new-s-new-a") && text.contains("old-s-new-b"));
