@@ -3642,6 +3642,46 @@ fn suggest_paragraph_after_first(doc: &yrs::Doc, text: &str, id: &str) {
     .unwrap();
 }
 
+fn suggest_two_paragraphs_after_first(doc: &yrs::Doc, text1: &str, text2: &str, id: &str) {
+    let after = decode(doc).into_iter().next().unwrap().id;
+    let frag = doc.get_or_insert_xml_fragment(content::FRAGMENT);
+    let mut txn = doc.transact_mut();
+    swarmdraft_lib::anchor::insert_suggested_paragraphs(
+        &mut txn,
+        &frag,
+        Some(&after),
+        &[(text1, "body"), (text2, "body")],
+        id,
+        "agent:agent-test-1",
+        "t",
+    )
+    .unwrap();
+}
+
+fn suggest_replacement_in_paragraph(
+    doc: &yrs::Doc,
+    paragraph: usize,
+    quote: &str,
+    replacement: &str,
+    id: &str,
+) {
+    let block = decode(doc)
+        .into_iter()
+        .nth(paragraph)
+        .unwrap_or_else(|| panic!("paragraph {paragraph}"))
+        .id;
+    let mut txn = doc.transact_mut();
+    let range = swarmdraft_lib::anchor::resolve(doc, &txn, &block, quote).unwrap();
+    swarmdraft_lib::anchor::add_suggestion_marks(
+        &mut txn,
+        &range,
+        id,
+        "agent:agent-test-1",
+        "t",
+        replacement,
+    );
+}
+
 fn insert_suggestion_after(doc: &yrs::Doc, needle: &str, extra: &str, id: &str) {
     use yrs::{GetString, Text, Transact, XmlFragment, XmlOut};
     let marks = json!([{
@@ -4384,6 +4424,120 @@ fn reopening_keeps_a_short_remnant_and_a_long_paragraph() {
             && opened_body[0].matches("word").count() == 300
             && !opened_body[0].contains("TAIL"),
         "reopen dropped the format mark after the long paragraph was retyped: {opened}"
+    );
+}
+
+/// Keystroke in one of two bot-inserted paragraphs stays with that insert on reopen (#348).
+#[test]
+fn reopening_keeps_a_keystroke_in_one_of_two_inserted_paragraphs() {
+    let (checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-two-shell-keystroke.draft",
+        json!([
+            {"type": "paragraph", "content": [{"type": "text", "text": "alpha"}]},
+            {"type": "paragraph", "content": [{"type": "text", "text": "omega"}]}
+        ]),
+        |doc| suggest_two_paragraphs_after_first(doc, "first insert", "second insert", "chg-two"),
+        |store, doc_id| type_at_paragraph(store, doc_id, 1, "note "),
+    );
+    assert_eq!(
+        paragraph_bodies(&checkpoint),
+        vec!["alpha".to_string(), "note".to_string(), "omega".to_string(),],
+        "checkpoint dropped a keystroke or published an insert early: {checkpoint}"
+    );
+    assert_eq!(
+        paragraph_bodies(&opened),
+        vec![
+            "alpha".to_string(),
+            "note {++first insert++}{>>suggestion:chg-two<<}".to_string(),
+            "{++second insert++}{>>suggestion:chg-two<<}".to_string(),
+            "omega".to_string(),
+        ],
+        "reopen left the keystroke outside the inserted paragraph it was typed in: {opened}"
+    );
+}
+
+/// A six-character remnant stays on the edited paragraph, not a later duplicate (#348).
+#[test]
+fn reopening_keeps_a_six_character_remnant_off_a_duplicate_paragraph() {
+    let (checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-six-char-remnant.draft",
+        json!([
+            {"type": "paragraph", "content": [{"type": "text", "text": "Keep the old phrase here."}]},
+            {"type": "paragraph", "content": [{"type": "text", "text": "Keep the old phrase here. Extra."}]}
+        ]),
+        |doc| suggest_replacement(doc, "old phrase", "new phrase", "chg-six"),
+        |store, doc_id| {
+            delete_in_paragraph(store, doc_id, 0, "Keep the ");
+            delete_in_paragraph(store, doc_id, 0, " here.");
+            delete_in_paragraph(store, doc_id, 0, "rase");
+        },
+    );
+    assert_eq!(
+        paragraph_bodies(&checkpoint),
+        vec![
+            "old ph".to_string(),
+            "Keep the old phrase here. Extra.".to_string(),
+        ],
+        "checkpoint restored deleted text or published the replacement: {checkpoint}"
+    );
+    assert_eq!(
+        paragraph_bodies(&opened),
+        vec![
+            "{--old ph--}{>>suggestion:chg-six<<}{++new phrase++}{>>suggestion:chg-six<<}"
+                .to_string(),
+            "Keep the old phrase here. Extra.".to_string(),
+        ],
+        "reopen put the six-character remnant on the later duplicate sentence: {opened}"
+    );
+}
+
+/// A new prefix paragraph cannot steal the suggestion from the paragraph the bot edited (#348).
+#[test]
+fn reopening_ignores_a_new_prefix_paragraph_when_reanchoring() {
+    let (checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-prefix-paragraph.draft",
+        json!([
+            {"type": "paragraph", "content": [{"type": "text", "text": "Keep the"}]},
+            {"type": "paragraph", "content": [{"type": "text", "text": "Keep the old phrase here."}]}
+        ]),
+        |doc| suggest_replacement_in_paragraph(doc, 1, "old phrase", "new phrase", "chg-pre"),
+        |store, doc_id| {
+            delete_in_paragraph(store, doc_id, 1, "Keep the ");
+            delete_in_paragraph(store, doc_id, 1, " here.");
+        },
+    );
+    assert_eq!(
+        paragraph_bodies(&checkpoint),
+        vec!["Keep the".to_string(), "old phrase".to_string(),],
+        "checkpoint changed paragraphs unexpectedly: {checkpoint}"
+    );
+    assert_eq!(
+        paragraph_bodies(&opened),
+        vec![
+            "Keep the".to_string(),
+            "{--old phrase--}{>>suggestion:chg-pre<<}{++new phrase++}{>>suggestion:chg-pre<<}"
+                .to_string(),
+        ],
+        "reopen let the prefix paragraph take the suggestion mark: {opened}"
+    );
+}
+
+/// Deleting a word beside an open suggestion still re-anchors on the same paragraph (#348).
+#[test]
+fn reopening_keeps_a_nearby_deletion_on_the_bot_paragraph_regression() {
+    let (_checkpoint, opened) = reopen_after_bot_edit(
+        "bot-reopen-delete-word-regression.draft",
+        json!([{
+            "type": "paragraph",
+            "content": [{"type": "text", "text": "Keep the old phrase here."}]
+        }]),
+        |doc| suggest_replacement(doc, "old phrase", "new phrase", "chg-reg"),
+        |store, doc_id| delete_in_paragraph(store, doc_id, 0, "here"),
+    );
+    assert_eq!(
+        paragraph_bodies(&opened),
+        vec!["Keep the {--old phrase--}{>>suggestion:chg-reg<<}{++new phrase++}{>>suggestion:chg-reg<<} .".to_string()],
+        "reopen moved the suggestion off the paragraph the writer edited: {opened}"
     );
 }
 
