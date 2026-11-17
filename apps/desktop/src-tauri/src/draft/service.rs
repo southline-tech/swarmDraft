@@ -662,6 +662,8 @@ impl DraftService {
             if self.bot_branch_is_settled(store, manuscript_id, &branch, &bot_key)? {
                 self.merge_settled_bot_branch(store, manuscript_id, &branch, &bot_key)?;
             }
+            // This decision can also settle an older branch of the same bot.
+            self.merge_settled_bot_branches(store, manuscript_id)?;
             Ok(oid)
         })
     }
@@ -1177,6 +1179,9 @@ impl DraftService {
         if let Err(e) = self.begin_editing_session_inner(store, &id) {
             eprintln!("draft session start failed: {e}");
         }
+        if let Err(e) = self.merge_settled_bot_branches(store, &id) {
+            eprintln!("settled bot branch not merged on open: {e}");
+        }
         Ok(Some(OpenDraftResult {
             manuscript_id: id,
             recovery: None,
@@ -1637,6 +1642,25 @@ fn unmerged_bot_omit(repo: &DraftRepo) -> Result<sync::SyncOmit, String> {
         .filter(|entry| entry.status == "accepted" || entry.status == "rejected")
         .map(|entry| entry.id)
         .collect();
+    // A decision on a bot branch that already merged also counts as on main. An older
+    // build merged a branch whose decisions a later checkpoint then left out of
+    // main's index, and withholding those ids as open would drop accepted text.
+    let mut main_decided = main_decided;
+    for tip in repo.search_ref_tips().map_err(|e| e.to_string())? {
+        if !tip.name.starts_with("bot/")
+            || repo
+                .merge_base(&tip.oid, &main)
+                .map_err(|e| e.to_string())?
+                != Some(tip.oid.clone())
+        {
+            continue;
+        }
+        for entry in changes::changes_in_commit(repo, &tip.oid).map_err(|e| e.to_string())? {
+            if entry.status == "accepted" || entry.status == "rejected" {
+                main_decided.insert(entry.id);
+            }
+        }
+    }
     let main_comments: std::collections::HashSet<String> =
         sync::comment_rows_in_commit(repo, &main)
             .map_err(|e| e.to_string())?
@@ -1670,8 +1694,11 @@ fn unmerged_bot_omit(repo: &DraftRepo) -> Result<sync::SyncOmit, String> {
             if main_decided.contains(&entry.id) {
                 continue;
             }
-            omit.change_status
-                .insert(entry.id.clone(), entry.status.clone());
+            // One open branch can say open where another already decided it.
+            let state = omit.change_status.entry(entry.id.clone()).or_default();
+            if state.is_empty() || state == "open" {
+                *state = entry.status.clone();
+            }
             omit.change_ids.insert(entry.id);
         }
         for row in sync::comment_rows_in_commit(repo, &tip.oid).map_err(|e| e.to_string())? {
@@ -1980,6 +2007,130 @@ fn bot_committer_email(bot_id: &str) -> String {
     format!("bot-{}@swarmdraft.local", bot_slug(bot_id))
 }
 
+/// Where a bot branch stands: its own suggestions and whether all of them are decided.
+struct BranchSettlement {
+    settled: bool,
+    decided: usize,
+}
+
+/// `None` when the branch or main is missing, or they share no history.
+fn branch_settlement(
+    repo: &DraftRepo,
+    branch: &str,
+    bot_agent_id: Option<&str>,
+) -> Result<Option<BranchSettlement>, DraftRepoError> {
+    let Some(bot_oid) = repo.branch_target(branch)? else {
+        return Ok(None);
+    };
+    let Some(main_oid) = repo.head_oid()? else {
+        return Ok(None);
+    };
+    let Some(base) = repo.merge_base(&bot_oid, &main_oid)? else {
+        return Ok(None);
+    };
+    let base_ids = changes::change_ids_in_commit(repo, &base)?;
+    let foreign = ids_first_on_other_branches(repo, branch, &bot_oid, &base, &main_oid)?;
+    let marked = suggestion_marks_in_commit(repo, &bot_oid)?;
+    // A decision can sit on another branch of the same bot, or on a legacy branch
+    // that already merged. It still decides the suggestion here.
+    let elsewhere = sync::git_decisions(repo)?;
+    let mut settled = true;
+    let mut decided = 0;
+    for entry in changes::changes_in_commit(repo, &bot_oid)? {
+        if base_ids.contains(&entry.id)
+            || foreign.contains(&entry.id)
+            || !change_authored_by_bot(&entry, bot_agent_id)
+        {
+            continue;
+        }
+        if entry.status == "accepted"
+            || entry.status == "rejected"
+            || elsewhere.contains_key(&entry.id)
+        {
+            decided += 1;
+        } else if marked.contains(&entry.id) {
+            settled = false;
+        }
+    }
+    Ok(Some(BranchSettlement { settled, decided }))
+}
+
+/// Earliest commit time of each change id on `tip`'s first-parent line, above `stop`.
+fn first_seen_on_line(
+    repo: &DraftRepo,
+    tip: &str,
+    stop: &str,
+) -> Result<HashMap<String, i64>, DraftRepoError> {
+    let mut seen: HashMap<String, i64> = HashMap::new();
+    // `walk_first_parent` lists the oldest commit first.
+    for commit in repo.walk_first_parent(tip)?.into_iter().rev() {
+        if commit.oid == stop {
+            break;
+        }
+        for id in changes::change_ids_in_commit(repo, &commit.oid)? {
+            let at = seen.entry(id).or_insert(commit.time_unix);
+            *at = (*at).min(commit.time_unix);
+        }
+    }
+    Ok(seen)
+}
+
+/// Ids on `branch` that another unmerged bot branch had strictly earlier. Every bot
+/// commit snapshots the whole cache, so an open suggestion from an older branch or
+/// session rides along on a newer branch without belonging to it.
+fn ids_first_on_other_branches(
+    repo: &DraftRepo,
+    branch: &str,
+    bot_oid: &str,
+    base: &str,
+    main_oid: &str,
+) -> Result<HashSet<String>, DraftRepoError> {
+    let mut other: HashMap<String, i64> = HashMap::new();
+    for tip in repo.search_ref_tips()? {
+        if tip.name == branch || !tip.name.starts_with("bot/") {
+            continue;
+        }
+        let Some(tip_base) = repo.merge_base(&tip.oid, main_oid)? else {
+            continue;
+        };
+        if tip_base == tip.oid {
+            continue;
+        }
+        for (id, at) in first_seen_on_line(repo, &tip.oid, &tip_base)? {
+            let earliest = other.entry(id).or_insert(at);
+            *earliest = (*earliest).min(at);
+        }
+    }
+    if other.is_empty() {
+        return Ok(HashSet::new());
+    }
+    Ok(first_seen_on_line(repo, bot_oid, base)?
+        .into_iter()
+        .filter(|(id, at)| other.get(id).is_some_and(|theirs| theirs < at))
+        .map(|(id, _)| id)
+        .collect())
+}
+
+/// Suggestion ids with a mark in any chapter of one commit.
+fn suggestion_marks_in_commit(
+    repo: &DraftRepo,
+    oid: &str,
+) -> Result<HashSet<String>, DraftRepoError> {
+    let mut ids = HashSet::new();
+    for path in repo.list_tree_files(oid, "yjs/")? {
+        if !path.ends_with(".bin") {
+            continue;
+        }
+        let Some(bytes) = repo.file_bytes(oid, &path)? else {
+            continue;
+        };
+        if let Some(doc) = sync::doc_from_update(&bytes) {
+            ids.extend(changes::suggestion_ids(&doc));
+        }
+    }
+    Ok(ids)
+}
+
 fn change_authored_by_bot(entry: &changes::ChangeEntry, bot_agent_id: Option<&str>) -> bool {
     if entry.author_kind != "agent" {
         return false;
@@ -2208,7 +2359,9 @@ impl DraftService {
 
     /// True when every bot suggestion on `branch` is accepted or rejected.
     /// A branch with no bot suggestions is settled, so a decision still merges.
-    /// A writer suggestion copied into the snapshot does not keep it open.
+    /// A writer suggestion copied into the snapshot does not keep it open, nor does an
+    /// open suggestion that another bot branch made first, nor a stale open row with no
+    /// mark left in the branch's chapters.
     fn bot_branch_is_settled(
         &self,
         store: &Store,
@@ -2218,28 +2371,47 @@ impl DraftService {
     ) -> Result<bool, String> {
         let dir = self.ensure_open_inner(store, manuscript_id)?;
         let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
-        let Some(bot_oid) = repo.branch_target(branch).map_err(|e| e.to_string())? else {
-            return Ok(false);
-        };
+        Ok(branch_settlement(&repo, branch, Some(bot_agent_id))
+            .map_err(|e| e.to_string())?
+            .is_some_and(|s| s.settled))
+    }
+
+    /// A settled bot branch left unmerged by an older build merges when the file opens.
+    /// Only a branch with at least one decided suggestion of its own merges, so a bot
+    /// that only left comments keeps its branch.
+    fn merge_settled_bot_branches(&self, store: &Store, manuscript_id: &str) -> Result<(), String> {
+        let dir = self.ensure_open_inner(store, manuscript_id)?;
+        let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
         let Some(main_oid) = repo.head_oid().map_err(|e| e.to_string())? else {
-            return Ok(false);
+            return Ok(());
         };
-        let Some(base) = repo
-            .merge_base(&bot_oid, &main_oid)
-            .map_err(|e| e.to_string())?
-        else {
-            return Ok(false);
-        };
-        let base_ids = changes::change_ids_in_commit(&repo, &base).map_err(|e| e.to_string())?;
-        let introduced: Vec<changes::ChangeEntry> = changes::changes_in_commit(&repo, &bot_oid)
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .filter(|entry| !base_ids.contains(&entry.id))
-            .filter(|entry| change_authored_by_bot(entry, Some(bot_agent_id)))
-            .collect();
-        Ok(introduced
-            .iter()
-            .all(|entry| entry.status == "accepted" || entry.status == "rejected"))
+        let mut ready = Vec::new();
+        for tip in repo.search_ref_tips().map_err(|e| e.to_string())? {
+            let mut parts = tip.name.splitn(3, '/');
+            let (Some("bot"), Some(key), Some(_)) = (parts.next(), parts.next(), parts.next())
+            else {
+                continue;
+            };
+            if repo
+                .merge_base(&tip.oid, &main_oid)
+                .map_err(|e| e.to_string())?
+                == Some(tip.oid.clone())
+            {
+                continue;
+            }
+            let Some(state) =
+                branch_settlement(&repo, &tip.name, Some(key)).map_err(|e| e.to_string())?
+            else {
+                continue;
+            };
+            if state.settled && state.decided > 0 {
+                ready.push((tip.name.clone(), key.to_string()));
+            }
+        }
+        for (branch, key) in ready {
+            self.merge_settled_bot_branch(store, manuscript_id, &branch, &key)?;
+        }
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2353,10 +2525,12 @@ impl DraftService {
             return Ok(Vec::new());
         };
         let base_ids = changes::change_ids_in_commit(&repo, &base).map_err(|e| e.to_string())?;
+        let foreign = ids_first_on_other_branches(&repo, branch, &bot_oid, &base, &main_oid)
+            .map_err(|e| e.to_string())?;
         let mut ids: Vec<String> = changes::changes_in_commit(&repo, &bot_oid)
             .map_err(|e| e.to_string())?
             .into_iter()
-            .filter(|entry| !base_ids.contains(&entry.id))
+            .filter(|entry| !base_ids.contains(&entry.id) && !foreign.contains(&entry.id))
             .filter(|entry| change_authored_by_bot(entry, bot_agent_id))
             .map(|entry| entry.id)
             .collect();

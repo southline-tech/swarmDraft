@@ -97,9 +97,9 @@ pub fn sync_worktree_to_store(
         .save_outline(manuscript_id, &outline)
         .map_err(storage_err)?;
     let repo = DraftRepo::open_working(worktree).ok();
-    let open_ids = repo
+    let (open_ids, decided) = repo
         .as_ref()
-        .and_then(|repo| open_suggestion_ids(repo).ok())
+        .and_then(|repo| suggestion_states(repo).ok())
         .unwrap_or_default();
     for section in store.list_sections(manuscript_id).map_err(storage_err)? {
         if section.kind != "chapter" {
@@ -114,6 +114,12 @@ pub fn sync_worktree_to_store(
             if let Some(merged) = restore_open_suggestions(repo, &section.id, &state, &open_ids) {
                 state = merged;
             }
+        }
+        // A suggestion decided in git keeps no mark, even when an older checkpoint
+        // stored the chapter with it. Otherwise the editor shows it open again and
+        // its decision is withdrawn.
+        if let Some(cleaned) = strip_decided_marks(&state, &decided) {
+            state = cleaned;
         }
         store
             .replace_doc_state(&section.doc_id, &state)
@@ -181,6 +187,19 @@ pub fn sync_store_to_worktree(
 
     let mut pending_change_ids = omit.change_ids.clone();
     let mut discovered: HashMap<String, HashSet<String>> = HashMap::new();
+    // A decided suggestion's marks never reach `main`, even if the live chapter still
+    // has them. A reopen would show it open again.
+    let mut status = omit.change_status.clone();
+    for section in &sections {
+        for decision in ["accepted", "rejected"] {
+            for row in store
+                .suggestions_with_status(&section.id, decision)
+                .map_err(storage_err)?
+            {
+                status.entry(row.id).or_insert_with(|| decision.to_string());
+            }
+        }
+    }
     for section in &sections {
         if section.kind != "chapter" {
             continue;
@@ -190,7 +209,7 @@ pub fn sync_store_to_worktree(
         if !ids.is_empty() {
             discovered.insert(section.doc_id.clone(), ids);
         }
-        let doc = strip_withheld_marks(&loaded, &omit.change_status).unwrap_or(loaded);
+        let doc = strip_withheld_marks(&loaded, &status).unwrap_or(loaded);
         let state = doc
             .transact()
             .encode_state_as_update_v1(&StateVector::default());
@@ -389,17 +408,44 @@ fn is_empty_paragraph(node: &serde_json::Value) -> bool {
     })
 }
 
-/// Suggestion ids still open on an unmerged `bot/*` tip.
-/// An id accepted or rejected on `main` or on any bot tip is not open.
-fn open_suggestion_ids(repo: &DraftRepo) -> Result<HashSet<String>, DraftRepoError> {
+/// Chapter state without the marks of `decided` suggestions: accepted text stays plain,
+/// rejected inserts and accepted deletions go. `None` when nothing changed.
+fn strip_decided_marks(state: &[u8], decided: &HashMap<String, String>) -> Option<Vec<u8>> {
+    if decided.is_empty() {
+        return None;
+    }
+    let doc = doc_from_update(state)?;
+    if !changes::suggestion_ids(&doc)
+        .iter()
+        .any(|id| decided.contains_key(id))
+    {
+        return None;
+    }
+    let cleaned = strip_withheld_marks(&doc, decided)?;
+    let bytes = cleaned
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    Some(bytes)
+}
+
+/// Status of every suggestion accepted or rejected on `main` or on any bot tip.
+pub(crate) fn git_decisions(repo: &DraftRepo) -> Result<HashMap<String, String>, DraftRepoError> {
+    Ok(suggestion_states(repo)?.1)
+}
+
+/// Suggestion ids still open on an unmerged `bot/*` tip, and the status of every id
+/// accepted or rejected on `main` or on any bot tip. A decided id is not open.
+fn suggestion_states(
+    repo: &DraftRepo,
+) -> Result<(HashSet<String>, HashMap<String, String>), DraftRepoError> {
     let Some(main) = repo.head_oid()? else {
-        return Ok(HashSet::new());
+        return Ok(Default::default());
     };
-    let mut decided = HashSet::new();
+    let mut decided: HashMap<String, String> = HashMap::new();
     let mut open = HashSet::new();
     for entry in changes::changes_in_commit(repo, &main)? {
         if entry.status == "accepted" || entry.status == "rejected" {
-            decided.insert(entry.id);
+            decided.insert(entry.id, entry.status);
         }
     }
     for tip in repo.search_ref_tips()? {
@@ -412,15 +458,15 @@ fn open_suggestion_ids(repo: &DraftRepo) -> Result<HashSet<String>, DraftRepoErr
         let unmerged = base != tip.oid;
         for entry in changes::changes_in_commit(repo, &tip.oid)? {
             if entry.status == "accepted" || entry.status == "rejected" {
-                decided.insert(entry.id.clone());
                 open.remove(&entry.id);
+                decided.entry(entry.id).or_insert(entry.status);
             } else if unmerged && entry.status == "open" {
                 open.insert(entry.id);
             }
         }
     }
-    open.retain(|id| !decided.contains(id));
-    Ok(open)
+    open.retain(|id| !decided.contains_key(id));
+    Ok((open, decided))
 }
 
 /// Put a suggestion that is still open back into `main_bytes` from unmerged bot tips,
@@ -481,7 +527,7 @@ fn restore_open_suggestions(
     Some(state)
 }
 
-fn doc_from_update(bytes: &[u8]) -> Option<Doc> {
+pub(crate) fn doc_from_update(bytes: &[u8]) -> Option<Doc> {
     use yrs::updates::decoder::Decode;
     use yrs::Update;
     let doc = content::new_doc();

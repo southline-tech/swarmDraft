@@ -7,7 +7,10 @@ use swarmdraft_lib::content;
 use swarmdraft_lib::draft::{BotRetention, DraftRepo, DraftService};
 use swarmdraft_lib::manuscripts::{doc_update_since, state_vector, Author, Suggestion};
 use swarmdraft_lib::storage::Store;
-use yrs::{ReadTxn, StateVector, Transact};
+use yrs::updates::decoder::Decode;
+use yrs::{ReadTxn, StateVector, Transact, XmlFragment};
+
+use swarmdraft_lib::content::FRAGMENT;
 
 const BOT_ID: &str = "0b617f531be2948123f525a099ce21a3";
 const BOT_NAME: &str = "QA Line Editor";
@@ -256,4 +259,146 @@ fn decisions_land_on_the_bots_branch_and_merge_after_the_last_one() {
     );
     assert_eq!(status(&book, IDS[2]), "accepted");
     assert!(open_ids(&book).is_empty());
+}
+
+/// The chapter as the editor leaves it once `decided` are accepted (insert kept)
+/// or rejected (old text kept), with the rest still marked.
+fn set_chapter_after(book: &Book, decided: &[(&str, bool)]) {
+    let author = format!("agent:{BOT_ID}");
+    let mut runs = Vec::new();
+    for (i, id) in IDS.iter().enumerate() {
+        match decided.iter().find(|(d, _)| d == id) {
+            Some((_, true)) => runs.push(json!({"type":"text","text":format!("new{i}")})),
+            Some((_, false)) => runs.push(json!({"type":"text","text":format!("old{i}")})),
+            None => {
+                runs.push(json!({"type":"text","text":format!("old{i}"),"marks":[{"type":"suggestion_delete","attrs":{"id":id,"author":author,"ts":"t"}}]}));
+                runs.push(json!({"type":"text","text":format!("new{i}"),"marks":[{"type":"suggestion_insert","attrs":{"id":id,"author":author,"ts":"t"}}]}));
+            }
+        }
+        runs.push(json!({"type":"text","text":" "}));
+    }
+    // An edit on top of the live doc, appended like the editor's own updates.
+    let doc_id = book
+        .store
+        .list_sections(&book.manuscript_id)
+        .unwrap()
+        .into_iter()
+        .find(|s| s.id == book.section_id)
+        .unwrap()
+        .doc_id;
+    let doc = book.store.load_doc(&doc_id).unwrap();
+    let since = state_vector(&doc);
+    {
+        let frag = doc.get_or_insert_xml_fragment(FRAGMENT);
+        let mut txn = doc.transact_mut();
+        let len = frag.len(&txn);
+        frag.remove_range(&mut txn, 0, len);
+    }
+    content::encode(
+        &doc,
+        &json!({"type":"doc","content":[{"type":"paragraph","content":runs}]}),
+    )
+    .unwrap();
+    let update = doc_update_since(&doc, &since);
+    book.store.append_doc_update(&doc_id, &update).unwrap();
+}
+
+fn chapter_mark_ids(book: &Book) -> Vec<String> {
+    let doc_id = book
+        .store
+        .list_sections(&book.manuscript_id)
+        .unwrap()
+        .into_iter()
+        .find(|s| s.id == book.section_id)
+        .unwrap()
+        .doc_id;
+    let doc = book.store.load_doc(&doc_id).unwrap();
+    let text: String = content::decode(&doc)
+        .iter()
+        .map(|b| b.node.to_string())
+        .collect();
+    IDS.iter()
+        .filter(|id| text.contains(*id))
+        .map(|id| id.to_string())
+        .collect()
+}
+
+#[test]
+fn decided_suggestions_stay_decided_after_save_and_reopen() {
+    let book = book_with_three_bot_suggestions();
+    set_chapter_after(&book, &[(IDS[0], true)]);
+    decide_like_the_editor(&book, IDS[0], true);
+    set_chapter_after(&book, &[(IDS[0], true), (IDS[1], false)]);
+    decide_like_the_editor(&book, IDS[1], false);
+    assert_eq!(chapter_mark_ids(&book), vec![IDS[2].to_string()]);
+
+    book.svc
+        .save_linked_or_needs_as(&book.store, &book.manuscript_id, "Saved")
+        .unwrap();
+    book.svc
+        .pack_if_linked(&book.store, &book.manuscript_id)
+        .unwrap();
+    let path = book
+        .store
+        .draft_file_path(&book.manuscript_id)
+        .unwrap()
+        .unwrap();
+    let opened = book
+        .svc
+        .open_draft_path(&book.store, &path, false)
+        .unwrap()
+        .unwrap();
+    assert!(opened.recovery.is_none());
+    assert_eq!(
+        chapter_mark_ids(&book),
+        vec![IDS[2].to_string()],
+        "reopen brought back a decided suggestion"
+    );
+    assert_eq!(status(&book, IDS[0]), "accepted");
+    assert_eq!(status(&book, IDS[1]), "rejected");
+    assert_eq!(open_ids(&book), vec![IDS[2].to_string()]);
+}
+
+/// Suggestion ids with a mark in main's committed chapter.
+fn main_chapter_mark_ids(book: &Book) -> Vec<String> {
+    let r = repo(book);
+    let main = r.main_oid().unwrap().unwrap();
+    let bytes = r
+        .file_bytes(&main, &format!("yjs/{}.bin", book.section_id))
+        .unwrap()
+        .unwrap();
+    let doc = content::new_doc();
+    {
+        let mut txn = doc.transact_mut();
+        txn.apply_update(yrs::Update::decode_v1(&bytes).unwrap())
+            .unwrap();
+    }
+    let text: String = content::decode(&doc)
+        .iter()
+        .map(|b| b.node.to_string())
+        .collect();
+    IDS.iter()
+        .filter(|id| text.contains(*id))
+        .map(|id| id.to_string())
+        .collect()
+}
+
+#[test]
+fn main_never_keeps_marks_of_decided_suggestions() {
+    let book = book_with_three_bot_suggestions();
+    let mut decided: Vec<(&str, bool)> = Vec::new();
+    for (id, accepted) in [(IDS[0], true), (IDS[1], false), (IDS[2], true)] {
+        decided.push((id, accepted));
+        set_chapter_after(&book, &decided);
+        decide_like_the_editor(&book, id, accepted);
+        assert!(
+            main_chapter_mark_ids(&book).is_empty(),
+            "main checkpoint kept marks after deciding {id}: {:?}",
+            main_chapter_mark_ids(&book)
+        );
+    }
+    assert!(main_messages(&repo(&book))
+        .iter()
+        .any(|m| m.starts_with("Merged bot/")));
+    assert!(chapter_mark_ids(&book).is_empty());
 }
