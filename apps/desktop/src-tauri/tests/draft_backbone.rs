@@ -761,7 +761,10 @@ fn end_editing_session_after_review_only_does_not_pack_draft() {
     svc.end_editing_session(&store, &m.id).unwrap();
     let after = fs::read(&path).unwrap();
     let after_meta = fs::metadata(&path).unwrap();
-    assert_eq!(after, before, "close after review must not rewrite the .draft");
+    assert_eq!(
+        after, before,
+        "close after review must not rewrite the .draft"
+    );
     assert_eq!(
         after_meta.modified().unwrap(),
         before_meta.modified().unwrap(),
