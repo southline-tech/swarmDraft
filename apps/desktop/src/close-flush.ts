@@ -1,33 +1,55 @@
 /**
  * Save pending section edits before the desktop window closes. Tauri's close-requested event is
- * intercepted, the flush is awaited (bounded by a timeout so a stuck save can't keep the window
- * open), then the window is destroyed. If edits are still unsaved, the user is asked whether to
- * quit anyway; on No the window stays open. `pagehide` stays as a best-effort fallback (browser
- * or a reload, where there is no close-requested event).
+ * intercepted, the flush is awaited (bounded by a long timeout so a stuck save can't keep the
+ * window open forever), then the window is destroyed. A short timeout only shows a non-blocking
+ * "Saving…" state; the user is asked whether to quit anyway only when the flush fails or the long
+ * timeout elapses. `pagehide` stays as a best-effort fallback (browser or a reload, where there is
+ * no close-requested event).
  */
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { closeFlush as closeFlushCopy, PRODUCT_NAME } from './copy-deck';
 
 export const CLOSE_FLUSH_TIMEOUT_MS = 3000;
+export const CLOSE_FLUSH_LONG_MS = 30_000;
 export const UNSAVED_QUIT_PROMPT = closeFlushCopy.unsavedQuitPrompt;
 
-/** 'saved', or 'unsaved' if the flush failed or didn't finish within `ms`; never rejects. */
+export type FlushCloseResult = 'saved' | 'unsaved';
+
+export type FlushWithTimeoutOptions = {
+  shortMs?: number;
+  longMs?: number;
+  onSlow?: () => void;
+};
+
+/** 'saved', or 'unsaved' if the flush failed or didn't finish within the long limit; never rejects. */
 export function flushWithTimeout(
   flush: () => Promise<void>,
-  ms: number,
-): Promise<'saved' | 'unsaved'> {
+  options: number | FlushWithTimeoutOptions = CLOSE_FLUSH_TIMEOUT_MS,
+): Promise<FlushCloseResult> {
+  const shortMs =
+    typeof options === 'number' ? options : (options.shortMs ?? CLOSE_FLUSH_TIMEOUT_MS);
+  const longMs = typeof options === 'number' ? options : (options.longMs ?? CLOSE_FLUSH_LONG_MS);
+  const onSlow = typeof options === 'number' ? undefined : options.onSlow;
+  const started = Date.now();
+
   return new Promise((resolve) => {
-    const t = setTimeout(() => resolve('unsaved'), ms);
+    let done = false;
+    const finish = (result: FlushCloseResult) => {
+      if (done) return;
+      done = true;
+      clearTimeout(shortTimer);
+      clearTimeout(longTimer);
+      console.info(`close flush ${result} in ${Date.now() - started}ms`);
+      resolve(result);
+    };
+
+    const shortTimer = setTimeout(() => onSlow?.(), shortMs);
+    const longTimer = setTimeout(() => finish('unsaved'), longMs);
+
     flush().then(
-      () => {
-        clearTimeout(t);
-        resolve('saved');
-      },
-      () => {
-        clearTimeout(t);
-        resolve('unsaved');
-      },
+      () => finish('saved'),
+      () => finish('unsaved'),
     );
   });
 }
@@ -42,14 +64,22 @@ export async function confirmQuit(message = UNSAVED_QUIT_PROMPT): Promise<boolea
   }
 }
 
+export type FlushOnCloseOptions = Pick<FlushWithTimeoutOptions, 'longMs' | 'onSlow'>;
+
 /** Install the handlers; returns a function that removes them. */
 export async function flushOnClose(
   flush: () => Promise<void>,
   timeoutMs = CLOSE_FLUSH_TIMEOUT_MS,
+  options: FlushOnCloseOptions = {},
 ): Promise<() => void> {
   const onPageHide = () => void flush().catch(() => {});
   window.addEventListener('pagehide', onPageHide);
   let unlisten = () => {};
+  const flushOpts: FlushWithTimeoutOptions = {
+    shortMs: timeoutMs,
+    longMs: options.longMs,
+    onSlow: options.onSlow,
+  };
   if (isTauri()) {
     const win = getCurrentWindow();
     let closing = false;
@@ -58,7 +88,7 @@ export async function flushOnClose(
       if (closing) return;
       closing = true;
       try {
-        if ((await flushWithTimeout(flush, timeoutMs)) !== 'saved' && !(await confirmQuit())) {
+        if ((await flushWithTimeout(flush, flushOpts)) !== 'saved' && !(await confirmQuit())) {
           closing = false; // stay open; the next close request asks again
           return;
         }

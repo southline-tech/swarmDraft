@@ -40,7 +40,10 @@ vi.mock('./backend', async (importOriginal) => {
   };
 });
 vi.mock('./close-flush', () => ({
+  CLOSE_FLUSH_TIMEOUT_MS: 3000,
   flushOnClose: async () => () => {},
+  flushWithTimeout: async () => 'saved',
+  confirmQuit: async () => true,
 }));
 
 import App from './App.vue';
