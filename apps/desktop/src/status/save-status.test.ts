@@ -19,6 +19,7 @@ describe('saveStatusLabel', () => {
   it('maps phases to copy', () => {
     expect(saveStatusLabel({ phase: 'idle' })).toBe('');
     expect(saveStatusLabel({ phase: 'saving' })).toBe('Saving…');
+    expect(saveStatusLabel({ phase: 'unsaved' })).toBe('Unsaved changes');
     expect(saveStatusLabel({ phase: 'error', message: 'ignored' })).toBe(FOOTER_SAVE_ERROR_LABEL);
     expect(saveStatusLabel({ phase: 'saved', savedAt: 0 }, 30_000)).toBe('Saved just now');
   });

@@ -43,13 +43,21 @@ function blocksInRange(doc: PMNode, from: number, to: number): number[] {
   return [...out];
 }
 
-function isBlockVisible(view: EditorView, blockPos: number): boolean {
+/** Lint blocks up to this far outside the window so a short scroll finds them checked. */
+const VISIBLE_MARGIN_PX = 400;
+
+/**
+ * Whether a block is on screen (or near it). Compare against the window, not the editor's own
+ * box: every block sits inside the editor box, so that check passed for the whole manuscript
+ * and opening a book linted every paragraph back to back (#356).
+ */
+export function isBlockVisible(view: EditorView, blockPos: number): boolean {
   try {
     const dom = view.nodeDOM(blockPos);
     if (!(dom instanceof HTMLElement)) return true;
-    const editorRect = view.dom.getBoundingClientRect();
     const rect = dom.getBoundingClientRect();
-    return rect.bottom >= editorRect.top && rect.top <= editorRect.bottom;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    return rect.bottom >= -VISIBLE_MARGIN_PX && rect.top <= viewportHeight + VISIBLE_MARGIN_PX;
   } catch {
     return true;
   }
@@ -160,8 +168,9 @@ export const Spellcheck = Extension.create<SpellcheckOptions>({
         dirtyBlocks.clear();
         return;
       }
+      // Off-screen blocks stay dirty until they scroll into view.
       const blocks = [...dirtyBlocks].filter((p) => isBlockVisible(view, p));
-      dirtyBlocks.clear();
+      for (const p of blocks) dirtyBlocks.delete(p);
       if (!blocks.length) return;
       const gen = ++lintGeneration;
       let issues = spellcheckKey.getState(view.state)?.issues ?? [];
@@ -219,6 +228,9 @@ export const Spellcheck = Extension.create<SpellcheckOptions>({
               schedule();
             }
             if (tr.docChanged) {
+              const pending = [...dirtyBlocks];
+              dirtyBlocks.clear();
+              for (const p of pending) dirtyBlocks.add(tr.mapping.map(p));
               tr.mapping.maps.forEach((map) => {
                 map.forEach((_oldStart, _oldEnd, newStart, newEnd) => {
                   for (const p of blocksInRange(tr.doc, newStart, newEnd)) dirtyBlocks.add(p);
@@ -242,10 +254,18 @@ export const Spellcheck = Extension.create<SpellcheckOptions>({
             if (node.isTextblock) dirtyBlocks.add(pos);
           });
           schedule();
+          const onScroll = () => {
+            if (dirtyBlocks.size) schedule();
+          };
+          const listen = { capture: true, passive: true } as const;
+          window.addEventListener('scroll', onScroll, listen);
+          window.addEventListener('resize', onScroll, listen);
           return {
             update() {},
             destroy() {
               clearTimeout(timer);
+              window.removeEventListener('scroll', onScroll, listen);
+              window.removeEventListener('resize', onScroll, listen);
               viewRef = null;
             },
           };

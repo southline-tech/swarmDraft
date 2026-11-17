@@ -210,6 +210,12 @@ function readWidth(el: Element | null | undefined): number {
   return el?.getBoundingClientRect().width ?? 0;
 }
 
+function inlineSetsEqual(a: Set<ToolbarOverflowItemId>, b: Set<ToolbarOverflowItemId>): boolean {
+  if (a.size !== b.size) return false;
+  for (const id of a) if (!b.has(id)) return false;
+  return true;
+}
+
 function measureToolbarLayout() {
   const bar = toolbarEl.value;
   const probe = measureEl.value;
@@ -221,7 +227,9 @@ function measureToolbarLayout() {
   const overflowBtnWidth = readWidth(probe.querySelector('[data-tb-measure="overflow-btn"]'));
   const available = readWidth(bar) - readWidth(leftPinnedEl.value) - readWidth(rightPinnedEl.value);
   const { inline } = pickInlineOverflowItems(available, itemWidths, overflowBtnWidth);
-  inlineSet.value = new Set(inline);
+  const next = new Set(inline);
+  if (inlineSetsEqual(next, inlineSet.value)) return;
+  inlineSet.value = next;
   if (!hasOverflow.value && menuOpen.value) closeMenu(false);
   if (import.meta.env.DEV) {
     console.debug('[toolbar overflow]', {

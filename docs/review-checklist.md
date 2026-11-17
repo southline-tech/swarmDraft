@@ -369,6 +369,7 @@ Implementor: add one line here for every review, design or QA finding, in the sa
 - 2026-11-11 · #354 · PR #355 review · Windows draft-pack job used `mkdir apps\\desktop\\dist` under Git Bash · `mkdir -p apps/desktop/dist` like the Linux job
 - 2026-11-11 · #354 · PR #355 review · `feedback.ui.test.js` Chrome layout probe could outlive Vitest’s default 5s timeout on slow CI · 30s test timeout and 20s `spawnSync` cap on headless Chrome
 - 2026-11-11 · #354 · PR #355 bugbot · `pack_draft` kept the `zip.finish()` handle open through `rename_draft_tmp` · `zip.finish()?.sync_all()?` so the temp file closes before rename like `backup.rs`
+- 2026-11-12 · #356 · idle CPU / pack defer · `commit_synced_main` packed before `record_comment_state_on_bot_branches`; removing that early pack broke reopen unless `commit_now_inner` still packs after bot-branch comment sync even when main commit is empty · always pack when `pack_now`, not only when `oid.is_some()`
 - 2026-11-05 · #302 · PR #325 combined review @ 1de1ff4 · bot branch only at accept; merge errors swallowed · MCP suggest commits on `bot/{id}/{session}`; merge errors surface; test `bot_branch_exists_before_accept_and_merges_after`
 - 2026-11-05 · #302 · PR #325 combined review @ 1de1ff4 · Word import skipped `.draft` · `draft_after_word_import` after import; test `word_import_creates_draft_file`
 - 2026-11-05 · #302 · PR #325 combined review @ 1de1ff4 · double-click `.draft` did not open · `tauri-plugin-single-instance` + argv/`open-draft-path` event

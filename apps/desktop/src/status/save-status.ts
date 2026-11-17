@@ -1,10 +1,13 @@
 import { footerSave } from '../copy-deck';
 
+const UNSAVED_LABEL = footerSave.unsavedLabel;
+
 export const FOOTER_SAVE_ERROR_LABEL = footerSave.errorLabel;
 
 export type ManuscriptSaveView =
   | { phase: 'idle' }
   | { phase: 'saving' }
+  | { phase: 'unsaved' }
   | { phase: 'error'; message: string }
   | { phase: 'saved'; savedAt: number };
 
@@ -21,6 +24,8 @@ export function saveStatusLabel(view: ManuscriptSaveView, now = Date.now()): str
       return '';
     case 'saving':
       return 'Saving…';
+    case 'unsaved':
+      return UNSAVED_LABEL;
     case 'error':
       return FOOTER_SAVE_ERROR_LABEL;
     case 'saved':

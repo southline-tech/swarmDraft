@@ -103,6 +103,7 @@ export const busyNotice =
 
 export const footerSave = {
   errorLabel: "Couldn't save. Retrying…",
+  unsavedLabel: 'Unsaved changes',
 } as const;
 
 export const pageEstimateTooltip = 'Estimated manuscript page (~250 words). Not print layout.';
