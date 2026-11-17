@@ -1088,7 +1088,6 @@ impl DraftService {
         if !archive_path.is_file() {
             return Err("That file isn't a swarmDraft draft.".into());
         }
-        let file_head = head_oid_from_archive(&archive_path)?;
         let id_preview = if let Some(existing) = store
             .manuscript_id_for_draft_path(path)
             .map_err(|e| e.to_string())?
@@ -1100,16 +1099,16 @@ impl DraftService {
                 format::unpack_draft(&archive_path, unpacked.path()).map_err(|e| e.to_string())?;
             manifest.book_id
         };
-        let work = self.work_dir(&id_preview);
-        if !force_discard_recovery {
-            if let Some(recovery) =
-                recovery_offer_if_worktree_newer(&work, path, &id_preview, &file_head)?
-            {
-                return Ok(Some(OpenDraftResult {
+        let preview_work = self.work_dir(&id_preview);
+        let against_file = compare_worktree_to_archive(&preview_work, &archive_path)?;
+        if !force_discard_recovery && against_file == WorktreeVsFile::Newer {
+            return Ok(Some(OpenDraftResult {
+                manuscript_id: id_preview.clone(),
+                recovery: Some(DraftRecoveryOffer {
                     manuscript_id: id_preview,
-                    recovery: Some(recovery),
-                }));
-            }
+                    draft_path: path.to_string(),
+                }),
+            }));
         }
         let unpacked = tempfile::tempdir().map_err(|e| e.to_string())?;
         let manifest =
@@ -1131,16 +1130,25 @@ impl DraftService {
             .set_draft_file_path(&id, path)
             .map_err(|e| e.to_string())?;
         let work = self.work_dir(&id);
-        if work.exists() {
-            std::fs::remove_dir_all(&work).map_err(|e| e.to_string())?;
+        if work == preview_work && against_file == WorktreeVsFile::Keep {
+            // The working repo already has everything in the file plus local-only
+            // commits (an unsaved `bot/*` branch). Rebuilding from the file would drop
+            // those suggestions, so open from the working repo instead.
+            let repo = DraftRepo::open_working(&work).map_err(|e| e.to_string())?;
+            repo.checkout_main().map_err(|e| e.to_string())?;
+            repo.checkout_head().map_err(|e| e.to_string())?;
+        } else {
+            if work.exists() {
+                std::fs::remove_dir_all(&work).map_err(|e| e.to_string())?;
+            }
+            std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+            let bare = unpacked.path().join(REPO_DIR);
+            copy_bare_to_working(&bare, &work).map_err(|e| e.to_string())?;
+            DraftRepo::open_working(&work)
+                .map_err(|e| e.to_string())?
+                .checkout_head()
+                .map_err(|e| e.to_string())?;
         }
-        std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
-        let bare = unpacked.path().join(REPO_DIR);
-        copy_bare_to_working(&bare, &work).map_err(|e| e.to_string())?;
-        DraftRepo::open_working(&work)
-            .map_err(|e| e.to_string())?
-            .checkout_head()
-            .map_err(|e| e.to_string())?;
         self.hydrate_from_worktree(store, &id, &work)?;
         self.working
             .lock()
@@ -2497,11 +2505,24 @@ impl DraftService {
         bot_agent_id: &str,
     ) -> Result<String, String> {
         let key = (manuscript_id.to_string(), bot_agent_id.to_string());
-        let sessions = self.bot_sessions.lock().expect("bot sessions");
-        if let Some(s) = sessions.get(&key) {
-            return Ok(s.branch.clone());
+        let cached = self
+            .bot_sessions
+            .lock()
+            .expect("bot sessions")
+            .get(&key)
+            .map(|s| s.branch.clone());
+        if let Some(branch) = cached {
+            // Opening the file again can rebuild the working repo without this ref
+            // (the writer chose to discard newer local work). Recreate it from main so
+            // the next suggestion still commits instead of failing on checkout.
+            let dir = self.ensure_open_inner(store, manuscript_id)?;
+            let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+            if !repo.has_branch(&branch) && repo.head_oid().map_err(|e| e.to_string())?.is_some() {
+                repo.ensure_bot_branch(&branch)
+                    .map_err(|e| format!("create bot branch: {e}"))?;
+            }
+            return Ok(branch);
         }
-        drop(sessions);
         let session_id = new_bot_session_id();
         let branch = bot_branch_name(bot_agent_id, &session_id);
         let dir = self.ensure_open_inner(store, manuscript_id)?;
@@ -2632,41 +2653,52 @@ fn format_when_human(unix: i64) -> String {
         .unwrap_or_else(|| "unknown time".into())
 }
 
-fn head_oid_from_archive(archive: &Path) -> Result<Option<String>, String> {
-    let unpacked = tempfile::tempdir().map_err(|e| e.to_string())?;
-    format::unpack_draft(archive, unpacked.path()).map_err(|e| e.to_string())?;
-    let bare = unpacked.path().join(REPO_DIR);
-    let work = unpacked.path().join("work");
-    copy_bare_to_working(&bare, &work).map_err(|e| e.to_string())?;
-    DraftRepo::open_working(&work)
-        .map_err(|e| e.to_string())?
-        .head_oid()
-        .map_err(|e| e.to_string())
+/// How the working repo for a book compares with the `.draft` file being opened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorktreeVsFile {
+    /// Nothing local would be lost: rebuild the working repo from the file.
+    Discard,
+    /// Same `main` as the file, every commit in the file, plus local-only commits
+    /// (an unsaved `bot/*` branch). Open from the working repo.
+    Keep,
+    /// The working repo has commits the file lacks and the file has commits the
+    /// working repo lacks, or `main` differs. Ask before discarding.
+    Newer,
 }
 
-fn recovery_offer_if_worktree_newer(
-    work: &Path,
-    draft_path: &str,
-    manuscript_id: &str,
-    file_head: &Option<String>,
-) -> Result<Option<DraftRecoveryOffer>, String> {
-    let Some(file_oid) = file_head else {
-        return Ok(None);
-    };
+fn compare_worktree_to_archive(work: &Path, archive: &Path) -> Result<WorktreeVsFile, String> {
     if !work.join(".git").is_dir() {
-        return Ok(None);
+        return Ok(WorktreeVsFile::Discard);
     }
-    let repo = DraftRepo::open_working(work).map_err(|e| e.to_string())?;
-    let Some(work_oid) = repo.head_oid().map_err(|e| e.to_string())? else {
-        return Ok(None);
+    let unpacked = tempfile::tempdir().map_err(|e| e.to_string())?;
+    format::unpack_draft(archive, unpacked.path()).map_err(|e| e.to_string())?;
+    let file_work = unpacked.path().join("work");
+    copy_bare_to_working(&unpacked.path().join(REPO_DIR), &file_work).map_err(|e| e.to_string())?;
+    let file_repo = DraftRepo::open_working(&file_work).map_err(|e| e.to_string())?;
+    let Some(file_main) = file_repo.main_oid().map_err(|e| e.to_string())? else {
+        return Ok(WorktreeVsFile::Discard);
     };
-    if work_oid == *file_oid {
-        return Ok(None);
+    let repo = DraftRepo::open_working(work).map_err(|e| e.to_string())?;
+    let Some(work_main) = repo.main_oid().map_err(|e| e.to_string())? else {
+        return Ok(WorktreeVsFile::Discard);
+    };
+    if work_main != file_main {
+        return Ok(WorktreeVsFile::Newer);
     }
-    Ok(Some(DraftRecoveryOffer {
-        manuscript_id: manuscript_id.to_string(),
-        draft_path: draft_path.to_string(),
-    }))
+    let local_only = repo
+        .tips_missing_from(&file_repo)
+        .map_err(|e| e.to_string())?;
+    if local_only.is_empty() {
+        return Ok(WorktreeVsFile::Discard);
+    }
+    let file_only = file_repo
+        .tips_missing_from(&repo)
+        .map_err(|e| e.to_string())?;
+    if file_only.is_empty() {
+        Ok(WorktreeVsFile::Keep)
+    } else {
+        Ok(WorktreeVsFile::Newer)
+    }
 }
 
 pub(crate) fn sanitize_filename(title: &str) -> String {
