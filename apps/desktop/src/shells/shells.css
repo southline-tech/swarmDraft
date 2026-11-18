@@ -795,6 +795,11 @@
   text-decoration: underline 2px var(--ct-suggest-insert-underline);
   text-underline-offset: 3px;
 }
+.history-compare-body {
+  white-space: pre-wrap;
+  line-height: var(--ct-line-height-body);
+}
+
 .history-compare-delete {
   color: var(--ct-suggest-delete-text);
   text-decoration: line-through 2px var(--ct-suggest-delete-strike);

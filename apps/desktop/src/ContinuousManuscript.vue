@@ -94,6 +94,10 @@ const props = defineProps<{
   rightDockOpen?: boolean;
   rightDockTab?: RightDockTab;
   historyCompareBanner?: string | null;
+  historyCompareSegmentsBySection?: Record<
+    string,
+    import('./backend').DraftHistoryCompareSegment[]
+  >;
   historyWordCount?: number;
   historyAuthorLabel?: string;
   historyPendingReview?: number;
@@ -652,6 +656,9 @@ onBeforeUnmount(() => {
             :right-dock-open="sec.id === selectedId ? rightDockOpen : undefined"
             :right-dock-tab="sec.id === selectedId ? rightDockTab : undefined"
             :history-compare-banner="sec.id === selectedId ? historyCompareBanner : undefined"
+            :history-compare-segments="
+              sec.id === selectedId ? historyCompareSegmentsBySection?.[sec.id] : undefined
+            "
             :history-word-count="sec.id === selectedId ? historyWordCount : undefined"
             :history-save="sec.id === selectedId ? manuscriptSave : undefined"
             :history-pending-review="sec.id === selectedId ? historyPendingReview : undefined"

@@ -22,6 +22,7 @@ pub use format::{
 pub use history_feed::{
     DraftRestoreVersionResult, HistoryBotSuggestion, HistoryCompareResponse, HistoryCompareSection,
     HistoryCompareSegment, HistoryFeedEntry, HistoryFeedResponse, HistoryFilterAuthor,
+    HistoryRestorePreviewResponse,
 };
 pub use migrate::{migrate_legacy_books_to_draft, DraftMigrationNotice};
 pub use repair::repair_draft_file_paths;

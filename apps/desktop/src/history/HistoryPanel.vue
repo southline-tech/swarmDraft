@@ -13,7 +13,7 @@ import {
   draftMilestoneCreate,
   draftMilestoneDelete,
   draftMilestonesList,
-  draftRestore,
+  draftRestoreVersion,
   type DraftMilestoneRow,
 } from '../backend';
 import type { ManuscriptSaveView } from '../status/save-status';
@@ -49,6 +49,7 @@ const emit = defineEmits<{
 const loading = ref(false);
 const error = ref('');
 const rows = ref<HistoryFeedRow[]>([]);
+const feedCurrent = ref<HistoryFeedRow | null>(null);
 const filterOptions = ref<HistoryFilterOption[]>([]);
 const activityTab = ref<HistoryActivityTab>('all');
 const filter = ref<HistoryFilterKey>('all');
@@ -72,15 +73,26 @@ const cancelRestoreBtn = ref<HTMLButtonElement | null>(null);
 const authorName = computed(() => props.authorLabel ?? 'You');
 const saveLabel = computed(() => (props.save ? saveStatusLabel(props.save) : ''));
 
-const currentCard = computed<HistoryFeedRow>(() => ({
-  id: 'current',
-  oid: '',
-  kind: 'current',
-  actorName: authorName.value,
-  isBot: false,
-  timeUnix: Math.floor(Date.now() / 1000),
-  summaryTitle: 'Your book as it is now',
-}));
+const currentCard = computed<HistoryFeedRow>(() => {
+  const fromFeed = feedCurrent.value;
+  if (fromFeed) {
+    return {
+      ...fromFeed,
+      actorName: authorName.value,
+      currentWordCount: fromFeed.currentWordCount ?? props.wordCount ?? 0,
+    };
+  }
+  return {
+    id: 'current',
+    oid: '',
+    kind: 'current',
+    actorName: authorName.value,
+    isBot: false,
+    timeUnix: Math.floor(Date.now() / 1000),
+    summaryTitle: 'Your book as it is now',
+    disabledReason: 'This is your book as it is now.',
+  };
+});
 
 function fallbackSummary(row: HistoryFeedRow): string {
   const n = row.suggestionCount ?? 0;
@@ -146,6 +158,7 @@ async function load() {
   try {
     const feed = await draftHistoryFeed(props.manuscriptId);
     rows.value = feed.rows;
+    feedCurrent.value = feed.current ?? null;
     filterOptions.value = feed.filterOptions;
     if (activityTab.value === 'milestones') {
       milestones.value = await draftMilestonesList(props.manuscriptId);
@@ -223,7 +236,7 @@ async function doRestore() {
   const label = compareLabel.value || confirmPreview.value?.titleLabel || 'this version';
   try {
     await props.beforeRestore?.();
-    await draftRestore(props.manuscriptId, confirmOid.value);
+    await draftRestoreVersion(props.manuscriptId, confirmOid.value, props.pendingReviewCount ?? 0);
     cancelRestore();
     closeCompare();
     const toast = `Restored from "${label}". A copy of your previous draft is in History as "Before restoring · ${formatRestoreTitleWhen(Math.floor(Date.now() / 1000))}".`;
@@ -379,7 +392,27 @@ defineExpose({ closeCompare });
           <span>{{ (wordCount ?? 0).toLocaleString() }} words</span>
           <span v-if="saveLabel">{{ saveLabel }}</span>
         </p>
-        <p class="history-panel__reason st-caption">This is your book as it is now.</p>
+        <p class="history-panel__reason st-caption">
+          {{ currentCard.disabledReason ?? 'This is your book as it is now.' }}
+        </p>
+        <div class="history-panel__actions">
+          <button
+            type="button"
+            class="sh-btn sh-btn--secondary sh-btn--sm"
+            disabled
+            aria-disabled="true"
+          >
+            Compare
+          </button>
+          <button
+            type="button"
+            class="sh-btn sh-btn--secondary sh-btn--sm"
+            disabled
+            aria-disabled="true"
+          >
+            Restore…
+          </button>
+        </div>
       </article>
 
       <div class="history-panel__controls">
@@ -572,8 +605,26 @@ defineExpose({ closeCompare });
                   Remove milestone
                 </button>
               </div>
-              <p v-else class="history-panel__reason st-caption">
-                Compare and Restore are not offered.
+              <div v-else class="history-panel__actions">
+                <button
+                  type="button"
+                  class="sh-btn sh-btn--secondary sh-btn--sm"
+                  disabled
+                  aria-disabled="true"
+                >
+                  Compare
+                </button>
+                <button
+                  type="button"
+                  class="sh-btn sh-btn--secondary sh-btn--sm"
+                  disabled
+                  aria-disabled="true"
+                >
+                  Restore…
+                </button>
+              </div>
+              <p v-if="row.kind === 'current'" class="history-panel__reason st-caption">
+                {{ row.disabledReason ?? 'This is your book as it is now.' }}
               </p>
             </li>
           </ul>

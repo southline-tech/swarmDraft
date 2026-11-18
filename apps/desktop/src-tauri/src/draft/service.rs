@@ -16,6 +16,7 @@ use super::changes::{self, DraftChangeResolve};
 use super::format::{self, DraftManifest, DRAFT_FORMAT, DRAFT_FORMAT_VERSION, REPO_DIR};
 use super::history_feed::{
     self, DraftRestoreVersionResult, HistoryCompareResponse, HistoryFeedResponse,
+    HistoryRestorePreviewResponse,
 };
 use super::repo::{
     append_trailers, message_trailers, trailer_value, CommitEntry, CommitOptions, DraftRepo,
@@ -1262,8 +1263,7 @@ impl DraftService {
     }
 
     /// Restore a past version after keeping a milestone on the current tip. Open review items
-    /// stay on that tagged tip; the restored book keeps only what that version had. A full copy
-    /// of pending suggestions into the milestone row is not attempted here.
+    /// stay on that tagged tip; the restored book is re-hydrated and orphaned open rows are cleared.
     pub fn restore_version(
         &self,
         store: &Store,
@@ -1300,6 +1300,8 @@ impl DraftService {
                 )
                 .map_err(|e| e.to_string())?;
             self.hydrate_from_worktree(store, manuscript_id, &dir)?;
+            sync::cleanup_orphaned_open_suggestions(store, manuscript_id, &dir)
+                .map_err(|e| e.to_string())?;
             if let Some(record) = self.active_record(manuscript_id) {
                 if let Err(e) = sessions::write_session_file(&dir, &record) {
                     eprintln!("draft session file not rewritten after restore: {e}");
@@ -1345,6 +1347,20 @@ impl DraftService {
             let dir = self.ensure_open_inner(store, manuscript_id)?;
             let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
             history_feed::compare_versions(store, manuscript_id, &repo, oid, None, include_segments)
+                .map_err(|e| e.to_string())
+        })
+    }
+
+    pub fn history_restore_preview(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        oid: &str,
+    ) -> Result<HistoryRestorePreviewResponse, String> {
+        self.with_op(|| {
+            let dir = self.ensure_open_inner(store, manuscript_id)?;
+            let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+            history_feed::restore_preview(store, manuscript_id, &repo, oid)
                 .map_err(|e| e.to_string())
         })
     }

@@ -118,6 +118,17 @@ pub struct HistoryCompareSegment {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct HistoryRestorePreviewResponse {
+    pub title_label: String,
+    pub restore_time_unix: i64,
+    pub word_count: usize,
+    pub pending_review_count: u32,
+    pub kept_milestone_name: String,
+    pub is_milestone: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DraftRestoreVersionResult {
     pub oid: String,
     pub milestone_name: Option<String>,
@@ -515,6 +526,49 @@ pub(crate) fn compare_versions(
 
 pub(crate) fn before_restoring_milestone_name() -> String {
     Local::now().format("Before restoring · %b %d").to_string()
+}
+
+pub(crate) fn restore_preview(
+    store: &Store,
+    manuscript_id: &str,
+    repo: &DraftRepo,
+    oid: &str,
+) -> Result<HistoryRestorePreviewResponse, DraftRepoError> {
+    use super::changes;
+
+    let compare = compare_versions(store, manuscript_id, repo, oid, None, false)?;
+    let title_label = format!(
+        "{} · {}",
+        compare.label_name,
+        format_when_short(compare.label_time_unix)
+    );
+    let word_count = compare.total_words_then;
+    let kept_milestone_name = before_restoring_milestone_name();
+    let is_milestone = repo
+        .list_milestone_tags()?
+        .into_iter()
+        .any(|t| t.oid == oid);
+    let pending_review_count = changes::build_change_index(store, manuscript_id)
+        .map(|rows| rows.iter().filter(|c| c.status == "open").count() as u32)
+        .unwrap_or(0);
+    Ok(HistoryRestorePreviewResponse {
+        title_label,
+        restore_time_unix: compare.label_time_unix,
+        word_count,
+        pending_review_count,
+        kept_milestone_name,
+        is_milestone,
+    })
+}
+
+fn format_when_short(unix: i64) -> String {
+    chrono::DateTime::from_timestamp(unix, 0)
+        .map(|dt| {
+            dt.with_timezone(&Local)
+                .format("%b %d, %I:%M %p")
+                .to_string()
+        })
+        .unwrap_or_else(|| "unknown time".into())
 }
 
 fn entry_time(entry: &HistoryFeedEntry) -> i64 {

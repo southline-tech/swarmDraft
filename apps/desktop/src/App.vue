@@ -1028,6 +1028,9 @@ const rightDockOpen = ref(true);
 const rightDockTab = ref<RightDockTab>('review');
 const rightDockLastTab = ref<RightDockTab>('review');
 const historyCompareBannerText = ref<string | null>(null);
+const historyCompareSegmentsBySection = ref<
+  Record<string, import('./backend').DraftHistoryCompareSegment[]>
+>({});
 
 function rightDockSnapshot() {
   return {
@@ -1058,6 +1061,7 @@ function onToggleRightDock() {
 
 function closeHistoryCompare() {
   historyCompareBannerText.value = null;
+  historyCompareSegmentsBySection.value = {};
 }
 
 function onRightDockKey(e: KeyboardEvent) {
@@ -2818,8 +2822,14 @@ defineExpose({ open, closeSession });
               :sections="session.sections"
               :selected-id="selectedId"
               :reload-token="reloads"
-              :readonly="session.closed || restoreInProgress"
-              :read-only-reason="restoreInProgress ? 'restore in progress' : undefined"
+              :readonly="session.closed || restoreInProgress || !!historyCompareBannerText"
+              :read-only-reason="
+                restoreInProgress
+                  ? 'restore in progress'
+                  : historyCompareBannerText
+                    ? 'comparing with a past version'
+                    : undefined
+              "
               :navigator-open="navigatorOpen"
               :navigator-controls="chapterNavControls"
               :chapter-title="selected?.title"
@@ -2851,6 +2861,7 @@ defineExpose({ open, closeSession });
               :right-dock-open="rightDockOpen"
               :right-dock-tab="rightDockTab"
               :history-compare-banner="historyCompareBannerText"
+              :history-compare-segments-by-section="historyCompareSegmentsBySection"
               :history-word-count="statusWordCount"
               :history-author-label="info?.computerName ?? 'You'"
               :history-pending-review="pendingReviewTotal"
@@ -2873,6 +2884,11 @@ defineExpose({ open, closeSession });
               @history-compare="
                 (_oid, data, label) => {
                   historyCompareBannerText = historyCompareBanner(data, label);
+                  const map: Record<string, import('./backend').DraftHistoryCompareSegment[]> = {};
+                  for (const ch of data.chapters) {
+                    if (ch.segments?.length) map[ch.sectionId] = ch.segments;
+                  }
+                  historyCompareSegmentsBySection = map;
                 }
               "
               @history-close-compare="closeHistoryCompare()"

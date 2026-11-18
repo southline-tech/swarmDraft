@@ -86,6 +86,7 @@ Run this consolidated pass in order; do not hand off until every line that appli
 
 Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
 
+- 2026-11-17 · #365 · PR #374 · History Tauri payloads (`entries`, `labelTimeUnix`, milestone command names) were invoked as if they matched Vue DTOs; compare skipped `includeSegments` and restore used `draft_restore` without preview IPC · map feed/compare/preview in `history-ipc.ts` + `backend.ts`, register `draft_history_restore_preview`, wire inline compare segments and `draft_restore_version` with pending cleanup after hydrate
 - 2026-11-11 · #344 · PR #345 · a deletion in a paragraph of about 1,500 characters dropped the mark · the deletion stays, an inline insert stays inline, and a format mark comes back on the words that remain
 - 2026-11-11 · #344 · PR #345 · a keystroke in a paragraph the bot inserted stayed outside it at the start or end of the chapter, and a keystroke typed after the insert landed before it · the keystroke stays in that paragraph, before the insert or after it, including at the start and end of the chapter
 - 2026-11-11 · #344 · PR #345 · a remnant shorter than "old phrase" was applied to a later paragraph that still had the old sentence · the deletion stays, and the mark comes back on that shorter remnant

@@ -280,8 +280,18 @@ const props = defineProps<{
   historyPendingReview?: number;
   historyAuthorLabel?: string;
   historyCompareBanner?: string | null;
+  historyCompareSegments?: import('./backend').DraftHistoryCompareSegment[];
   beforeHistoryRestore?: () => void | Promise<void>;
 }>();
+
+const showHistoryCompareBody = computed(
+  () =>
+    !!(
+      props.historyCompareBanner &&
+      props.historyCompareSegments &&
+      props.historyCompareSegments.length > 0
+    ),
+);
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
   change: [doc: JSONContent];
@@ -2154,7 +2164,22 @@ onBeforeUnmount(() => {
           >
             {{ splitShortcutStatus }}
           </p>
+          <div
+            v-if="showHistoryCompareBody"
+            class="page history-compare-body"
+            data-test="history-compare-body"
+            aria-readonly="true"
+          >
+            <template v-for="(seg, index) in historyCompareSegments" :key="index">
+              <span v-if="seg.kind === 'same'">{{ seg.text }} </span>
+              <span v-else-if="seg.kind === 'add'" class="history-compare-insert"
+                >{{ seg.text }}
+              </span>
+              <span v-else class="history-compare-delete">{{ seg.text }} </span>
+            </template>
+          </div>
           <EditorContent
+            v-else
             :editor="editor"
             class="page"
             spellcheck="false"

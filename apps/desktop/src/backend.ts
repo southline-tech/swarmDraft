@@ -406,6 +406,9 @@ export interface HistoryFeedRow {
   chapterTitle?: string | null;
   milestoneName?: string | null;
   children?: HistorySuggestionChild[] | null;
+  /** Shown on the current-book row when Compare/Restore are disabled (#365). */
+  disabledReason?: string | null;
+  currentWordCount?: number | null;
 }
 
 export interface HistoryFilterOption {
@@ -419,12 +422,20 @@ export interface DraftHistoryFeed {
   filterOptions: HistoryFilterOption[];
   authorLabel: string;
   wordCount: number;
+  /** Server-backed current card; falls back to a client default when missing. */
+  current?: HistoryFeedRow | null;
+}
+
+export interface DraftHistoryCompareSegment {
+  kind: 'same' | 'add' | 'remove';
+  text: string;
 }
 
 export interface DraftHistoryCompareChapter {
   sectionId: string;
   title: string;
   hasChanges: boolean;
+  segments?: DraftHistoryCompareSegment[];
 }
 
 export interface DraftHistoryCompare {
@@ -605,7 +616,12 @@ export async function draftHistoryFeed(manuscriptId: string): Promise<DraftHisto
     return { rows: [], filterOptions: [], authorLabel: 'You', wordCount: 0 };
   }
   try {
-    return await invoke<DraftHistoryFeed>('draft_history_feed', { manuscriptId });
+    const { mapHistoryFeed } = await import('./history/history-ipc');
+    const raw = await invoke<import('./history/history-ipc').RawHistoryFeedResponse>(
+      'draft_history_feed',
+      { manuscriptId },
+    );
+    return mapHistoryFeed(raw);
   } catch {
     const commits = await draftHistory(manuscriptId, 50, 0);
     return {
@@ -620,6 +636,7 @@ export async function draftHistoryFeed(manuscriptId: string): Promise<DraftHisto
 export async function draftHistoryCompare(
   manuscriptId: string,
   oid: string,
+  includeSegments = true,
 ): Promise<DraftHistoryCompare> {
   if (!isTauri()) {
     return {
@@ -631,7 +648,12 @@ export async function draftHistoryCompare(
     };
   }
   try {
-    return await invoke<DraftHistoryCompare>('draft_history_compare', { manuscriptId, oid });
+    const { mapHistoryCompare } = await import('./history/history-ipc');
+    const raw = await invoke<import('./history/history-ipc').RawHistoryCompareResponse>(
+      'draft_history_compare',
+      { manuscriptId, oid, includeSegments },
+    );
+    return mapHistoryCompare(raw);
   } catch {
     return {
       oid,
@@ -658,10 +680,12 @@ export async function draftHistoryRestorePreview(
     };
   }
   try {
-    return await invoke<DraftHistoryRestorePreview>('draft_history_restore_preview', {
-      manuscriptId,
-      oid,
-    });
+    const { mapRestorePreview } = await import('./history/history-ipc');
+    const raw = await invoke<import('./history/history-ipc').RawHistoryRestorePreviewResponse>(
+      'draft_history_restore_preview',
+      { manuscriptId, oid },
+    );
+    return mapRestorePreview(raw);
   } catch {
     return {
       titleLabel: 'this version',
@@ -677,7 +701,12 @@ export async function draftHistoryRestorePreview(
 export async function draftMilestonesList(manuscriptId: string): Promise<DraftMilestoneRow[]> {
   if (!isTauri()) return [];
   try {
-    return await invoke<DraftMilestoneRow[]>('draft_milestones_list', { manuscriptId });
+    const { mapMilestoneTags } = await import('./history/history-ipc');
+    const raw = await invoke<import('./history/history-ipc').RawMilestoneTag[]>(
+      'draft_milestone_list',
+      { manuscriptId },
+    );
+    return mapMilestoneTags(raw);
   } catch {
     return [];
   }
@@ -698,11 +727,33 @@ export async function draftMilestoneCreate(
 export async function draftMilestoneDelete(manuscriptId: string, refName: string): Promise<void> {
   if (!isTauri()) return;
   try {
-    await invoke('draft_milestone_delete', { manuscriptId, refName });
+    await invoke('draft_milestone_remove', { manuscriptId, name: refName });
   } catch (e) {
     console.error('Milestone delete failed', e);
     throw e;
   }
+}
+
+export interface DraftRestoreVersionResult {
+  oid: string;
+  milestoneName?: string | null;
+  milestoneOid: string;
+  pendingCount?: number | null;
+}
+
+export async function draftRestoreVersion(
+  manuscriptId: string,
+  oid: string,
+  pendingCount?: number,
+): Promise<DraftRestoreVersionResult> {
+  if (!isTauri()) {
+    return Promise.reject(new Error('History restore requires the desktop app'));
+  }
+  return invoke<DraftRestoreVersionResult>('draft_restore_version', {
+    manuscriptId,
+    oid,
+    pendingCount: pendingCount ?? null,
+  });
 }
 
 export async function draftReviewCommit(args: {

@@ -1303,6 +1303,22 @@ async fn draft_history_compare(
 }
 
 #[tauri::command]
+async fn draft_history_restore_preview(
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+    oid: String,
+) -> Result<draft::HistoryRestorePreviewResponse, String> {
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        drafts.history_restore_preview(&store, &manuscript_id, &oid)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn draft_milestone_create(
     store: tauri::State<'_, storage::Store>,
     drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
@@ -1736,6 +1752,7 @@ pub fn run() {
             draft_history,
             draft_history_feed,
             draft_history_compare,
+            draft_history_restore_preview,
             draft_restore,
             draft_restore_version,
             draft_milestone_create,

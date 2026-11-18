@@ -30,7 +30,11 @@ vi.mock('../backend', () => ({
     keptMilestoneName: 'Before restoring · Nov 17',
     isMilestone: false,
   })),
-  draftRestore: vi.fn(async () => 'abc123'),
+  draftRestoreVersion: vi.fn(async () => ({
+    oid: 'abc123',
+    milestoneOid: 'ms1',
+    milestoneName: 'Before restoring',
+  })),
   draftHistoryCompare: vi.fn(async () => ({
     oid: 'abc123',
     timeUnix: 1_700_000_000,
