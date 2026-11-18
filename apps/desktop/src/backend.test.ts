@@ -108,7 +108,7 @@ describe('draftHistoryFeed IPC (#365)', () => {
     }));
     const { draftHistoryFeed } = await import('./backend');
     const feed = await draftHistoryFeed('m1');
-    expect(feed.rows[0].chapterTitle).toBe('One');
+    expect(feed.rows[0]!.chapterTitle).toBe('One');
     expect(invoke).toHaveBeenCalledWith('draft_history_feed', { manuscriptId: 'm1' });
     vi.doUnmock('@tauri-apps/api/core');
     vi.resetModules();

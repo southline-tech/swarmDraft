@@ -52,9 +52,9 @@ describe('history IPC mappers (#365)', () => {
     expect(feed.wordCount).toBe(1200);
     expect(feed.current?.kind).toBe('current');
     expect(feed.rows).toHaveLength(1);
-    expect(feed.rows[0].timeUnix).toBe(80);
-    expect(feed.rows[0].children?.[0].deciderName).toBe('Brett');
-    expect(feed.filterOptions[0]).toMatchObject({ key: 'agent:line', isBot: true });
+    expect(feed.rows[0]!.timeUnix).toBe(80);
+    expect(feed.rows[0]!.children?.[0]!.deciderName).toBe('Brett');
+    expect(feed.filterOptions[0]!).toMatchObject({ key: 'agent:line', isBot: true });
   });
 
   it('maps compare and restore preview payloads', () => {
@@ -76,8 +76,8 @@ describe('history IPC mappers (#365)', () => {
     };
     const mapped = mapHistoryCompare(compare);
     expect(mapped.wordCountThen).toBe(10);
-    expect(mapped.chapters[0].hasChanges).toBe(true);
-    expect(mapped.chapters[0].segments?.[0].kind).toBe('add');
+    expect(mapped.chapters[0]!.hasChanges).toBe(true);
+    expect(mapped.chapters[0]!.segments?.[0]!.kind).toBe('add');
 
     expect(
       mapRestorePreview({

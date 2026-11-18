@@ -5,6 +5,7 @@ import type {
   DraftHistoryRestorePreview,
   HistoryFeedRow,
   HistoryFilterOption,
+  HistorySuggestionChild,
 } from '../backend';
 import {
   draftHistoryCompare,
@@ -311,16 +312,15 @@ function onPanelKeydown(e: KeyboardEvent) {
   }
 }
 
-function suggestionStatusLine(child: HistoryFeedRow['children'] extends infer C ? C : never) {
-  const c = child as NonNullable<HistoryFeedRow['children']>[number];
-  const when = formatHistoryRowWhen(c.timeUnix);
-  if (c.status === 'rejected') {
-    return `${c.deciderName} · ${when} · ${c.chapterTitle}`;
+function suggestionStatusLine(child: HistorySuggestionChild) {
+  const when = formatHistoryRowWhen(child.timeUnix);
+  if (child.status === 'rejected') {
+    return `${child.deciderName} · ${when} · ${child.chapterTitle}`;
   }
-  if (c.status === 'editedLater') {
-    return `${c.deciderName} accepted this, then edited it later · ${when}`;
+  if (child.status === 'editedLater') {
+    return `${child.deciderName} accepted this, then edited it later · ${when}`;
   }
-  return `${c.deciderName} · ${when} · ${c.chapterTitle}`;
+  return `${child.deciderName} · ${when} · ${child.chapterTitle}`;
 }
 
 onMounted(() => {
