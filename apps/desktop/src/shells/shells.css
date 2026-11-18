@@ -797,7 +797,7 @@
 }
 .history-compare-body {
   white-space: pre-wrap;
-  line-height: var(--ct-line-height-body);
+  line-height: var(--ct-leading-body);
 }
 
 .history-compare-delete {
