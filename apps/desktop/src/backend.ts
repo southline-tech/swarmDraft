@@ -378,6 +378,90 @@ export interface DraftCommitEntry {
   message: string;
 }
 
+/** History panel feed (#365). */
+export type HistorySuggestionStatus = 'accepted' | 'rejected' | 'editedLater';
+
+export interface HistorySuggestionChild {
+  changeId: string;
+  status: HistorySuggestionStatus;
+  quote: string;
+  deciderName: string;
+  chapterTitle: string;
+  sectionId: string;
+  timeUnix: number;
+}
+
+export type HistoryRowKind = 'current' | 'bot' | 'authorEdit' | 'save' | 'restore' | 'milestone';
+
+export interface HistoryFeedRow {
+  id: string;
+  oid: string;
+  kind: HistoryRowKind;
+  actorName: string;
+  isBot: boolean;
+  agentId?: string | null;
+  timeUnix: number;
+  summaryTitle?: string | null;
+  suggestionCount?: number | null;
+  chapterTitle?: string | null;
+  milestoneName?: string | null;
+  children?: HistorySuggestionChild[] | null;
+  /** Shown on the current-book row when Compare/Restore are disabled (#365). */
+  disabledReason?: string | null;
+  currentWordCount?: number | null;
+}
+
+export interface HistoryFilterOption {
+  key: string;
+  label: string;
+  isBot: boolean;
+}
+
+export interface DraftHistoryFeed {
+  rows: HistoryFeedRow[];
+  filterOptions: HistoryFilterOption[];
+  authorLabel: string;
+  wordCount: number;
+  /** Server-backed current card; falls back to a client default when missing. */
+  current?: HistoryFeedRow | null;
+}
+
+export interface DraftHistoryCompareSegment {
+  kind: 'same' | 'add' | 'remove';
+  text: string;
+}
+
+export interface DraftHistoryCompareChapter {
+  sectionId: string;
+  title: string;
+  hasChanges: boolean;
+  segments?: DraftHistoryCompareSegment[];
+}
+
+export interface DraftHistoryCompare {
+  oid: string;
+  timeUnix: number;
+  wordCountThen: number;
+  wordCountNow: number;
+  chapters: DraftHistoryCompareChapter[];
+}
+
+export interface DraftHistoryRestorePreview {
+  titleLabel: string;
+  restoreTimeUnix: number;
+  wordCount: number;
+  pendingReviewCount: number;
+  keptMilestoneName: string;
+  isMilestone: boolean;
+}
+
+export interface DraftMilestoneRow {
+  refName: string;
+  displayName: string;
+  timeUnix: number;
+  oid: string;
+}
+
 export interface OpenDraftResult {
   manuscriptId: string;
   recovery?: { manuscriptId: string; draftPath: string } | null;
@@ -495,6 +579,181 @@ export async function draftHistory(
 export async function draftRestore(manuscriptId: string, oid: string): Promise<string> {
   if (!isTauri()) return Promise.reject(new Error('History restore requires the desktop app'));
   return invoke<string>('draft_restore', { manuscriptId, oid });
+}
+
+function commitKind(message: string): HistoryRowKind {
+  if (message.startsWith('Merged bot/')) return 'bot';
+  if (message.startsWith('You saved')) return 'save';
+  if (message.includes('milestone')) return 'milestone';
+  if (message.toLowerCase().includes('restore')) return 'restore';
+  if (message.startsWith('Edited')) return 'authorEdit';
+  return 'authorEdit';
+}
+
+function feedFromCommits(commits: DraftCommitEntry[]): HistoryFeedRow[] {
+  return commits.map((c) => {
+    const kind = commitKind(c.message);
+    return {
+      id: c.oid,
+      oid: c.oid,
+      kind,
+      actorName: kind === 'bot' ? c.committerName : 'You',
+      isBot: kind === 'bot',
+      agentId: null,
+      timeUnix: c.timeUnix,
+      summaryTitle: kind === 'bot' ? null : c.message,
+      suggestionCount: null,
+      chapterTitle: null,
+      milestoneName: kind === 'milestone' ? c.message : null,
+      children: null,
+    };
+  });
+}
+
+/** Rich history feed; falls back to commit list when the IPC is not ready. */
+export async function draftHistoryFeed(manuscriptId: string): Promise<DraftHistoryFeed> {
+  if (!isTauri()) {
+    return { rows: [], filterOptions: [], authorLabel: 'You', wordCount: 0 };
+  }
+  try {
+    const { mapHistoryFeed } = await import('./history/history-ipc');
+    const raw = await invoke<import('./history/history-ipc').RawHistoryFeedResponse>(
+      'draft_history_feed',
+      { manuscriptId },
+    );
+    return mapHistoryFeed(raw);
+  } catch {
+    const commits = await draftHistory(manuscriptId, 50, 0);
+    return {
+      rows: feedFromCommits(commits),
+      filterOptions: [],
+      authorLabel: 'You',
+      wordCount: 0,
+    };
+  }
+}
+
+export async function draftHistoryCompare(
+  manuscriptId: string,
+  oid: string,
+  includeSegments = true,
+): Promise<DraftHistoryCompare> {
+  if (!isTauri()) {
+    return {
+      oid,
+      timeUnix: 0,
+      wordCountThen: 0,
+      wordCountNow: 0,
+      chapters: [],
+    };
+  }
+  try {
+    const { mapHistoryCompare } = await import('./history/history-ipc');
+    const raw = await invoke<import('./history/history-ipc').RawHistoryCompareResponse>(
+      'draft_history_compare',
+      { manuscriptId, oid, includeSegments },
+    );
+    return mapHistoryCompare(raw);
+  } catch {
+    return {
+      oid,
+      timeUnix: 0,
+      wordCountThen: 0,
+      wordCountNow: 0,
+      chapters: [],
+    };
+  }
+}
+
+export async function draftHistoryRestorePreview(
+  manuscriptId: string,
+  oid: string,
+): Promise<DraftHistoryRestorePreview> {
+  if (!isTauri()) {
+    return {
+      titleLabel: 'this version',
+      restoreTimeUnix: 0,
+      wordCount: 0,
+      pendingReviewCount: 0,
+      keptMilestoneName: 'Before restoring',
+      isMilestone: false,
+    };
+  }
+  try {
+    const { mapRestorePreview } = await import('./history/history-ipc');
+    const raw = await invoke<import('./history/history-ipc').RawHistoryRestorePreviewResponse>(
+      'draft_history_restore_preview',
+      { manuscriptId, oid },
+    );
+    return mapRestorePreview(raw);
+  } catch {
+    return {
+      titleLabel: 'this version',
+      restoreTimeUnix: 0,
+      wordCount: 0,
+      pendingReviewCount: 0,
+      keptMilestoneName: 'Before restoring',
+      isMilestone: false,
+    };
+  }
+}
+
+export async function draftMilestonesList(manuscriptId: string): Promise<DraftMilestoneRow[]> {
+  if (!isTauri()) return [];
+  try {
+    const { mapMilestoneTags } = await import('./history/history-ipc');
+    const raw = await invoke<import('./history/history-ipc').RawMilestoneTag[]>(
+      'draft_milestone_list',
+      { manuscriptId },
+    );
+    return mapMilestoneTags(raw);
+  } catch {
+    return [];
+  }
+}
+
+export async function draftMilestoneCreate(
+  manuscriptId: string,
+  name: string,
+): Promise<DraftMilestoneRow | null> {
+  if (!isTauri()) return null;
+  try {
+    return await invoke<DraftMilestoneRow | null>('draft_milestone_create', { manuscriptId, name });
+  } catch {
+    return null;
+  }
+}
+
+export async function draftMilestoneDelete(manuscriptId: string, refName: string): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke('draft_milestone_remove', { manuscriptId, name: refName });
+  } catch (e) {
+    console.error('Milestone delete failed', e);
+    throw e;
+  }
+}
+
+export interface DraftRestoreVersionResult {
+  oid: string;
+  milestoneName?: string | null;
+  milestoneOid: string;
+  pendingCount?: number | null;
+}
+
+export async function draftRestoreVersion(
+  manuscriptId: string,
+  oid: string,
+  pendingCount?: number,
+): Promise<DraftRestoreVersionResult> {
+  if (!isTauri()) {
+    return Promise.reject(new Error('History restore requires the desktop app'));
+  }
+  return invoke<DraftRestoreVersionResult>('draft_restore_version', {
+    manuscriptId,
+    oid,
+    pendingCount: pendingCount ?? null,
+  });
 }
 
 export async function draftReviewCommit(args: {

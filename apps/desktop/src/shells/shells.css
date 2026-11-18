@@ -537,13 +537,87 @@
   margin-top: var(--ct-space-3);
 }
 
-/* History dialog is teleported; keep layout next to the other dialog cards. */
+/* Right dock (#365): Review and History share --ct-panel-w. */
+.right-dock {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+}
+.right-dock--open {
+  width: var(--ct-panel-w);
+  min-width: var(--ct-panel-w-narrow);
+}
+.right-dock__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  border-left: 1px solid var(--ct-border);
+  background: var(--ct-surface-raised);
+}
+.right-dock__tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--ct-border);
+  flex-shrink: 0;
+}
+.right-dock__tab {
+  flex: 1;
+  padding: var(--ct-space-2) var(--ct-space-3);
+  font-size: var(--ct-text-sm);
+  font-weight: var(--ct-weight-medium);
+  color: var(--ct-text-muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+.right-dock__tab[aria-selected='true'] {
+  color: var(--ct-text);
+  border-bottom-color: var(--ct-accent);
+}
+.right-dock__badge {
+  margin-left: var(--ct-space-1);
+  padding: 0 var(--ct-space-1);
+  font-size: var(--ct-text-xs);
+  border-radius: var(--ct-radius-sm);
+  background: color-mix(in srgb, var(--ct-accent) 15%, var(--ct-surface));
+  color: var(--ct-accent);
+}
+.right-dock__panel {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.right-dock__slot {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+.right-dock__hide {
+  flex-shrink: 0;
+  margin: var(--ct-space-2);
+  align-self: flex-start;
+}
+@media (max-width: 1199px) {
+  .right-dock--open {
+    width: var(--ct-panel-w-narrow);
+  }
+}
+
 .history-panel {
   display: flex;
   flex-direction: column;
   gap: var(--ct-space-3);
-  width: min(32rem, calc(100vw - 2rem));
-  max-height: min(70vh, 32rem);
+  flex: 1;
+  min-height: 0;
+  padding: var(--ct-space-3);
   overflow: auto;
 }
 .history-panel__head {
@@ -551,9 +625,62 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--ct-space-2);
+  flex-shrink: 0;
+}
+.history-panel__current {
+  padding: var(--ct-space-3);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-md);
+  background: var(--ct-bg);
+}
+.history-panel__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ct-space-2);
+}
+.history-panel__activity-tabs {
+  display: flex;
+  gap: var(--ct-space-1);
+  margin-left: auto;
+}
+.history-panel__activity-tab {
+  padding: var(--ct-space-1) var(--ct-space-2);
+  font-size: var(--ct-text-sm);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-sm);
+  background: var(--ct-bg);
+  color: var(--ct-text-muted);
+  cursor: pointer;
+}
+.history-panel__activity-tab[aria-selected='true'] {
+  color: var(--ct-text);
+  border-color: var(--ct-accent);
+}
+.history-panel__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.history-panel__day {
+  margin: var(--ct-space-3) 0 var(--ct-space-2);
+  font-size: var(--ct-text-sm);
+  font-weight: var(--ct-weight-semibold);
+  color: var(--ct-text-muted);
 }
 .history-panel__error {
   color: var(--ct-danger);
+}
+.history-panel__error-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-space-2);
+}
+.history-panel__empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-space-3);
+  padding: var(--ct-space-4) 0;
 }
 .history-panel__list {
   list-style: none;
@@ -561,14 +688,35 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--ct-space-3);
+  gap: var(--ct-space-2);
 }
 .history-panel__row {
   display: flex;
   flex-direction: column;
   gap: var(--ct-space-1);
-  padding-bottom: var(--ct-space-3);
-  border-bottom: 1px solid var(--ct-border);
+  padding: var(--ct-space-3);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-md);
+  background: var(--ct-bg);
+}
+.history-panel__row--focused {
+  box-shadow: var(--ct-focus-ring);
+}
+.history-panel__row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ct-space-2);
+}
+.history-panel__who {
+  font-weight: var(--ct-weight-semibold);
+}
+.history-panel__tag {
+  font-size: var(--ct-text-xs);
+  padding: 0 var(--ct-space-1);
+  border-radius: var(--ct-radius-sm);
+  background: color-mix(in srgb, var(--ct-text-muted) 12%, var(--ct-surface));
+  color: var(--ct-text-muted);
 }
 .history-panel__meta {
   display: flex;
@@ -577,8 +725,46 @@
   font-size: var(--ct-text-sm);
   color: var(--ct-text-muted);
 }
-.history-panel__msg {
+.history-panel__reason {
+  color: var(--ct-text-muted);
   margin: 0;
+}
+.history-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ct-space-2);
+  margin-top: var(--ct-space-2);
+}
+.history-panel__children {
+  list-style: none;
+  margin: var(--ct-space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-space-1);
+}
+.history-panel__child {
+  text-align: left;
+  width: 100%;
+}
+.history-panel__compare {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-space-3);
+  padding: var(--ct-space-3);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-md);
+}
+.history-panel__compare-stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--ct-space-1) var(--ct-space-3);
+  margin: 0;
+}
+.history-panel__compare-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ct-space-2);
 }
 .history-panel__confirm {
   margin-top: var(--ct-space-3);
@@ -592,6 +778,31 @@
   justify-content: flex-end;
   gap: var(--ct-space-2);
   margin-top: var(--ct-space-3);
+}
+
+.history-compare-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ct-space-2);
+  padding: var(--ct-space-2) var(--ct-space-4);
+  background: var(--ct-surface-raised);
+  border-bottom: 1px solid var(--ct-border);
+  font-size: var(--ct-text-sm);
+}
+.history-compare-insert {
+  text-decoration: underline 2px var(--ct-suggest-insert-underline);
+  text-underline-offset: 3px;
+}
+.history-compare-body {
+  white-space: pre-wrap;
+  line-height: var(--ct-leading-body);
+}
+
+.history-compare-delete {
+  color: var(--ct-suggest-delete-text);
+  text-decoration: line-through 2px var(--ct-suggest-delete-strike);
 }
 
 /* #94: in focus mode Find sits below the centred "Focus mode" pill instead of under it. */

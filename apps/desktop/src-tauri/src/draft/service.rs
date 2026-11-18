@@ -14,9 +14,13 @@ use crate::storage::Store;
 
 use super::changes::{self, DraftChangeResolve};
 use super::format::{self, DraftManifest, DRAFT_FORMAT, DRAFT_FORMAT_VERSION, REPO_DIR};
+use super::history_feed::{
+    self, DraftRestoreVersionResult, HistoryCompareResponse, HistoryFeedResponse,
+    HistoryRestorePreviewResponse,
+};
 use super::repo::{
     append_trailers, message_trailers, trailer_value, CommitEntry, CommitOptions, DraftRepo,
-    DraftRepoError,
+    DraftRepoError, MilestoneTag,
 };
 use super::sessions::{self, SessionRecord};
 use super::sync;
@@ -1253,9 +1257,32 @@ impl DraftService {
         oid: &str,
         committer_name: &str,
     ) -> Result<String, String> {
+        Ok(self
+            .restore_version(store, manuscript_id, oid, committer_name, None)?
+            .oid)
+    }
+
+    /// Restore a past version after keeping a milestone on the current tip. Open review items
+    /// stay on that tagged tip; the restored book is re-hydrated and orphaned open rows are cleared.
+    pub fn restore_version(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        oid: &str,
+        committer_name: &str,
+        pending_count: Option<u32>,
+    ) -> Result<DraftRestoreVersionResult, String> {
         self.with_op_after_queued_commits(|| {
             let dir = self.ensure_open_inner(store, manuscript_id)?;
             let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+            let head = repo
+                .head_oid()
+                .map_err(|e| e.to_string())?
+                .unwrap_or_default();
+            let milestone_name = history_feed::before_restoring_milestone_name();
+            let milestone_oid = repo
+                .create_milestone_tag(&milestone_name, &head, &milestone_name, committer_name)
+                .map_err(|e| e.to_string())?;
             let time = repo.commit_time_unix(oid).unwrap_or(0);
             let session = self.session_for_commit(store, manuscript_id)?;
             let msg = message_with_session(
@@ -1273,13 +1300,117 @@ impl DraftService {
                 )
                 .map_err(|e| e.to_string())?;
             self.hydrate_from_worktree(store, manuscript_id, &dir)?;
+            sync::cleanup_orphaned_open_suggestions(store, manuscript_id, &dir)
+                .map_err(|e| e.to_string())?;
             if let Some(record) = self.active_record(manuscript_id) {
                 if let Err(e) = sessions::write_session_file(&dir, &record) {
                     eprintln!("draft session file not rewritten after restore: {e}");
                 }
             }
             self.pack_if_linked_inner(store, manuscript_id)?;
-            Ok(new_oid)
+            Ok(DraftRestoreVersionResult {
+                oid: new_oid,
+                milestone_name: Some(milestone_name),
+                milestone_oid,
+                pending_count,
+            })
+        })
+    }
+
+    pub fn history_feed(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        limit: usize,
+    ) -> Result<HistoryFeedResponse, String> {
+        self.with_op(|| {
+            let dir = self.ensure_open_inner(store, manuscript_id)?;
+            let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+            let save_state = if self.draft_file_behind(manuscript_id) {
+                "unsaved"
+            } else {
+                "saved"
+            };
+            history_feed::list_feed(store, manuscript_id, &repo, save_state, limit)
+                .map_err(|e| e.to_string())
+        })
+    }
+
+    pub fn history_compare(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        oid: &str,
+        include_segments: bool,
+    ) -> Result<HistoryCompareResponse, String> {
+        self.with_op(|| {
+            let dir = self.ensure_open_inner(store, manuscript_id)?;
+            let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+            history_feed::compare_versions(store, manuscript_id, &repo, oid, None, include_segments)
+                .map_err(|e| e.to_string())
+        })
+    }
+
+    pub fn history_restore_preview(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        oid: &str,
+    ) -> Result<HistoryRestorePreviewResponse, String> {
+        self.with_op(|| {
+            let dir = self.ensure_open_inner(store, manuscript_id)?;
+            let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+            history_feed::restore_preview(store, manuscript_id, &repo, oid)
+                .map_err(|e| e.to_string())
+        })
+    }
+
+    pub fn milestone_create(
+        &self,
+        store: &Store,
+        manuscript_id: &str,
+        name: &str,
+        message: Option<&str>,
+        tagger_name: &str,
+    ) -> Result<String, String> {
+        self.with_op(|| {
+            let dir = self.ensure_open_inner(store, manuscript_id)?;
+            let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+            let head = repo
+                .head_oid()
+                .map_err(|e| e.to_string())?
+                .unwrap_or_default();
+            let body = message.filter(|s| !s.trim().is_empty()).unwrap_or(name);
+            repo.create_milestone_tag(name, &head, body, tagger_name)
+                .map_err(|e| e.to_string())
+        })
+    }
+
+    pub fn milestone_remove(&self, manuscript_id: &str, name: &str) -> Result<(), String> {
+        self.with_op(|| {
+            let dir = self
+                .working
+                .lock()
+                .expect("working")
+                .get(manuscript_id)
+                .cloned()
+                .ok_or_else(|| "manuscript is not open".to_string())?;
+            let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+            repo.delete_milestone_tag(name).map_err(|e| e.to_string())
+        })
+    }
+
+    pub fn milestone_list(&self, manuscript_id: &str) -> Result<Vec<MilestoneTag>, String> {
+        self.with_op(|| {
+            let dir = self
+                .working
+                .lock()
+                .expect("working")
+                .get(manuscript_id)
+                .cloned()
+                .ok_or_else(|| "manuscript is not open".to_string())?;
+            let repo = DraftRepo::open_working(&dir).map_err(|e| e.to_string())?;
+            repo.list_milestone_tags().map_err(|e| e.to_string())
         })
     }
 

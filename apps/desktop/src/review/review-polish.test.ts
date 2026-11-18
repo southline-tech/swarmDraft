@@ -27,7 +27,7 @@ const read = (p: string) =>
 describe('review sidebar polish (#47)', () => {
   it('review column scrolls as one unit through ReviewPanel only (#239)', () => {
     const css = read('ManuscriptEditor.vue');
-    expect(css).toMatch(/\.manuscript-editor \.review\s*\{[^}]*overflow-y:\s*auto/s);
+    expect(css).toMatch(/\.manuscript-editor \.right-dock-host[\s\S]*overflow-y:\s*auto/);
     expect(css).not.toMatch(/class="comments"/);
   });
 

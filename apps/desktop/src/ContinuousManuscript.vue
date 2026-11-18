@@ -50,6 +50,7 @@ import { useUnseenBotComments } from './review/unseen-bot-comments';
 
 const REVIEW_RAIL = '#continuous-review-rail';
 import { docWordCount } from './status/wordcount';
+import type { RightDockTab } from './history/history-dock-state';
 
 const props = defineProps<{
   outline: Section[];
@@ -91,6 +92,18 @@ const props = defineProps<{
   splitAcrossThreadIds?: readonly string[];
   /** Review-link selection (#119). Null shows every change. */
   changeIds?: readonly string[] | null;
+  rightDockOpen?: boolean;
+  rightDockTab?: RightDockTab;
+  historyCompareBanner?: string | null;
+  historyCompareSegmentsBySection?: Record<
+    string,
+    import('./backend').DraftHistoryCompareSegment[]
+  >;
+  historyWordCount?: number;
+  historyAuthorLabel?: string;
+  historyExpandedBotRowId?: string | null;
+  historyPendingReview?: number;
+  beforeHistoryRestore?: () => void | Promise<void>;
 }>();
 
 const commentRows = shallowRef<readonly CommentRow[]>([]);
@@ -172,6 +185,13 @@ const emit = defineEmits<{
   'reading-position': [pos: ReadingPosition];
   'copy-link': [ok: boolean];
   'clear-change-ids': [];
+  'update:rightDockOpen': [open: boolean];
+  'update:rightDockTab': [tab: RightDockTab];
+  'toggle-right-dock': [];
+  'history-restored': [toast: string];
+  'history-open-suggestion': [changeId: string, sectionId: string, botRowId: string];
+  'history-close-compare': [];
+  'history-compare': [oid: string, data: import('./backend').DraftHistoryCompare, label: string];
 }>();
 
 const suggestionsBySection = shallowRef(new Map<string, SuggestionItem[]>());
@@ -674,6 +694,30 @@ onBeforeUnmount(() => {
             :chapter-number="sec.id === selectedId ? leadChapterOps?.chapterNumber : undefined"
             :split-chapter-hint="sec.id === selectedId && !!leadChapterOps?.splitHint"
             :split-across-thread-ids="sec.id === selectedId ? splitAcrossThreadIds : undefined"
+            :right-dock-managed="sec.id === selectedId && !!manuscriptId"
+            :right-dock-open="sec.id === selectedId ? rightDockOpen : undefined"
+            :right-dock-tab="sec.id === selectedId ? rightDockTab : undefined"
+            :history-compare-banner="sec.id === selectedId ? historyCompareBanner : undefined"
+            :history-compare-segments="
+              sec.id === selectedId ? historyCompareSegmentsBySection?.[sec.id] : undefined
+            "
+            :history-word-count="sec.id === selectedId ? historyWordCount : undefined"
+            :history-save="sec.id === selectedId ? manuscriptSave : undefined"
+            :history-pending-review="sec.id === selectedId ? historyPendingReview : undefined"
+            :history-author-label="sec.id === selectedId ? historyAuthorLabel : undefined"
+            :history-expanded-bot-row-id="
+              sec.id === selectedId ? historyExpandedBotRowId : undefined
+            "
+            :before-history-restore="beforeHistoryRestore"
+            @update:right-dock-open="emit('update:rightDockOpen', $event)"
+            @update:right-dock-tab="emit('update:rightDockTab', $event)"
+            @toggle-right-dock="emit('toggle-right-dock')"
+            @history-restored="emit('history-restored', $event)"
+            @history-open-suggestion="
+              (id, sid, botId) => emit('history-open-suggestion', id, sid, botId)
+            "
+            @history-close-compare="emit('history-close-compare')"
+            @history-compare="(oid, data, label) => emit('history-compare', oid, data, label)"
             @update:author-filter="authorFilter = $event"
             @clear-change-ids="emit('clear-change-ids')"
             @split-chapter="emit('split-chapter', $event)"

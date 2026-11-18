@@ -6,6 +6,7 @@
 
 mod changes;
 mod format;
+mod history_feed;
 mod migrate;
 mod repair;
 mod repo;
@@ -18,9 +19,14 @@ pub use format::{
     cleanup_stale_draft_write_temps, pack_draft, unpack_draft, DraftFormatError, DraftManifest,
     DRAFT_FORMAT, DRAFT_FORMAT_VERSION,
 };
+pub use history_feed::{
+    DraftRestoreVersionResult, HistoryBotSuggestion, HistoryCompareResponse, HistoryCompareSection,
+    HistoryCompareSegment, HistoryFeedEntry, HistoryFeedResponse, HistoryFilterAuthor,
+    HistoryRestorePreviewResponse,
+};
 pub use migrate::{migrate_legacy_books_to_draft, DraftMigrationNotice};
 pub use repair::repair_draft_file_paths;
-pub use repo::{CommitEntry, CommitOptions, DraftRepo, DraftRepoError};
+pub use repo::{CommitEntry, CommitOptions, DraftRepo, DraftRepoError, MilestoneTag};
 pub use service::{
     commit_comment_mutation, queue_main_commit, BotRetention, DraftRecoveryOffer, DraftSaveOutcome,
     DraftService, OpenDraftResult,

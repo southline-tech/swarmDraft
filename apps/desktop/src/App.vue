@@ -48,8 +48,17 @@ import {
   draftEndSession,
   draftReviewCommit,
   type OpenDraftResult,
+  linksResolve,
 } from './backend';
-import HistoryPanel from './history/HistoryPanel.vue';
+import {
+  dockToggleShortcut,
+  historyToggleShortcut,
+  toggleDockShortcut,
+  toggleHistoryShortcut,
+  type RightDockTab,
+} from './history/history-dock-state';
+import { historyCompareBanner } from './history/history-compare';
+import type { DraftHistoryCompare, DraftHistoryCompareSegment } from './backend';
 import SettingsScreen from './settings/SettingsScreen.vue';
 import AgentsWindow from './agents/AgentsWindow.vue';
 import { agentDirectory, markAuthorLabel, refreshAgents, reloadOnFocus } from './agent-names';
@@ -93,7 +102,12 @@ import { readEvidenceQuery } from './evidence/evidence-routes';
 import AppToast from './shells/AppToast.vue';
 import OldChangeView from './links/OldChangeView.vue';
 import { COPY_LINK_FAILURE, COPY_LINK_SUCCESS } from './links/link-codec';
-import { startChangeLinkRoute, type OldChangeViewModel } from './links/open-link';
+import {
+  UNKNOWN_CHANGE_TOAST,
+  oldChangeViewFromLinkResolution,
+  startChangeLinkRoute,
+  type OldChangeViewModel,
+} from './links/open-link';
 import UpdatePromptToast from './updater/UpdatePromptToast.vue';
 import {
   createAppUpdater,
@@ -1130,7 +1144,72 @@ async function refreshRecentBooks() {
 }
 const appMenu = ref<HTMLDetailsElement | null>(null);
 const bookMenuOpen = ref(false);
-const historyOpen = ref(false);
+const rightDockOpen = ref(true);
+const rightDockTab = ref<RightDockTab>('review');
+const rightDockLastTab = ref<RightDockTab>('review');
+const historyCompareBannerText = ref<string | null>(null);
+const historyCompareSegmentsBySection = ref<Record<string, DraftHistoryCompareSegment[]>>({});
+const historyExpandedBotRowId = ref<string | null>(null);
+const oldChangeFromHistory = ref(false);
+
+function rightDockSnapshot() {
+  return {
+    open: rightDockOpen.value,
+    tab: rightDockTab.value,
+    lastTab: rightDockLastTab.value,
+  };
+}
+
+function applyRightDock(next: ReturnType<typeof toggleHistoryShortcut>) {
+  if (next.tab === 'review' && rightDockTab.value === 'history') {
+    closeHistoryCompare();
+  }
+  rightDockOpen.value = next.open;
+  rightDockTab.value = next.tab;
+  rightDockLastTab.value = next.lastTab;
+}
+
+function openHistoryDock() {
+  rightDockOpen.value = true;
+  rightDockTab.value = 'history';
+  rightDockLastTab.value = 'history';
+}
+
+function onToggleRightDock() {
+  applyRightDock(toggleDockShortcut(rightDockSnapshot()));
+}
+
+function closeHistoryCompare() {
+  historyCompareBannerText.value = null;
+  historyCompareSegmentsBySection.value = {};
+}
+
+function onHistoryCompare(_oid: string, data: DraftHistoryCompare, label: string) {
+  historyCompareBannerText.value = historyCompareBanner(data, label);
+  const map: Record<string, DraftHistoryCompareSegment[]> = {};
+  for (const ch of data.chapters) {
+    if (ch.segments?.length) map[ch.sectionId] = ch.segments;
+  }
+  historyCompareSegmentsBySection.value = map;
+}
+
+function onRightDockKey(e: KeyboardEvent) {
+  if (!session.value || choosingBook.value) return;
+  if (
+    e.target instanceof HTMLElement &&
+    e.target.closest('input, textarea, select, [contenteditable="true"]')
+  ) {
+    return;
+  }
+  if (historyToggleShortcut(e)) {
+    e.preventDefault();
+    applyRightDock(toggleHistoryShortcut(rightDockSnapshot()));
+  } else if (dockToggleShortcut(e)) {
+    e.preventDefault();
+    onToggleRightDock();
+  }
+}
+
 const bookMenuTrigger = shallowRef<HTMLElement | null>(null);
 const recentTrigger = shallowRef<HTMLButtonElement | null>(null);
 function closeBookMenu() {
@@ -1463,6 +1542,7 @@ onMounted(() => {
   window.addEventListener('focus', reloadAgents);
   window.addEventListener('keydown', onAppMenuKey);
   window.addEventListener('keydown', onUpdatePromptEscape);
+  window.addEventListener('keydown', onRightDockKey);
   window.addEventListener('keydown', onChapterToastUndoKey, true);
   void refreshAgents();
   // Register the listener before taking the queue. take_all marks the slot taken;
@@ -1521,6 +1601,7 @@ onMounted(() => {
   stopAppMenuKeys = () => {
     window.removeEventListener('keydown', onAppMenuKey);
     window.removeEventListener('keydown', onUpdatePromptEscape);
+    window.removeEventListener('keydown', onRightDockKey);
     window.removeEventListener('keydown', onChapterToastUndoKey, true);
   };
 });
@@ -1899,6 +1980,49 @@ function onCopyLink(ok: boolean) {
 function focusEditorAfterOldChange() {
   void nextTick(() => editorPane.value?.focusBody());
 }
+function focusHistoryAfterOldChange() {
+  openHistoryDock();
+  void nextTick(() => {
+    const heading = document.querySelector<HTMLElement>('[data-test="history-panel"] h2');
+    heading?.focus();
+  });
+}
+const oldChangeFocusEditor = computed(() =>
+  oldChangeFromHistory.value ? focusHistoryAfterOldChange : focusEditorAfterOldChange,
+);
+
+async function onHistoryOpenSuggestion(changeId: string, _sectionId: string, botRowId: string) {
+  const mid = session.value?.id;
+  if (!mid) return;
+  historyExpandedBotRowId.value = botRowId;
+  try {
+    const resolution = await linksResolve(mid, changeId);
+    if (!resolution) return;
+    if (resolution.action === 'focus') {
+      oldChangeFromHistory.value = false;
+      await editorPane.value?.focusResolvedChange(resolution.sectionId, resolution.changeId);
+      return;
+    }
+    if (resolution.action === 'history') {
+      oldChangeFromHistory.value = true;
+      presentOldChange(oldChangeViewFromLinkResolution(resolution));
+      return;
+    }
+    oldChangeFromHistory.value = false;
+    showLinkToast(UNKNOWN_CHANGE_TOAST);
+  } catch (err) {
+    oldChangeFromHistory.value = false;
+    console.error('History suggestion open failed', err);
+    openError.value = errorLine(err, 'open');
+  }
+}
+
+function onOldChangeClose() {
+  const fromHistory = oldChangeFromHistory.value;
+  oldChangeFromHistory.value = false;
+  advanceOldChange();
+  if (fromHistory) openHistoryDock();
+}
 function onOldChangeGoChapter() {
   const id = oldChange.value?.sectionId;
   if (id) {
@@ -2079,6 +2203,9 @@ const selected = computed(() =>
 /** Per-section word counts for the outline (#52): read-only, recounted after edits settle. */
 const wordCounts = shallowRef<Record<string, number>>({});
 const changeCounts = shallowRef<Record<string, number>>({});
+const pendingReviewTotal = computed(() =>
+  Object.values(changeCounts.value).reduce((a, b) => a + b, 0),
+);
 let countTimer: ReturnType<typeof setTimeout> | undefined;
 let stopCounts = () => {};
 function recount() {
@@ -2401,7 +2528,7 @@ defineExpose({ open, closeSession });
                 @click="
                   () => {
                     if (!session) return;
-                    historyOpen = true;
+                    openHistoryDock();
                     closeBookMenu();
                   }
                 "
@@ -2687,18 +2814,9 @@ defineExpose({ open, closeSession });
         v-if="oldChange"
         :view="oldChange"
         :chapter-number="oldChangeChapter"
-        :focus-editor="focusEditorAfterOldChange"
-        @close="advanceOldChange"
+        :focus-editor="oldChangeFocusEditor"
+        @close="onOldChangeClose"
         @go-chapter="onOldChangeGoChapter"
-      />
-      <HistoryPanel
-        v-if="isTauri()"
-        :open="historyOpen"
-        :manuscript-id="session?.id ?? null"
-        :menu-trigger="bookMenuTrigger"
-        :before-restore="onHistoryBeforeRestore"
-        @close="historyOpen = false"
-        @restored="() => void reloadOpenManuscript()"
       />
       <!-- Always mounted so the live region exists before its text (#79). -->
       <Teleport to="#app-overlay-layer">
@@ -2890,8 +3008,14 @@ defineExpose({ open, closeSession });
               :sections="session.sections"
               :selected-id="selectedId"
               :reload-token="reloads"
-              :readonly="session.closed || restoreInProgress"
-              :read-only-reason="restoreInProgress ? 'restore in progress' : undefined"
+              :readonly="session.closed || restoreInProgress || !!historyCompareBannerText"
+              :read-only-reason="
+                restoreInProgress
+                  ? 'restore in progress'
+                  : historyCompareBannerText
+                    ? 'comparing with a past version'
+                    : undefined
+              "
               :navigator-open="navigatorOpen"
               :navigator-controls="chapterNavControls"
               :chapter-title="selected?.title"
@@ -2920,6 +3044,36 @@ defineExpose({ open, closeSession });
               :comment-meta-version="commentMetaVersion"
               :lead-chapter-ops="leadChapterOps"
               :split-across-thread-ids="splitAcrossThreadIds"
+              :right-dock-open="rightDockOpen"
+              :right-dock-tab="rightDockTab"
+              :history-compare-banner="historyCompareBannerText"
+              :history-compare-segments-by-section="historyCompareSegmentsBySection"
+              :history-word-count="statusWordCount"
+              :history-author-label="info?.computerName ?? 'You'"
+              :history-expanded-bot-row-id="historyExpandedBotRowId"
+              :history-pending-review="pendingReviewTotal"
+              :before-history-restore="onHistoryBeforeRestore"
+              @update:right-dock-open="rightDockOpen = $event"
+              @update:right-dock-tab="
+                (tab) => {
+                  if (tab === 'review' && rightDockTab === 'history') closeHistoryCompare();
+                  rightDockTab = tab;
+                  rightDockLastTab = tab;
+                }
+              "
+              @toggle-right-dock="onToggleRightDock()"
+              @history-restored="
+                (toast) => {
+                  showLinkToast(toast, 'check');
+                  void reloadOpenManuscript();
+                }
+              "
+              @history-compare="onHistoryCompare"
+              @history-close-compare="closeHistoryCompare()"
+              @history-open-suggestion="
+                (changeId, sectionId, botRowId) =>
+                  void onHistoryOpenSuggestion(changeId, sectionId, botRowId)
+              "
               @clear-change-ids="selectedChangeIds = null"
               @update:selected-id="selectedId = $event"
               @split-chapter="onEditorSplitChapter"

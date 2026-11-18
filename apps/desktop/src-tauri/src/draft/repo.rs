@@ -22,6 +22,15 @@ pub enum DraftRepoError {
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct MilestoneTag {
+    pub name: String,
+    pub oid: String,
+    pub time_unix: i64,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CommitEntry {
     pub oid: String,
     pub time_unix: i64,
@@ -546,6 +555,110 @@ impl DraftRepo {
         Ok(oid.to_string())
     }
 
+    /// Annotated tags under `refs/tags/milestone/*`, newest first.
+    pub fn list_milestone_tags(&self) -> Result<Vec<MilestoneTag>, DraftRepoError> {
+        let mut out = Vec::new();
+        for reference in self.repo.references()? {
+            let reference = reference?;
+            let Some(full) = reference.name() else {
+                continue;
+            };
+            let Some(short) = full.strip_prefix("refs/tags/milestone/") else {
+                continue;
+            };
+            if short.is_empty() {
+                continue;
+            }
+            let target = reference
+                .peel(git2::ObjectType::Tag)
+                .or_else(|_| reference.peel(git2::ObjectType::Commit));
+            let (time_unix, message, oid) = match target {
+                Ok(obj) if obj.kind() == Some(git2::ObjectType::Tag) => {
+                    let tag = obj.peel_to_tag()?;
+                    let target = tag.target_id();
+                    let oid = self
+                        .repo
+                        .find_commit(target)
+                        .map(|c| c.id().to_string())
+                        .unwrap_or_else(|_| target.to_string());
+                    let time_unix = tag
+                        .tagger()
+                        .map(|s| s.when().seconds())
+                        .unwrap_or_else(|| self.commit_time_unix(&oid).unwrap_or(0));
+                    (time_unix, tag.message().unwrap_or("").to_string(), oid)
+                }
+                Ok(obj) if obj.kind() == Some(git2::ObjectType::Commit) => {
+                    let commit = obj.peel_to_commit()?;
+                    (
+                        commit.time().seconds(),
+                        String::new(),
+                        commit.id().to_string(),
+                    )
+                }
+                _ => continue,
+            };
+            let display = if message.trim().is_empty() {
+                short.replace('-', " ")
+            } else {
+                message.trim().to_string()
+            };
+            out.push(MilestoneTag {
+                name: display,
+                oid,
+                time_unix,
+                message,
+            });
+        }
+        out.sort_by_key(|tag| std::cmp::Reverse(tag.time_unix));
+        Ok(out)
+    }
+
+    /// Tag `oid` with an annotated milestone. Returns the tagged commit oid.
+    pub fn create_milestone_tag(
+        &self,
+        name: &str,
+        oid: &str,
+        message: &str,
+        tagger_name: &str,
+    ) -> Result<String, DraftRepoError> {
+        let display = name.trim();
+        if display.is_empty() {
+            return Err(DraftRepoError::Invalid("milestone name is invalid".into()));
+        }
+        let ref_segment = sanitize_tag_name(display);
+        let tag_name = format!("milestone/{ref_segment}");
+        let full_ref = format!("refs/tags/{tag_name}");
+        if self.repo.find_reference(&full_ref).is_ok() {
+            return Err(DraftRepoError::Invalid(
+                "a milestone with that name already exists".into(),
+            ));
+        }
+        let commit = self.repo.find_commit(parse_oid(oid)?)?;
+        let sig = placeholder_signature(tagger_name, "author@swarmdraft.local")?;
+        let body = if message.trim().is_empty() {
+            display
+        } else {
+            message
+        };
+        self.repo
+            .tag(&tag_name, commit.as_object(), &sig, body, false)?;
+        Ok(oid.to_string())
+    }
+
+    pub fn delete_milestone_tag(&self, name: &str) -> Result<(), DraftRepoError> {
+        let display = name.trim();
+        let ref_segment = sanitize_tag_name(display);
+        let refname = format!("refs/tags/milestone/{ref_segment}");
+        match self.repo.find_reference(&refname) {
+            Ok(mut reference) => {
+                reference.delete()?;
+                Ok(())
+            }
+            Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Copy the working repo's `.git` directory into bare layout (`repo.git/` in the zip).
     pub fn export_bare(&self, bare_path: &Path) -> Result<(), DraftRepoError> {
         let git_dir = self.path.join(".git");
@@ -623,6 +736,20 @@ fn upsert_tree_parts(
         builder.insert(name, child_id, i32::from(git2::FileMode::Tree))?;
     }
     Ok(builder.write()?)
+}
+
+fn sanitize_tag_name(name: &str) -> String {
+    let mut out = String::new();
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() || ch == ' ' || ch == '-' || ch == '·' {
+            out.push(if ch == ' ' { '-' } else { ch });
+        }
+    }
+    if out.is_empty() {
+        "milestone".to_string()
+    } else {
+        out
+    }
 }
 
 fn parse_oid(oid: &str) -> Result<git2::Oid, DraftRepoError> {

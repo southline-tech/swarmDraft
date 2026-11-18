@@ -82,6 +82,39 @@ describe('draft backbone commands (#116)', () => {
   });
 });
 
+describe('draftHistoryFeed IPC (#365)', () => {
+  it('maps draft_history_feed through history-ipc', async () => {
+    vi.resetModules();
+    const invoke = vi.fn(async (cmd: string) => {
+      if (cmd !== 'draft_history_feed') return null;
+      return {
+        entries: [
+          {
+            kind: 'authorEdit',
+            oid: 'a1',
+            timeUnix: 1,
+            chapterTitle: 'One',
+            collapsedCount: 1,
+          },
+        ],
+        filterAuthors: [{ id: 'author', name: 'You', authorKind: 'human', isBot: false }],
+        wordCountNow: 50,
+        saveState: 'saved',
+      };
+    });
+    vi.doMock('@tauri-apps/api/core', () => ({
+      isTauri: () => true,
+      invoke,
+    }));
+    const { draftHistoryFeed } = await import('./backend');
+    const feed = await draftHistoryFeed('m1');
+    expect(feed.rows[0]!.chapterTitle).toBe('One');
+    expect(invoke).toHaveBeenCalledWith('draft_history_feed', { manuscriptId: 'm1' });
+    vi.doUnmock('@tauri-apps/api/core');
+    vi.resetModules();
+  });
+});
+
 describe('draftTakeLaunchPath (#302)', () => {
   it('returns null when not in Tauri', async () => {
     const { draftTakeLaunchPath } = await import('./backend');

@@ -33,6 +33,11 @@ import { countWords, watchBookWords } from './status/wordcount';
 import { agentDirectory, authorLabel, markAuthorLabel, type AgentName } from './agent-names';
 import { clampZoom, loadZoom, saveZoom } from './desk/zoom';
 import ReviewPanel from './review/ReviewPanel.vue';
+import RightDock from './desk/RightDock.vue';
+import HistoryPanel from './history/HistoryPanel.vue';
+import type { RightDockTab } from './history/history-dock-state';
+import { openDockOnReview } from './history/history-dock-state';
+import type { DraftHistoryCompare } from './backend';
 import OverlapPopover, { type OverlapEntry } from './review/OverlapPopover.vue';
 import {
   DecisionLog,
@@ -266,7 +271,28 @@ const props = defineProps<{
   chapterNumber?: number;
   splitChapterHint?: boolean;
   splitAcrossThreadIds?: readonly string[];
+  /** Right dock: Review | History (#365). */
+  rightDockManaged?: boolean;
+  rightDockOpen?: boolean;
+  rightDockTab?: RightDockTab;
+  historyWordCount?: number;
+  historySave?: ManuscriptSaveView;
+  historyPendingReview?: number;
+  historyAuthorLabel?: string;
+  historyExpandedBotRowId?: string | null;
+  historyCompareBanner?: string | null;
+  historyCompareSegments?: import('./backend').DraftHistoryCompareSegment[];
+  beforeHistoryRestore?: () => void | Promise<void>;
 }>();
+
+const showHistoryCompareBody = computed(
+  () =>
+    !!(
+      props.historyCompareBanner &&
+      props.historyCompareSegments &&
+      props.historyCompareSegments.length > 0
+    ),
+);
 /** `reload` asks the parent to reopen the section from its source (e.g. by re-mounting). */
 const emit = defineEmits<{
   change: [doc: JSONContent];
@@ -309,6 +335,13 @@ const emit = defineEmits<{
   'find-chapter-breaks': [];
   /** Clipboard result for a change link (#117). The parent shows the toast. */
   'copy-link': [ok: boolean];
+  'update:rightDockOpen': [open: boolean];
+  'update:rightDockTab': [tab: RightDockTab];
+  'toggle-right-dock': [];
+  'history-restored': [toast: string];
+  'history-open-suggestion': [changeId: string, sectionId: string, botRowId: string];
+  'history-close-compare': [];
+  'history-compare': [oid: string, data: DraftHistoryCompare, label: string];
 }>();
 
 const appFooterEditor = inject(APP_FOOTER_EDITOR_KEY, null);
@@ -644,7 +677,33 @@ function flashSplitShortcutStatus(message: string) {
 }
 function jumpToReviewAtSplit() {
   reviewOpen.value = true;
-  collapsed.value = false;
+  if (props.rightDockManaged) {
+    emit('update:rightDockOpen', true);
+    emit('update:rightDockTab', 'review');
+  } else {
+    collapsed.value = false;
+  }
+}
+function onToggleReviewFromToolbar() {
+  if (props.rightDockManaged) {
+    const next = openDockOnReview({
+      open: props.rightDockOpen ?? true,
+      tab: props.rightDockTab ?? 'review',
+      lastTab: props.rightDockTab ?? 'review',
+    });
+    emit('update:rightDockOpen', next.open);
+    emit('update:rightDockTab', next.tab);
+    reviewOpen.value = true;
+    return;
+  }
+  reviewOpen.value = !reviewOpen.value;
+}
+function onDockToggleOpen() {
+  if (props.rightDockManaged) {
+    emit('toggle-right-dock');
+    return;
+  }
+  collapsed.value = !collapsed.value;
 }
 const menuActiveStyle = computed((): ContextMenuAction | undefined => {
   const e = editor.value;
@@ -805,7 +864,21 @@ watch(currentKey, (key) => {
   maybeEmitBotCommentSeen(threadId);
 });
 const collapsed = shallowRef(loadCollapsed());
-watch(collapsed, (v) => saveCollapsed(v));
+watch(collapsed, (v) => {
+  if (!props.rightDockManaged) saveCollapsed(v);
+});
+watch(
+  () => props.rightDockOpen,
+  (open) => {
+    if (props.rightDockManaged && open !== undefined) collapsed.value = !open;
+  },
+  { immediate: true },
+);
+const dockOpen = computed(() =>
+  props.rightDockManaged ? (props.rightDockOpen ?? true) : !collapsed.value,
+);
+const dockTab = computed(() => props.rightDockTab ?? 'review');
+const reviewBadgeCount = computed(() => filteredSuggestions.value.length);
 watch(
   () => props.changeIds,
   (ids) => {
@@ -1385,7 +1458,8 @@ function onKeydown(ev: KeyboardEvent) {
   }
   ev.preventDefault();
   if (action === 'toggle') {
-    if (reviewOpen.value) collapsed.value = !collapsed.value;
+    if (props.rightDockManaged) emit('toggle-right-dock');
+    else if (reviewOpen.value) collapsed.value = !collapsed.value;
   } else if (action === 'next') move(1);
   else if (action === 'prev') move(-1);
   else decideCurrent(action === 'accept' ? 'accept' : 'reject');
@@ -1507,7 +1581,10 @@ const pageNarrow = computed(() =>
   ),
 );
 const layout = computed<EditorLayout>(() => ({
-  reviewShown: reviewOpen.value && !collapsed.value && !focusMode.value,
+  reviewShown:
+    reviewOpen.value &&
+    (props.rightDockManaged ? dockOpen.value : !collapsed.value) &&
+    !focusMode.value,
   deskWidth: deskWidth.value,
   marginNotes: marginNotesShown.value,
   deskLeft: deskLeft.value,
@@ -1981,7 +2058,7 @@ onBeforeUnmount(() => {
           :book-title="props.chapterTitle"
           :tracking="tracking"
           @toggle-navigator="emit('toggle-navigator')"
-          @toggle-review="reviewOpen = !reviewOpen"
+          @toggle-review="onToggleReviewFromToolbar"
           @toggle-track="toggleTrackChanges"
           @open-settings="emit('open-settings')"
           @open-agents="emit('open-agents')"
@@ -2017,6 +2094,22 @@ onBeforeUnmount(() => {
         </EditorToolbar>
       </div>
     </Teleport>
+    <div
+      v-if="historyCompareBanner"
+      class="history-compare-banner"
+      data-test="history-compare-banner"
+      role="status"
+    >
+      <span>{{ historyCompareBanner }}</span>
+      <button
+        type="button"
+        class="sh-btn sh-btn--secondary sh-btn--sm"
+        data-test="history-compare-close"
+        @click="emit('history-close-compare')"
+      >
+        Close compare
+      </button>
+    </div>
     <div class="body" :class="{ 'no-review': !reviewOpen || focusMode || !!reviewTarget }">
       <!-- Auto margins (not justify-center) keep a zoomed page that is wider than the desk
            reachable: it centers when it fits and scrolls from its left edge when it does not. -->
@@ -2093,7 +2186,22 @@ onBeforeUnmount(() => {
           >
             {{ splitShortcutStatus }}
           </p>
+          <div
+            v-if="showHistoryCompareBody"
+            class="page history-compare-body"
+            data-test="history-compare-body"
+            aria-readonly="true"
+          >
+            <template v-for="(seg, index) in historyCompareSegments" :key="index">
+              <span v-if="seg.kind === 'same'">{{ seg.text }} </span>
+              <span v-else-if="seg.kind === 'add'" class="history-compare-insert"
+                >{{ seg.text }}
+              </span>
+              <span v-else class="history-compare-delete">{{ seg.text }} </span>
+            </template>
+          </div>
           <EditorContent
+            v-else
             :editor="editor"
             class="page"
             spellcheck="false"
@@ -2133,8 +2241,72 @@ onBeforeUnmount(() => {
         :disabled="!reviewTarget || sliceMode || !reviewOpen || focusMode"
         defer
       >
+        <RightDock
+          v-if="reviewOpen && !focusMode && !sliceMode && rightDockManaged"
+          :open="dockOpen"
+          :tab="dockTab"
+          :review-badge="reviewBadgeCount"
+          :collapsed="!dockOpen"
+          controls-id="right-dock-panel"
+          data-test="review"
+          class="review right-dock-host"
+          @update:tab="emit('update:rightDockTab', $event)"
+          @toggle-open="onDockToggleOpen"
+        >
+          <template #review>
+            <ReviewPanel
+              :items="suggestions"
+              :list-items="reviewListItems"
+              :suggestion-count="filteredSuggestions.length"
+              :show-resolved="showResolved"
+              :book-changes="reviewTarget ? changes : undefined"
+              :chapter-groups="reviewTarget ? bookChapterGroups : undefined"
+              :active-scroll-key="reviewTarget ? reviewActiveScrollKey : undefined"
+              :follow="reviewTarget ? (reviewFollow ?? true) : true"
+              :load-failed="!!loadError"
+              :filter="filter"
+              :change-ids="changeIds ?? null"
+              :current-key="currentKey"
+              :collapsed="false"
+              :busy="!editor?.isEditable"
+              :labels="labelAuthor"
+              @select="select"
+              @prev="move(-1)"
+              @next="move(1)"
+              @decide-one="decideOne"
+              @decide-visible="decideVisible"
+              @toggle-collapsed="onDockToggleOpen"
+              @select-view="onSelectView"
+              @clear-change-ids="emit('clear-change-ids')"
+              @dismiss-one="dismissOne"
+              @update:follow="emit('update:reviewFollow', $event)"
+              @update:show-resolved="showResolved = $event"
+              @comment-reply="(id, body) => emit('comment-reply', id, body)"
+              @comment-resolve="(id, r) => emit('comment-resolve', id, r)"
+            />
+            <div class="visually-hidden" aria-live="polite" data-test="view-scope-live">
+              {{ viewScopeLive }}
+            </div>
+          </template>
+          <template #history>
+            <HistoryPanel
+              :active="dockTab === 'history' && dockOpen"
+              :manuscript-id="manuscriptId ?? null"
+              :word-count="historyWordCount"
+              :save="historySave"
+              :pending-review-count="historyPendingReview"
+              :author-label="historyAuthorLabel"
+              :expanded-bot-row-id="historyExpandedBotRowId"
+              :before-restore="beforeHistoryRestore"
+              @restored="(t) => emit('history-restored', t)"
+              @open-suggestion="(id, sid, botId) => emit('history-open-suggestion', id, sid, botId)"
+              @compare="(oid, data, label) => emit('history-compare', oid, data, label)"
+              @close-compare="emit('history-close-compare')"
+            />
+          </template>
+        </RightDock>
         <div
-          v-if="reviewOpen && !focusMode && !sliceMode"
+          v-else-if="reviewOpen && !focusMode && !sliceMode"
           class="review"
           :class="{ 'review--collapsed': collapsed }"
           data-test="review"
@@ -2489,7 +2661,8 @@ onBeforeUnmount(() => {
 .manuscript-editor .desk > .sh-margin {
   margin-right: var(--ct-space-4);
 }
-.manuscript-editor .review {
+.manuscript-editor .review,
+.manuscript-editor .right-dock-host {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -2497,7 +2670,8 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   background: var(--ct-surface);
 }
-.continuous-review-rail .review {
+.continuous-review-rail .review,
+.continuous-review-rail .right-dock-host {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -2505,42 +2679,50 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   background: var(--ct-surface);
 }
-.manuscript-editor .review > :first-child {
+.manuscript-editor .review > :first-child,
+.manuscript-editor .right-dock-host > :first-child {
   flex: none;
 }
-.continuous-review-rail .review > :first-child {
+.continuous-review-rail .review > :first-child,
+.continuous-review-rail .right-dock-host > :first-child {
   flex: none;
 }
 /* #90: the open review column has a fixed width (400px; 320px below 1200px), so its contents
    (e.g. the comments empty state) can't widen it over the page. The desk keeps the rest and
    scrolls the page, which never sits under a panel. The collapsed rail keeps its own width.
    #92: it never narrows below --ct-panel-w-narrow to make room for the page. */
-.manuscript-editor .review:not(.review--collapsed) {
+.manuscript-editor .review:not(.review--collapsed),
+.manuscript-editor .right-dock-host {
   box-sizing: border-box;
   width: var(--ct-panel-w);
   min-width: var(--ct-panel-w-narrow);
 }
-.continuous-review-rail .review:not(.review--collapsed) {
+.continuous-review-rail .review:not(.review--collapsed),
+.continuous-review-rail .right-dock-host {
   box-sizing: border-box;
   width: var(--ct-panel-w);
   min-width: var(--ct-panel-w-narrow);
   height: 100%;
 }
-.manuscript-editor .review:not(.review--collapsed) > * {
+.manuscript-editor .review:not(.review--collapsed) > *,
+.manuscript-editor .right-dock-host > * {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
 }
-.continuous-review-rail .review:not(.review--collapsed) > * {
+.continuous-review-rail .review:not(.review--collapsed) > *,
+.continuous-review-rail .right-dock-host > * {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
 }
 @media (max-width: 1199.98px) {
-  .manuscript-editor .review:not(.review--collapsed) {
+  .manuscript-editor .review:not(.review--collapsed),
+  .manuscript-editor .right-dock-host {
     width: var(--ct-panel-w-narrow);
   }
-  .continuous-review-rail .review:not(.review--collapsed) {
+  .continuous-review-rail .review:not(.review--collapsed),
+  .continuous-review-rail .right-dock-host {
     width: var(--ct-panel-w-narrow);
   }
 }

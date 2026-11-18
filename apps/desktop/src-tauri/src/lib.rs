@@ -1252,6 +1252,114 @@ async fn draft_restore(
 }
 
 #[tauri::command]
+async fn draft_restore_version(
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+    oid: String,
+    pending_count: Option<u32>,
+) -> Result<draft::DraftRestoreVersionResult, String> {
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    let author = draft_author_name(&store);
+    tauri::async_runtime::spawn_blocking(move || {
+        drafts.restore_version(&store, &manuscript_id, &oid, &author, pending_count)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn draft_history_feed(
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+    limit: Option<usize>,
+) -> Result<draft::HistoryFeedResponse, String> {
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    let lim = limit.unwrap_or(50);
+    tauri::async_runtime::spawn_blocking(move || drafts.history_feed(&store, &manuscript_id, lim))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn draft_history_compare(
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+    oid: String,
+    include_segments: Option<bool>,
+) -> Result<draft::HistoryCompareResponse, String> {
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    let segments = include_segments.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || {
+        drafts.history_compare(&store, &manuscript_id, &oid, segments)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn draft_history_restore_preview(
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+    oid: String,
+) -> Result<draft::HistoryRestorePreviewResponse, String> {
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        drafts.history_restore_preview(&store, &manuscript_id, &oid)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn draft_milestone_create(
+    store: tauri::State<'_, storage::Store>,
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+    name: String,
+    message: Option<String>,
+) -> Result<String, String> {
+    let store = store.inner().clone();
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    let author = draft_author_name(&store);
+    tauri::async_runtime::spawn_blocking(move || {
+        drafts.milestone_create(&store, &manuscript_id, &name, message.as_deref(), &author)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn draft_milestone_remove(
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+    name: String,
+) -> Result<(), String> {
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    tauri::async_runtime::spawn_blocking(move || drafts.milestone_remove(&manuscript_id, &name))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn draft_milestone_list(
+    drafts: tauri::State<'_, std::sync::Arc<draft::DraftService>>,
+    manuscript_id: String,
+) -> Result<Vec<draft::MilestoneTag>, String> {
+    let drafts = std::sync::Arc::clone(drafts.inner());
+    tauri::async_runtime::spawn_blocking(move || drafts.milestone_list(&manuscript_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 #[allow(clippy::too_many_arguments)]
 async fn draft_review_commit(
     store: tauri::State<'_, storage::Store>,
@@ -1642,7 +1750,14 @@ pub fn run() {
             draft_pack_if_due,
             draft_file_behind,
             draft_history,
+            draft_history_feed,
+            draft_history_compare,
+            draft_history_restore_preview,
             draft_restore,
+            draft_restore_version,
+            draft_milestone_create,
+            draft_milestone_remove,
+            draft_milestone_list,
             draft_review_commit,
             draft_begin_session,
             draft_end_session,
