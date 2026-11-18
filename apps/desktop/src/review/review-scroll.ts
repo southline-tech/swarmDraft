@@ -125,10 +125,16 @@ function rectsOverlap(a: RectEdges, b: RectEdges): boolean {
   );
 }
 
+function insideScroller(rect: RectEdges, rootRect: RectEdges): boolean {
+  return rect.top >= rootRect.top - 1 && rect.bottom <= rootRect.bottom + 1;
+}
+
 /**
  * Move `el` into a vertical band of `root` that is not covered by `obstacle`
- * (the find-breaks card). A line already beside the card stays put. Scroll is
- * clamped so a short manuscript cannot jump past its ends.
+ * (the find-breaks card). A line already in that band stays put. A line above
+ * or below the scroller is brought into the band, and the landed rect sits
+ * inside the scroller and clears the card. Scroll is clamped so a short
+ * manuscript cannot jump past its ends.
  */
 export function scrollElementBesideObstacle(
   root: HTMLElement,
@@ -138,33 +144,40 @@ export function scrollElementBesideObstacle(
 ): void {
   const rootRect = root.getBoundingClientRect();
   const elRect = el.getBoundingClientRect();
-  if (!rectsOverlap(elRect, obstacle)) return;
+  if (insideScroller(elRect, rootRect) && !rectsOverlap(elRect, obstacle)) return;
 
   const coverTop = Math.max(obstacle.top, rootRect.top);
   const coverBottom = Math.min(obstacle.bottom, rootRect.bottom);
-  const above = coverTop - rootRect.top;
-  const below = rootRect.bottom - coverBottom;
+  const above = Math.max(0, coverTop - rootRect.top);
+  const below = Math.max(0, rootRect.bottom - coverBottom);
   const aboveTarget = coverTop - padding - elRect.height;
   const belowTarget = coverBottom + padding;
   const targets = above >= below ? [aboveTarget, belowTarget] : [belowTarget, aboveTarget];
   const max = Math.max(0, root.scrollHeight - root.clientHeight);
 
-  for (const targetTop of targets) {
+  const place = (targetTop: number) => {
     const next = Math.min(max, Math.max(0, root.scrollTop + (elRect.top - targetTop)));
     const newTop = elRect.top - (next - root.scrollTop);
-    const moved = {
-      top: newTop,
-      bottom: newTop + elRect.height,
-      left: elRect.left,
-      right: elRect.right,
+    return {
+      next,
+      moved: {
+        top: newTop,
+        bottom: newTop + elRect.height,
+        left: elRect.left,
+        right: elRect.right,
+      },
     };
-    if (!rectsOverlap(moved, obstacle)) {
+  };
+
+  for (const targetTop of targets) {
+    const { next, moved } = place(targetTop);
+    if (insideScroller(moved, rootRect) && !rectsOverlap(moved, obstacle)) {
       if (next !== root.scrollTop) root.scrollTop = next;
       return;
     }
   }
 
-  const fallback = Math.min(max, Math.max(0, root.scrollTop + (elRect.top - targets[0]!)));
+  const fallback = place(targets[0]!).next;
   if (fallback !== root.scrollTop) root.scrollTop = fallback;
 }
 

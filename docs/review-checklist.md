@@ -86,6 +86,7 @@ Run this consolidated pass in order; do not hand off until every line that appli
 
 Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
 
+- 2026-11-18 · #305 · PR #377 · Show left a heading that started outside the manuscript scroller, because a line that missed the card was treated as already beside it · a line outside the scroller scrolls into the open band, and the landed rect sits inside the scroller and clears the dialog
 - 2026-11-17 · #305 · PR #377 · Enter and Ctrl+Z could start a second batch or a second restore while the first save was still running · ignore `repeat`, and drop further confirms and the toast before the first await
 - 2026-11-17 · #305 · PR #377 · chapter-toast Ctrl+Z ran for every focus that was not an input, so a note undo restored the split and closed the preview · the chord is taken only on the manuscript page
 - 2026-11-17 · #305 · PR #377 · Show centered the heading behind the preview card · the line scrolls into the open band beside the card, and the test checks that rect against the dialog

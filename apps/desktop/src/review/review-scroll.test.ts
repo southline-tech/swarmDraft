@@ -142,6 +142,8 @@ describe('scrollElementBesideObstacle (#305)', () => {
     expect(before.bottom).toBeGreaterThan(card.top);
     scrollElementBesideObstacle(root, el, card);
     const after = el.getBoundingClientRect();
+    expect(after.top).toBeGreaterThanOrEqual(40 - 1);
+    expect(after.bottom).toBeLessThanOrEqual(840 + 1);
     const clear =
       after.bottom <= card.top + 1 ||
       after.top >= card.bottom - 1 ||
@@ -149,6 +151,70 @@ describe('scrollElementBesideObstacle (#305)', () => {
       after.left >= card.right - 1;
     expect(clear).toBe(true);
     expect(scrollTop).not.toBe(500);
+  });
+
+  it('scrolls a line that starts outside the manuscript into the open band', () => {
+    const root = document.createElement('div');
+    let scrollTop = 0;
+    Object.defineProperty(root, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value: number) => {
+        scrollTop = value;
+      },
+    });
+    Object.defineProperty(root, 'scrollHeight', { configurable: true, value: 2400 });
+    Object.defineProperty(root, 'clientHeight', { configurable: true, value: 800 });
+    root.getBoundingClientRect = () => edges(40, 900, 840, 0);
+    const card = edges(220, 760, 620, 200);
+    const el = document.createElement('p');
+    el.getBoundingClientRect = () => {
+      const top = 900 - scrollTop;
+      return edges(top, 700, top + 20, 220);
+    };
+    const before = el.getBoundingClientRect();
+    expect(before.top).toBeGreaterThanOrEqual(840);
+    expect(before.top).toBeGreaterThanOrEqual(card.bottom);
+    scrollElementBesideObstacle(root, el, card);
+    const after = el.getBoundingClientRect();
+    expect(after.top).toBeGreaterThanOrEqual(40 - 1);
+    expect(after.bottom).toBeLessThanOrEqual(840 + 1);
+    const clear =
+      after.bottom <= card.top + 1 ||
+      after.top >= card.bottom - 1 ||
+      after.right <= card.left + 1 ||
+      after.left >= card.right - 1;
+    expect(clear).toBe(true);
+    expect(scrollTop).not.toBe(0);
+  });
+
+  it('scrolls a line that starts above the manuscript into the open band', () => {
+    const root = document.createElement('div');
+    let scrollTop = 1400;
+    Object.defineProperty(root, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value: number) => {
+        scrollTop = value;
+      },
+    });
+    Object.defineProperty(root, 'scrollHeight', { configurable: true, value: 2400 });
+    Object.defineProperty(root, 'clientHeight', { configurable: true, value: 800 });
+    root.getBoundingClientRect = () => edges(40, 900, 840, 0);
+    const card = edges(220, 760, 620, 200);
+    const el = document.createElement('p');
+    el.getBoundingClientRect = () => {
+      const top = 900 - scrollTop;
+      return edges(top, 700, top + 20, 220);
+    };
+    const before = el.getBoundingClientRect();
+    expect(before.bottom).toBeLessThanOrEqual(40);
+    scrollElementBesideObstacle(root, el, card);
+    const after = el.getBoundingClientRect();
+    expect(after.top).toBeGreaterThanOrEqual(40 - 1);
+    expect(after.bottom).toBeLessThanOrEqual(840 + 1);
+    expect(after.bottom <= card.top + 1 || after.top >= card.bottom - 1).toBe(true);
+    expect(scrollTop).not.toBe(1400);
   });
 
   it('leaves a line that is already beside the card', () => {

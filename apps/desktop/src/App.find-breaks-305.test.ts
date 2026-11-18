@@ -217,12 +217,12 @@ describe('Find chapter breaks review (#305)', () => {
     w.unmount();
   });
 
-  it('puts the shown paragraph beside the preview card', async () => {
+  it('scrolls an off-screen paragraph into the open band beside the preview card', async () => {
     const { w } = await withBook(TWO_BREAKS);
     await openFindBreaks(w);
     const root = w.get('[data-test="continuous-manuscript"]').element as HTMLElement;
     const dialog = document.querySelector('[data-test="find-breaks-dialog"]') as HTMLElement;
-    let scrollTop = 500;
+    let scrollTop = 0;
     Object.defineProperty(root, 'scrollTop', {
       configurable: true,
       get: () => scrollTop,
@@ -244,10 +244,11 @@ describe('Find chapter breaks review (#305)', () => {
         y: top,
         toJSON: () => ({}),
       }) as DOMRect;
+    const rootRect = rect(40, 900, 840, 0);
     const card = rect(220, 760, 620, 200);
     const orig = HTMLElement.prototype.getBoundingClientRect;
     HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
-      if (this === root) return rect(40, 900, 840, 0);
+      if (this === root) return rootRect;
       if (this === dialog) return card;
       if (root.contains(this) && this.closest('.ProseMirror')) {
         const top = 900 - scrollTop;
@@ -255,21 +256,24 @@ describe('Find chapter breaks review (#305)', () => {
       }
       return orig.call(this);
     };
-    const covered = () => {
-      const line = rect(900 - scrollTop, 700, 900 - scrollTop + 20, 220);
-      return line.bottom > card.top + 1 && line.top < card.bottom - 1 && line.left < card.right;
+    const lineAt = () => {
+      const top = 900 - scrollTop;
+      return rect(top, 700, top + 20, 220);
     };
-    expect(covered()).toBe(true);
+    const before = lineAt();
+    expect(before.top).toBeGreaterThanOrEqual(rootRect.bottom);
     (document.querySelector('[data-test="find-breaks-show"]') as HTMLElement).click();
     await settle();
-    const lineTop = 900 - scrollTop;
-    const line = rect(lineTop, 700, lineTop + 20, 220);
+    const line = lineAt();
+    expect(line.top).toBeGreaterThanOrEqual(rootRect.top - 1);
+    expect(line.bottom).toBeLessThanOrEqual(rootRect.bottom + 1);
     const clear =
       line.bottom <= card.top + 1 ||
       line.top >= card.bottom - 1 ||
       line.right <= card.left + 1 ||
       line.left >= card.right - 1;
     expect(clear).toBe(true);
+    expect(scrollTop).not.toBe(0);
     expect(document.querySelector('[data-test="find-breaks-dialog"]')).toBeTruthy();
     HTMLElement.prototype.getBoundingClientRect = orig;
     w.unmount();
