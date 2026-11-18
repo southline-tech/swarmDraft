@@ -38,13 +38,15 @@ const props = defineProps<{
   pendingReviewCount?: number;
   authorLabel?: string;
   beforeRestore?: () => void | Promise<void>;
+  /** Parent-owned bot row expansion (#365 old-change return). */
+  expandedBotRowId?: string | null;
 }>();
 
 const emit = defineEmits<{
   restored: [toast: string];
   compare: [oid: string, data: DraftHistoryCompare, label: string];
   'close-compare': [];
-  'open-suggestion': [changeId: string, sectionId: string];
+  'open-suggestion': [changeId: string, sectionId: string, botRowId: string];
 }>();
 
 const loading = ref(false);
@@ -172,6 +174,24 @@ async function load() {
     loading.value = false;
   }
 }
+
+watch(
+  () => props.expandedBotRowId,
+  (id) => {
+    if (id != null) expandedBotId.value = id;
+  },
+  { immediate: true },
+);
+
+watch(
+  () => props.manuscriptId,
+  (id, prev) => {
+    if (id && id !== prev) {
+      filter.value = 'all';
+      activityTab.value = 'all';
+    }
+  },
+);
 
 watch(
   () => [props.active, props.manuscriptId] as const,
@@ -565,7 +585,7 @@ defineExpose({ closeCompare });
                     <button
                       type="button"
                       class="history-panel__child sh-btn sh-btn--ghost"
-                      @click="emit('open-suggestion', child.changeId, child.sectionId)"
+                      @click="emit('open-suggestion', child.changeId, child.sectionId, row.id)"
                     >
                       <span class="history-panel__child-status">{{ child.status }}</span>
                       <span class="history-panel__child-quote">"{{ child.quote }}"</span>

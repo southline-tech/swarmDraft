@@ -279,6 +279,7 @@ const props = defineProps<{
   historySave?: ManuscriptSaveView;
   historyPendingReview?: number;
   historyAuthorLabel?: string;
+  historyExpandedBotRowId?: string | null;
   historyCompareBanner?: string | null;
   historyCompareSegments?: import('./backend').DraftHistoryCompareSegment[];
   beforeHistoryRestore?: () => void | Promise<void>;
@@ -337,7 +338,7 @@ const emit = defineEmits<{
   'update:rightDockTab': [tab: RightDockTab];
   'toggle-right-dock': [];
   'history-restored': [toast: string];
-  'history-open-suggestion': [changeId: string, sectionId: string];
+  'history-open-suggestion': [changeId: string, sectionId: string, botRowId: string];
   'history-close-compare': [];
   'history-compare': [oid: string, data: DraftHistoryCompare, label: string];
 }>();
@@ -2274,9 +2275,10 @@ onBeforeUnmount(() => {
               :save="historySave"
               :pending-review-count="historyPendingReview"
               :author-label="historyAuthorLabel"
+              :expanded-bot-row-id="historyExpandedBotRowId"
               :before-restore="beforeHistoryRestore"
               @restored="(t) => emit('history-restored', t)"
-              @open-suggestion="(id, sid) => emit('history-open-suggestion', id, sid)"
+              @open-suggestion="(id, sid, botId) => emit('history-open-suggestion', id, sid, botId)"
               @compare="(oid, data, label) => emit('history-compare', oid, data, label)"
               @close-compare="emit('history-close-compare')"
             />

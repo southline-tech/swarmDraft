@@ -48,6 +48,7 @@ import {
   draftEndSession,
   draftReviewCommit,
   type OpenDraftResult,
+  linksResolve,
 } from './backend';
 import {
   dockToggleShortcut,
@@ -101,7 +102,12 @@ import { readEvidenceQuery } from './evidence/evidence-routes';
 import AppToast from './shells/AppToast.vue';
 import OldChangeView from './links/OldChangeView.vue';
 import { COPY_LINK_FAILURE, COPY_LINK_SUCCESS } from './links/link-codec';
-import { startChangeLinkRoute, type OldChangeViewModel } from './links/open-link';
+import {
+  UNKNOWN_CHANGE_TOAST,
+  oldChangeViewFromLinkResolution,
+  startChangeLinkRoute,
+  type OldChangeViewModel,
+} from './links/open-link';
 import UpdatePromptToast from './updater/UpdatePromptToast.vue';
 import {
   createAppUpdater,
@@ -1030,6 +1036,8 @@ const rightDockTab = ref<RightDockTab>('review');
 const rightDockLastTab = ref<RightDockTab>('review');
 const historyCompareBannerText = ref<string | null>(null);
 const historyCompareSegmentsBySection = ref<Record<string, DraftHistoryCompareSegment[]>>({});
+const historyExpandedBotRowId = ref<string | null>(null);
+const oldChangeFromHistory = ref(false);
 
 function rightDockSnapshot() {
   return {
@@ -1857,6 +1865,49 @@ function onCopyLink(ok: boolean) {
 function focusEditorAfterOldChange() {
   void nextTick(() => editorPane.value?.focusBody());
 }
+function focusHistoryAfterOldChange() {
+  openHistoryDock();
+  void nextTick(() => {
+    const heading = document.querySelector<HTMLElement>('[data-test="history-panel"] h2');
+    heading?.focus();
+  });
+}
+const oldChangeFocusEditor = computed(() =>
+  oldChangeFromHistory.value ? focusHistoryAfterOldChange : focusEditorAfterOldChange,
+);
+
+async function onHistoryOpenSuggestion(changeId: string, _sectionId: string, botRowId: string) {
+  const mid = session.value?.id;
+  if (!mid) return;
+  historyExpandedBotRowId.value = botRowId;
+  try {
+    const resolution = await linksResolve(mid, changeId);
+    if (!resolution) return;
+    if (resolution.action === 'focus') {
+      oldChangeFromHistory.value = false;
+      await editorPane.value?.focusResolvedChange(resolution.sectionId, resolution.changeId);
+      return;
+    }
+    if (resolution.action === 'history') {
+      oldChangeFromHistory.value = true;
+      presentOldChange(oldChangeViewFromLinkResolution(resolution));
+      return;
+    }
+    oldChangeFromHistory.value = false;
+    showLinkToast(UNKNOWN_CHANGE_TOAST);
+  } catch (err) {
+    oldChangeFromHistory.value = false;
+    console.error('History suggestion open failed', err);
+    openError.value = errorLine(err, 'open');
+  }
+}
+
+function onOldChangeClose() {
+  const fromHistory = oldChangeFromHistory.value;
+  oldChangeFromHistory.value = false;
+  advanceOldChange();
+  if (fromHistory) openHistoryDock();
+}
 function onOldChangeGoChapter() {
   const id = oldChange.value?.sectionId;
   if (id) {
@@ -2648,8 +2699,8 @@ defineExpose({ open, closeSession });
         v-if="oldChange"
         :view="oldChange"
         :chapter-number="oldChangeChapter"
-        :focus-editor="focusEditorAfterOldChange"
-        @close="advanceOldChange"
+        :focus-editor="oldChangeFocusEditor"
+        @close="onOldChangeClose"
         @go-chapter="onOldChangeGoChapter"
       />
       <!-- Always mounted so the live region exists before its text (#79). -->
@@ -2872,6 +2923,7 @@ defineExpose({ open, closeSession });
               :history-compare-segments-by-section="historyCompareSegmentsBySection"
               :history-word-count="statusWordCount"
               :history-author-label="info?.computerName ?? 'You'"
+              :history-expanded-bot-row-id="historyExpandedBotRowId"
               :history-pending-review="pendingReviewTotal"
               :before-history-restore="onHistoryBeforeRestore"
               @update:right-dock-open="rightDockOpen = $event"
@@ -2892,9 +2944,8 @@ defineExpose({ open, closeSession });
               @history-compare="onHistoryCompare"
               @history-close-compare="closeHistoryCompare()"
               @history-open-suggestion="
-                (changeId, sectionId) => {
-                  void editorPane?.focusResolvedChange(sectionId, changeId);
-                }
+                (changeId, sectionId, botRowId) =>
+                  void onHistoryOpenSuggestion(changeId, sectionId, botRowId)
               "
               @clear-change-ids="selectedChangeIds = null"
               @update:selected-id="selectedId = $event"

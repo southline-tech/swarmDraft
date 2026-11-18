@@ -100,6 +100,7 @@ const props = defineProps<{
   >;
   historyWordCount?: number;
   historyAuthorLabel?: string;
+  historyExpandedBotRowId?: string | null;
   historyPendingReview?: number;
   beforeHistoryRestore?: () => void | Promise<void>;
 }>();
@@ -186,7 +187,7 @@ const emit = defineEmits<{
   'update:rightDockTab': [tab: RightDockTab];
   'toggle-right-dock': [];
   'history-restored': [toast: string];
-  'history-open-suggestion': [changeId: string, sectionId: string];
+  'history-open-suggestion': [changeId: string, sectionId: string, botRowId: string];
   'history-close-compare': [];
   'history-compare': [oid: string, data: import('./backend').DraftHistoryCompare, label: string];
 }>();
@@ -663,12 +664,17 @@ onBeforeUnmount(() => {
             :history-save="sec.id === selectedId ? manuscriptSave : undefined"
             :history-pending-review="sec.id === selectedId ? historyPendingReview : undefined"
             :history-author-label="sec.id === selectedId ? historyAuthorLabel : undefined"
+            :history-expanded-bot-row-id="
+              sec.id === selectedId ? historyExpandedBotRowId : undefined
+            "
             :before-history-restore="beforeHistoryRestore"
             @update:right-dock-open="emit('update:rightDockOpen', $event)"
             @update:right-dock-tab="emit('update:rightDockTab', $event)"
             @toggle-right-dock="emit('toggle-right-dock')"
             @history-restored="emit('history-restored', $event)"
-            @history-open-suggestion="(id, sid) => emit('history-open-suggestion', id, sid)"
+            @history-open-suggestion="
+              (id, sid, botId) => emit('history-open-suggestion', id, sid, botId)
+            "
             @history-close-compare="emit('history-close-compare')"
             @history-compare="(oid, data, label) => emit('history-compare', oid, data, label)"
             @update:author-filter="authorFilter = $event"

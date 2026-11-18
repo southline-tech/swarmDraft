@@ -95,6 +95,66 @@ describe('History panel', () => {
     w.unmount();
   });
 
+  it('resets the filter to All when the manuscript changes', async () => {
+    const w = mount(HistoryPanel, {
+      props: { active: true, manuscriptId: 'm1' },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    await w.find('[data-test="history-filter"]').trigger('click');
+    await flushPromises();
+    const agentItem = [...document.body.querySelectorAll('[role="menuitem"]')].find((el) =>
+      el.textContent?.includes('Line Editor'),
+    );
+    expect(agentItem).toBeTruthy();
+    agentItem!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushPromises();
+    expect(w.find('[data-test="history-filter"]').text()).toContain('Line Editor');
+    await w.setProps({ manuscriptId: 'm2' });
+    await flushPromises();
+    expect(w.find('[data-test="history-filter"]').text()).toContain('All');
+    w.unmount();
+  });
+
+  it('emits bot row id when opening a suggestion', async () => {
+    const { draftHistoryFeed } = await import('../backend');
+    vi.mocked(draftHistoryFeed).mockResolvedValueOnce({
+      rows: [
+        {
+          id: 'bot-row-9',
+          oid: 'oid9',
+          kind: 'bot',
+          actorName: 'Bot',
+          isBot: true,
+          agentId: 'agent:9',
+          timeUnix: 1_700_000_000,
+          children: [
+            {
+              changeId: 'c9',
+              sectionId: 's9',
+              status: 'accepted',
+              quote: 'line',
+              deciderName: 'You',
+              chapterTitle: 'Chapter 1',
+              timeUnix: 1_700_000_000,
+            },
+          ],
+        },
+      ],
+      filterOptions: [],
+      authorLabel: 'You',
+      wordCount: 0,
+    });
+    const w = mount(HistoryPanel, {
+      props: { active: true, manuscriptId: 'm1' },
+    });
+    await flushPromises();
+    await w.find('.history-panel__disclosure').trigger('click');
+    await w.find('.history-panel__child').trigger('click');
+    expect(w.emitted('open-suggestion')?.[0]).toEqual(['c9', 's9', 'bot-row-9']);
+    w.unmount();
+  });
+
   it('shows empty filter copy', async () => {
     const w = mount(HistoryPanel, {
       props: { active: true, manuscriptId: 'm1' },

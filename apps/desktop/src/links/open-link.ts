@@ -70,7 +70,7 @@ export interface ChangeLinkRoute {
   onFailure: (err: unknown) => void;
 }
 
-function historyModel(
+export function oldChangeViewFromLinkResolution(
   resolution: Extract<LinkResolution, { action: 'history' }>,
 ): OldChangeViewModel {
   return {
@@ -120,7 +120,7 @@ export async function openChangeLink(
     return 'opened';
   }
   if (resolution.action === 'history') {
-    route.showHistory(historyModel(resolution));
+    route.showHistory(oldChangeViewFromLinkResolution(resolution));
     return 'opened';
   }
   route.showToast(UNKNOWN_CHANGE_TOAST);
@@ -174,7 +174,7 @@ export async function openReviewLink(
       focusIds.push(resolution.changeId);
       continue;
     }
-    history.push(historyModel(resolution));
+    history.push(oldChangeViewFromLinkResolution(resolution));
   }
 
   route.resetLinkUi();
