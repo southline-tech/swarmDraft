@@ -10,6 +10,7 @@ import {
 import { yDocToDoc } from '@swarmdraft/docx';
 import { isMacPlatform } from '../shells/app-shortcuts';
 import type { ManuscriptSession } from '../manuscript-session';
+import { listNotes } from '../notes/doc';
 import {
   applyChapterMerge,
   applyChapterSplit,
@@ -159,6 +160,27 @@ export function chapterBreakToastMessage(titles: readonly string[]): string {
   return `Split into ${titles.length} chapters`;
 }
 
+/** How many chapters from this batch a note now covers (source plus each new chapter). */
+export function notesLinkSpan(
+  notes: readonly { sectionIds: readonly string[] }[],
+  sourceIds: ReadonlySet<string>,
+  createdIds: ReadonlySet<string>,
+): number {
+  let max = 0;
+  for (const note of notes) {
+    if (!note.sectionIds.some((id) => createdIds.has(id))) continue;
+    const span = note.sectionIds.filter((id) => sourceIds.has(id) || createdIds.has(id)).length;
+    if (span > max) max = span;
+  }
+  return max;
+}
+
+export function notesLinkedDetail(chapterCount: number): string | undefined {
+  if (chapterCount < 2) return undefined;
+  if (chapterCount === 2) return 'Notes linked to both chapters';
+  return 'Notes linked to all of these chapters';
+}
+
 export function scanSessionBreaks(session: ManuscriptSession): FindBreakRow[] {
   const chapters = session.outline.value.filter((s) => s.kind === 'chapter');
   const input = chapters.flatMap((sec, chapterIndex) => {
@@ -224,7 +246,7 @@ export async function runChapterBreakBatch(
   let undo: ChapterOpSnapshot | null = null;
   const applied: { key: string; id: string; title: string }[] = [];
   const skipped: string[] = [];
-  let notesLinked = false;
+  const splitSources = new Set<string>();
   const splitAcrossThreadIds: string[] = [];
 
   const shiftAfter = (
@@ -263,10 +285,10 @@ export async function runChapterBreakBatch(
         row.removeLine,
         notesDoc,
       );
-      if (result.notesLinkedBoth) notesLinked = true;
       splitAcrossThreadIds.push(...result.splitAcrossThreadIds);
       const created = session.outline.value.find((s) => s.id === result.newChapterId);
       const sourceTitle = created?.title || row.title;
+      splitSources.add(loc.chapterId);
       applied.push({ key: row.key, id: result.newChapterId, title: row.title });
       shiftAfter(loc.chapterId, loc.blockIndex, row.removeLine, result.newChapterId, sourceTitle);
     }
@@ -303,6 +325,9 @@ export async function runChapterBreakBatch(
   const watchDocIds = [
     ...new Set([...undo.outline.map((s) => s.docId), ...session.outline.value.map((s) => s.docId)]),
   ];
+  const noteSpan = notesDoc
+    ? notesLinkSpan(listNotes(notesDoc), splitSources, new Set(applied.map((row) => row.id)))
+    : 0;
   return {
     appliedKeys: applied.map((row) => row.key),
     skippedKeys,
@@ -312,7 +337,7 @@ export async function runChapterBreakBatch(
     splitAcrossThreadIds,
     toast: {
       message: chapterBreakToastMessage(titlesInOrder),
-      detail: notesLinked ? 'Notes linked to both chapters' : undefined,
+      detail: notesLinkedDetail(noteSpan),
       undo,
       watchDocIds,
       stateVectors: captureDocStateVectors(session, watchDocIds),

@@ -79,6 +79,7 @@ describe('chapter break batch (#305)', () => {
     expect(bodies[2]?.text).toContain('Later the rain started.');
     const noteIds = listNotes(notes)[0]?.sectionIds ?? [];
     expect(noteIds).toEqual(expect.arrayContaining(['c1', bodies[1]!.id, bodies[2]!.id]));
+    expect(result.toast?.detail).toBe('Notes linked to all of these chapters');
 
     const restored = await undoChapterToast(session, result.toast!, notes);
     expect(restored).toBe('c1');
@@ -91,10 +92,14 @@ describe('chapter break batch (#305)', () => {
 
   it('uses the single-chapter toast when one break is selected', async () => {
     const session = await sessionWith([para('Opening line.'), para('Chapter Two'), para('After.')]);
+    const notes = createNotesDoc();
+    addNote(notes, { kind: 'human', id: 'you', name: 'You' }, 'A note', { sectionIds: ['c1'] });
     const rows = scanSessionBreaks(session).map((row, i) => ({ ...row, selected: i === 0 }));
-    const result = await runChapterBreakBatch(session, 'm', rows, 'c1');
+    const result = await runChapterBreakBatch(session, 'm', rows, 'c1', notes);
     expect(result.toast?.message).toBe(chapterBreakToastMessage(['Chapter Two']));
+    expect(result.toast?.detail).toBe('Notes linked to both chapters');
     expect(session.outline.value).toHaveLength(2);
+    expect(listNotes(notes)[0]?.sectionIds).toHaveLength(2);
   });
 
   it('skips a blocked break and still splits the others', async () => {

@@ -117,6 +117,57 @@ export function scrollElementCenterInRoot(
   root.scrollBy({ top: delta, behavior });
 }
 
+type RectEdges = Pick<DOMRect, 'top' | 'bottom' | 'left' | 'right'>;
+
+function rectsOverlap(a: RectEdges, b: RectEdges): boolean {
+  return (
+    a.bottom > b.top + 1 && a.top < b.bottom - 1 && a.right > b.left + 1 && a.left < b.right - 1
+  );
+}
+
+/**
+ * Move `el` into a vertical band of `root` that is not covered by `obstacle`
+ * (the find-breaks card). A line already beside the card stays put. Scroll is
+ * clamped so a short manuscript cannot jump past its ends.
+ */
+export function scrollElementBesideObstacle(
+  root: HTMLElement,
+  el: Element,
+  obstacle: DOMRect,
+  padding = 8,
+): void {
+  const rootRect = root.getBoundingClientRect();
+  const elRect = el.getBoundingClientRect();
+  if (!rectsOverlap(elRect, obstacle)) return;
+
+  const coverTop = Math.max(obstacle.top, rootRect.top);
+  const coverBottom = Math.min(obstacle.bottom, rootRect.bottom);
+  const above = coverTop - rootRect.top;
+  const below = rootRect.bottom - coverBottom;
+  const aboveTarget = coverTop - padding - elRect.height;
+  const belowTarget = coverBottom + padding;
+  const targets = above >= below ? [aboveTarget, belowTarget] : [belowTarget, aboveTarget];
+  const max = Math.max(0, root.scrollHeight - root.clientHeight);
+
+  for (const targetTop of targets) {
+    const next = Math.min(max, Math.max(0, root.scrollTop + (elRect.top - targetTop)));
+    const newTop = elRect.top - (next - root.scrollTop);
+    const moved = {
+      top: newTop,
+      bottom: newTop + elRect.height,
+      left: elRect.left,
+      right: elRect.right,
+    };
+    if (!rectsOverlap(moved, obstacle)) {
+      if (next !== root.scrollTop) root.scrollTop = next;
+      return;
+    }
+  }
+
+  const fallback = Math.min(max, Math.max(0, root.scrollTop + (elRect.top - targets[0]!)));
+  if (fallback !== root.scrollTop) root.scrollTop = fallback;
+}
+
 export function findMarkElement(root: HTMLElement, scopedKey: string): Element | null {
   const parsed = parseBookChangeKey(scopedKey);
   if (!parsed) return null;

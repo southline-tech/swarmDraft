@@ -533,6 +533,7 @@ const mergeSkipConfirmSession = ref(false);
 const splitChapterHintId = ref<string | null>(null);
 const splitAcrossThreadIds = ref<string[]>([]);
 const findBreaksOpen = ref(false);
+const findBreaksApplying = ref(false);
 const findBreakRows = ref<FindBreakRow[]>([]);
 const findBreakSkip = ref<{ message: string; jumpKey: string } | null>(null);
 const findBreaksReturn = ref<HTMLElement | null>(null);
@@ -655,25 +656,32 @@ async function undoChapterAction() {
   const s = session.value;
   const t = chapterToast.value;
   if (!s || !t || chapterToastUndoBlockedNow()) return;
-  selectedId.value = await undoChapterToast(s, t, notesSession.value?.doc);
   chapterToast.value = null;
   clearTimeout(chapterToastTimer);
+  try {
+    selectedId.value = await undoChapterToast(s, t, notesSession.value?.doc);
+  } catch (err) {
+    console.error('Could not undo chapter change', err);
+    scheduleChapterToast(t);
+    saveFailure.value = saveFailed(saveFailure.value, err);
+    return;
+  }
   splitAcrossThreadIds.value = [];
   findBreaksOpen.value = false;
   findBreakSkip.value = null;
 }
+/** Chapter-toast Ctrl+Z belongs to the manuscript page, not notes or comment editors. */
+function manuscriptSurface(t: EventTarget | null): boolean {
+  if (!(t instanceof HTMLElement)) return false;
+  if (!t.closest('.manuscript-editor .page')) return false;
+  return !!t.closest('.tiptap, .ProseMirror');
+}
 function onChapterToastUndoKey(e: KeyboardEvent) {
+  if (e.repeat) return;
   if (!chapterToast.value || chapterToastUndoBlockedNow()) return;
   const mod = e.ctrlKey || e.metaKey;
   if (!mod || e.shiftKey || e.altKey || e.key.toLowerCase() !== 'z') return;
-  const target = e.target;
-  if (
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement
-  ) {
-    return;
-  }
+  if (!manuscriptSurface(e.target)) return;
   e.preventDefault();
   e.stopPropagation();
   void undoChapterAction();
@@ -700,7 +708,8 @@ function onFindBreakShow(key: string) {
 }
 async function onFindBreaksConfirm() {
   const s = session.value;
-  if (!s || !selectedId.value) return;
+  if (!s || !selectedId.value || findBreaksApplying.value) return;
+  findBreaksApplying.value = true;
   try {
     const result = await runChapterBreakBatch(
       s,
@@ -744,6 +753,8 @@ async function onFindBreaksConfirm() {
   } catch (err) {
     console.error('Could not split chapter breaks', err);
     saveFailure.value = saveFailed(saveFailure.value, err);
+  } finally {
+    findBreaksApplying.value = false;
   }
 }
 function dismissChapterToast() {
@@ -2784,6 +2795,7 @@ defineExpose({ open, closeSession });
           :skip-message="findBreakSkip?.message"
           :skip-jump-key="findBreakSkip?.jumpKey"
           :return-focus="findBreaksReturn"
+          :busy="findBreaksApplying"
           @close="onFindBreaksClose"
           @confirm="onFindBreaksConfirm"
           @show="onFindBreakShow"

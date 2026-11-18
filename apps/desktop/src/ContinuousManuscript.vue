@@ -34,6 +34,7 @@ import {
   findMarkElement,
   pickActiveManuscriptMark,
   scrollBehavior,
+  scrollElementBesideObstacle,
   scrollElementCenterInRoot,
   scrollSectionAnchorToTop,
 } from './review/review-scroll';
@@ -483,7 +484,9 @@ function finishReveal() {
   pendingReveal = null;
   const root = scrollRoot.value;
   if (!root) return;
-  scrollElementCenterInRoot(root, el, 'auto');
+  const card = document.querySelector<HTMLElement>('[data-test="find-breaks-dialog"]');
+  if (card) scrollElementBesideObstacle(root, el, card.getBoundingClientRect());
+  else scrollElementCenterInRoot(root, el, 'auto');
   restoreWindowScroll();
 }
 

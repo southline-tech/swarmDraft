@@ -8,6 +8,8 @@ const props = defineProps<{
   skipMessage?: string | null;
   skipJumpKey?: string | null;
   returnFocus?: HTMLElement | null;
+  /** True while a batch is applying, so Enter cannot start another one. */
+  busy?: boolean;
 }>();
 const emit = defineEmits<{
   close: [];
@@ -24,7 +26,7 @@ function close() {
 }
 
 function submit() {
-  if (!rows.value.some((row) => row.selected)) return;
+  if (props.busy || !rows.value.some((row) => row.selected)) return;
   emit('confirm');
 }
 
@@ -36,6 +38,11 @@ function onKeydown(e: KeyboardEvent) {
     return;
   }
   if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+    if (e.repeat || props.busy) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     const target = e.target;
     if (target instanceof HTMLButtonElement && target.type === 'button') return;
     e.preventDefault();
@@ -74,17 +81,25 @@ onBeforeUnmount(() => props.returnFocus?.focus?.());
       @keydown="onKeydown"
     >
       <h2 :id="titleId" class="find-breaks__title">Find chapter breaks</h2>
-      <p v-if="skipMessage" class="find-breaks__skip" role="status" data-test="find-breaks-skip">
-        {{ skipMessage }}
-        <button
-          v-if="skipJumpKey"
-          type="button"
-          class="sh-btn sh-btn--link"
-          data-test="find-breaks-skip-show"
-          @click="emit('show', skipJumpKey)"
-        >
-          Show
-        </button>
+      <p
+        class="find-breaks__skip"
+        role="status"
+        aria-live="polite"
+        data-test="find-breaks-skip"
+        :data-empty="skipMessage ? undefined : 'true'"
+      >
+        <template v-if="skipMessage">
+          {{ skipMessage }}
+          <button
+            v-if="skipJumpKey"
+            type="button"
+            class="sh-btn sh-btn--link"
+            data-test="find-breaks-skip-show"
+            @click="emit('show', skipJumpKey)"
+          >
+            Show
+          </button>
+        </template>
       </p>
       <p v-if="!rows.length" class="find-breaks__empty" data-test="find-breaks-empty">
         No chapter breaks found.
@@ -119,7 +134,12 @@ onBeforeUnmount(() => props.returnFocus?.focus?.());
             Show
           </button>
           <label class="find-breaks__remove">
-            <input v-model="row.removeLine" type="checkbox" data-test="find-breaks-remove-line" />
+            <input
+              v-model="row.removeLine"
+              type="checkbox"
+              data-test="find-breaks-remove-line"
+              :aria-label="`Remove “${row.title}” from the text`"
+            />
             Remove this line from the text (use it as the title)
           </label>
         </li>
@@ -143,8 +163,8 @@ onBeforeUnmount(() => props.returnFocus?.focus?.());
             type="button"
             class="sh-btn sh-btn--primary"
             data-test="find-breaks-confirm"
-            :disabled="!rows.some((row) => row.selected)"
-            :aria-disabled="rows.some((row) => row.selected) ? undefined : 'true'"
+            :disabled="busy || !rows.some((row) => row.selected)"
+            :aria-disabled="!busy && rows.some((row) => row.selected) ? undefined : 'true'"
             @click="submit"
           >
             Split selected
@@ -156,15 +176,21 @@ onBeforeUnmount(() => props.returnFocus?.focus?.());
 </template>
 <style scoped>
 .find-breaks {
+  box-sizing: border-box;
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--ct-space-3);
   width: min(36rem, 100%);
-  max-height: min(32rem, calc(100vh - var(--ct-space-8)));
+  min-height: 0;
+  /* Scrim padding sits outside the card; border-box keeps that padding inside the cap. */
+  max-height: min(32rem, calc(100vh - 2 * var(--ct-space-6)));
+  overflow: auto;
   color: var(--ct-text);
   font-family: var(--ct-font-ui);
 }
 .find-breaks__title {
+  flex: none;
   margin: 0;
   font-size: var(--ct-text-md);
   font-weight: var(--ct-weight-semibold);
@@ -177,7 +203,18 @@ onBeforeUnmount(() => props.returnFocus?.focus?.());
 .find-breaks__skip {
   color: var(--ct-text);
 }
+.find-breaks__skip[data-empty='true'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
 .find-breaks__list {
+  flex: 1 1 auto;
+  min-height: 0;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -242,6 +279,7 @@ onBeforeUnmount(() => props.returnFocus?.focus?.());
   font-size: var(--ct-text-sm);
 }
 .find-breaks__actions {
+  flex: none;
   display: flex;
   justify-content: flex-end;
   gap: var(--ct-space-2);
