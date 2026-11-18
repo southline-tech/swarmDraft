@@ -49,7 +49,14 @@ import {
   draftReviewCommit,
   type OpenDraftResult,
 } from './backend';
-import HistoryPanel from './history/HistoryPanel.vue';
+import {
+  dockToggleShortcut,
+  historyToggleShortcut,
+  toggleDockShortcut,
+  toggleHistoryShortcut,
+  type RightDockTab,
+} from './history/history-dock-state';
+import { historyCompareBanner } from './history/history-compare';
 import SettingsScreen from './settings/SettingsScreen.vue';
 import AgentsWindow from './agents/AgentsWindow.vue';
 import { agentDirectory, markAuthorLabel, refreshAgents, reloadOnFocus } from './agent-names';
@@ -1017,7 +1024,59 @@ async function refreshRecentBooks() {
 }
 const appMenu = ref<HTMLDetailsElement | null>(null);
 const bookMenuOpen = ref(false);
-const historyOpen = ref(false);
+const rightDockOpen = ref(true);
+const rightDockTab = ref<RightDockTab>('review');
+const rightDockLastTab = ref<RightDockTab>('review');
+const historyCompareBannerText = ref<string | null>(null);
+
+function rightDockSnapshot() {
+  return {
+    open: rightDockOpen.value,
+    tab: rightDockTab.value,
+    lastTab: rightDockLastTab.value,
+  };
+}
+
+function applyRightDock(next: ReturnType<typeof toggleHistoryShortcut>) {
+  if (next.tab === 'review' && rightDockTab.value === 'history') {
+    closeHistoryCompare();
+  }
+  rightDockOpen.value = next.open;
+  rightDockTab.value = next.tab;
+  rightDockLastTab.value = next.lastTab;
+}
+
+function openHistoryDock() {
+  rightDockOpen.value = true;
+  rightDockTab.value = 'history';
+  rightDockLastTab.value = 'history';
+}
+
+function onToggleRightDock() {
+  applyRightDock(toggleDockShortcut(rightDockSnapshot()));
+}
+
+function closeHistoryCompare() {
+  historyCompareBannerText.value = null;
+}
+
+function onRightDockKey(e: KeyboardEvent) {
+  if (!session.value || choosingBook.value) return;
+  if (
+    e.target instanceof HTMLElement &&
+    e.target.closest('input, textarea, select, [contenteditable="true"]')
+  ) {
+    return;
+  }
+  if (historyToggleShortcut(e)) {
+    e.preventDefault();
+    applyRightDock(toggleHistoryShortcut(rightDockSnapshot()));
+  } else if (dockToggleShortcut(e)) {
+    e.preventDefault();
+    onToggleRightDock();
+  }
+}
+
 const bookMenuTrigger = shallowRef<HTMLElement | null>(null);
 const recentTrigger = shallowRef<HTMLButtonElement | null>(null);
 function closeBookMenu() {
@@ -1350,6 +1409,7 @@ onMounted(() => {
   window.addEventListener('focus', reloadAgents);
   window.addEventListener('keydown', onAppMenuKey);
   window.addEventListener('keydown', onUpdatePromptEscape);
+  window.addEventListener('keydown', onRightDockKey);
   void refreshAgents();
   // Register the listener before taking the queue. take_all marks the slot taken;
   // a Finder open that arrives in the gap would be emitted with nobody listening.
@@ -1407,6 +1467,7 @@ onMounted(() => {
   stopAppMenuKeys = () => {
     window.removeEventListener('keydown', onAppMenuKey);
     window.removeEventListener('keydown', onUpdatePromptEscape);
+    window.removeEventListener('keydown', onRightDockKey);
   };
 });
 onBeforeUnmount(() => {
@@ -1964,6 +2025,9 @@ const selected = computed(() =>
 /** Per-section word counts for the outline (#52): read-only, recounted after edits settle. */
 const wordCounts = shallowRef<Record<string, number>>({});
 const changeCounts = shallowRef<Record<string, number>>({});
+const pendingReviewTotal = computed(() =>
+  Object.values(changeCounts.value).reduce((a, b) => a + b, 0),
+);
 let countTimer: ReturnType<typeof setTimeout> | undefined;
 let stopCounts = () => {};
 function recount() {
@@ -2286,7 +2350,7 @@ defineExpose({ open, closeSession });
                 @click="
                   () => {
                     if (!session) return;
-                    historyOpen = true;
+                    openHistoryDock();
                     closeBookMenu();
                   }
                 "
@@ -2576,15 +2640,6 @@ defineExpose({ open, closeSession });
         @close="advanceOldChange"
         @go-chapter="onOldChangeGoChapter"
       />
-      <HistoryPanel
-        v-if="isTauri()"
-        :open="historyOpen"
-        :manuscript-id="session?.id ?? null"
-        :menu-trigger="bookMenuTrigger"
-        :before-restore="onHistoryBeforeRestore"
-        @close="historyOpen = false"
-        @restored="() => void reloadOpenManuscript()"
-      />
       <!-- Always mounted so the live region exists before its text (#79). -->
       <Teleport to="#app-overlay-layer">
         <div
@@ -2793,6 +2848,39 @@ defineExpose({ open, closeSession });
               :comment-meta-version="commentMetaVersion"
               :lead-chapter-ops="leadChapterOps"
               :split-across-thread-ids="splitAcrossThreadIds"
+              :right-dock-open="rightDockOpen"
+              :right-dock-tab="rightDockTab"
+              :history-compare-banner="historyCompareBannerText"
+              :history-word-count="statusWordCount"
+              :history-author-label="info?.computerName ?? 'You'"
+              :history-pending-review="pendingReviewTotal"
+              :before-history-restore="onHistoryBeforeRestore"
+              @update:right-dock-open="rightDockOpen = $event"
+              @update:right-dock-tab="
+                (tab) => {
+                  if (tab === 'review' && rightDockTab === 'history') closeHistoryCompare();
+                  rightDockTab = tab;
+                  rightDockLastTab = tab;
+                }
+              "
+              @toggle-right-dock="onToggleRightDock()"
+              @history-restored="
+                (toast) => {
+                  showLinkToast(toast, 'check');
+                  void reloadOpenManuscript();
+                }
+              "
+              @history-compare="
+                (_oid, data, label) => {
+                  historyCompareBannerText = historyCompareBanner(data, label);
+                }
+              "
+              @history-close-compare="closeHistoryCompare()"
+              @history-open-suggestion="
+                (changeId, sectionId) => {
+                  void editorPane?.focusResolvedChange(sectionId, changeId);
+                }
+              "
               @clear-change-ids="selectedChangeIds = null"
               @update:selected-id="selectedId = $event"
               @split-chapter="onEditorSplitChapter"

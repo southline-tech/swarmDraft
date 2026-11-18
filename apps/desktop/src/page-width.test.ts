@@ -38,8 +38,8 @@ describe('fluid page column (#92, #105)', () => {
   });
 
   it('the open review panel never narrows below --ct-panel-w-narrow', () => {
-    expect(rule('.manuscript-editor .review:not(.review--collapsed)')).toContain(
-      'min-width: var(--ct-panel-w-narrow);',
+    expect(css).toMatch(
+      /\.manuscript-editor \.right-dock-host[\s\S]*?min-width: var\(--ct-panel-w-narrow\)/,
     );
   });
 });
@@ -49,17 +49,13 @@ describe('review panel at narrow widths (#92)', () => {
     const m = css.indexOf('@media (max-width: 1199.98px)');
     expect(m).toBeGreaterThan(-1);
     const inMedia = css.slice(m, css.indexOf('}', css.indexOf('{', m) + 1) + 1);
-    expect(inMedia.replace(/\s+/g, ' ')).toContain('width: var(--ct-panel-w-narrow);');
-    expect(rule('.manuscript-editor .review:not(.review--collapsed) > *')).toContain(
-      'width: 100%;',
-    );
+    expect(inMedia.replace(/\s+/g, ' ')).toMatch(/width: var\(--ct-panel-w-narrow\);/);
+    expect(css).toMatch(/\.manuscript-editor \.right-dock-host > \*[\s\S]*width: 100%/);
   });
 });
 
 it('the open review panel has a fixed --ct-panel-w width at 1200px and up (#92)', () => {
-  expect(rule('.manuscript-editor .review:not(.review--collapsed)')).toContain(
-    'width: var(--ct-panel-w);',
-  );
+  expect(css).toMatch(/\.manuscript-editor \.right-dock-host[\s\S]*?width: var\(--ct-panel-w\)/);
 });
 
 describe('forced outline page (#96)', () => {

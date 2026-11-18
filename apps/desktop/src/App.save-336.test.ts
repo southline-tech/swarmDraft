@@ -128,6 +128,38 @@ vi.mock('./backend', async (orig) => ({
   draftSaveAs: vi.fn(async () => null),
   draftCheckpoint: vi.fn(async () => null),
   draftHistory: vi.fn(async () => []),
+  draftHistoryFeed: vi.fn(async () => ({
+    rows: [
+      {
+        id: 'h1',
+        oid: 'h1',
+        kind: 'save',
+        actorName: 'You',
+        isBot: false,
+        timeUnix: 1_700_000_000,
+        summaryTitle: 'You saved your book',
+      },
+    ],
+    filterOptions: [],
+    authorLabel: 'You',
+    wordCount: 100,
+  })),
+  draftHistoryRestorePreview: vi.fn(async () => ({
+    titleLabel: 'test',
+    restoreTimeUnix: 1_700_000_000,
+    wordCount: 100,
+    pendingReviewCount: 0,
+    keptMilestoneName: 'Before restoring',
+    isMilestone: false,
+  })),
+  draftHistoryCompare: vi.fn(async () => ({
+    oid: 'h1',
+    timeUnix: 1_700_000_000,
+    wordCountThen: 90,
+    wordCountNow: 100,
+    chapters: [],
+  })),
+  draftMilestonesList: vi.fn(async () => []),
   draftRestore: vi.fn(async () => 'oid'),
   draftReviewCommit: vi.fn(async () => null),
   saveManuscriptCopy: vi.fn(async () => 'D:\\Copies\\book.docx'),
@@ -283,6 +315,7 @@ describe('File menu history without a book (#326)', () => {
     expect(item.getAttribute('aria-describedby')).toBe('app-menu-history-reason');
     item.click();
     await settle();
+    expect(document.body.querySelector('[data-test="history-scrim"]')).toBeNull();
     expect(document.body.querySelector('[data-test="history-panel"]')).toBeNull();
     w.unmount();
   });
@@ -296,7 +329,14 @@ describe('File menu history without a book (#326)', () => {
     expect(item.textContent).not.toContain('Open a book first');
     item.click();
     await settle();
-    expect(document.body.querySelector('[data-test="history-panel"]')).toBeTruthy();
+    expect(document.body.querySelector('[data-test="history-scrim"]')).toBeNull();
+    const historyTab = document.body.querySelector('[data-test="dock-tab-history"]') as HTMLElement;
+    expect(historyTab).toBeTruthy();
+    historyTab.click();
+    await settle();
+    expect(
+      document.body.querySelector('#continuous-review-rail [data-test="history-panel"]'),
+    ).toBeTruthy();
     w.unmount();
   });
 });
