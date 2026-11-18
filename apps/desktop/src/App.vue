@@ -57,6 +57,7 @@ import {
   type RightDockTab,
 } from './history/history-dock-state';
 import { historyCompareBanner } from './history/history-compare';
+import type { DraftHistoryCompare, DraftHistoryCompareSegment } from './backend';
 import SettingsScreen from './settings/SettingsScreen.vue';
 import AgentsWindow from './agents/AgentsWindow.vue';
 import { agentDirectory, markAuthorLabel, refreshAgents, reloadOnFocus } from './agent-names';
@@ -1028,9 +1029,7 @@ const rightDockOpen = ref(true);
 const rightDockTab = ref<RightDockTab>('review');
 const rightDockLastTab = ref<RightDockTab>('review');
 const historyCompareBannerText = ref<string | null>(null);
-const historyCompareSegmentsBySection = ref<
-  Record<string, import('./backend').DraftHistoryCompareSegment[]>
->({});
+const historyCompareSegmentsBySection = ref<Record<string, DraftHistoryCompareSegment[]>>({});
 
 function rightDockSnapshot() {
   return {
@@ -1062,6 +1061,15 @@ function onToggleRightDock() {
 function closeHistoryCompare() {
   historyCompareBannerText.value = null;
   historyCompareSegmentsBySection.value = {};
+}
+
+function onHistoryCompare(_oid: string, data: DraftHistoryCompare, label: string) {
+  historyCompareBannerText.value = historyCompareBanner(data, label);
+  const map: Record<string, DraftHistoryCompareSegment[]> = {};
+  for (const ch of data.chapters) {
+    if (ch.segments?.length) map[ch.sectionId] = ch.segments;
+  }
+  historyCompareSegmentsBySection.value = map;
 }
 
 function onRightDockKey(e: KeyboardEvent) {
@@ -2881,16 +2889,7 @@ defineExpose({ open, closeSession });
                   void reloadOpenManuscript();
                 }
               "
-              @history-compare="
-                (_oid, data, label) => {
-                  historyCompareBannerText = historyCompareBanner(data, label);
-                  const map: Record<string, import('./backend').DraftHistoryCompareSegment[]> = {};
-                  for (const ch of data.chapters) {
-                    if (ch.segments?.length) map[ch.sectionId] = ch.segments;
-                  }
-                  historyCompareSegmentsBySection = map;
-                }
-              "
+              @history-compare="onHistoryCompare"
               @history-close-compare="closeHistoryCompare()"
               @history-open-suggestion="
                 (changeId, sectionId) => {
