@@ -32,7 +32,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync",
 unicode-normalization = "0.1.26"
 harper-core = "2"
 tauri-plugin-process = "2.3.1"
-git2 = { version = "0.19", features = ["vendored-libgit2"] }
+# The universal macOS disk image cross-compiles x86_64 on an arm64 runner.
+# Default git2 features pull in openssl-sys (https) and libssh2 (ssh); that
+# runner has no x86_64 system OpenSSL, so vendor it (#351).
+git2 = { version = "0.19", features = ["vendored-libgit2", "vendored-openssl"] }
 chrono = "0.4"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-deep-link = "2"
