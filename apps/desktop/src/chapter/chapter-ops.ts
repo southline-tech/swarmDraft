@@ -11,7 +11,7 @@ import {
 } from '@swarmdraft/editor';
 import { docToYDoc, FRAGMENT_NAME, yDocToDoc } from '@swarmdraft/docx';
 import type { ManuscriptSession } from '../manuscript-session';
-import { listNotes, updateNoteSectionIds } from '../notes/doc';
+import { listNotes, restoreNotesSnapshot, updateNoteSectionIds } from '../notes/doc';
 
 export interface ChapterOpSnapshot {
   outline: Section[];
@@ -64,11 +64,7 @@ export async function restoreChapterSnapshot(
     Y.applyUpdate(fromSnap, upd);
     replaceDocContent(doc, yDocToDoc(fromSnap));
   }
-  if (snap.notes && notesDoc) {
-    const empty = new Y.Doc();
-    Y.applyUpdate(notesDoc, Y.encodeStateAsUpdate(empty), CHAPTER_OP_ORIGIN);
-    Y.applyUpdate(notesDoc, snap.notes, CHAPTER_OP_ORIGIN);
-  }
+  if (snap.notes && notesDoc) restoreNotesSnapshot(notesDoc, snap.notes, CHAPTER_OP_ORIGIN);
 }
 
 export async function applyChapterSplit(
