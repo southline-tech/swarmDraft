@@ -7,7 +7,6 @@ import type {
   DraftMilestoneRow,
   HistoryFeedRow,
   HistoryFilterOption,
-  HistoryRowKind,
   HistorySuggestionChild,
   HistorySuggestionStatus,
 } from '../backend';
