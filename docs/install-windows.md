@@ -17,9 +17,9 @@ The P1 builds are **unsigned**. Code signing is deferred until a certificate is 
 
 Data is stored locally in `%APPDATA%\com.radiancelux.swarmdraft\` (`swarmdraft.db`, SQLite; an
 existing install may still have `coauthor.db` until the app opens it once). The
-file name is kept on purpose so backups and older builds stay compatible). Uninstalling keeps it
-unless you tick **Also delete my manuscripts and settings** in the uninstaller (see
-[Uninstalling](#uninstalling)).
+file name is kept on purpose so backups and older builds stay compatible). Uninstalling keeps
+manuscripts unless you tick **Also delete my manuscripts and settings**, which also removes older
+app data folders (see [Uninstalling](#uninstalling)).
 
 ### Moving from coAuthor (rename, issues #43 and #68)
 
@@ -36,7 +36,9 @@ On first start, for each of the two folders: if the new folder isn't marked as m
 old one exists, swarmDraft **copies** the old folder to the new location (through a temporary folder,
 so an interrupted copy never leaves a half-filled one). The database is copied as a consistent
 snapshot, so it is safe even if coAuthor is still open. A marker file (`.swarmdraft-migrated`) is
-written last. The old folder is never changed or deleted, so you can go back to an older build.
+written last. The running app only reads the old folder, so you can go back to an older build. It
+does not change or delete that folder. A checked uninstall does remove it, along with the current
+app data (see [Uninstalling](#uninstalling)).
 
 If the copy fails (for example coAuthor holds its database locked), the app shows a notice asking you
 to close coAuthor and starts empty; the next start retries. The empty folder from that start is kept
@@ -50,6 +52,8 @@ the old data by mistake.
 An existing coAuthor install is not removed by the swarmDraft installer (it is a different product
 to Windows), so both can sit side by side. Uninstall **coAuthor** from Settings > Apps when you no
 longer need it; ticking its delete box removes only the old `com.radiancelux.coauthor` folders.
+swarmDraft's own uninstaller leaves those folders in place unless **Also delete my manuscripts and
+settings** is ticked.
 
 The local MCP server listens on `127.0.0.1` only (default port 7337); agent tokens are managed in
 the app (RAD-205/209).
@@ -106,9 +110,14 @@ Known gaps versus the mockups (limits of Win32 dialogs):
 Uninstall swarmDraft from **Settings > Apps > Installed apps > swarmDraft > Uninstall**.
 
 The uninstaller shows an **Also delete my manuscripts and settings** checkbox, unchecked by default.
+An update never deletes app data or the older folders.
 
-- Unticked: everything swarmDraft stored stays on your computer (manuscripts, settings, agent tokens).
-- Ticked: it also deletes both `com.radiancelux.swarmdraft` folders,
+- Unticked: manuscripts and settings stay on this computer, including any older app data in
+  `%APPDATA%\com.radiancelux.coauthor\` and `%LOCALAPPDATA%\com.radiancelux.coauthor\`. A later
+  install can still copy those folders in on first launch.
+- Ticked (and this is not an update): it deletes the current folders
   `%APPDATA%\com.radiancelux.swarmdraft\` (roaming, including `swarmdraft.db`) and
-  `%LOCALAPPDATA%\com.radiancelux.swarmdraft\` (local). This cannot be undone. The old
-  `com.radiancelux.coauthor` folders are left alone.
+  `%LOCALAPPDATA%\com.radiancelux.swarmdraft\` (local), and the older folders
+  `%APPDATA%\com.radiancelux.coauthor\` and `%LOCALAPPDATA%\com.radiancelux.coauthor\`.
+  This cannot be undone. The finish page then says the app and its data are gone from this
+  computer. A later install starts with a clean welcome and does not copy those folders back.
