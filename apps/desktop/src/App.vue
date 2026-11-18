@@ -104,16 +104,21 @@ import {
 } from './updater/app-updater';
 import { updatePromptEscapeAction } from './updater/update-prompt-logic';
 import MergeChapterConfirm from './chapter/MergeChapterConfirm.vue';
+import FindChapterBreaksDialog from './chapter/FindChapterBreaksDialog.vue';
 import { chapterNeighbors } from './chapter/chapter-editor';
 import {
   CHAPTER_TOAST_MS,
   chapterToastUndoDisabled,
   chapterToastUndoHint,
+  runChapterBreakBatch,
   runChapterMerge,
   runChapterSplit,
+  scanSessionBreaks,
   shouldConfirmMerge,
+  skippedBreaksMessage,
   undoChapterToast,
   type ChapterToastState,
+  type FindBreakRow,
 } from './chapter/chapter-app-handlers';
 import { appMenuKeyAction, menuShortcutLabel, saveChord } from './shells/app-shortcuts';
 import OpeningProgress from './shells/OpeningProgress.vue';
@@ -527,6 +532,11 @@ const mergePending = ref<{
 const mergeSkipConfirmSession = ref(false);
 const splitChapterHintId = ref<string | null>(null);
 const splitAcrossThreadIds = ref<string[]>([]);
+const findBreaksOpen = ref(false);
+const findBreaksApplying = ref(false);
+const findBreakRows = ref<FindBreakRow[]>([]);
+const findBreakSkip = ref<{ message: string; jumpKey: string } | null>(null);
+const findBreaksReturn = ref<HTMLElement | null>(null);
 const chapterToastUndoBlocked = computed(() => {
   const s = session.value;
   const t = chapterToast.value;
@@ -636,13 +646,116 @@ async function onMergeConfirm(dontAsk: boolean) {
   if (!p) return;
   await commitChapterMerge(p.targetId, p.sourceId);
 }
+function chapterToastUndoBlockedNow() {
+  const s = session.value;
+  const t = chapterToast.value;
+  if (!s || !t) return false;
+  return chapterToastUndoDisabled(s, t);
+}
 async function undoChapterAction() {
   const s = session.value;
   const t = chapterToast.value;
-  if (!s || !t || chapterToastUndoBlocked.value) return;
-  selectedId.value = await undoChapterToast(s, t, notesSession.value?.doc);
+  if (!s || !t || chapterToastUndoBlockedNow()) return;
   chapterToast.value = null;
   clearTimeout(chapterToastTimer);
+  try {
+    selectedId.value = await undoChapterToast(s, t, notesSession.value?.doc);
+  } catch (err) {
+    console.error('Could not undo chapter change', err);
+    scheduleChapterToast(t);
+    saveFailure.value = saveFailed(saveFailure.value, err);
+    return;
+  }
+  splitAcrossThreadIds.value = [];
+  findBreaksOpen.value = false;
+  findBreakSkip.value = null;
+}
+/** Chapter-toast Ctrl+Z belongs to the manuscript page, not notes or comment editors. */
+function manuscriptSurface(t: EventTarget | null): boolean {
+  if (!(t instanceof HTMLElement)) return false;
+  if (!t.closest('.manuscript-editor .page')) return false;
+  return !!t.closest('.tiptap, .ProseMirror');
+}
+function onChapterToastUndoKey(e: KeyboardEvent) {
+  if (e.repeat) return;
+  if (!chapterToast.value || chapterToastUndoBlockedNow()) return;
+  const mod = e.ctrlKey || e.metaKey;
+  if (!mod || e.shiftKey || e.altKey || e.key.toLowerCase() !== 'z') return;
+  if (!manuscriptSurface(e.target)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  void undoChapterAction();
+}
+function openFindChapterBreaks() {
+  const s = session.value;
+  if (!s) return;
+  findBreaksReturn.value =
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  findBreakSkip.value = null;
+  findBreakRows.value = scanSessionBreaks(s);
+  findBreaksOpen.value = true;
+}
+function onFindBreaksClose() {
+  findBreaksOpen.value = false;
+  findBreakSkip.value = null;
+  const id = selectedId.value;
+  if (id) void nextTick(() => editorPane.value?.focusSection(id));
+}
+function onFindBreakShow(key: string) {
+  const row = findBreakRows.value.find((item) => item.key === key);
+  if (!row) return;
+  editorPane.value?.revealParagraph(row.chapterId, row.blockIndex);
+}
+async function onFindBreaksConfirm() {
+  const s = session.value;
+  if (!s || !selectedId.value || findBreaksApplying.value) return;
+  findBreaksApplying.value = true;
+  try {
+    const result = await runChapterBreakBatch(
+      s,
+      s.id,
+      findBreakRows.value,
+      selectedId.value,
+      notesSession.value?.doc,
+    );
+    splitAcrossThreadIds.value = result.splitAcrossThreadIds;
+    if (result.toast) {
+      scheduleChapterToast(result.toast);
+      if (result.firstNewChapterId) {
+        selectedId.value = result.firstNewChapterId;
+        if (!result.skippedKeys.length) {
+          void nextTick(() => editorPane.value?.focusSection(result.firstNewChapterId!));
+        }
+      }
+    }
+    if (!result.skippedKeys.length) {
+      findBreaksOpen.value = false;
+      findBreakSkip.value = null;
+      return;
+    }
+    const applied = new Set(result.appliedKeys);
+    findBreakRows.value = findBreakRows.value
+      .filter((row) => !applied.has(row.key))
+      .map((row) => {
+        const loc = result.locations.get(row.key);
+        if (!loc) return row;
+        return {
+          ...row,
+          chapterId: loc.chapterId,
+          blockIndex: loc.blockIndex,
+          sourceTitle: loc.sourceTitle,
+        };
+      });
+    findBreakSkip.value = {
+      message: skippedBreaksMessage(result.skippedKeys.length),
+      jumpKey: result.skippedKeys[0]!,
+    };
+  } catch (err) {
+    console.error('Could not split chapter breaks', err);
+    saveFailure.value = saveFailed(saveFailure.value, err);
+  } finally {
+    findBreaksApplying.value = false;
+  }
 }
 function dismissChapterToast() {
   chapterToast.value = null;
@@ -1350,6 +1463,7 @@ onMounted(() => {
   window.addEventListener('focus', reloadAgents);
   window.addEventListener('keydown', onAppMenuKey);
   window.addEventListener('keydown', onUpdatePromptEscape);
+  window.addEventListener('keydown', onChapterToastUndoKey, true);
   void refreshAgents();
   // Register the listener before taking the queue. take_all marks the slot taken;
   // a Finder open that arrives in the gap would be emitted with nobody listening.
@@ -1407,6 +1521,7 @@ onMounted(() => {
   stopAppMenuKeys = () => {
     window.removeEventListener('keydown', onAppMenuKey);
     window.removeEventListener('keydown', onUpdatePromptEscape);
+    window.removeEventListener('keydown', onChapterToastUndoKey, true);
   };
 });
 onBeforeUnmount(() => {
@@ -2674,6 +2789,17 @@ defineExpose({ open, closeSession });
           @close="onMergeClose"
           @confirm="onMergeConfirm"
         />
+        <FindChapterBreaksDialog
+          v-if="findBreaksOpen"
+          v-model:rows="findBreakRows"
+          :skip-message="findBreakSkip?.message"
+          :skip-jump-key="findBreakSkip?.jumpKey"
+          :return-focus="findBreaksReturn"
+          :busy="findBreaksApplying"
+          @close="onFindBreaksClose"
+          @confirm="onFindBreaksConfirm"
+          @show="onFindBreakShow"
+        />
       </Teleport>
       <HomeScreen
         v-if="showImportHome"
@@ -2753,6 +2879,7 @@ defineExpose({ open, closeSession });
             @numbering-style="onNumberingStyle"
             @split-chapter="onOutlineSplitChapter"
             @merge-chapter="(target, source) => requestChapterMerge(target, source)"
+            @find-chapter-breaks="openFindChapterBreaks"
           />
           <OutlineRail v-show="!navigatorOpen && !focusMode" @expand="outlineAuto.toggleByHand()" />
           <div class="editor-stack min-h-0 min-w-0" data-test="editor-stack">
@@ -2797,6 +2924,7 @@ defineExpose({ open, closeSession });
               @update:selected-id="selectedId = $event"
               @split-chapter="onEditorSplitChapter"
               @merge-prev-chapter="onEditorMergePrev"
+              @find-chapter-breaks="openFindChapterBreaks"
               @copy-link="onCopyLink"
               @load-error="editorLoadError = $event"
               @reload="reloadSection"

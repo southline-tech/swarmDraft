@@ -34,6 +34,7 @@ import {
   findMarkElement,
   pickActiveManuscriptMark,
   scrollBehavior,
+  scrollElementBesideObstacle,
   scrollElementCenterInRoot,
   scrollSectionAnchorToTop,
 } from './review/review-scroll';
@@ -167,6 +168,7 @@ const emit = defineEmits<{
   'comment-resolve': [sectionId: string, threadId: string, resolved: boolean];
   'split-chapter': [payload: { blockIndex: number; title: string; removeLine: boolean }];
   'merge-prev-chapter': [];
+  'find-chapter-breaks': [];
   'reading-position': [pos: ReadingPosition];
   'copy-link': [ok: boolean];
   'clear-change-ids': [];
@@ -464,11 +466,49 @@ function onLeadLayout(layout: EditorLayout) {
   emit('layout', layout);
 }
 
+let pendingReveal: { id: string; blockIndex: number } | null = null;
+let revealTries = 0;
+
+function finishReveal() {
+  const pending = pendingReveal;
+  if (!pending || pending.id !== props.selectedId) return;
+  const el = editors.value.get(pending.id)?.revealBlock(pending.blockIndex) ?? null;
+  if (!el) {
+    if (revealTries < 2) {
+      revealTries += 1;
+      void nextTick(() => finishReveal());
+    }
+    return;
+  }
+  revealTries = 0;
+  pendingReveal = null;
+  const root = scrollRoot.value;
+  if (!root) return;
+  const card = document.querySelector<HTMLElement>('[data-test="find-breaks-dialog"]');
+  if (card) scrollElementBesideObstacle(root, el, card.getBoundingClientRect());
+  else scrollElementCenterInRoot(root, el, 'auto');
+  restoreWindowScroll();
+}
+
+function revealParagraph(id: string, blockIndex: number) {
+  pendingReveal = { id, blockIndex };
+  revealTries = 0;
+  if (props.selectedId !== id) {
+    emit('update:selectedId', id);
+    return;
+  }
+  void nextTick(() => finishReveal());
+}
+
 watch(
   () => props.selectedId,
   (id, prev) => {
     if (!id || spyFromScroll) {
       spyFromScroll = false;
+      return;
+    }
+    if (pendingReveal && pendingReveal.id === id) {
+      void nextTick(() => finishReveal());
       return;
     }
     if (restoreScrollPending && restoreScrollPending.sectionId === id) {
@@ -528,6 +568,7 @@ defineExpose({
     if (props.selectedId) focusSection(props.selectedId);
   },
   focusSection,
+  revealParagraph,
   focusResolvedChange: focusChangeId,
   setZoom,
   setScrollPaddingBottom,
@@ -637,6 +678,7 @@ onBeforeUnmount(() => {
             @clear-change-ids="emit('clear-change-ids')"
             @split-chapter="emit('split-chapter', $event)"
             @merge-prev-chapter="emit('merge-prev-chapter')"
+            @find-chapter-breaks="emit('find-chapter-breaks')"
             @copy-link="emit('copy-link', $event)"
             @reload="emit('reload')"
             @toggle-navigator="emit('toggle-navigator')"

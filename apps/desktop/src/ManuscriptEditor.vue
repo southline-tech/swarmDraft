@@ -306,6 +306,7 @@ const emit = defineEmits<{
   'bot-comment-seen': [threadId: string];
   'split-chapter': [payload: { blockIndex: number; title: string; removeLine: boolean }];
   'merge-prev-chapter': [];
+  'find-chapter-breaks': [];
   /** Clipboard result for a change link (#117). The parent shows the toast. */
   'copy-link': [ok: boolean];
 }>();
@@ -668,6 +669,10 @@ async function onContextMenuSelect(action: ContextMenuAction) {
   }
   if (action === 'merge_prev_chapter') {
     emit('merge-prev-chapter');
+    return;
+  }
+  if (action === 'find_chapter_breaks') {
+    emit('find-chapter-breaks');
     return;
   }
   await runEditorContextAction(action);
@@ -1667,6 +1672,21 @@ function landInBody(e: Editor) {
 let focusPending = false;
 let focusTimer: ReturnType<typeof setTimeout> | undefined;
 /** Focus the editor at the start of the section's body (see `landInBody`). */
+function revealBlock(blockIndex: number): HTMLElement | null {
+  const e = editor.value;
+  if (!e || e.isDestroyed) return null;
+  const doc = e.state.doc;
+  if (blockIndex < 0 || blockIndex >= doc.childCount) return null;
+  let before = 0;
+  for (let i = 0; i < blockIndex; i++) before += doc.child(i).nodeSize;
+  const inside = Math.min(before + 1, doc.content.size);
+  const sel = TextSelection.create(doc, inside);
+  if (!sel.eq(e.state.selection)) {
+    e.view.dispatch(e.state.tr.setSelection(sel).setMeta('addToHistory', false));
+  }
+  const dom = e.view.nodeDOM(before);
+  return dom instanceof HTMLElement ? dom : null;
+}
 function focusBody() {
   const e = editor.value;
   if (!e) {
@@ -1700,6 +1720,7 @@ function feedbackExcerpt(): string {
 
 defineExpose({
   focusBody,
+  revealBlock,
   reportLoadError,
   setZoom,
   wordsBeforeClientY,

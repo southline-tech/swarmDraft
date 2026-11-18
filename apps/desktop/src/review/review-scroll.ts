@@ -117,6 +117,70 @@ export function scrollElementCenterInRoot(
   root.scrollBy({ top: delta, behavior });
 }
 
+type RectEdges = Pick<DOMRect, 'top' | 'bottom' | 'left' | 'right'>;
+
+function rectsOverlap(a: RectEdges, b: RectEdges): boolean {
+  return (
+    a.bottom > b.top + 1 && a.top < b.bottom - 1 && a.right > b.left + 1 && a.left < b.right - 1
+  );
+}
+
+function insideScroller(rect: RectEdges, rootRect: RectEdges): boolean {
+  return rect.top >= rootRect.top - 1 && rect.bottom <= rootRect.bottom + 1;
+}
+
+/**
+ * Move `el` into a vertical band of `root` that is not covered by `obstacle`
+ * (the find-breaks card). A line already in that band stays put. A line above
+ * or below the scroller is brought into the band, and the landed rect sits
+ * inside the scroller and clears the card. Scroll is clamped so a short
+ * manuscript cannot jump past its ends.
+ */
+export function scrollElementBesideObstacle(
+  root: HTMLElement,
+  el: Element,
+  obstacle: DOMRect,
+  padding = 8,
+): void {
+  const rootRect = root.getBoundingClientRect();
+  const elRect = el.getBoundingClientRect();
+  if (insideScroller(elRect, rootRect) && !rectsOverlap(elRect, obstacle)) return;
+
+  const coverTop = Math.max(obstacle.top, rootRect.top);
+  const coverBottom = Math.min(obstacle.bottom, rootRect.bottom);
+  const above = Math.max(0, coverTop - rootRect.top);
+  const below = Math.max(0, rootRect.bottom - coverBottom);
+  const aboveTarget = coverTop - padding - elRect.height;
+  const belowTarget = coverBottom + padding;
+  const targets = above >= below ? [aboveTarget, belowTarget] : [belowTarget, aboveTarget];
+  const max = Math.max(0, root.scrollHeight - root.clientHeight);
+
+  const place = (targetTop: number) => {
+    const next = Math.min(max, Math.max(0, root.scrollTop + (elRect.top - targetTop)));
+    const newTop = elRect.top - (next - root.scrollTop);
+    return {
+      next,
+      moved: {
+        top: newTop,
+        bottom: newTop + elRect.height,
+        left: elRect.left,
+        right: elRect.right,
+      },
+    };
+  };
+
+  for (const targetTop of targets) {
+    const { next, moved } = place(targetTop);
+    if (insideScroller(moved, rootRect) && !rectsOverlap(moved, obstacle)) {
+      if (next !== root.scrollTop) root.scrollTop = next;
+      return;
+    }
+  }
+
+  const fallback = place(targets[0]!).next;
+  if (fallback !== root.scrollTop) root.scrollTop = fallback;
+}
+
 export function findMarkElement(root: HTMLElement, scopedKey: string): Element | null {
   const parsed = parseBookChangeKey(scopedKey);
   if (!parsed) return null;

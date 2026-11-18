@@ -17,6 +17,7 @@ export type ContextMenuAction =
   | 'scene_break'
   | 'split_chapter'
   | 'merge_prev_chapter'
+  | 'find_chapter_breaks'
   | 'comment'
   | 'copy_link'
   | 'ask-bot';
@@ -76,6 +77,7 @@ export function contextMenuDisabled(
     for (const id of STYLE_ACTIONS) out.add(id);
     out.add('split_chapter');
     out.add('merge_prev_chapter');
+    out.add('find_chapter_breaks');
   }
   if (chapter?.splitBlocked) out.add('split_chapter');
   if (!chapter?.canMergePrev) out.add('merge_prev_chapter');

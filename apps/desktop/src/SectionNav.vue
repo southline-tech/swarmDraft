@@ -53,6 +53,7 @@ const emit = defineEmits<{
   numberingStyle: [style: NumberingStyle];
   'split-chapter': [id: string];
   'merge-chapter': [targetId: string, sourceId: string];
+  'find-chapter-breaks': [];
 }>();
 
 const KIND_LABELS: Record<SectionKind, string> = {
@@ -363,6 +364,12 @@ function menuSplitChapter() {
   if (!id) return;
   closeMenu();
   emit('split-chapter', id);
+}
+function menuFindBreaks() {
+  menuFor.value = undefined;
+  menuAt.value = undefined;
+  moveSubOpen.value = false;
+  emit('find-chapter-breaks');
 }
 function menuMergePrev() {
   const id = menuFor.value;
@@ -1380,6 +1387,16 @@ const rovingTabKey = computed(() => {
             @click="menuSplitChapter"
           >
             Split chapter…
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            tabindex="-1"
+            class="sh-mi"
+            data-test="outline-ctx-find-breaks"
+            @click="menuFindBreaks"
+          >
+            Find chapter breaks…
           </button>
         </template>
         <div class="sh-sep" role="separator" />
