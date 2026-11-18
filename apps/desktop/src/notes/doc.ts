@@ -235,6 +235,53 @@ export function deleteNote(doc: Y.Doc, id: string): void {
   frag.delete(0, frag.length);
 }
 
+/** Put note rows and bodies back to a captured state (chapter split/merge undo). */
+export function restoreNotesSnapshot(target: Y.Doc, update: Uint8Array, origin?: unknown): void {
+  const source = new Y.Doc();
+  Y.applyUpdate(source, update);
+  const wanted = listNotes(source);
+  const wantedIds = new Set(wanted.map((note) => note.id));
+  const write = () => {
+    for (const note of listNotes(target)) {
+      if (!wantedIds.has(note.id)) deleteNote(target, note.id);
+    }
+    for (const note of wanted) {
+      if (!entryMap(target, note.id)) {
+        const entry = new Y.Map<unknown>();
+        entry.set('title', note.title);
+        entry.set('noteType', note.noteType);
+        entry.set('authorKind', note.authorKind);
+        entry.set('authorId', note.authorId);
+        entry.set('authorName', note.authorName);
+        entry.set('createdAt', note.createdAt);
+        entry.set('updatedAt', note.updatedAt);
+        ensureStringArray(entry, 'sectionIds', note.sectionIds);
+        entry.set('sectionId', note.sectionIds[0] ?? null);
+        ensureStringArray(entry, 'tags', note.tags);
+        target.getMap(ENTRIES_KEY).set(note.id, entry);
+        target.getXmlFragment(bodyField(note.id));
+      } else {
+        const entry = entryMap(target, note.id)!;
+        entry.set('title', note.title);
+        entry.set('noteType', note.noteType);
+        entry.set('authorKind', note.authorKind);
+        entry.set('authorId', note.authorId);
+        entry.set('authorName', note.authorName);
+        entry.set('createdAt', note.createdAt);
+        entry.set('updatedAt', note.updatedAt);
+        updateNoteSectionIds(target, note.id, note.sectionIds);
+        updateNoteTags(target, note.id, note.tags);
+      }
+      copyNoteBodyBetween(source, note.id, target, note.id);
+    }
+    const order = target.getArray<string>(ORDER_KEY);
+    if (order.length) order.delete(0, order.length);
+    if (wanted.length) order.push(wanted.map((note) => note.id));
+  };
+  if (origin === undefined) target.transact(write);
+  else target.transact(write, origin);
+}
+
 export function observeNotes(doc: Y.Doc, cb: () => void): () => void {
   const order = doc.getArray(ORDER_KEY);
   const entries = doc.getMap(ENTRIES_KEY);

@@ -115,3 +115,4 @@ export {
   type TrackedInlineFormat,
 } from './format-change';
 export * from './chapter-split-merge';
+export * from './chapter-breaks';

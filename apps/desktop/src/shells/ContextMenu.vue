@@ -37,6 +37,7 @@ const STYLES: { id: ContextMenuAction; label: string; keys: string }[] = [
 const CHAPTER: { id: ContextMenuAction; label: string; keys: string }[] = [
   { id: 'split_chapter', label: 'Split chapter here', keys: 'Ctrl+Shift+Enter' },
   { id: 'merge_prev_chapter', label: 'Merge with previous chapter', keys: '' },
+  { id: 'find_chapter_breaks', label: 'Find chapter breaks…', keys: '' },
 ];
 const splitChapterKeys = computed(() => menuShortcutLabel('Ctrl+Shift+Enter'));
 

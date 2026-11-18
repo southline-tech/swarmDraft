@@ -14,7 +14,9 @@
    [Releases](https://github.com/southline-tech/swarmDraft/releases/latest) if you prefer.
 5. Your data lives in `%APPDATA%\com.radiancelux.swarmdraft\`. Uninstalling from Settings removes
    the app but keeps that folder unless you tick **Also delete my manuscripts and settings** in the
-   uninstaller.
+   uninstaller. That choice also removes older app data folders (`com.radiancelux.coauthor`) under
+   `%APPDATA%` and `%LOCALAPPDATA%`. Leaving the box unticked keeps manuscripts, including those
+   older folders. An update never deletes them.
 
 For more detail (SmartScreen, coAuthor migration, uninstall pages), see
 [install-windows.md](./install-windows.md). On a Mac, the unsigned disk image and Gatekeeper

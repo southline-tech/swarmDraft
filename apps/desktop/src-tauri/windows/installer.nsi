@@ -1311,13 +1311,18 @@ Section Uninstall
     DeleteRegKey /ifempty HKCU "${MANUKEY}"
 
     SetShellVarContext current
-    ; swarmDraft: only the current identifier's folders. The pre-rename com.radiancelux.coauthor
-    ; folders are the first-run migration source and are never deleted (see src/migrate.rs).
+    ; swarmDraft (#352): this checked, non-update path removes the current identifier's
+    ; folders and the pre-rename folders. Those pre-rename folders stay when the box is
+    ; off and during an update ($UpdateMode); they are still the first-run migration
+    ; source (see src/migrate.rs). Spell the pre-rename identifier as a literal. Do not
+    ; derive it from ${BUNDLEID}, and do not delete ${BUNDLEID} a second time.
     !if "${BUNDLEID}" == "com.radiancelux.coauthor"
-      !error "swarmDraft: the uninstaller must never delete the pre-rename data folders"
+      !error "swarmDraft: BUNDLEID must not be the pre-rename identifier. Those folders are removed only by the literal name on this checked, non-update path."
     !endif
     RmDir /r "$APPDATA\${BUNDLEID}"
     RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
+    RmDir /r "$APPDATA\com.radiancelux.coauthor"
+    RmDir /r "$LOCALAPPDATA\com.radiancelux.coauthor"
   ${EndIf}
 
   !ifmacrodef NSIS_HOOK_POSTUNINSTALL

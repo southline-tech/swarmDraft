@@ -590,6 +590,18 @@ describe('outline chapter merge menu', () => {
     later.unmount();
   });
 
+  it('offers find chapter breaks from the chapter menu', async () => {
+    const w = setup({ selectedId: 'ch-1' });
+    await openCtx(w, 'ch-1');
+    const item = ctxEl('outline-ctx-find-breaks');
+    expect(item.textContent).toContain('Find chapter breaks…');
+    item.click();
+    await settle();
+    expect(w.emitted('find-chapter-breaks')).toHaveLength(1);
+    expect(w.emitted('split-chapter')).toBeUndefined();
+    w.unmount();
+  });
+
   it('shows merge with next disabled on the last chapter', async () => {
     const w = setup({ selectedId: 'ch-2' });
     await openCtx(w, 'ch-2');

@@ -508,6 +508,40 @@ describe('UI shells (Part of #36)', () => {
     localStorage.removeItem(PROFILE_KEY);
   });
 
+  it('offers find chapter breaks in the chapter group, not as a toolbar control', async () => {
+    const ydoc = docToYDoc({
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          attrs: { style: 'body' },
+          content: [{ type: 'text', text: 'Opening line.' }],
+        },
+      ],
+    } as never);
+    const w = mount(ManuscriptEditor, {
+      props: { doc: ydoc, chapterOpsEnabled: true, canMergePrevChapter: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    expect(w.text()).not.toContain('Find chapter breaks');
+    await openContextMenu(w);
+    const item = w.get('[data-test="ctx-find_chapter_breaks"]');
+    expect(item.text()).toContain('Find chapter breaks…');
+    const before = Y.encodeStateVector(ydoc);
+    await item.trigger('click');
+    expect(w.emitted('find-chapter-breaks')).toHaveLength(1);
+    expect(Y.encodeStateVector(ydoc)).toEqual(before);
+    const editor = (
+      w.find('.tiptap').element as unknown as { editor: import('@tiptap/core').Editor }
+    ).editor;
+    const beforeDoc = editor.state.doc;
+    (w.vm as unknown as { revealBlock: (index: number) => HTMLElement | null }).revealBlock(0);
+    expect(editor.state.doc.eq(beforeDoc)).toBe(true);
+    expect(Y.encodeStateVector(ydoc)).toEqual(before);
+    w.unmount();
+  });
+
   it('keeps merge with previous visible when it cannot run', async () => {
     const ydoc = docToYDoc(SAMPLE_DOC as never);
     const w = mount(ManuscriptEditor, {

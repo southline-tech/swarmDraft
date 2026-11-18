@@ -26,8 +26,10 @@
 //! - The copy goes into a hidden temp folder next to the target and is renamed into place only
 //!   once it is complete, so an interrupted copy never leaves a half-filled data folder. Stale
 //!   temp folders from an interrupted run are removed and the copy starts over.
-//! - The old folder is only ever read. It stays as a backup, and neither the app nor the
-//!   uninstaller removes it.
+//! - The old folder is only ever read by the running app. It stays as a backup so a later
+//!   install can still copy it. The Windows uninstaller removes it only when the writer
+//!   checks "Also delete my manuscripts and settings" and the run is not an update
+//!   (see `windows/installer.nsi`).
 
 use rusqlite::{Connection, OpenFlags};
 use std::fs;
@@ -685,6 +687,48 @@ mod tests {
         let old = t.path().join(OLD_IDENTIFIER);
         assert_eq!(migrate(&old, &new).unwrap(), Outcome::NothingToMigrate);
         assert!(!new.exists());
+    }
+
+    /// After the pre-rename folders are gone, the next launch has nothing to copy
+    /// and must not recreate a data folder.
+    #[test]
+    fn startup_migration_does_not_reimport_when_pre_rename_folder_is_gone() {
+        let t = tempfile::tempdir().unwrap();
+        let new = t.path().join("com.radiancelux.swarmdraft");
+        assert!(startup_migration(&new).is_empty());
+        assert!(!new.exists());
+        assert!(!t.path().join(OLD_IDENTIFIER).exists());
+    }
+
+    /// Genuine first-run upgrade: the running app copies, writes `.swarmdraft-migrated`,
+    /// and only reads the pre-rename folder.
+    #[test]
+    fn startup_migration_copies_pre_rename_folder_and_only_reads_it() {
+        let t = tempfile::tempdir().unwrap();
+        let old = t.path().join(OLD_IDENTIFIER);
+        let new = t.path().join("com.radiancelux.swarmdraft");
+        seed_old(&old);
+        let before = snapshot(&old);
+        assert!(startup_migration(&new).is_empty());
+        assert!(
+            new.join(MARKER).is_file(),
+            "marker is written on a completed copy"
+        );
+        assert_eq!(
+            snapshot(&old),
+            before,
+            "old folder is only ever read by the running app"
+        );
+        assert_eq!(rows(&new), vec!["m1".to_string()]);
+        assert!(
+            startup_migration(&new).is_empty(),
+            "later launch is a no-op"
+        );
+        assert_eq!(
+            snapshot(&old),
+            before,
+            "old folder is only ever read by the running app"
+        );
     }
 
     #[test]
