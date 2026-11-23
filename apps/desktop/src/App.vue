@@ -396,8 +396,11 @@ const saveError = computed(() => saveFailure.value.failing);
 /** RAD-265 / #204: footer save line after at least one successful persist. */
 const saveStatusShown = ref(false);
 const saveDirty = ref(false);
-/** Author text in git is not yet packed into the linked `.draft` file (#356, #366). */
+/** Author text in git is not yet packed into the linked `.draft` file (#356, #366).
+ * The writer-facing status follows the git checkpoint, not this flag. */
 const draftFileBehind = ref(false);
+/** Bumped when a git checkpoint lands so an open History list reloads (#379). */
+const historyActivityVersion = ref(0);
 /** Idle draft checkpoints are for author typing, not review decisions (#366). */
 let draftCheckpointSuppress = 0;
 const lastSavedAt = ref<number | null>(null);
@@ -426,8 +429,10 @@ const persistHooks = {
       scheduleIdleDraftCheckpoint(() => {
         void draftCheckpoint(id, `Edited ${title}`)
           .then((oid) => {
-            if (oid) draftFileBehind.value = true;
-            else void refreshDraftFileBehind();
+            if (oid) {
+              draftFileBehind.value = true;
+              historyActivityVersion.value += 1;
+            } else void refreshDraftFileBehind();
           })
           .catch((err) => {
             console.error('Draft checkpoint failed', err);
@@ -457,8 +462,10 @@ function runDraftCheckpoint(immediate = false) {
   const commit = () => {
     void draftCheckpoint(id, `Edited ${title}`, immediate)
       .then((oid) => {
-        if (oid) draftFileBehind.value = true;
-        else void refreshDraftFileBehind();
+        if (oid) {
+          draftFileBehind.value = true;
+          historyActivityVersion.value += 1;
+        } else void refreshDraftFileBehind();
       })
       .catch((err) => {
         console.error('Draft checkpoint failed', err);
@@ -502,7 +509,8 @@ const manuscriptSave = computed((): ManuscriptSaveView | undefined => {
     return { phase: 'error', message: '' };
   }
   if (saveDirty.value) return { phase: 'saving' };
-  if (draftFileBehind.value) return { phase: 'unsaved' };
+  // A checkpoint leaves the linked `.draft` unpacked on purpose. Git has the text,
+  // so the footer and History card stay on Saved instead of "Unsaved changes".
   if (saveStatusShown.value && lastSavedAt.value != null) {
     return { phase: 'saved', savedAt: lastSavedAt.value };
   }
@@ -3049,6 +3057,7 @@ defineExpose({ open, closeSession });
               :history-compare-banner="historyCompareBannerText"
               :history-compare-segments-by-section="historyCompareSegmentsBySection"
               :history-word-count="statusWordCount"
+              :history-activity-version="historyActivityVersion"
               :history-author-label="info?.computerName ?? 'You'"
               :history-expanded-bot-row-id="historyExpandedBotRowId"
               :history-pending-review="pendingReviewTotal"

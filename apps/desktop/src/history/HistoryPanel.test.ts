@@ -79,6 +79,54 @@ describe('History panel', () => {
     w.unmount();
   });
 
+  it('shows Saved on the current card and reloads the newest row after a checkpoint', async () => {
+    const { draftHistoryFeed } = await import('../backend');
+    vi.mocked(draftHistoryFeed).mockResolvedValueOnce({
+      rows: [],
+      filterOptions: [],
+      authorLabel: 'You',
+      wordCount: 0,
+    });
+    const savedAt = Date.now();
+    const w = mount(HistoryPanel, {
+      props: {
+        active: true,
+        manuscriptId: 'm1',
+        wordCount: 30,
+        activityVersion: 0,
+        save: { phase: 'saved', savedAt },
+      },
+    });
+    await flushPromises();
+    expect(w.find('[data-test="history-current-card"]').text()).not.toContain('Unsaved changes');
+    expect(w.find('[data-test="history-current-card"]').text()).toContain('Saved');
+    expect(w.find('[data-test="history-empty"]').text()).toContain('No history yet');
+
+    vi.mocked(draftHistoryFeed).mockResolvedValueOnce({
+      rows: [
+        {
+          id: 'newest',
+          oid: 'newest',
+          kind: 'authorEdit',
+          actorName: 'You',
+          isBot: false,
+          timeUnix: 1_700_000_000,
+          summaryTitle: 'You edited Chapter Two',
+          chapterTitle: 'Chapter Two',
+        },
+      ],
+      filterOptions: [],
+      authorLabel: 'You',
+      wordCount: 30,
+    });
+    await w.setProps({ activityVersion: 1 });
+    await flushPromises();
+    const rows = w.findAll('[data-test="history-row"]');
+    expect(rows[0]!.text()).toContain('You edited Chapter Two');
+    expect(w.text()).not.toMatch(/Invalid Date|NaN|undefined/);
+    w.unmount();
+  });
+
   it('shows empty state copy', async () => {
     const { draftHistoryFeed } = await import('../backend');
     vi.mocked(draftHistoryFeed).mockResolvedValueOnce({

@@ -92,9 +92,9 @@ describe('draftHistoryFeed IPC (#365)', () => {
           {
             kind: 'authorEdit',
             oid: 'a1',
-            timeUnix: 1,
-            chapterTitle: 'One',
-            collapsedCount: 1,
+            time_unix: 1,
+            chapter_title: 'One',
+            collapsed_count: 1,
           },
         ],
         filterAuthors: [{ id: 'author', name: 'You', authorKind: 'human', isBot: false }],

@@ -7,6 +7,7 @@ import {
   type RawHistoryCompareResponse,
   type RawHistoryFeedResponse,
 } from './history-ipc';
+import { formatHistoryDayHeader, formatHistoryRowWhen } from './history-time';
 
 describe('history IPC mappers (#365)', () => {
   it('maps feed entries, filter authors, and current card', () => {
@@ -15,20 +16,20 @@ describe('history IPC mappers (#365)', () => {
         {
           kind: 'current',
           oid: 'head',
-          timeUnix: 100,
-          wordCount: 1200,
-          saveState: 'saved',
+          time_unix: 100,
+          word_count: 1200,
+          save_state: 'saved',
           reason: 'This is your book as it is now.',
         },
         {
           kind: 'bot',
           oid: 'b1',
-          timeUnix: 90,
-          displayTimeUnix: 80,
-          agentId: 'agent:line',
-          agentName: 'Line Editor',
+          time_unix: 90,
+          display_time_unix: 80,
+          agent_id: 'agent:line',
+          agent_name: 'Line Editor',
           summary: 'Tighten opening',
-          suggestionCount: 1,
+          suggestion_count: 1,
           suggestions: [
             {
               changeId: 'c1',
@@ -55,6 +56,44 @@ describe('history IPC mappers (#365)', () => {
     expect(feed.rows[0]!.timeUnix).toBe(80);
     expect(feed.rows[0]!.children?.[0]!.deciderName).toBe('Brett');
     expect(feed.filterOptions[0]!).toMatchObject({ key: 'agent:line', isBot: true });
+  });
+
+  it('maps the serde enum shape (snake_case variant fields) to a readable row', () => {
+    const unix = 1_700_000_000;
+    const raw: RawHistoryFeedResponse = {
+      entries: [
+        {
+          kind: 'current',
+          oid: 'head',
+          time_unix: unix,
+          word_count: 30,
+          save_state: 'saved',
+          reason: 'This is your book as it is now.',
+        },
+        {
+          kind: 'authorEdit',
+          oid: 'e1',
+          time_unix: unix,
+          chapter_title: 'Chapter Two',
+          collapsed_count: 1,
+        },
+      ],
+      filterAuthors: [{ id: 'author', name: 'You', authorKind: 'human', isBot: false }],
+      wordCountNow: 30,
+      saveState: 'saved',
+    };
+    const feed = mapHistoryFeed(raw);
+    const row = feed.rows[0]!;
+    expect(row.summaryTitle).toBe('You edited Chapter Two');
+    expect(row.chapterTitle).toBe('Chapter Two');
+    expect(row.timeUnix).toBe(unix);
+    const when = formatHistoryRowWhen(row.timeUnix, new Date(unix * 1000));
+    const header = formatHistoryDayHeader(row.timeUnix, new Date(unix * 1000));
+    expect(when).not.toMatch(/Invalid Date|NaN|undefined/);
+    expect(header).not.toMatch(/Invalid Date|NaN|undefined/);
+    expect(when.length).toBeGreaterThan(0);
+    expect(header).toBe('Today');
+    expect(feed.rows.map((r) => r.summaryTitle).join(' ')).not.toMatch(/undefined/);
   });
 
   it('maps compare and restore preview payloads', () => {

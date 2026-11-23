@@ -1,7 +1,9 @@
 /** Local time labels for the History panel (#365). Never UTC, never raw stamps. */
 
-function atLocal(unix: number): Date {
-  return new Date(unix * 1000);
+function atLocal(unix: number): Date | null {
+  if (typeof unix !== 'number' || !Number.isFinite(unix)) return null;
+  const d = new Date(unix * 1000);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 function startOfLocalDay(d: Date): Date {
@@ -34,6 +36,7 @@ function shortMonthDay(d: Date, includeYear: boolean): string {
 /** Row subtitle: Today 10:22 AM · older: Mon, Nov 10, 4:05 PM · year when not current. */
 export function formatHistoryRowWhen(unix: number, now = new Date()): string {
   const d = atLocal(unix);
+  if (!d) return '';
   const today = startOfLocalDay(now);
   const target = startOfLocalDay(d);
   const dayMs = 86_400_000;
@@ -50,6 +53,7 @@ export function formatHistoryRowWhen(unix: number, now = new Date()): string {
 /** Day group headers: Today, Yesterday, Monday, Nov 10, or Thursday, Sep 3, 2026 */
 export function formatHistoryDayHeader(unix: number, now = new Date()): string {
   const d = atLocal(unix);
+  if (!d) return '';
   const today = startOfLocalDay(now);
   const target = startOfLocalDay(d);
   const dayMs = 86_400_000;
@@ -71,6 +75,7 @@ export function formatHistoryDayHeader(unix: number, now = new Date()): string {
 /** Compare banner and restore confirm: Tue, Nov 17, 2026 · 10:22 AM */
 export function formatHistoryLongWhen(unix: number): string {
   const d = atLocal(unix);
+  if (!d) return '';
   const wd = d.toLocaleString(undefined, { weekday: 'short' });
   const month = d.toLocaleString(undefined, { month: 'short' });
   return `${wd}, ${month} ${d.getDate()}, ${d.getFullYear()} · ${formatTime(d)}`;
@@ -79,6 +84,7 @@ export function formatHistoryLongWhen(unix: number): string {
 /** Restore confirm title fragment: Nov 17, 10:22 AM */
 export function formatRestoreTitleWhen(unix: number, now = new Date()): string {
   const d = atLocal(unix);
+  if (!d) return '';
   const thisYear = now.getFullYear() === d.getFullYear();
   const month = d.toLocaleString(undefined, { month: 'short' });
   const day = d.getDate();
@@ -88,6 +94,7 @@ export function formatRestoreTitleWhen(unix: number, now = new Date()): string {
 
 export function historyDayKey(unix: number, now = new Date()): string {
   const d = atLocal(unix);
+  if (!d) return 'unknown';
   if (isSameLocalDay(d, now)) return 'today';
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }

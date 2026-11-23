@@ -100,6 +100,8 @@ const props = defineProps<{
     import('./backend').DraftHistoryCompareSegment[]
   >;
   historyWordCount?: number;
+  /** Bumped when a git checkpoint lands so History reloads (#379). */
+  historyActivityVersion?: number;
   historyAuthorLabel?: string;
   historyExpandedBotRowId?: string | null;
   historyPendingReview?: number;
@@ -702,6 +704,7 @@ onBeforeUnmount(() => {
               sec.id === selectedId ? historyCompareSegmentsBySection?.[sec.id] : undefined
             "
             :history-word-count="sec.id === selectedId ? historyWordCount : undefined"
+            :history-activity-version="sec.id === selectedId ? historyActivityVersion : undefined"
             :history-save="sec.id === selectedId ? manuscriptSave : undefined"
             :history-pending-review="sec.id === selectedId ? historyPendingReview : undefined"
             :history-author-label="sec.id === selectedId ? historyAuthorLabel : undefined"

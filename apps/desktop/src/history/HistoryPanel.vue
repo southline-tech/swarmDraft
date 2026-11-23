@@ -34,6 +34,8 @@ const props = defineProps<{
   active: boolean;
   manuscriptId: string | null;
   wordCount?: number;
+  /** Incremented when a git checkpoint lands (#379). */
+  activityVersion?: number;
   save?: ManuscriptSaveView;
   pendingReviewCount?: number;
   authorLabel?: string;
@@ -111,7 +113,10 @@ function fallbackSummary(row: HistoryFeedRow): string {
 
 function rowTitle(row: HistoryFeedRow): string {
   if (row.kind === 'current') return 'Your book as it is now';
-  if (row.kind === 'authorEdit' && row.chapterTitle) return `You edited ${row.chapterTitle}`;
+  if (row.kind === 'authorEdit') {
+    const title = row.chapterTitle?.trim();
+    return title ? `You edited ${title}` : 'You edited a chapter';
+  }
   return row.summaryTitle || fallbackSummary(row) || row.actorName;
 }
 
@@ -202,6 +207,14 @@ watch(
     }
   },
   { immediate: true },
+);
+
+watch(
+  () => props.activityVersion,
+  (version, prev) => {
+    if (version === prev || !props.active) return;
+    void load();
+  },
 );
 
 watch(activityTab, (tab) => {

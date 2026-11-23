@@ -2,8 +2,10 @@
 
 use serde_json::json;
 use swarmdraft_lib::content;
-use swarmdraft_lib::draft::{DraftRepo, DraftService, HistoryFeedEntry};
-use swarmdraft_lib::manuscripts::Section;
+use swarmdraft_lib::draft::{
+    DraftRepo, DraftService, HistoryBotSuggestion, HistoryFeedEntry, HistoryFeedResponse,
+};
+use swarmdraft_lib::manuscripts::{section_doc_id, OutlineEntry, Section};
 use swarmdraft_lib::storage::Store;
 use tempfile::tempdir;
 use yrs::{ReadTxn, StateVector, Transact};
@@ -41,6 +43,138 @@ fn link_draft(store: &Store, manuscript_id: &str, name: &str) {
     store
         .set_draft_file_path(manuscript_id, &path.to_string_lossy())
         .unwrap();
+}
+
+#[test]
+fn history_feed_json_uses_snake_case_variant_fields() {
+    let entry = HistoryFeedEntry::AuthorEdit {
+        oid: "abc".into(),
+        time_unix: 1_700_000_000,
+        chapter_title: "Chapter Two".into(),
+        collapsed_count: 1,
+    };
+    let value = serde_json::to_value(&entry).unwrap();
+    assert_eq!(value["kind"], "authorEdit", "author edit json: {value}");
+    assert_eq!(
+        value["time_unix"], 1_700_000_000,
+        "author edit json: {value}"
+    );
+    assert_eq!(
+        value["chapter_title"], "Chapter Two",
+        "author edit json: {value}"
+    );
+    assert!(value.get("timeUnix").is_none(), "author edit json: {value}");
+    assert!(
+        value.get("chapterTitle").is_none(),
+        "author edit json: {value}"
+    );
+
+    let response = HistoryFeedResponse {
+        entries: vec![entry],
+        filter_authors: Vec::new(),
+        word_count_now: 30,
+        save_state: "saved".into(),
+    };
+    let raw = serde_json::to_value(&response).unwrap();
+    assert!(raw.get("filterAuthors").is_some(), "feed json: {raw}");
+    assert!(raw.get("wordCountNow").is_some(), "feed json: {raw}");
+    assert!(raw.get("entries").is_some(), "feed json: {raw}");
+
+    let suggestion = HistoryBotSuggestion {
+        change_id: "c1".into(),
+        status: "accepted".into(),
+        quote: "Hello".into(),
+        decided_by: None,
+        section_id: "s1".into(),
+        chapter_title: "Chapter Two".into(),
+    };
+    let suggestion_json = serde_json::to_value(&suggestion).unwrap();
+    assert_eq!(suggestion_json["changeId"], "c1", "{suggestion_json}");
+    assert_eq!(
+        suggestion_json["chapterTitle"], "Chapter Two",
+        "{suggestion_json}"
+    );
+    assert!(
+        suggestion_json.get("change_id").is_none(),
+        "{suggestion_json}"
+    );
+}
+
+#[test]
+fn new_chapter_text_survives_checkpoint_without_writing_draft() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "new-chapter.draft");
+    let draft_path = store.draft_file_path(&m.id).unwrap().expect("linked path");
+    svc.commit_now(&store, &m.id, "Saved", "Author", "author@swarmdraft.local")
+        .unwrap();
+    let draft_before = std::fs::read(&draft_path).ok();
+
+    let existing = store.list_sections(&m.id).unwrap();
+    let new_id = "chapter-two";
+    let new_doc = section_doc_id(&m.id, new_id);
+    let mut outline: Vec<OutlineEntry> = existing
+        .iter()
+        .map(|section| OutlineEntry {
+            id: section.id.clone(),
+            parent_id: section.parent_id.clone(),
+            kind: section.kind.clone(),
+            title: section.title.clone(),
+            doc_id: section.doc_id.clone(),
+        })
+        .collect();
+    outline.push(OutlineEntry {
+        id: new_id.into(),
+        parent_id: None,
+        kind: "chapter".into(),
+        title: "Chapter Two".into(),
+        doc_id: new_doc.clone(),
+    });
+    store.save_outline(&m.id, &outline).unwrap();
+    set_chapter_plain(&store, &new_doc, "typed after the split");
+    svc.checkpoint_if_due(&store, &m.id, "Edited Chapter Two", true)
+        .unwrap()
+        .expect("checkpoint commit");
+
+    assert_eq!(
+        std::fs::read(&draft_path).ok(),
+        draft_before,
+        "a checkpoint must not rewrite the .draft file"
+    );
+    let markdown = std::fs::read_to_string(
+        svc.worktree_path(&m.id)
+            .join("chapters")
+            .join(format!("{new_id}.md")),
+    )
+    .unwrap();
+    assert!(
+        markdown.contains("typed after the split"),
+        "git chapter file: {markdown}"
+    );
+
+    set_chapter_plain(&store, &new_doc, "wiped");
+    let bin = std::fs::read(
+        svc.worktree_path(&m.id)
+            .join("yjs")
+            .join(format!("{new_id}.bin")),
+    )
+    .unwrap();
+    store.replace_doc_state(&new_doc, &bin).unwrap();
+    let restored = store.load_doc(&new_doc).unwrap();
+    let text = content::markdown(&content::decode(&restored));
+    assert!(
+        text.contains("typed after the split"),
+        "reloaded from git bytes: {text}"
+    );
+    assert!(!text.contains("wiped"));
+
+    let feed = svc.history_feed(&store, &m.id, 20).unwrap();
+    assert!(feed.entries.iter().any(|entry| matches!(
+        entry,
+        HistoryFeedEntry::AuthorEdit { chapter_title, .. } if chapter_title == "Chapter Two"
+    )));
 }
 
 #[test]

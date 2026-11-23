@@ -1,4 +1,10 @@
-/** Map Tauri history IPC payloads to UI DTOs (#365). */
+/**
+ * Map Tauri history IPC payloads to UI DTOs (#365, #379).
+ *
+ * `HistoryFeedEntry` is a serde enum. `rename_all = "camelCase"` renames variants,
+ * not variant fields, so those fields arrive as snake_case (`time_unix`,
+ * `chapter_title`). Wrapper structs and nested suggestion structs stay camelCase.
+ */
 
 import type {
   DraftHistoryCompare,
@@ -31,32 +37,50 @@ type RawFeedEntry =
   | {
       kind: 'current';
       oid: string;
-      timeUnix: number;
-      wordCount: number;
-      saveState: string;
+      time_unix: number;
+      word_count: number;
+      save_state: string;
       reason: string;
     }
   | {
       kind: 'bot';
       oid: string;
-      timeUnix: number;
-      displayTimeUnix: number;
-      agentId: string;
-      agentName: string;
+      time_unix: number;
+      display_time_unix: number;
+      agent_id: string;
+      agent_name: string;
       summary: string;
-      suggestionCount: number;
+      suggestion_count: number;
       suggestions: RawBotSuggestion[];
     }
   | {
       kind: 'authorEdit';
       oid: string;
-      timeUnix: number;
-      chapterTitle: string;
-      collapsedCount: number;
+      time_unix: number;
+      chapter_title: string;
+      collapsed_count: number;
     }
-  | { kind: 'save'; oid: string; timeUnix: number }
-  | { kind: 'restore'; oid: string; timeUnix: number; sourceLabel: string }
-  | { kind: 'milestone'; oid: string; timeUnix: number; name: string; message: string };
+  | { kind: 'save'; oid: string; time_unix: number }
+  | { kind: 'restore'; oid: string; time_unix: number; source_label: string }
+  | { kind: 'milestone'; oid: string; time_unix: number; name: string; message: string };
+
+/** Read a serde enum field. Snake_case is what the enum emits; camelCase is accepted too. */
+function field(entry: object, snake: string, camel: string): unknown {
+  const rec = entry as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(rec, snake)) return rec[snake];
+  if (Object.prototype.hasOwnProperty.call(rec, camel)) return rec[camel];
+  return undefined;
+}
+
+function fieldString(entry: object, snake: string, camel: string): string {
+  const value = field(entry, snake, camel);
+  return typeof value === 'string' ? value : '';
+}
+
+function fieldNumber(entry: object, snake: string, camel: string): number | undefined {
+  const value = field(entry, snake, camel);
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
 
 export interface RawHistoryFeedResponse {
   entries: RawFeedEntry[];
@@ -120,6 +144,7 @@ function mapBotChildren(
 }
 
 function mapFeedRow(entry: RawFeedEntry, authorLabel: string): HistoryFeedRow | null {
+  const timeUnix = fieldNumber(entry, 'time_unix', 'timeUnix') ?? Number.NaN;
   switch (entry.kind) {
     case 'current':
       return {
@@ -128,35 +153,41 @@ function mapFeedRow(entry: RawFeedEntry, authorLabel: string): HistoryFeedRow | 
         kind: 'current',
         actorName: authorLabel,
         isBot: false,
-        timeUnix: entry.timeUnix,
+        timeUnix,
         summaryTitle: 'Your book as it is now',
-        disabledReason: entry.reason,
-        currentWordCount: entry.wordCount,
+        disabledReason: typeof entry.reason === 'string' ? entry.reason : '',
+        currentWordCount: fieldNumber(entry, 'word_count', 'wordCount') ?? null,
       };
-    case 'bot':
+    case 'bot': {
+      const display = fieldNumber(entry, 'display_time_unix', 'displayTimeUnix');
+      const shown = display ?? timeUnix;
+      const suggestions = Array.isArray(entry.suggestions) ? entry.suggestions : [];
       return {
         id: entry.oid,
         oid: entry.oid,
         kind: 'bot',
-        actorName: entry.agentName,
+        actorName: fieldString(entry, 'agent_name', 'agentName') || 'Bot',
         isBot: true,
-        agentId: entry.agentId,
-        timeUnix: entry.displayTimeUnix,
-        summaryTitle: entry.summary,
-        suggestionCount: entry.suggestionCount,
-        children: mapBotChildren(entry.suggestions, entry.timeUnix),
+        agentId: fieldString(entry, 'agent_id', 'agentId'),
+        timeUnix: shown,
+        summaryTitle: fieldString(entry, 'summary', 'summary'),
+        suggestionCount: fieldNumber(entry, 'suggestion_count', 'suggestionCount') ?? null,
+        children: mapBotChildren(suggestions, shown),
       };
-    case 'authorEdit':
+    }
+    case 'authorEdit': {
+      const chapterTitle = fieldString(entry, 'chapter_title', 'chapterTitle').trim();
       return {
         id: entry.oid,
         oid: entry.oid,
         kind: 'authorEdit',
         actorName: 'You',
         isBot: false,
-        timeUnix: entry.timeUnix,
-        chapterTitle: entry.chapterTitle,
-        summaryTitle: `You edited ${entry.chapterTitle}`,
+        timeUnix,
+        chapterTitle,
+        summaryTitle: chapterTitle ? `You edited ${chapterTitle}` : 'You edited a chapter',
       };
+    }
     case 'save':
       return {
         id: entry.oid,
@@ -164,30 +195,34 @@ function mapFeedRow(entry: RawFeedEntry, authorLabel: string): HistoryFeedRow | 
         kind: 'save',
         actorName: authorLabel,
         isBot: false,
-        timeUnix: entry.timeUnix,
+        timeUnix,
         summaryTitle: 'You saved your book',
       };
-    case 'restore':
+    case 'restore': {
+      const source = fieldString(entry, 'source_label', 'sourceLabel');
       return {
         id: entry.oid,
         oid: entry.oid,
         kind: 'restore',
         actorName: authorLabel,
         isBot: false,
-        timeUnix: entry.timeUnix,
-        summaryTitle: `Restored version from ${entry.sourceLabel}`,
+        timeUnix,
+        summaryTitle: source ? `Restored version from ${source}` : 'Restored version',
       };
-    case 'milestone':
+    }
+    case 'milestone': {
+      const name = fieldString(entry, 'name', 'name');
       return {
         id: entry.oid,
         oid: entry.oid,
         kind: 'milestone',
         actorName: authorLabel,
         isBot: false,
-        timeUnix: entry.timeUnix,
-        milestoneName: entry.name,
-        summaryTitle: entry.name,
+        timeUnix,
+        milestoneName: name,
+        summaryTitle: name,
       };
+    }
     default:
       return null;
   }
