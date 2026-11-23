@@ -20,4 +20,11 @@ describe('history time (#365)', () => {
     const y = Math.floor(new Date(2026, 10, 16, 9, 0, 0).getTime() / 1000);
     expect(formatHistoryDayHeader(y, now)).toBe('Yesterday');
   });
+
+  it('never prints Invalid Date or NaN for a missing stamp', () => {
+    expect(formatHistoryRowWhen(Number.NaN)).toBe('');
+    expect(formatHistoryDayHeader(Number.NaN)).toBe('');
+    expect(formatHistoryRowWhen(undefined as unknown as number)).not.toMatch(/Invalid Date|NaN/);
+    expect(formatHistoryDayHeader(undefined as unknown as number)).not.toMatch(/Invalid Date|NaN/);
+  });
 });

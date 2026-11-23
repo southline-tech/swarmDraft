@@ -151,8 +151,13 @@ export function openSession(
         sections.delete(d);
       }
       // New sections start empty unless this docId was removed earlier in-session (undo delete).
+      // A chapter split inserts its new doc, already filled, before this save. That doc is not
+      // watched yet, so adopt writes its full state; later keystrokes then save as deltas.
       for (const x of next) {
-        if (sections.has(x.docId)) continue;
+        if (sections.has(x.docId)) {
+          saver?.adopt(x.docId);
+          continue;
+        }
         const doc = markRaw(new Y.Doc());
         const snap = removedDocSnapshots.get(x.docId);
         if (snap) {
@@ -384,6 +389,19 @@ function watchSections(manuscript: Y.Doc, docs: Map<string, Y.Doc>, p: SectionPe
     flush,
     watch: (docId: string, doc: Y.Doc) => {
       if (!stopped && !offs.has(docId)) offs.set(docId, watch(docId, doc));
+    },
+    /**
+     * A doc already in the map (a split chapter) has no update listener, and the
+     * bytes that built it will not fire again. Watch it and queue its full state.
+     */
+    adopt: (docId: string) => {
+      if (stopped || offs.has(docId)) return;
+      const doc = docs.get(docId);
+      if (!doc) return;
+      offs.set(docId, watch(docId, doc));
+      dirtyFull.add(docId);
+      p.onDirty?.();
+      schedule(p.debounceMs ?? SAVE_DEBOUNCE_MS);
     },
     forget: (docId: string) => {
       offs.get(docId)?.();

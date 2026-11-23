@@ -276,6 +276,7 @@ const props = defineProps<{
   rightDockOpen?: boolean;
   rightDockTab?: RightDockTab;
   historyWordCount?: number;
+  historyActivityVersion?: number;
   historySave?: ManuscriptSaveView;
   historyPendingReview?: number;
   historyAuthorLabel?: string;
@@ -2293,6 +2294,7 @@ onBeforeUnmount(() => {
               :active="dockTab === 'history' && dockOpen"
               :manuscript-id="manuscriptId ?? null"
               :word-count="historyWordCount"
+              :activity-version="historyActivityVersion"
               :save="historySave"
               :pending-review-count="historyPendingReview"
               :author-label="historyAuthorLabel"
