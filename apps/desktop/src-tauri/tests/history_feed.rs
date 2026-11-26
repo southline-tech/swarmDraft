@@ -365,6 +365,15 @@ fn milestone_create_and_list() {
         .all(|t| t.name != "Submitted to editor"));
 }
 
+fn set_doc_json(store: &Store, doc_id: &str, content: serde_json::Value) {
+    let doc = content::new_doc();
+    content::encode(&doc, &json!({ "type": "doc", "content": content })).unwrap();
+    let state = doc
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    store.replace_doc_state(doc_id, &state).unwrap();
+}
+
 fn set_paragraphs(store: &Store, doc_id: &str, lines: &[&str]) {
     let doc = content::new_doc();
     let content: Vec<_> = lines
@@ -618,4 +627,83 @@ fn compare_keeps_chapters_and_paragraphs_without_block_markers() {
     assert!(two_body.contains("Beta three stays."), "{two_body}");
     assert!(!two_body.contains("Alpha"), "{two_body}");
     assert!(two.added >= 10 && two.removed == 0, "{:?}", two);
+}
+
+#[test]
+fn compare_marks_added_and_removed_paragraphs_with_hard_breaks() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "history-compare-hard-break.draft");
+    let chapter = chapter(&stored);
+
+    let broken = |top: &str, bottom: &str| {
+        json!({
+            "type": "paragraph",
+            "content": [
+                { "type": "text", "text": top },
+                { "type": "hard_break" },
+                { "type": "text", "text": bottom }
+            ]
+        })
+    };
+    set_doc_json(
+        &store,
+        &chapter.doc_id,
+        json!([broken("Old top", "old bottom")]),
+    );
+    let older = svc
+        .commit_now(&store, &m.id, "Saved", "Author", "author@swarmdraft.local")
+        .unwrap()
+        .expect("older save");
+    set_doc_json(
+        &store,
+        &chapter.doc_id,
+        json!([broken("New top", "new bottom")]),
+    );
+    svc.commit_now(&store, &m.id, "Saved", "Author", "author@swarmdraft.local")
+        .unwrap();
+
+    let cmp = svc.history_compare(&store, &m.id, &older, true).unwrap();
+    let section = cmp
+        .sections
+        .iter()
+        .find(|s| {
+            s.segments
+                .as_ref()
+                .is_some_and(|segs| segs.iter().any(|seg| seg.text.contains("New top")))
+        })
+        .expect("chapter with the new paragraph");
+    let segments = section.segments.as_ref().expect("segments");
+    let removed = segments
+        .iter()
+        .find(|seg| seg.segment_kind == "remove")
+        .expect("removed paragraph");
+    let added = segments
+        .iter()
+        .find(|seg| seg.segment_kind == "add")
+        .expect("added paragraph");
+    assert!(
+        removed.text.contains('\n'),
+        "removed hard break became a plain gap: {}",
+        removed.text
+    );
+    assert!(
+        removed.text.contains("Old top") && removed.text.contains("old bottom"),
+        "{}",
+        removed.text
+    );
+    assert!(
+        added.text.contains('\n'),
+        "added hard break became a plain gap: {}",
+        added.text
+    );
+    assert!(
+        added.text.contains("New top") && added.text.contains("new bottom"),
+        "{}",
+        added.text
+    );
+    assert!(!removed.text.contains("<!--"), "{}", removed.text);
+    assert!(!added.text.contains("<!--"), "{}", added.text);
 }

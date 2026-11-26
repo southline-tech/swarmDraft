@@ -347,21 +347,23 @@ const emit = defineEmits<{
   'history-compare': [oid: string, data: DraftHistoryCompare, label: string];
 }>();
 
-const historyPanelRef = useTemplateRef<{ closeCompare: () => void }>('historyPanel');
+const historyPanelRef = useTemplateRef<{
+  closeCompare: () => boolean;
+  clearCompare: () => void;
+}>('historyPanel');
 
-/** Banner and the History panel both call this (#385). */
+/** Banner and the History panel both call this (#385).
+ * Focus mode remounts the panel outside compare mode, so this click still closes the banner. */
 function closeHistoryCompare() {
-  if (historyPanelRef.value) {
-    historyPanelRef.value.closeCompare();
-    return;
-  }
-  emit('history-close-compare');
+  const panelClosed = historyPanelRef.value?.closeCompare() ?? false;
+  if (!panelClosed) emit('history-close-compare');
 }
 
 watch(
   () => props.historyCompareBanner,
   (banner) => {
-    if (!banner) historyPanelRef.value?.closeCompare();
+    // Continuous view passes the banner only to the selected chapter (#385).
+    if (!banner) historyPanelRef.value?.clearCompare();
   },
 );
 
@@ -2236,12 +2238,12 @@ onBeforeUnmount(() => {
             aria-readonly="true"
           >
             <template v-for="(seg, index) in historyCompareSegments" :key="index">
-              <span v-if="seg.text.includes('\n')">{{ seg.text }}</span>
-              <span v-else-if="seg.kind === 'same'">{{ seg.text }} </span>
-              <span v-else-if="seg.kind === 'add'" class="history-compare-insert"
+              <span v-if="seg.kind === 'add'" class="history-compare-insert">{{ seg.text }} </span>
+              <span v-else-if="seg.kind === 'remove'" class="history-compare-delete"
                 >{{ seg.text }}
               </span>
-              <span v-else class="history-compare-delete">{{ seg.text }} </span>
+              <span v-else-if="seg.text.includes('\n')">{{ seg.text }}</span>
+              <span v-else>{{ seg.text }} </span>
             </template>
           </div>
           <EditorContent

@@ -238,13 +238,21 @@ async function startCompare(row: HistoryFeedRow) {
   emit('compare', row.oid, data, compareLabel.value);
 }
 
-function closeCompare() {
-  const open = compareMode.value || compareData.value != null;
+/** Local compare state only. Does not emit, so another chapter keeps its segments (#385). */
+function clearCompare() {
   compareMode.value = false;
   compareOid.value = null;
   compareData.value = null;
   compareLabel.value = '';
-  if (open) emit('close-compare');
+}
+
+/** Returns whether this panel was showing compare and emitted `close-compare`. */
+function closeCompare(): boolean {
+  const open = compareMode.value || compareData.value != null;
+  clearCompare();
+  if (!open) return false;
+  emit('close-compare');
+  return true;
 }
 
 async function onRestoreClick(row: HistoryFeedRow) {
@@ -355,7 +363,7 @@ onMounted(() => {
   if (props.active) heading.value?.focus();
 });
 
-defineExpose({ closeCompare });
+defineExpose({ closeCompare, clearCompare });
 </script>
 
 <template>

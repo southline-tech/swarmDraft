@@ -86,6 +86,9 @@ Run this consolidated pass in order; do not hand off until every line that appli
 
 Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
 
+- 2026-11-25 · #385 · PR #387 · Banner Close compare after focus mode remounted History left the banner up, because the new panel was not in compare mode and the click returned without telling the parent · the click still clears the banner and the compare body
+- 2026-11-25 · #385 · PR #387 · switching chapters withdrew the banner from the previous editor, and that watch closed compare for the whole book · the other chapter still shows its segments
+- 2026-11-25 · #384 · PR #387 · an added or removed paragraph with a hard break was painted with no insert or delete class, because any newline skipped the class · that paragraph stays underlined or struck
 - 2026-11-25 · #384 · history compare rendered `<!-- block:… -->` markers and ran paragraphs and chapters into one blob · compare aligns paragraphs by block id, keeps the breaks, and never puts `<!--block` in a segment
 - 2026-11-25 · #384 · compare word counts counted markers and skipped a chapter that exists only in the current book · totals use the visible chapter text, and that chapter is still listed
 - 2026-11-25 · #385 · the current card showed Compare and Restore, and the activity list repeated "Your book as it is now" · the card is the only current entry and has neither button; older saves stay save rows
