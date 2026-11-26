@@ -345,6 +345,24 @@ const emit = defineEmits<{
   'history-compare': [oid: string, data: DraftHistoryCompare, label: string];
 }>();
 
+const historyPanelRef = useTemplateRef<{ closeCompare: () => void }>('historyPanel');
+
+/** Banner and the History panel both call this (#385). */
+function closeHistoryCompare() {
+  if (historyPanelRef.value) {
+    historyPanelRef.value.closeCompare();
+    return;
+  }
+  emit('history-close-compare');
+}
+
+watch(
+  () => props.historyCompareBanner,
+  (banner) => {
+    if (!banner) historyPanelRef.value?.closeCompare();
+  },
+);
+
 const appFooterEditor = inject(APP_FOOTER_EDITOR_KEY, null);
 const continuousNav = inject(CONTINUOUS_REVIEW_NAV, null);
 const continuousScroll = inject(CONTINUOUS_SCROLL_ROOT, null);
@@ -2106,7 +2124,7 @@ onBeforeUnmount(() => {
         type="button"
         class="sh-btn sh-btn--secondary sh-btn--sm"
         data-test="history-compare-close"
-        @click="emit('history-close-compare')"
+        @click="closeHistoryCompare"
       >
         Close compare
       </button>
@@ -2194,7 +2212,8 @@ onBeforeUnmount(() => {
             aria-readonly="true"
           >
             <template v-for="(seg, index) in historyCompareSegments" :key="index">
-              <span v-if="seg.kind === 'same'">{{ seg.text }} </span>
+              <span v-if="seg.text.includes('\n')">{{ seg.text }}</span>
+              <span v-else-if="seg.kind === 'same'">{{ seg.text }} </span>
               <span v-else-if="seg.kind === 'add'" class="history-compare-insert"
                 >{{ seg.text }}
               </span>
@@ -2291,6 +2310,7 @@ onBeforeUnmount(() => {
           </template>
           <template #history>
             <HistoryPanel
+              ref="historyPanel"
               :active="dockTab === 'history' && dockOpen"
               :manuscript-id="manuscriptId ?? null"
               :word-count="historyWordCount"

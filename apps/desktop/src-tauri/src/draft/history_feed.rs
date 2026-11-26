@@ -442,10 +442,6 @@ pub(crate) fn compare_versions(
     let head = repo.head_oid()?.unwrap_or_default();
     let then_sections = book_sections(repo, oid)?;
     let now_sections = book_sections(repo, &head)?;
-    let now_by_id: HashMap<String, BookSection> = now_sections
-        .into_iter()
-        .map(|s| (s.id.clone(), s))
-        .collect();
 
     let (label_name, label_time_unix) = if let Some((name, time)) = feed_label {
         (name.to_string(), time)
@@ -469,38 +465,44 @@ pub(crate) fn compare_versions(
         ("Version".into(), repo.commit_time_unix(oid).unwrap_or(0))
     };
 
+    // Current book order, then chapters that existed only in the older save.
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut chapter_ids: Vec<(String, String)> = Vec::new();
+    for section in now_sections.iter().chain(then_sections.iter()) {
+        if section.kind != "chapter" || !seen.insert(section.id.clone()) {
+            continue;
+        }
+        let title = now_sections
+            .iter()
+            .chain(then_sections.iter())
+            .find(|s| s.id == section.id)
+            .map(|s| s.title.clone())
+            .unwrap_or_else(|| "Chapter".into());
+        chapter_ids.push((section.id.clone(), title));
+    }
+
     let mut total_then = 0usize;
     let mut total_now = 0usize;
     let mut sections_out = Vec::new();
-    for section in then_sections {
-        if section.kind != "chapter" {
-            continue;
-        }
-        let then_text = chapter_markdown(repo, oid, &section.id)?;
-        let now_text = chapter_markdown(
-            repo,
-            &head,
-            now_by_id
-                .get(&section.id)
-                .map(|s| s.id.as_str())
-                .unwrap_or(&section.id),
-        )?;
-        let then_words = word_count_text(&then_text);
-        let now_words = word_count_text(&now_text);
-        total_then += then_words;
-        total_now += now_words;
-        let (added, removed) = word_delta(&then_text, &now_text);
+    for (section_id, title) in chapter_ids {
+        let then_blocks = chapter_blocks(repo, oid, &section_id)?;
+        let now_blocks = chapter_blocks(repo, &head, &section_id)?;
+        total_then += content::word_count(&then_blocks);
+        total_now += content::word_count(&now_blocks);
+        let then_paras = paragraphs_of(&then_blocks);
+        let now_paras = paragraphs_of(&now_blocks);
+        let (added, removed) = word_delta(&plain_text(&then_paras), &plain_text(&now_paras));
         if added == 0 && removed == 0 {
             continue;
         }
         let segments = if include_segments {
-            Some(diff_segments(&then_text, &now_text))
+            Some(diff_paragraphs(&then_paras, &now_paras))
         } else {
             None
         };
         sections_out.push(HistoryCompareSection {
-            section_id: section.id,
-            title: section.title,
+            section_id,
+            title,
             added,
             removed,
             segments,
@@ -662,23 +664,65 @@ fn book_sections(repo: &DraftRepo, oid: &str) -> Result<Vec<BookSection>, DraftR
     Ok(book.chapters)
 }
 
-fn chapter_markdown(
+fn chapter_blocks(
     repo: &DraftRepo,
     oid: &str,
     section_id: &str,
-) -> Result<String, DraftRepoError> {
+) -> Result<Vec<content::Block>, DraftRepoError> {
+    if oid.is_empty() {
+        return Ok(Vec::new());
+    }
     let path = format!("yjs/{section_id}.bin");
     let Some(bytes) = repo.file_bytes(oid, &path)? else {
-        return Ok(String::new());
+        return Ok(Vec::new());
     };
     let Some(doc) = sync::doc_from_update(&bytes) else {
-        return Ok(String::new());
+        return Ok(Vec::new());
     };
-    Ok(content::markdown(&decode(&doc)))
+    Ok(decode(&doc))
 }
 
-fn word_count_text(text: &str) -> usize {
-    text.split_whitespace().count()
+struct Para {
+    id: String,
+    text: String,
+}
+
+fn paragraphs_of(blocks: &[content::Block]) -> Vec<Para> {
+    blocks
+        .iter()
+        .map(|block| Para {
+            id: block.id.clone(),
+            text: strip_block_markers(&content::block_text(&block.node)),
+        })
+        .collect()
+}
+
+fn plain_text(paras: &[Para]) -> String {
+    paras
+        .iter()
+        .map(|para| para.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Drop `<!-- block:id -->` markers so compare text is the book the author reads.
+fn strip_block_markers(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("<!--") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 4..];
+        if after.trim_start().starts_with("block:") {
+            if let Some(end) = rest[start..].find("-->") {
+                rest = &rest[start + end + 3..];
+                continue;
+            }
+        }
+        out.push_str("<!--");
+        rest = &rest[start + 4..];
+    }
+    out.push_str(rest);
+    out
 }
 
 fn word_delta(before: &str, after: &str) -> (usize, usize) {
@@ -714,46 +758,136 @@ fn lcs_word_delta(a: &[&str], b: &[&str]) -> (usize, usize) {
     (m.saturating_sub(lcs), n.saturating_sub(lcs))
 }
 
-fn diff_segments(before: &str, after: &str) -> Vec<HistoryCompareSegment> {
-    let a: Vec<&str> = before.split_whitespace().collect();
-    let b: Vec<&str> = after.split_whitespace().collect();
+enum ParaOp {
+    Same(usize, usize),
+    Remove(usize),
+    Add(usize),
+}
+
+/// Align paragraphs by block id, then diff words inside a paragraph that changed.
+fn diff_paragraphs(before: &[Para], after: &[Para]) -> Vec<HistoryCompareSegment> {
+    let ops = align_paragraphs(before, after);
     let mut segments = Vec::new();
-    let mut i = 0usize;
-    let mut j = 0usize;
-    while i < a.len() || j < b.len() {
-        if i < a.len() && j < b.len() && a[i] == b[j] {
-            push_segment(&mut segments, "same", a[i]);
-            i += 1;
-            j += 1;
-        } else if j < b.len()
-            && (i >= a.len() || next_match(&a, i, &b, j) >= next_match_rev(&a, i, &b, j))
-        {
-            push_segment(&mut segments, "add", b[j]);
-            j += 1;
-        } else if i < a.len() {
-            push_segment(&mut segments, "remove", a[i]);
-            i += 1;
+    for (index, op) in ops.iter().enumerate() {
+        if index > 0 {
+            segments.push(HistoryCompareSegment {
+                segment_kind: "gap".into(),
+                text: "\n\n".into(),
+            });
+        }
+        match op {
+            ParaOp::Same(i, j) => {
+                let old = before[*i].text.as_str();
+                let new = after[*j].text.as_str();
+                if old == new {
+                    if !new.is_empty() {
+                        push_segment(&mut segments, "same", new);
+                    }
+                } else {
+                    diff_words(&mut segments, old, new);
+                }
+            }
+            ParaOp::Remove(i) => {
+                let text = before[*i].text.as_str();
+                if !text.is_empty() {
+                    push_segment(&mut segments, "remove", text);
+                }
+            }
+            ParaOp::Add(j) => {
+                let text = after[*j].text.as_str();
+                if !text.is_empty() {
+                    push_segment(&mut segments, "add", text);
+                }
+            }
         }
     }
     segments
 }
 
-fn next_match(a: &[&str], i: usize, b: &[&str], j: usize) -> usize {
-    for k in j..b.len() {
-        if a.get(i) == b.get(k) {
-            return k - j;
+fn align_paragraphs(before: &[Para], after: &[Para]) -> Vec<ParaOp> {
+    let n = before.len();
+    let m = after.len();
+    let mut dp = vec![vec![0usize; m + 1]; n + 1];
+    for i in 1..=n {
+        for j in 1..=m {
+            if before[i - 1].id == after[j - 1].id {
+                dp[i][j] = dp[i - 1][j - 1] + 1;
+            } else {
+                dp[i][j] = dp[i - 1][j].max(dp[i][j - 1]);
+            }
         }
     }
-    usize::MAX
+    let mut ops = Vec::new();
+    let mut i = n;
+    let mut j = m;
+    while i > 0 || j > 0 {
+        if i > 0 && j > 0 && before[i - 1].id == after[j - 1].id {
+            ops.push(ParaOp::Same(i - 1, j - 1));
+            i -= 1;
+            j -= 1;
+        } else if i > 0 && (j == 0 || dp[i - 1][j] >= dp[i][j - 1]) {
+            ops.push(ParaOp::Remove(i - 1));
+            i -= 1;
+        } else {
+            ops.push(ParaOp::Add(j - 1));
+            j -= 1;
+        }
+    }
+    ops.reverse();
+    ops
 }
 
-fn next_match_rev(a: &[&str], i: usize, b: &[&str], j: usize) -> usize {
-    for k in i..a.len() {
-        if b.get(j) == a.get(k) {
-            return k - i;
+fn diff_words(segments: &mut Vec<HistoryCompareSegment>, before: &str, after: &str) {
+    let a: Vec<&str> = before.split_whitespace().collect();
+    let b: Vec<&str> = after.split_whitespace().collect();
+    if a.is_empty() && b.is_empty() {
+        return;
+    }
+    if a.is_empty() {
+        push_segment(segments, "add", after);
+        return;
+    }
+    if b.is_empty() {
+        push_segment(segments, "remove", before);
+        return;
+    }
+    let n = a.len();
+    let m = b.len();
+    if n.saturating_mul(m) > 400_000 {
+        push_segment(segments, "remove", before);
+        push_segment(segments, "add", after);
+        return;
+    }
+    let mut dp = vec![vec![0usize; m + 1]; n + 1];
+    for i in 1..=n {
+        for j in 1..=m {
+            if a[i - 1] == b[j - 1] {
+                dp[i][j] = dp[i - 1][j - 1] + 1;
+            } else {
+                dp[i][j] = dp[i - 1][j].max(dp[i][j - 1]);
+            }
         }
     }
-    usize::MAX
+    let mut ops: Vec<(&str, &str)> = Vec::new();
+    let mut i = n;
+    let mut j = m;
+    while i > 0 || j > 0 {
+        if i > 0 && j > 0 && a[i - 1] == b[j - 1] {
+            ops.push(("same", a[i - 1]));
+            i -= 1;
+            j -= 1;
+        } else if i > 0 && (j == 0 || dp[i - 1][j] >= dp[i][j - 1]) {
+            ops.push(("remove", a[i - 1]));
+            i -= 1;
+        } else {
+            ops.push(("add", b[j - 1]));
+            j -= 1;
+        }
+    }
+    ops.reverse();
+    for (kind, word) in ops {
+        push_segment(segments, kind, word);
+    }
 }
 
 fn push_segment(segments: &mut Vec<HistoryCompareSegment>, kind: &str, word: &str) {
