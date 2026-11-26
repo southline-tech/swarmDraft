@@ -73,7 +73,9 @@ import {
 } from './shells/context-menu';
 import SplitChapterPopover from './chapter/SplitChapterPopover.vue';
 import {
-  splitDisabledReason as chapterSplitDisabledReason,
+  blockIndexFromPointer,
+  splitBlockIndex,
+  splitDisabledAt,
   splitPopoverDefaults,
 } from './chapter/chapter-editor';
 import { caretStyle } from './toolbar/toolbar';
@@ -353,7 +355,13 @@ const continuousScroll = inject(CONTINUOUS_SCROLL_ROOT, null);
    manuscript, the Y.Doc, the selection or the undo history. */
 const findOpen = shallowRef(Boolean(import.meta.env.DEV && props.initialFindOpen));
 const findFocusReplace = shallowRef(Boolean(import.meta.env.DEV && props.initialFindReplace));
-const menuAt = shallowRef<{ x: number; y: number; changeId?: string } | null>(null);
+const menuAt = shallowRef<{
+  x: number;
+  y: number;
+  changeId?: string;
+  /** Top-level block under the pointer. Absent when the click missed a paragraph. */
+  blockIndex?: number;
+} | null>(null);
 const spellMenu = shallowRef<{ x: number; y: number; issue: SpellIssue } | null>(null);
 const spellPrefs = ref(loadSpellPrefs());
 const shortcutsOpen = shallowRef(Boolean(import.meta.env.DEV && props.initialShortcutsOpen));
@@ -568,10 +576,12 @@ function openMenu(e: MouseEvent) {
     }
   }
   spellMenu.value = null;
+  const blockIndex = ed && !ed.isDestroyed ? blockIndexFromPointer(ed, e) : undefined;
   menuAt.value = {
     x: Math.min(e.clientX, window.innerWidth - 280),
     y: Math.min(e.clientY, window.innerHeight - 300),
     changeId: ed && !ed.isDestroyed ? changeIdFromContext(ed, e) : undefined,
+    ...(blockIndex != null ? { blockIndex } : {}),
   };
 }
 
@@ -603,10 +613,20 @@ async function onSpellDictionary() {
   await spellDictionaryAdd(props.manuscriptId, menu.issue.word);
   refreshSpellcheck(ed);
 }
-const splitDisabledReason = computed((): string | null => {
+/** Bumped on selection changes so split checks follow the caret, not the first render. */
+const selectionEpoch = ref(0);
+function liveSplitDisabled(blockIndex?: number): string | null {
   const e = editor.value;
   if (!e || e.isDestroyed || !props.doc) return 'Read-only';
-  return chapterSplitDisabledReason(e, e.state.doc.toJSON() as DocNode);
+  const docJson = e.state.doc.toJSON() as DocNode;
+  const index =
+    blockIndex ??
+    (typeof menuAt.value?.blockIndex === 'number' ? menuAt.value.blockIndex : splitBlockIndex(e));
+  return splitDisabledAt(e.isEditable, docJson, index);
+}
+const splitDisabledReason = computed((): string | null => {
+  void selectionEpoch.value;
+  return liveSplitDisabled();
 });
 const mergePrevDisabledReason = computed((): string | undefined => {
   const e = editor.value;
@@ -634,10 +654,13 @@ const splitPopover = shallowRef<{
 const splitShortcutStatus = ref<string | null>(null);
 let splitShortcutStatusTimer: ReturnType<typeof setTimeout> | undefined;
 const splitAcrossSet = computed(() => new Set(props.splitAcrossThreadIds ?? []));
-function openSplitPopover(anchor?: { x: number; y: number }) {
+function openSplitPopover(anchor?: { x: number; y: number }, blockIndex?: number) {
   const e = editor.value;
-  if (!e || e.isDestroyed || !props.doc || splitDisabledReason.value) return;
-  const defaults = splitPopoverDefaults(e, toRaw(props.doc), props.chapterNumber ?? 1);
+  if (!e || e.isDestroyed || !props.doc) return;
+  const docJson = e.state.doc.toJSON() as DocNode;
+  const index = blockIndex ?? splitBlockIndex(e);
+  if (splitDisabledAt(e.isEditable, docJson, index)) return;
+  const defaults = splitPopoverDefaults(e, toRaw(props.doc), props.chapterNumber ?? 1, index);
   const rect = e.view.dom.getBoundingClientRect();
   splitPopover.value = {
     x: anchor?.x ?? rect.left + rect.width / 2 - 140,
@@ -724,7 +747,7 @@ async function onContextMenuSelect(action: ContextMenuAction) {
     return;
   }
   if (action === 'split_chapter') {
-    openSplitPopover(at ?? undefined);
+    openSplitPopover(at ?? undefined, at?.blockIndex);
     return;
   }
   if (action === 'merge_prev_chapter') {
@@ -1425,7 +1448,7 @@ function onKeydown(ev: KeyboardEvent) {
     !props.sliceMode &&
     !inForeignInput(ev.target, editor.value?.view.dom ?? null)
   ) {
-    const reason = splitDisabledReason.value;
+    const reason = liveSplitDisabled();
     if (!reason) {
       ev.preventDefault();
       openSplitPopover();
@@ -1914,6 +1937,7 @@ const options: Partial<EditorOptions> = {
     if (focusPending) setTimeout(focusBody);
   },
   onSelectionUpdate: ({ editor }) => {
+    selectionEpoch.value += 1;
     countSelection(editor);
     reportCaretWords(editor);
   },

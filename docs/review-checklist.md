@@ -86,6 +86,7 @@ Run this consolidated pass in order; do not hand off until every line that appli
 
 Implementor: add one line here for every review, design or QA finding, in the same PR, before asking for re-review. Reviewer/review bot: when a new kind of finding shows up a second time, promote it into a checklist item above.
 
+- 2026-11-25 · #383 · right-click Split chapter used the caret, so the suggested title could join the previous paragraph and the split started paragraphs before the clicked line · resolve the menu target to that paragraph's start and take the title from that paragraph only
 - 2026-11-22 · #380 · a chapter created by Split selected was inserted into the session map before the saver watched it, so the moved text and later keystrokes never reached SQLite or git · `session.save` adopts that doc and writes its full state; split, type, flush, and reload still find the text
 - 2026-11-22 · #379 · history feed enum fields serialize as snake_case (`time_unix`, `chapter_title`) while the panel read camelCase, so rows said "Invalid Date" and "You edited undefined" · map those serde names in `history-ipc.ts` and test a payload in that shape
 - 2026-11-22 · #379 · a git checkpoint set History to "Unsaved changes" because the `.draft` file was left unpacked, and an open activity list did not reload · the card stays on the saved label after the checkpoint, and the open list reloads when the commit lands
