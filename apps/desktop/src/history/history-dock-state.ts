@@ -13,7 +13,6 @@ export interface HistoryPanelUiState {
   expandedBotRowId: string | null;
   focusedRowKey: string | null;
   compareEntryId: string | null;
-  compareSeenForRestore: Set<string>;
 }
 
 export function defaultHistoryPanelUi(): HistoryPanelUiState {
@@ -23,7 +22,6 @@ export function defaultHistoryPanelUi(): HistoryPanelUiState {
     expandedBotRowId: null,
     focusedRowKey: null,
     compareEntryId: null,
-    compareSeenForRestore: new Set(),
   };
 }
 

@@ -72,8 +72,7 @@ describe('History panel', () => {
     expect(restore.exists()).toBe(true);
     await restore.trigger('click');
     await flushPromises();
-    await w.find('[data-test="compare-restore"]').trigger('click');
-    await flushPromises();
+    expect(w.find('[data-test="history-compare-side"]').exists()).toBe(false);
     expect(w.find('[data-test="history-restore-confirm"]').exists()).toBe(true);
     expect(w.text()).toContain('Keep a copy and restore');
     w.unmount();
@@ -230,6 +229,79 @@ describe('History panel', () => {
     await flushPromises();
     w.find('[data-test="history-filter"]').trigger('click');
     await flushPromises();
+    w.unmount();
+  });
+
+  it('shows one current card and older saves as save rows (#385)', async () => {
+    const { draftHistoryFeed } = await import('../backend');
+    vi.mocked(draftHistoryFeed).mockResolvedValueOnce({
+      rows: [
+        {
+          id: 'save-new',
+          oid: 'save-new',
+          kind: 'save',
+          actorName: 'You',
+          isBot: false,
+          timeUnix: 1_700_000_100,
+          summaryTitle: 'You saved your book',
+        },
+        {
+          id: 'save-old',
+          oid: 'save-old',
+          kind: 'save',
+          actorName: 'You',
+          isBot: false,
+          timeUnix: 1_700_000_000,
+          summaryTitle: 'You saved your book',
+        },
+      ],
+      filterOptions: [],
+      authorLabel: 'You',
+      wordCount: 52,
+      current: {
+        id: 'current',
+        oid: 'head',
+        kind: 'current',
+        actorName: 'You',
+        isBot: false,
+        timeUnix: 1_700_000_100,
+        summaryTitle: 'Your book as it is now',
+        disabledReason: 'This is your book as it is now.',
+      },
+    });
+    const w = mount(HistoryPanel, {
+      props: { active: true, manuscriptId: 'm1', wordCount: 52 },
+    });
+    await flushPromises();
+    const cards = w.findAll('[data-test="history-current-card"]');
+    expect(cards).toHaveLength(1);
+    expect(cards[0]!.text()).not.toMatch(/Compare|Restore/);
+    expect(w.text().match(/Your book as it is now/g)).toEqual(['Your book as it is now']);
+    const rows = w.findAll('[data-test="history-row"]');
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.text()).toContain('You saved your book');
+      expect(row.text()).not.toContain('Your book as it is now');
+      expect(row.text()).not.toContain('This is your book as it is now.');
+    }
+    w.unmount();
+  });
+
+  it('opens restore confirmation without entering compare (#385)', async () => {
+    const { draftHistoryCompare, draftHistoryRestorePreview } = await import('../backend');
+    vi.mocked(draftHistoryCompare).mockClear();
+    vi.mocked(draftHistoryRestorePreview).mockClear();
+    const w = mount(HistoryPanel, {
+      props: { active: true, manuscriptId: 'm1' },
+    });
+    await flushPromises();
+    await w.find('[data-test="history-restore"]').trigger('click');
+    await flushPromises();
+    expect(draftHistoryCompare).not.toHaveBeenCalled();
+    expect(draftHistoryRestorePreview).toHaveBeenCalledWith('m1', 'abc123');
+    expect(w.find('[data-test="history-restore-confirm"]').exists()).toBe(true);
+    expect(w.find('[data-test="history-compare-side"]').exists()).toBe(false);
+    expect(w.text()).toContain('48,164 words');
     w.unmount();
   });
 });

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, shallowRef, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import type {
   DraftHistoryCompare,
   DraftHistoryRestorePreview,
@@ -69,7 +69,6 @@ const compareMode = ref(false);
 const compareOid = ref<string | null>(null);
 const compareData = ref<DraftHistoryCompare | null>(null);
 const compareLabel = ref('');
-const compareSeen = shallowRef(new Set<string>());
 const removeMilestoneRef = ref<string | null>(null);
 const panelRoot = ref<HTMLElement | null>(null);
 const heading = ref<HTMLHeadingElement | null>(null);
@@ -137,7 +136,7 @@ const filteredRows = computed(() => {
 
 const groupedRows = computed(() => {
   const map = new Map<string, { label: string; rows: HistoryFeedRow[] }>();
-  const list = [currentCard.value, ...filteredRows.value];
+  const list = filteredRows.value.filter((row) => row.kind !== 'current');
   const now = new Date();
   for (const row of list) {
     const key = row.kind === 'current' ? 'current' : historyDayKey(row.timeUnix, now);
@@ -239,21 +238,25 @@ async function startCompare(row: HistoryFeedRow) {
   emit('compare', row.oid, data, compareLabel.value);
 }
 
-function closeCompare() {
+/** Local compare state only. Does not emit, so another chapter keeps its segments (#385). */
+function clearCompare() {
   compareMode.value = false;
   compareOid.value = null;
   compareData.value = null;
+  compareLabel.value = '';
+}
+
+/** Returns whether this panel was showing compare and emitted `close-compare`. */
+function closeCompare(): boolean {
+  const open = compareMode.value || compareData.value != null;
+  clearCompare();
+  if (!open) return false;
   emit('close-compare');
+  return true;
 }
 
 async function onRestoreClick(row: HistoryFeedRow) {
   if (row.kind === 'current' || !props.manuscriptId) return;
-  const seen = compareSeen.value.has(row.oid);
-  if (!seen && !compareMode.value) {
-    await startCompare(row);
-    compareSeen.value = new Set([...compareSeen.value, row.oid]);
-    return;
-  }
   const preview = await draftHistoryRestorePreview(props.manuscriptId, row.oid);
   confirmPreview.value = preview;
   confirmOid.value = row.oid;
@@ -360,7 +363,7 @@ onMounted(() => {
   if (props.active) heading.value?.focus();
 });
 
-defineExpose({ closeCompare });
+defineExpose({ closeCompare, clearCompare });
 </script>
 
 <template>
@@ -395,7 +398,12 @@ defineExpose({ closeCompare });
         </li>
       </ul>
       <div class="history-panel__compare-actions">
-        <button type="button" class="sh-btn sh-btn--secondary" @click="closeCompare">
+        <button
+          type="button"
+          class="sh-btn sh-btn--secondary"
+          data-test="history-panel-close-compare"
+          @click="closeCompare()"
+        >
           Close compare
         </button>
         <button
@@ -428,24 +436,6 @@ defineExpose({ closeCompare });
         <p class="history-panel__reason st-caption">
           {{ currentCard.disabledReason ?? 'This is your book as it is now.' }}
         </p>
-        <div class="history-panel__actions">
-          <button
-            type="button"
-            class="sh-btn sh-btn--secondary sh-btn--sm"
-            disabled
-            aria-disabled="true"
-          >
-            Compare
-          </button>
-          <button
-            type="button"
-            class="sh-btn sh-btn--secondary sh-btn--sm"
-            disabled
-            aria-disabled="true"
-          >
-            Restore…
-          </button>
-        </div>
       </article>
 
       <div class="history-panel__controls">
@@ -636,24 +626,6 @@ defineExpose({ closeCompare });
                   @click="askRemoveMilestone(row.milestoneName ?? row.oid)"
                 >
                   Remove milestone
-                </button>
-              </div>
-              <div v-else class="history-panel__actions">
-                <button
-                  type="button"
-                  class="sh-btn sh-btn--secondary sh-btn--sm"
-                  disabled
-                  aria-disabled="true"
-                >
-                  Compare
-                </button>
-                <button
-                  type="button"
-                  class="sh-btn sh-btn--secondary sh-btn--sm"
-                  disabled
-                  aria-disabled="true"
-                >
-                  Restore…
                 </button>
               </div>
               <p v-if="row.kind === 'current'" class="history-panel__reason st-caption">

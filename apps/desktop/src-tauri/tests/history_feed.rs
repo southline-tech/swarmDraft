@@ -364,3 +364,346 @@ fn milestone_create_and_list() {
         .iter()
         .all(|t| t.name != "Submitted to editor"));
 }
+
+fn set_doc_json(store: &Store, doc_id: &str, content: serde_json::Value) {
+    let doc = content::new_doc();
+    content::encode(&doc, &json!({ "type": "doc", "content": content })).unwrap();
+    let state = doc
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    store.replace_doc_state(doc_id, &state).unwrap();
+}
+
+fn set_paragraphs(store: &Store, doc_id: &str, lines: &[&str]) {
+    let doc = content::new_doc();
+    let content: Vec<_> = lines
+        .iter()
+        .map(|text| {
+            json!({
+                "type": "paragraph",
+                "content": [{ "type": "text", "text": text }]
+            })
+        })
+        .collect();
+    content::encode(&doc, &json!({ "type": "doc", "content": content })).unwrap();
+    let state = doc
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    store.replace_doc_state(doc_id, &state).unwrap();
+}
+
+fn rewrite_paragraph(store: &Store, doc_id: &str, index: usize, next: &str) {
+    use yrs::{Text, Transact, XmlFragment, XmlOut};
+    let doc = store.load_doc(doc_id).unwrap();
+    let text = {
+        let frag = doc.get_or_insert_xml_fragment(content::FRAGMENT);
+        let txn = doc.transact();
+        let children: Vec<_> = frag.children(&txn).collect();
+        let XmlOut::Element(el) = &children[index] else {
+            panic!("paragraph {index} missing");
+        };
+        let inner: Vec<_> = el.children(&txn).collect();
+        let XmlOut::Text(text) = &inner[0] else {
+            panic!("paragraph {index} has no text");
+        };
+        text.clone()
+    };
+    {
+        let mut txn = doc.transact_mut();
+        let len = text.len(&txn);
+        if len > 0 {
+            text.remove_range(&mut txn, 0, len);
+        }
+        text.insert(&mut txn, 0, next);
+    }
+    let state = doc
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    store.replace_doc_state(doc_id, &state).unwrap();
+}
+
+fn append_paragraph(store: &Store, doc_id: &str, text: &str) {
+    use yrs::{Text, Transact, XmlElementPrelim, XmlFragment, XmlTextPrelim};
+    let doc = store.load_doc(doc_id).unwrap();
+    {
+        let frag = doc.get_or_insert_xml_fragment(content::FRAGMENT);
+        let mut txn = doc.transact_mut();
+        let el = frag.push_back(&mut txn, XmlElementPrelim::empty("paragraph"));
+        let node = el.push_back(&mut txn, XmlTextPrelim::new(""));
+        node.insert(&mut txn, 0, text);
+    }
+    let state = doc
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    store.replace_doc_state(doc_id, &state).unwrap();
+}
+
+fn outline_of(store: &Store, manuscript_id: &str) -> Vec<OutlineEntry> {
+    store
+        .list_sections(manuscript_id)
+        .unwrap()
+        .into_iter()
+        .map(|section| OutlineEntry {
+            id: section.id,
+            parent_id: section.parent_id,
+            kind: section.kind,
+            title: section.title,
+            doc_id: section.doc_id,
+        })
+        .collect()
+}
+
+#[test]
+fn feed_keeps_one_current_entry_and_lists_saves() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "history-one-current.draft");
+    let chapter = chapter(&stored);
+    set_paragraphs(&store, &chapter.doc_id, &["one two"]);
+    svc.commit_now(&store, &m.id, "Saved", "Author", "author@swarmdraft.local")
+        .unwrap();
+    set_paragraphs(&store, &chapter.doc_id, &["one two three"]);
+    svc.commit_now(&store, &m.id, "Saved", "Author", "author@swarmdraft.local")
+        .unwrap();
+
+    let feed = svc.history_feed(&store, &m.id, 20).unwrap();
+    let currents = feed
+        .entries
+        .iter()
+        .filter(|entry| matches!(entry, HistoryFeedEntry::Current { .. }))
+        .count();
+    assert_eq!(currents, 1, "entries: {:?}", feed.entries);
+    assert!(matches!(
+        feed.entries.first(),
+        Some(HistoryFeedEntry::Current { .. })
+    ));
+    let saves = feed
+        .entries
+        .iter()
+        .filter(|entry| matches!(entry, HistoryFeedEntry::Save { .. }))
+        .count();
+    assert!(
+        saves >= 2,
+        "saves should stay save rows: {:?}",
+        feed.entries
+    );
+}
+
+#[test]
+fn compare_keeps_chapters_and_paragraphs_without_block_markers() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "history-compare-paragraphs.draft");
+    let chapter = chapter(&stored);
+
+    let mut outline = outline_of(&store, &m.id);
+    for entry in &mut outline {
+        if entry.id == chapter.id {
+            entry.title = "Chapter One".into();
+        }
+    }
+    store.save_outline(&m.id, &outline).unwrap();
+    set_paragraphs(
+        &store,
+        &chapter.doc_id,
+        &[
+            "Alpha one stays.",
+            "Alpha two was here.",
+            "Alpha three stays.",
+        ],
+    );
+    let older = svc
+        .commit_now(&store, &m.id, "Saved", "Author", "author@swarmdraft.local")
+        .unwrap()
+        .expect("older save");
+
+    rewrite_paragraph(&store, &chapter.doc_id, 1, "Alpha two is new now.");
+    append_paragraph(&store, &chapter.doc_id, "Alpha four added.");
+    let mut outline = outline_of(&store, &m.id);
+    let second_id = "chapter-two";
+    let second_doc = section_doc_id(&m.id, second_id);
+    outline.push(OutlineEntry {
+        id: second_id.into(),
+        parent_id: None,
+        kind: "chapter".into(),
+        title: "Chapter Two".into(),
+        doc_id: second_doc.clone(),
+    });
+    store.save_outline(&m.id, &outline).unwrap();
+    set_paragraphs(
+        &store,
+        &second_doc,
+        &[
+            "Beta one stays.",
+            "Beta two was written.",
+            "Beta three stays.",
+        ],
+    );
+    svc.commit_now(&store, &m.id, "Saved", "Author", "author@swarmdraft.local")
+        .unwrap();
+
+    let cmp = svc.history_compare(&store, &m.id, &older, true).unwrap();
+    assert_eq!(cmp.total_words_then, 10, "then counts visible words");
+    assert_eq!(cmp.total_words_now, 24, "now matches the visible book");
+    assert_eq!(cmp.sections.len(), 2, "sections: {:?}", cmp.sections);
+
+    let mut saw_break = false;
+    for section in &cmp.sections {
+        let segments = section.segments.as_ref().expect("segments");
+        let body: String = segments.iter().map(|seg| seg.text.as_str()).collect();
+        assert!(
+            body.contains('\n'),
+            "{} ran paragraphs together: {body}",
+            section.title
+        );
+        saw_break = true;
+        for seg in segments {
+            assert!(
+                !seg.text.contains("<!--block") && !seg.text.contains("<!-- block"),
+                "marker in {}: {}",
+                section.title,
+                seg.text
+            );
+        }
+    }
+    assert!(saw_break);
+
+    let one = cmp
+        .sections
+        .iter()
+        .find(|s| s.title == "Chapter One")
+        .expect("chapter one");
+    let two = cmp
+        .sections
+        .iter()
+        .find(|s| s.title == "Chapter Two")
+        .expect("chapter two");
+    let one_body: String = one
+        .segments
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|seg| seg.text.as_str())
+        .collect();
+    let two_body: String = two
+        .segments
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|seg| seg.text.as_str())
+        .collect();
+    assert!(one_body.contains("Alpha one stays."), "{one_body}");
+    assert!(one_body.contains("Alpha four added."), "{one_body}");
+    assert!(!one_body.contains("Beta"), "{one_body}");
+    assert!(
+        !one_body.contains("stays. Alpha"),
+        "paragraphs glued: {one_body}"
+    );
+    let removed: String = one
+        .segments
+        .as_ref()
+        .unwrap()
+        .iter()
+        .filter(|seg| seg.segment_kind == "remove")
+        .map(|seg| seg.text.as_str())
+        .collect();
+    let added: String = one
+        .segments
+        .as_ref()
+        .unwrap()
+        .iter()
+        .filter(|seg| seg.segment_kind == "add")
+        .map(|seg| seg.text.as_str())
+        .collect();
+    assert!(removed.contains("was"), "{removed}");
+    assert!(!removed.contains("Alpha one"), "{removed}");
+    assert!(added.contains("new"), "{added}");
+    assert!(added.contains("Alpha four"), "{added}");
+    assert!(two_body.contains("Beta one stays."), "{two_body}");
+    assert!(two_body.contains("Beta three stays."), "{two_body}");
+    assert!(!two_body.contains("Alpha"), "{two_body}");
+    assert!(two.added >= 10 && two.removed == 0, "{:?}", two);
+}
+
+#[test]
+fn compare_marks_added_and_removed_paragraphs_with_hard_breaks() {
+    let (_dir, store) = temp_store();
+    let stored = store.create_blank_manuscript_with_progress(None).unwrap();
+    let m = stored.manuscript.clone();
+    let svc = DraftService::new(store.data_dir().to_path_buf(), "0.2.1".into());
+    link_draft(&store, &m.id, "history-compare-hard-break.draft");
+    let chapter = chapter(&stored);
+
+    let broken = |top: &str, bottom: &str| {
+        json!({
+            "type": "paragraph",
+            "content": [
+                { "type": "text", "text": top },
+                { "type": "hard_break" },
+                { "type": "text", "text": bottom }
+            ]
+        })
+    };
+    set_doc_json(
+        &store,
+        &chapter.doc_id,
+        json!([broken("Old top", "old bottom")]),
+    );
+    let older = svc
+        .commit_now(&store, &m.id, "Saved", "Author", "author@swarmdraft.local")
+        .unwrap()
+        .expect("older save");
+    set_doc_json(
+        &store,
+        &chapter.doc_id,
+        json!([broken("New top", "new bottom")]),
+    );
+    svc.commit_now(&store, &m.id, "Saved", "Author", "author@swarmdraft.local")
+        .unwrap();
+
+    let cmp = svc.history_compare(&store, &m.id, &older, true).unwrap();
+    let section = cmp
+        .sections
+        .iter()
+        .find(|s| {
+            s.segments
+                .as_ref()
+                .is_some_and(|segs| segs.iter().any(|seg| seg.text.contains("New top")))
+        })
+        .expect("chapter with the new paragraph");
+    let segments = section.segments.as_ref().expect("segments");
+    let removed = segments
+        .iter()
+        .find(|seg| seg.segment_kind == "remove")
+        .expect("removed paragraph");
+    let added = segments
+        .iter()
+        .find(|seg| seg.segment_kind == "add")
+        .expect("added paragraph");
+    assert!(
+        removed.text.contains('\n'),
+        "removed hard break became a plain gap: {}",
+        removed.text
+    );
+    assert!(
+        removed.text.contains("Old top") && removed.text.contains("old bottom"),
+        "{}",
+        removed.text
+    );
+    assert!(
+        added.text.contains('\n'),
+        "added hard break became a plain gap: {}",
+        added.text
+    );
+    assert!(
+        added.text.contains("New top") && added.text.contains("new bottom"),
+        "{}",
+        added.text
+    );
+    assert!(!removed.text.contains("<!--"), "{}", removed.text);
+    assert!(!added.text.contains("<!--"), "{}", added.text);
+}

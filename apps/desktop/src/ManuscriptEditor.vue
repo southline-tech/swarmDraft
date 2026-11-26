@@ -347,6 +347,26 @@ const emit = defineEmits<{
   'history-compare': [oid: string, data: DraftHistoryCompare, label: string];
 }>();
 
+const historyPanelRef = useTemplateRef<{
+  closeCompare: () => boolean;
+  clearCompare: () => void;
+}>('historyPanel');
+
+/** Banner and the History panel both call this (#385).
+ * Focus mode remounts the panel outside compare mode, so this click still closes the banner. */
+function closeHistoryCompare() {
+  const panelClosed = historyPanelRef.value?.closeCompare() ?? false;
+  if (!panelClosed) emit('history-close-compare');
+}
+
+watch(
+  () => props.historyCompareBanner,
+  (banner) => {
+    // Continuous view passes the banner only to the selected chapter (#385).
+    if (!banner) historyPanelRef.value?.clearCompare();
+  },
+);
+
 const appFooterEditor = inject(APP_FOOTER_EDITOR_KEY, null);
 const continuousNav = inject(CONTINUOUS_REVIEW_NAV, null);
 const continuousScroll = inject(CONTINUOUS_SCROLL_ROOT, null);
@@ -2130,7 +2150,7 @@ onBeforeUnmount(() => {
         type="button"
         class="sh-btn sh-btn--secondary sh-btn--sm"
         data-test="history-compare-close"
-        @click="emit('history-close-compare')"
+        @click="closeHistoryCompare"
       >
         Close compare
       </button>
@@ -2218,11 +2238,12 @@ onBeforeUnmount(() => {
             aria-readonly="true"
           >
             <template v-for="(seg, index) in historyCompareSegments" :key="index">
-              <span v-if="seg.kind === 'same'">{{ seg.text }} </span>
-              <span v-else-if="seg.kind === 'add'" class="history-compare-insert"
+              <span v-if="seg.kind === 'add'" class="history-compare-insert">{{ seg.text }} </span>
+              <span v-else-if="seg.kind === 'remove'" class="history-compare-delete"
                 >{{ seg.text }}
               </span>
-              <span v-else class="history-compare-delete">{{ seg.text }} </span>
+              <span v-else-if="seg.text.includes('\n')">{{ seg.text }}</span>
+              <span v-else>{{ seg.text }} </span>
             </template>
           </div>
           <EditorContent
@@ -2315,6 +2336,7 @@ onBeforeUnmount(() => {
           </template>
           <template #history>
             <HistoryPanel
+              ref="historyPanel"
               :active="dockTab === 'history' && dockOpen"
               :manuscript-id="manuscriptId ?? null"
               :word-count="historyWordCount"
